@@ -6,34 +6,8 @@ import { Bell, RefreshCw, Menu, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTopbarControls, type TimeFilter } from "@/components/layout/topbar-context";
 import { MONTHS_AR } from "@/lib/utils/constants";
-
-const PAGE_TITLES: Record<string, string> = {
-  "/dashboard": "نظرة عامة",
-  "/sales": "المبيعات",
-  "/renewals": "التجديدات",
-  "/satisfaction": "رضا العملاء",
-  "/support": "الدعم",
-  "/development": "التطويرات",
-  "/partnerships": "الشراكات",
-  "/team": "الفريق",
-  "/finance": "المالية",
-  "/upload": "رفع البيانات",
-  "/agent": "المساعد الذكي",
-};
-
-const PAGE_SUBTITLES: Record<string, string> = {
-  "/dashboard": "لوحة تنفيذية مركزة على الإشارات الأهم الآن",
-  "/sales": "متابعة الصفقات وخط الأنابيب من مكان واحد",
-  "/renewals": "متابعة تجديد العملاء ومعدلات الاحتفاظ",
-  "/satisfaction": "مؤشرات رضا العملاء وتحليل NPS",
-  "/support": "رؤية أسرع لحالة التذاكر والاستجابة",
-  "/development": "حالة المشاريع الجارية والتقدم الفعلي",
-  "/partnerships": "متابعة العلاقات والقيمة الاستراتيجية",
-  "/team": "نظرة تشغيلية على الفريق وتوزيع الجهد",
-  "/finance": "قراءة مالية مبنية على البيانات الفعلية",
-  "/upload": "إدخال البيانات وربط النظام بالمصادر",
-  "/agent": "طبقة ذكاء مساعدة فوق بيانات الشركة",
-};
+import { PAGE_TITLES } from "@/lib/nav";
+import { CommandPaletteTrigger } from "@/components/command-palette";
 
 const TIME_FILTERS: TimeFilter[] = ["اليوم", "الأسبوع", "الشهر", "الكل"];
 
@@ -45,8 +19,9 @@ interface TopbarProps {
 
 export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProps) {
   const pathname = usePathname();
-  const title = PAGE_TITLES[pathname] || "لوحة التحكم";
-  const subtitle = PAGE_SUBTITLES[pathname] || "مركز متابعة حي للمبيعات والتشغيل";
+  const meta = PAGE_TITLES[pathname];
+  const title = meta?.title ?? "لوحة التحكم";
+  const subtitle = meta?.subtitle ?? "مركز قيادة الوكالة";
   const monthsRef = useRef<HTMLDivElement>(null);
   const {
     controls: { onRefresh, isRefreshing, lastUpdatedAt },
@@ -152,6 +127,11 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
                 {filter}
               </button>
             ))}
+          </div>
+
+          {/* Cmd-K trigger — desktop only */}
+          <div className="hidden md:block">
+            <CommandPaletteTrigger />
           </div>
 
           {/* Clock + Calendar */}

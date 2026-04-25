@@ -23,15 +23,16 @@ function timeAgo(timestamp: string): string {
   return `منذ ${days} يوم`;
 }
 
+// Route notification clicks by entity_type / section slug.
 const SECTION_PATH: Record<string, string> = {
-  support: "/support",
-  development: "/development",
-  team: "/team",
-  sales: "/sales",
-  "sales-guide": "/sales-guide",
-  partnerships: "/partnerships",
-  renewals: "/renewals",
-  satisfaction: "/satisfaction",
+  handover: "/handover",
+  task: "/tasks",
+  project: "/projects",
+  client: "/clients",
+  notification: "/notifications",
+  ai_event: "/ai-insights",
+  mention: "/tasks",
+  team: "/organization/employees",
 };
 
 export function NotificationPanel({
