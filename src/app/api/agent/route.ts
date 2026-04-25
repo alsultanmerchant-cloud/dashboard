@@ -1,143 +1,209 @@
 import { streamText, generateText, convertToModelMessages, tool, stepCountIs } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { buildKnowledgeContext } from "@/lib/ai/knowledge";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getServerSession } from "@/lib/auth-server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY!,
 });
 
-const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد إدارة أعمال ذكي لشركة RESTAVO، شركة أتمتة مطاعم رائدة في السعودية.
+// Allowed tables for the agent's queryDatabase tool — only the agency MVP schema.
+const ALLOWED_TABLES = [
+  "clients",
+  "projects",
+  "project_services",
+  "project_members",
+  "services",
+  "tasks",
+  "task_assignees",
+  "task_comments",
+  "task_mentions",
+  "task_templates",
+  "task_template_items",
+  "sales_handover_forms",
+  "notifications",
+  "audit_logs",
+  "ai_events",
+  "departments",
+  "employee_profiles",
+  "roles",
+  "permissions",
+  "user_roles",
+  "role_permissions",
+] as const;
 
-## هويتك:
-- اسمك: المساعد الذكي (CommandCenter AI)
-- دورك: مستشار أعمال ومحلل بيانات متخصص في قطاع المطاعم
-- تعمل ضمن منصة CommandCenter لإدارة المبيعات والدعم والعمليات
+const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد إدارة العمليات لوكالة تسويق سعودية تستخدم منصة "مركز قيادة الوكالة".
 
-## قدراتك:
-1. **تحليل المبيعات**: تحليل الصفقات، Pipeline، معدلات الإغلاق، أداء الموظفين
-2. **تحليل الدعم الفني**: تتبع التذاكر، أوقات الاستجابة، معدلات الحل
-3. **تحليل الفريق**: تقييم الأداء، حمل العمل، نقاط القوة والضعف
-4. **التوقعات**: توقع الإيرادات، تحليل الاتجاهات، تحديد المخاطر
-5. **التوصيات**: اقتراحات عملية لتحسين الأداء وزيادة المبيعات
-6. **المشاريع**: متابعة تقدم المشاريع وتحديد المتأخر منها
-7. **الشراكات**: تحليل الشراكات وقيمتها والفرص الجديدة
-8. **المالية**: تحليل الإيرادات، المصاريف، هامش الربح، Burn Rate
-9. **استعلام قاعدة البيانات**: يمكنك استخدام أداة queryDatabase للاستعلام عن أي جدول في قاعدة البيانات مباشرة
-10. **البحث في الويب**: يمكنك استخدام أداة webSearch للبحث في الإنترنت عن معلومات حديثة مثل أخبار السوق، المنافسين، الاتجاهات، أو أي معلومة غير موجودة في بيانات الشركة
+## هويتك
+- اسمك: المساعد الذكي
+- دورك: مستشار عمليات ومحلل بيانات داخل الوكالة
+- تعمل ضمن منصة Agency Command Center لإدارة العملاء والمشاريع والمهام والتسليم من المبيعات
 
-## أداة queryDatabase:
-عندما يسألك المستخدم عن عميل معين أو صفقة أو تذكرة أو أي بيانات محددة، استخدم أداة queryDatabase للحصول على البيانات الدقيقة.
+## قدراتك
+1. **العملاء والمشاريع**: تحليل قاعدة العملاء، حالة المشاريع، الخدمات المقدمة، حمل فريق العمل
+2. **المهام والتسليم**: تتبع المهام، حالات الإنجاز، المهام المتأخرة، توزيع الأعمال على الفرق
+3. **التسليم من المبيعات**: متابعة نماذج التسليم الواردة، أوقات الاستجابة، الخدمات الأكثر طلبًا
+4. **الأحداث الذكية**: تحليل سير عمل الفريق من خلال جدول ai_events (مهام، تعليقات، إشارات، تنبيهات، تأخيرات)
+5. **التنبيهات والإشارات**: تحليل نشاط @mention والتواصل بين الفريق
+6. **التوقعات والمخاطر**: استخراج أنماط من البيانات (تأخر متكرر، ضغط على قسم معين، عملاء يحتاجون متابعة)
+7. **استعلام قاعدة البيانات**: استخدم queryDatabase للاستعلام عن أي جدول من الجداول المسموحة
+8. **البحث في الويب**: استخدم webSearch للمعلومات العامة (اتجاهات السوق، ممارسات الصناعة، أدوات تسويقية حديثة)
 
-### الجداول المتاحة:
-- **deals**: الصفقات (client_name, client_phone, deal_value, source, stage, probability, assigned_rep_name, cycle_days, deal_date, close_date, loss_reason, notes, month, year)
-- **tickets**: تذاكر الدعم (ticket_number, client_name, client_phone, issue, priority, status, assigned_agent_name, open_date, due_date, resolved_date, response_time_minutes, month, year)
-- **employees**: الموظفين (name, role, email, phone, status)
-- **employee_scores**: تقييم الموظفين (employee_id, month, year, overall_score, close_rate_score, revenue_score, revenue, deals_won, total_deals, close_rate, ai_summary)
-- **projects**: المشاريع (name, team, start_date, progress, total_tasks, remaining_tasks, status_tag)
-- **partnerships**: الشراكات (name, type, status, value, manager_name, description)
-- **kpi_snapshots**: مؤشرات الأداء الشهرية (month, year, total_revenue, total_deals, closed_deals, close_rate, target_revenue)
-- **alerts**: التنبيهات (type, category, message, is_read, is_dismissed)
-- **renewals**: التجديدات (customer_name, customer_phone, plan_name, plan_price, assigned_rep, status, start_date, renewal_date, cancel_reason, notes)
-- **reviews**: تقييمات العملاء (customer_name, stars, type, category, review_date, comment)
+## الجداول المتاحة لـ queryDatabase
+- **clients**: العملاء (name, contact_name, phone, email, status, source, created_at)
+- **projects**: المشاريع (name, description, status, priority, start_date, end_date, client_id, account_manager_employee_id, created_at)
+- **project_services**: ربط المشاريع بالخدمات (project_id, service_id, status)
+- **project_members**: أعضاء فريق المشروع (project_id, employee_id, role_label)
+- **services**: الخدمات المقدمة (name, slug, description, is_active) — slug في {social-media-management, seo, media-buying}
+- **tasks**: المهام (title, description, status, priority, due_date, completed_at, project_id, service_id, created_from_template_item_id) — status في {todo, in_progress, review, blocked, done, cancelled}
+- **task_assignees**: إسناد المهام (task_id, employee_id)
+- **task_comments**: تعليقات المهام (task_id, author_user_id, body, is_internal, created_at)
+- **task_mentions**: الإشارات داخل التعليقات (task_comment_id, mentioned_employee_id)
+- **task_templates** + **task_template_items**: قوالب توليد المهام لكل خدمة
+- **sales_handover_forms**: نماذج التسليم من المبيعات (client_name, urgency_level, status, selected_service_ids, project_id, client_id, created_at) — status في {submitted, in_review, accepted, rejected}
+- **notifications**: التنبيهات (recipient_user_id, recipient_employee_id, type, title, body, read_at, entity_type, entity_id)
+- **audit_logs**: سجل التدقيق (action, entity_type, entity_id, metadata, actor_user_id)
+- **ai_events**: الأحداث الذكية (event_type, entity_type, entity_id, payload, importance) — أنواع: HANDOVER_SUBMITTED, PROJECT_CREATED, TASK_CREATED, TASK_STATUS_CHANGED, TASK_COMMENT_ADDED, MENTION_CREATED, NOTIFICATION_CREATED
+- **employee_profiles**: ملفات الموظفين (full_name, email, phone, job_title, department_id, employment_status)
+- **departments**: الأقسام (name, slug, description, head_employee_id)
+- **roles** + **permissions** + **user_roles** + **role_permissions**: نظام الأدوار والصلاحيات
 
-### نصائح الاستعلام:
-- عند البحث عن عميل بالاسم، استخدم filter مع operator "ilike" وقيمة مثل "%فهد%" للبحث الجزئي
-- يمكنك استخدام select لتحديد الأعمدة المطلوبة فقط (مثل "client_name,deal_value,stage")
-- استخدم orderBy للترتيب (مثل ترتيب بالقيمة أو التاريخ)
-- استخدم limit للحد من النتائج
-- يمكنك إرسال عدة استعلامات متتالية لجمع بيانات من جداول مختلفة
+## نصائح الاستعلام
+- البحث الجزئي: استخدم operator "ilike" مع value مثل "%رمضان%"
+- اقتصر على الأعمدة المطلوبة في select لتقليل الحجم
+- استخدم orderColumn + orderAscending=false للترتيب من الأحدث
+- limit الافتراضي 50 — ارفعه عند الحاجة لتحليل أوسع
+- النتائج مفلترة تلقائيًا على المنظمة الحالية — لا حاجة لإضافة organization_id كفلتر
 
-## قواعد الرد:
-1. أجب دائماً بالعربية السعودية المهنية (مثال: "وش رأيك" بدل "ما رأيك")
-2. استخدم الأرقام الفعلية من البيانات — لا تختلق أرقاماً
-3. نسّق إجاباتك باستخدام Markdown (عناوين، جداول، قوائم، bold)
-4. استخدم الجداول عند المقارنة بين موظفين أو فترات
-5. ابدأ بعنوان واضح لكل إجابة
-6. اختم كل إجابة بـ 2-3 أسئلة متابعة مقترحة
-7. إذا سُئلت عن شيء غير موجود في البيانات، قل ذلك بوضوح
-8. استخدم الرموز باعتدال: 📈📉🎯⚠️✅❌💡🔥
-9. عند ذكر تغييرات، اذكر النسبة المئوية والاتجاه
-10. كن مباشراً — ابدأ بالجواب ثم التفاصيل
-11. عند تقديم توصيات، رقّمها وحدد الأولوية (عاجل/مهم/اقتراح)
+## قواعد الرد
+1. أجب بالعربية الفصحى الواضحة
+2. استخدم الأرقام الفعلية من البيانات — لا تختلق
+3. نسّق بـ Markdown (عناوين، قوائم، جداول)
+4. ابدأ بعنوان قصير ثم خلاصة في سطر واحد
+5. اختم بـ 2-3 أسئلة متابعة مقترحة
+6. إذا لم تجد البيانات في الجداول، قل ذلك صراحة بدلاً من التخمين
+7. التوصيات رقّمها وحدد الأولوية: عاجل / مهم / اقتراح
+8. استخدم الرموز باعتدال: 📊 📈 📉 🎯 ⚠️ ✅ 💡 🔥
 
-## تنسيق الإجابة:
+## تنسيق الإجابة المثالي
 \`\`\`
 ## العنوان 📊
+ملخص في سطر.
 
-[التحليل المختصر مع أرقام ونسب]
+### تفاصيل
+- نقطة 1
+- نقطة 2
 
-### التفاصيل
-[جداول أو قوائم مفصلة]
-
-### التوصيات 💡
-1. [توصية عاجلة]
-2. [توصية مهمة]
-3. [اقتراح]
+### توصيات 💡
+1. [عاجل] …
+2. [مهم] …
 
 ---
 **أسئلة متابعة:**
-- سؤال 1؟
-- سؤال 2؟
-- سؤال 3؟
-\`\`\``;
+- …؟
+- …؟
+\`\`\`
+`;
+
+async function buildOrgSnapshot(organizationId: string): Promise<string> {
+  const [clients, projects, openTasks, doneTasks, handovers, recentEvents] =
+    await Promise.all([
+      supabaseAdmin.from("clients").select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId),
+      supabaseAdmin.from("projects").select("id, name, status, priority", { count: "exact" })
+        .eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(5),
+      supabaseAdmin.from("tasks").select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .in("status", ["todo", "in_progress", "review", "blocked"]),
+      supabaseAdmin.from("tasks").select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId).eq("status", "done"),
+      supabaseAdmin.from("sales_handover_forms").select("client_name, urgency_level, status, created_at")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false }).limit(3),
+      supabaseAdmin.from("ai_events").select("event_type")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false }).limit(50),
+    ]);
+
+  const eventTally: Record<string, number> = {};
+  for (const e of recentEvents.data ?? []) {
+    eventTally[e.event_type] = (eventTally[e.event_type] ?? 0) + 1;
+  }
+  const eventLines = Object.entries(eventTally)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `  - ${k}: ${v}`)
+    .join("\n") || "  (لا توجد أحداث بعد)";
+
+  const handoverLines = (handovers.data ?? [])
+    .map((h) => `  - ${h.client_name} · ${h.urgency_level} · ${h.status}`)
+    .join("\n") || "  (لا توجد تسليمات بعد)";
+
+  const projectLines = (projects.data ?? [])
+    .map((p) => `  - ${p.name} · ${p.status} · ${p.priority}`)
+    .join("\n") || "  (لا توجد مشاريع بعد)";
+
+  return `لقطة الحالة الراهنة في الوكالة:
+- إجمالي العملاء: ${clients.count ?? 0}
+- إجمالي المشاريع: ${projects.count ?? 0}
+- مهام مفتوحة: ${openTasks.count ?? 0}
+- مهام مكتملة: ${doneTasks.count ?? 0}
+
+أحدث 3 تسليمات من المبيعات:
+${handoverLines}
+
+أحدث 5 مشاريع:
+${projectLines}
+
+أحداث ذكية مؤخرًا (أعلى 50):
+${eventLines}`;
+}
 
 export async function POST(req: Request) {
   try {
-    const { messages, orgId } = await req.json();
-    const ORG_ID = orgId || "00000000-0000-0000-0000-000000000001";
+    const session = await getServerSession();
+    if (!session) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    }
 
-
-    const knowledgeContext = await buildKnowledgeContext(ORG_ID);
+    const { messages } = await req.json();
+    const orgId = session.orgId;
+    const snapshot = await buildOrgSnapshot(orgId);
     const modelMessages = await convertToModelMessages(messages);
 
-    const supabase = await createServerSupabaseClient();
-
     const queryDbParams = z.object({
-      table: z.enum([
-        "deals", "tickets", "employees", "employee_scores",
-        "projects", "partnerships", "kpi_snapshots", "alerts",
-        "renewals", "reviews",
-      ]).describe("The table to query"),
-      select: z.string().default("*").describe("Columns to select, e.g. 'client_name,deal_value,stage' or '*' for all"),
+      table: z.enum(ALLOWED_TABLES).describe("The table to query (auto-scoped to current organization)"),
+      select: z.string().default("*").describe("Columns to select, e.g. 'name,status' or '*'"),
       filters: z.array(z.object({
         column: z.string().describe("Column name to filter on"),
-        operator: z.enum([
-          "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "is", "in",
-        ]).describe("Filter operator: eq (equals), ilike (case-insensitive partial match — use %keyword%), gt (greater than), etc."),
-        value: z.string().describe("Value to filter by. For ilike use %keyword% pattern. Numbers should be passed as strings."),
-      })).default([]).describe("Filters to apply"),
-      orderColumn: z.string().optional().describe("Column name to order results by"),
-      orderAscending: z.boolean().default(false).describe("Whether to order ascending (true) or descending (false)"),
-      limit: z.number().default(50).describe("Max number of rows to return"),
+        operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "is", "in"])
+          .describe("Filter operator. Use ilike with %keyword% for partial matches."),
+        value: z.string().describe("Value to filter by. Numbers as strings."),
+      })).default([]),
+      orderColumn: z.string().optional().describe("Column to order by"),
+      orderAscending: z.boolean().default(false),
+      limit: z.number().default(50),
     });
 
     const result = streamText({
       model: google("gemini-3-flash-preview"),
-      system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n## بيانات الشركة الحالية:\n${knowledgeContext}`,
+      system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
       stopWhen: stepCountIs(5),
       tools: {
         webSearch: tool({
-          description: "Search the web for current information. Use this for market trends, competitor info, industry news, restaurant tech updates, or any information not available in the company database.",
+          description: "Search the web for current information (industry news, competitor info, marketing trends, agency tools).",
           inputSchema: z.object({
-            query: z.string().describe("The search query in Arabic or English"),
+            query: z.string().describe("Search query in Arabic or English"),
           }),
           execute: async ({ query }) => {
             try {
-              const searchResult = await generateText({
+              const r = await generateText({
                 model: google("gemini-3-flash-preview"),
                 prompt: query,
-                tools: {
-                  googleSearch: google.tools.googleSearch({}),
-                },
+                tools: { googleSearch: google.tools.googleSearch({}) },
               });
-              return {
-                success: true as const,
-                result: searchResult.text,
-                query,
-              };
+              return { success: true as const, result: r.text, query };
             } catch (err) {
               return {
                 success: false as const,
@@ -148,33 +214,31 @@ export async function POST(req: Request) {
           },
         }),
         queryDatabase: tool({
-          description: "Query any table in the Supabase database. Use this to look up specific clients, deals, tickets, employees, or any other data. Always use this when the user asks about a specific record.",
+          description: "Query the agency database (auto-scoped to current organization). Use this to look up clients, projects, tasks, handovers, and ai_events.",
           inputSchema: queryDbParams,
           execute: async ({ table, select, filters, orderColumn, orderAscending, limit }) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let query = supabase.from(table).select(select).eq("org_id", ORG_ID).limit(limit) as any;
+            let query = supabaseAdmin
+              .from(table)
+              .select(select)
+              .eq("organization_id", orgId)
+              .limit(limit) as any;
 
-            for (const filter of filters) {
-              if (filter.operator === "in") {
-                const values = filter.value.split(",").map((v: string) => v.trim());
-                query = query.in(filter.column, values);
-              } else if (filter.operator === "is") {
-                query = query.is(filter.column, null);
+            for (const f of filters) {
+              if (f.operator === "in") {
+                query = query.in(f.column, f.value.split(",").map((v: string) => v.trim()));
+              } else if (f.operator === "is") {
+                query = query.is(f.column, null);
               } else {
-                query = query.filter(filter.column, filter.operator, filter.value);
+                query = query.filter(f.column, f.operator, f.value);
               }
             }
-
-            if (orderColumn) {
-              query = query.order(orderColumn, { ascending: orderAscending });
-            }
+            if (orderColumn) query = query.order(orderColumn, { ascending: orderAscending });
 
             const { data, error } = await query;
-
             if (error) {
               return { success: false as const, error: error.message, data: null, count: 0 };
             }
-
             return {
               success: true as const,
               data: data ?? [],
