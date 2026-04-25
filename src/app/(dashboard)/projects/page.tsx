@@ -56,9 +56,12 @@ export default async function ProjectsPage() {
               : copy.empty.projects.description
           }
           action={clients.length > 0 ? newProjectButton : (
-            <Button asChild render={<Link href="/clients" />}>
+            <Link
+              href="/clients"
+              className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
               الذهاب إلى العملاء
-            </Button>
+            </Link>
           )}
         />
       ) : (
@@ -105,9 +108,13 @@ export default async function ProjectsPage() {
                     <DataTableCell className="text-xs text-muted-foreground">{am?.full_name ?? "—"}</DataTableCell>
                     <DataTableCell className="text-xs text-muted-foreground">{formatArabicShortDate(p.start_date)}</DataTableCell>
                     <DataTableCell>
-                      <Button asChild variant="ghost" size="sm" render={<Link href={`/projects/${p.id}`} />}>
+                      <Link
+                        href={`/projects/${p.id}`}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+                        aria-label="فتح"
+                      >
                         <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                      </Button>
+                      </Link>
                     </DataTableCell>
                   </DataTableRow>
                 );

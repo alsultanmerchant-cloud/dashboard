@@ -47,10 +47,13 @@ export default async function TaskTemplatesPage() {
                       <span className="text-[11px] text-muted-foreground">
                         {itemCount} {itemCount === 1 ? "عنصر" : "عنصرًا"}
                       </span>
-                      <Button asChild variant="ghost" size="sm" render={<Link href={`/task-templates/${t.id}`} />}>
+                      <Link
+                        href={`/task-templates/${t.id}`}
+                        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+                      >
                         عرض التفاصيل
                         <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                      </Button>
+                      </Link>
                     </div>
                   </CardContent>
                 </Card>

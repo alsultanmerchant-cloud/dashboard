@@ -1,20 +1,100 @@
-import { Send } from "lucide-react";
-import { ComingSoonPage } from "@/components/coming-soon-page";
+import Link from "next/link";
+import { Inbox, Send } from "lucide-react";
+import { requireSession } from "@/lib/auth-server";
+import { listHandovers } from "@/lib/data/handover";
+import { listAccountManagers, listServices } from "@/lib/data/employees";
+import { PageHeader } from "@/components/page-header";
+import { SectionTitle } from "@/components/section-title";
+import { EmptyState } from "@/components/empty-state";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  HandoverStatusBadge, UrgencyBadge,
+} from "@/components/status-badges";
+import { formatArabicDateTime } from "@/lib/utils-format";
+import { HandoverForm } from "./handover-form";
 
-export default function HandoverPage() {
+export default async function HandoverPage() {
+  const session = await requireSession();
+  const [services, accountManagers, handovers] = await Promise.all([
+    listServices(session.orgId),
+    listAccountManagers(session.orgId),
+    listHandovers(session.orgId),
+  ]);
+
+  const amOptions = accountManagers.map((a) => ({
+    id: a.id,
+    label: a.full_name + (a.job_title ? ` — ${a.job_title}` : ""),
+  }));
+
   return (
-    <ComingSoonPage
-      title="التسليم من المبيعات"
-      description="نموذج تسليم العميل من فريق المبيعات إلى مدير الحساب — مع إنشاء المشروع والمهام تلقائيًا."
-      icon={<Send className="size-6" />}
-      phase={5}
-      bullets={[
-        "نموذج موحّد لإرسال بيانات العميل والخدمات المتفق عليها",
-        "إنشاء أو ربط ملف العميل تلقائيًا عند الإرسال",
-        "إنشاء المشروع وربطه بالخدمات المختارة",
-        "توليد المهام تلقائيًا من قوالب المهام الخاصة بكل خدمة",
-        "تنبيه فوري لمدير الحساب وتسجيل حدث ذكي للمتابعة",
-      ]}
-    />
+    <div>
+      <PageHeader
+        title="التسليم من المبيعات"
+        description="نموذج موحّد لتحويل صفقة مغلقة إلى مشروع تشغيلي. عند الإرسال يتم إنشاء العميل والمشروع وتوليد المهام وتنبيه مدير الحساب — كله في خطوة واحدة."
+      />
+
+      <HandoverForm services={services} accountManagers={amOptions} />
+
+      <div className="mt-12">
+        <SectionTitle
+          title="آخر التسليمات"
+          description={`${handovers.length} نموذج مسجَّل`}
+        />
+        {handovers.length === 0 ? (
+          <EmptyState
+            icon={<Inbox className="size-6" />}
+            title="لا توجد تسليمات بعد"
+            description="ستظهر هنا كل نماذج التسليم فور إرسالها."
+            variant="compact"
+          />
+        ) : (
+          <div className="space-y-2.5">
+            {handovers.map((h) => {
+              const am = Array.isArray(h.assigned_account_manager)
+                ? h.assigned_account_manager[0]
+                : h.assigned_account_manager;
+              const project = Array.isArray(h.project) ? h.project[0] : h.project;
+              return (
+                <Card key={h.id}>
+                  <CardContent className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <h3 className="text-sm font-semibold">{h.client_name}</h3>
+                          <HandoverStatusBadge status={h.status} />
+                          <UrgencyBadge level={h.urgency_level} />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {h.selected_service_ids.length} خدمة
+                          {am ? ` · مدير الحساب: ${am.full_name}` : ""}
+                          {h.client_phone ? ` · ${h.client_phone}` : ""}
+                        </p>
+                        {h.sales_notes && (
+                          <p className="mt-2 text-xs text-foreground/80 line-clamp-2 leading-relaxed">
+                            {h.sales_notes}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 text-[11px] text-muted-foreground shrink-0">
+                        <span dir="ltr">{formatArabicDateTime(h.created_at)}</span>
+                        {project?.id && (
+                          <Link
+                            href={`/projects/${project.id}`}
+                            className="inline-flex items-center gap-1 text-cyan hover:text-cyan/80 transition-colors"
+                          >
+                            <Send className="size-3 icon-flip-rtl" />
+                            عرض المشروع
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

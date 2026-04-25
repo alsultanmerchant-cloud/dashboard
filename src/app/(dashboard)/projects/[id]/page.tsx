@@ -213,9 +213,13 @@ export default async function ProjectDetailPage({
                   <DataTableCell><PriorityBadge priority={t.priority} /></DataTableCell>
                   <DataTableCell className="text-xs text-muted-foreground" dir="ltr">{t.due_date ?? "—"}</DataTableCell>
                   <DataTableCell>
-                    <Button asChild variant="ghost" size="sm" render={<Link href={`/tasks/${t.id}`} />}>
+                    <Link
+                      href={`/tasks/${t.id}`}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+                      aria-label="فتح"
+                    >
                       <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                    </Button>
+                    </Link>
                   </DataTableCell>
                 </DataTableRow>
               ))}
