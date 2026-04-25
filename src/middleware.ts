@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createMiddlewareClient } from "@/lib/supabase/middleware";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback"];
+// `/dev/*` is a development-only design-system / preview namespace.
+// Kept public so we can demo primitives without touching auth/RBAC.
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev"];
 
 export async function middleware(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request);
