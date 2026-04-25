@@ -1,0 +1,17 @@
+# AI Agent Page Plan
+
+## Approach
+Full-page conversational AI assistant using Vercel AI SDK with @ai-sdk/google provider.
+Rich chat interface with knowledge context from all company data.
+
+## Implementation Steps
+
+1. Install packages: `ai`, `@ai-sdk/google`
+2. Create `/app/api/agent/route.ts` — streaming route using `streamText` from AI SDK with full data context
+3. Build `/app/(dashboard)/agent/page.tsx` — full-page chat with:
+   - Conversation history sidebar (left)
+   - Main chat area with markdown rendering
+   - Suggested prompts grid when empty
+   - Rich message bubbles with timestamps
+4. Add "المساعد الذكي" nav item to sidebar with Bot icon
+5. Build + verify
