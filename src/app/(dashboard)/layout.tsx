@@ -15,20 +15,13 @@ import { DEMO_TICKETS, DEMO_PROJECTS, DEMO_PARTNERSHIPS } from "@/lib/demo-data"
 import { fetchDeals, fetchSalesTargets, fetchSalesActivities, fetchTickets, fetchMentionNotifications, markMentionNotificationsRead } from "@/lib/supabase/db";
 import type { AppNotification } from "@/types";
 
+// Phase 2 nav slugs (only routes that still exist). Phase 3 replaces this with permission-keyed routing.
 const PAGE_SLUG_MAP: Record<string, string> = {
   "/dashboard": "dashboard",
-  "/sales": "sales",
-  "/renewals": "renewals",
-  "/satisfaction": "satisfaction",
-  "/support": "support",
-  "/development": "development",
-  "/partnerships": "partnerships",
+  "/agent": "agent",
   "/team": "team",
   "/finance": "finance",
-  "/upload": "upload",
-  "/agent": "agent",
   "/users": "users",
-  "/weekly": "weekly",
 };
 
 function MentionNotifLoader({ onLoad }: { onLoad: (n: AppNotification[]) => void }) {

@@ -5,41 +5,25 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  TrendingUp,
-  RefreshCw,
-  Heart,
-  Headphones,
-  Code,
-  Handshake,
+  Bot,
   Users,
   Banknote,
   X,
   Shield,
   LogOut,
   ChevronDown,
-  Upload,
-  ClipboardList,
-  BookOpen,
-  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 
+// Phase 2 nav. Phase 3 will replace this with grouped nav per spec.
+// Each item declares the permission required (owner bypasses).
 const NAV_ITEMS = [
-  { label: "نظرة عامة", href: "/dashboard", slug: "dashboard", icon: LayoutDashboard },
-  { label: "المبيعات", href: "/sales", slug: "sales", icon: TrendingUp },
-  { label: "دليل المبيعات", href: "/sales-guide", slug: "sales-guide", icon: BookOpen },
-  { label: "الاجتماع الأسبوعي", href: "/weekly", slug: "weekly", icon: ClipboardList },
-  { label: "التجديدات", href: "/renewals", slug: "renewals", icon: RefreshCw },
-  { label: "رضا العملاء", href: "/satisfaction", slug: "satisfaction", icon: Heart },
-  { label: "الدعم", href: "/support", slug: "support", icon: Headphones },
-  { label: "التطويرات", href: "/development", slug: "development", icon: Code },
-  { label: "الشراكات", href: "/partnerships", slug: "partnerships", icon: Handshake },
-  { label: "المسوقين", href: "/marketers", slug: "marketers", icon: Megaphone },
-  { label: "الفريق", href: "/team", slug: "team", icon: Users },
-  { label: "المالية", href: "/finance", slug: "finance", icon: Banknote },
-  { label: "رفع الملفات", href: "/upload", slug: "upload", icon: Upload },
-  { label: "إدارة المستخدمين", href: "/users", slug: "users", icon: Shield },
+  { label: "نظرة عامة", href: "/dashboard", slug: "dashboard", icon: LayoutDashboard, perm: "tasks.view" },
+  { label: "المساعد الذكي", href: "/agent", slug: "agent", icon: Bot, perm: "tasks.view" },
+  { label: "الفريق", href: "/team", slug: "team", icon: Users, perm: "employees.view" },
+  { label: "المالية", href: "/finance", slug: "finance", icon: Banknote, perm: "reports.view" },
+  { label: "إدارة المستخدمين", href: "/users", slug: "users", icon: Shield, perm: "settings.manage" },
 ];
 
 interface SidebarProps {
@@ -49,15 +33,16 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { user, loading, signOut, activeOrgId, switchOrg, orgs } = useAuth();
+  const { user, loading, signOut, activeOrgId, switchOrg, orgs, hasPermission } = useAuth();
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
 
-  const isSuperAdmin = user?.isSuperAdmin ?? false;
+  // Single-tenant: only show org switcher if multiple orgs are loaded.
+  const isSuperAdmin = (user?.isOwner ?? false) && orgs.length > 1;
 
-  // Filter nav items by user permissions
+  // Permission-keyed nav (replaces the old `allowedPages` slug list).
   const visibleItems = NAV_ITEMS.filter((item) => {
-    if (isSuperAdmin) return true;
-    return user?.allowedPages.includes(item.slug);
+    if (!user) return false;
+    return user.isOwner || hasPermission(item.perm);
   });
 
   // Find active org info
