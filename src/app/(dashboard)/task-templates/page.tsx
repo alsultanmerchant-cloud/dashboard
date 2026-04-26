@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ClipboardList, ChevronLeft } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listTaskTemplates } from "@/lib/data/templates";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -10,7 +10,7 @@ import { ServiceBadge } from "@/components/status-badges";
 import { Button } from "@/components/ui/button";
 
 export default async function TaskTemplatesPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("templates.manage");
   const templates = await listTaskTemplates(session.orgId);
 
   return (

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ListTodo, ChevronLeft } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listTasks } from "@/lib/data/tasks";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -26,7 +26,7 @@ export default async function TasksPage({
 }: {
   searchParams: Promise<{ filter?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requirePagePermission("tasks.view");
   const sp = await searchParams;
   const filter = (sp.filter ?? "open") as (typeof STATUS_FILTERS)[number]["key"];
 

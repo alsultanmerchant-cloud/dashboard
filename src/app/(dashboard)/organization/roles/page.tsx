@@ -1,5 +1,5 @@
 import { Shield, Check } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listRolesWithPermissions, listAllPermissions } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { ROLE_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 export default async function RolesPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("settings.manage");
   const [roles, permissions] = await Promise.all([
     listRolesWithPermissions(session.orgId),
     listAllPermissions(),

@@ -1,5 +1,5 @@
 import { Inbox } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -7,7 +7,7 @@ import { copy } from "@/lib/copy";
 import { NotificationsList } from "./notifications-list";
 
 export default async function NotificationsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("notifications.view");
   const { data } = await supabaseAdmin
     .from("notifications")
     .select("id, type, title, body, entity_type, entity_id, read_at, created_at")

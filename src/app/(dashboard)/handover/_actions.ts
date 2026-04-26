@@ -11,7 +11,7 @@ export type HandoverFormState = {
   ok?: true;
   handoverId?: string;
   projectId?: string;
-  clientId?: string;
+  clientId?: string | null;
   taskCount?: number;
   error?: string;
   fieldErrors?: Record<string, string>;

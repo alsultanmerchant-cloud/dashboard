@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Inbox, Send } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermissionAny } from "@/lib/auth-server";
 import { listHandovers } from "@/lib/data/handover";
 import { listAccountManagers, listServices } from "@/lib/data/employees";
 import { PageHeader } from "@/components/page-header";
@@ -14,7 +14,7 @@ import { formatArabicDateTime } from "@/lib/utils-format";
 import { HandoverForm } from "./handover-form";
 
 export default async function HandoverPage() {
-  const session = await requireSession();
+  const session = await requirePagePermissionAny(["handover.create", "handover.manage"]);
   const [services, accountManagers, handovers] = await Promise.all([
     listServices(session.orgId),
     listAccountManagers(session.orgId),

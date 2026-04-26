@@ -1,5 +1,5 @@
 import { Settings, Building2, User, Globe, Shield, Sparkles } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -17,7 +17,7 @@ async function getOrgInfo(orgId: string) {
 }
 
 export default async function SettingsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("settings.manage");
   const org = await getOrgInfo(session.orgId);
   const ownerRole = session.roleKeys.includes("owner");
 

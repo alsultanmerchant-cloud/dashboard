@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Briefcase, ChevronLeft } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listProjects } from "@/lib/data/projects";
 import { listClients } from "@/lib/data/clients";
 import { listAccountManagers, listServices } from "@/lib/data/employees";
@@ -19,7 +19,7 @@ import { copy } from "@/lib/copy";
 import { NewProjectDialog } from "./new-project-dialog";
 
 export default async function ProjectsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("projects.view");
   const [projects, clients, services, ams] = await Promise.all([
     listProjects(session.orgId),
     listClients(session.orgId),

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { CalendarDays } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { getTaskTemplate } from "@/lib/data/templates";
 import { PageHeader } from "@/components/page-header";
 import { ServiceBadge, PriorityBadge } from "@/components/status-badges";
@@ -16,7 +16,7 @@ export default async function TaskTemplateDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await requireSession();
+  const session = await requirePagePermission("templates.manage");
   const tpl = await getTaskTemplate(session.orgId, id);
   if (!tpl) notFound();
 

@@ -12,13 +12,13 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
   DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { createProjectAction, type ProjectFormState } from "./_actions";
 
 type Option = { id: string; label: string };
+
+const SELECT_CLASS =
+  "flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export function NewProjectDialog({
   clients, services, accountManagers,
@@ -29,24 +29,20 @@ export function NewProjectDialog({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [clientId, setClientId] = useState("");
-  const [accountManagerId, setAccountManagerId] = useState("");
-  const [priority, setPriority] = useState("medium");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [generateTasks, setGenerateTasks] = useState(true);
   const [state, formAction, pending] = useActionState<ProjectFormState | undefined, FormData>(
     createProjectAction,
     undefined,
   );
+  const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
     if (state?.ok) {
       toast.success(`تم إنشاء المشروع${state.taskCount ? ` وتوليد ${state.taskCount} مهمة` : ""}`);
       setOpen(false);
-      setClientId("");
-      setAccountManagerId("");
-      setPriority("medium");
       setSelectedServices(new Set());
+      setResetKey((k) => k + 1);
       router.refresh();
     } else if (state?.error) {
       toast.error(state.error);
@@ -72,10 +68,7 @@ export function NewProjectDialog({
           <DialogTitle>مشروع جديد</DialogTitle>
           <DialogDescription>اختر العميل والخدمات. ستُولَّد المهام تلقائيًا من قوالب الخدمات المحددة.</DialogDescription>
         </DialogHeader>
-        <form action={formAction} className="space-y-3">
-          <input type="hidden" name="client_id" value={clientId} />
-          <input type="hidden" name="account_manager_employee_id" value={accountManagerId} />
-          <input type="hidden" name="priority" value={priority} />
+        <form action={formAction} className="space-y-3" key={resetKey}>
           {Array.from(selectedServices).map((id) => (
             <input key={id} type="hidden" name="service_ids" value={id} />
           ))}
@@ -83,17 +76,13 @@ export function NewProjectDialog({
 
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>العميل *</Label>
-              <Select value={clientId} onValueChange={setClientId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر العميل" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="proj_client">العميل *</Label>
+              <select id="proj_client" name="client_id" required defaultValue="" className={SELECT_CLASS}>
+                <option value="" disabled>اختر العميل</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
               {state?.fieldErrors?.client_id && (
                 <p className="text-xs text-cc-red">{state.fieldErrors.client_id}</p>
               )}
@@ -142,33 +131,24 @@ export function NewProjectDialog({
               <Input id="end_date" name="end_date" type="date" dir="ltr" />
             </div>
             <div className="space-y-1.5">
-              <Label>الأولوية</Label>
-              <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">منخفضة</SelectItem>
-                  <SelectItem value="medium">متوسطة</SelectItem>
-                  <SelectItem value="high">عالية</SelectItem>
-                  <SelectItem value="urgent">عاجلة</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="proj_priority">الأولوية</Label>
+              <select id="proj_priority" name="priority" defaultValue="medium" className={SELECT_CLASS}>
+                <option value="low">منخفضة</option>
+                <option value="medium">متوسطة</option>
+                <option value="high">عالية</option>
+                <option value="urgent">عاجلة</option>
+              </select>
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label>مدير الحساب</Label>
-            <Select value={accountManagerId} onValueChange={setAccountManagerId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="اختياري — يمكن تعيينه لاحقًا" />
-              </SelectTrigger>
-              <SelectContent>
-                {accountManagers.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="proj_am">مدير الحساب</Label>
+            <select id="proj_am" name="account_manager_employee_id" defaultValue="" className={SELECT_CLASS}>
+              <option value="">— اختياري — يمكن تعيينه لاحقًا</option>
+              {accountManagers.map((a) => (
+                <option key={a.id} value={a.id}>{a.label}</option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-1.5">
@@ -188,7 +168,7 @@ export function NewProjectDialog({
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
-            <Button type="submit" disabled={pending || !clientId || !formIsValid({ clientId, selectedServices })}>
+            <Button type="submit" disabled={pending || selectedServices.size === 0}>
               {pending && <Loader2 className="size-4 animate-spin" />}
               إنشاء المشروع
             </Button>
@@ -197,8 +177,4 @@ export function NewProjectDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function formIsValid({ clientId }: { clientId: string; selectedServices: Set<string> }) {
-  return clientId.length > 0;
 }

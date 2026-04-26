@@ -1,5 +1,5 @@
 import { BarChart3, Briefcase, ListTodo, Inbox, Users, Sparkles } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -43,7 +43,7 @@ async function getRollupStats(orgId: string) {
 }
 
 export default async function ReportsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("reports.view");
   const [breakdown, totals] = await Promise.all([
     getServiceBreakdown(session.orgId),
     getRollupStats(session.orgId),

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   Briefcase, Calendar, User, ListTodo, ChevronLeft,
 } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { getProject, getProjectTaskSummary } from "@/lib/data/projects";
 import { listTasks } from "@/lib/data/tasks";
 import { PageHeader } from "@/components/page-header";
@@ -29,7 +29,7 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await requireSession();
+  const session = await requirePagePermission("projects.view");
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 

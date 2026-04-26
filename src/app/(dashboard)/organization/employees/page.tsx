@@ -1,5 +1,5 @@
 import { Users, Mail, Phone } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listEmployees, listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions, getEmployeeRoleAssignments } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
@@ -15,7 +15,7 @@ import { ROLE_LABELS } from "@/lib/labels";
 import { InviteEmployeeDialog } from "./invite-employee-dialog";
 
 export default async function EmployeesPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("employees.view");
   const [employees, departments, roleOptions] = await Promise.all([
     listEmployees(session.orgId),
     listDepartments(session.orgId),
@@ -63,7 +63,7 @@ export default async function EmployeesPage() {
             <tbody>
               {employees.map((e) => {
                 const dept = Array.isArray(e.department) ? e.department[0] : e.department;
-                const roles = (e.user_id && roleMap.get(e.user_id)) || [];
+                const roles = (e.user_id ? roleMap.get(e.user_id) : undefined) ?? [];
                 return (
                   <DataTableRow key={e.id}>
                     <DataTableCell>

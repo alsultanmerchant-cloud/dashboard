@@ -1,5 +1,5 @@
 import { Building2, Phone, Mail } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listClients } from "@/lib/data/clients";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -13,7 +13,7 @@ import { copy } from "@/lib/copy";
 import { NewClientDialog } from "./new-client-dialog";
 
 export default async function ClientsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("clients.view");
   const clients = await listClients(session.orgId);
 
   return (

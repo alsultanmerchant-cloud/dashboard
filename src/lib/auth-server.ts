@@ -74,3 +74,29 @@ export async function requirePermission(perm: string): Promise<ServerSession> {
 export function hasPermission(session: ServerSession, perm: string) {
   return session.isOwner || session.permissions.has(perm);
 }
+
+/**
+ * Page-level permission guard. Use in server components.
+ * - Not authenticated → redirect to /login.
+ * - Authenticated but missing the permission → redirect to /dashboard
+ *   (gracefully sends the user back to a page they can use).
+ * Use `requirePermission` (which throws) for server actions instead, so the
+ * action can return a structured `{ error }` to the form.
+ */
+export async function requirePagePermission(perm: string): Promise<ServerSession> {
+  const session = await requireSession();
+  if (!hasPermission(session, perm)) {
+    redirect("/dashboard");
+  }
+  return session;
+}
+
+/** Same as requirePagePermission but accepts any-of a list. */
+export async function requirePagePermissionAny(perms: string[]): Promise<ServerSession> {
+  const session = await requireSession();
+  if (session.isOwner) return session;
+  if (!perms.some((p) => session.permissions.has(p))) {
+    redirect("/dashboard");
+  }
+  return session;
+}

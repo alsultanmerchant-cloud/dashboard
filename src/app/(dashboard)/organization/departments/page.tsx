@@ -1,5 +1,5 @@
 import { Building, Users } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requirePagePermission } from "@/lib/auth-server";
 import { listDepartments } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
@@ -28,7 +28,7 @@ async function getDepartmentsWithCounts(orgId: string) {
 }
 
 export default async function DepartmentsPage() {
-  const session = await requireSession();
+  const session = await requirePagePermission("employees.view");
   const departments = await getDepartmentsWithCounts(session.orgId);
 
   return (
