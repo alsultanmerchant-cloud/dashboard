@@ -4,7 +4,9 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export async function listEmployees(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
-    .select("*, department:departments ( id, name, slug )")
+    .select(
+      "*, department:departments!employee_profiles_department_id_fkey ( id, name, slug )",
+    )
     .eq("organization_id", orgId)
     .order("created_at", { ascending: true });
   if (error) throw error;

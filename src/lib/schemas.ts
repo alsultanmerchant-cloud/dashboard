@@ -82,3 +82,31 @@ export const HandoverSubmitSchema = z.object({
     .transform((v) => v || null),
 });
 export type HandoverSubmitInput = z.infer<typeof HandoverSubmitSchema>;
+
+const slugRegex = /^[a-z0-9-]+$/;
+
+export const DepartmentCreateSchema = z.object({
+  name: z.string().trim().min(2, { message: "اسم القسم قصير جدًا" }),
+  slug: z.string().trim().min(2).regex(slugRegex, { message: "أحرف لاتينية صغيرة وأرقام وشرطات فقط" }),
+  description: optionalString,
+  parent_department_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+});
+export type DepartmentCreateInput = z.infer<typeof DepartmentCreateSchema>;
+
+export const EmployeeInviteSchema = z.object({
+  full_name: z.string().trim().min(2, { message: "الاسم قصير جدًا" }),
+  email: arabicEmail,
+  phone: optionalString,
+  job_title: optionalString,
+  department_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  role_id: uuidLoose,
+});
+export type EmployeeInviteInput = z.infer<typeof EmployeeInviteSchema>;
