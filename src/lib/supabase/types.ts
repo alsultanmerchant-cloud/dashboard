@@ -109,6 +109,8 @@ export type Database = {
           created_at: string
           created_by: string | null
           email: string | null
+          external_id: number | null
+          external_source: string | null
           id: string
           name: string
           notes: string | null
@@ -124,6 +126,8 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           email?: string | null
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           name: string
           notes?: string | null
@@ -139,6 +143,8 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           email?: string | null
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           name?: string
           notes?: string | null
@@ -223,6 +229,8 @@ export type Database = {
           department_id: string | null
           email: string | null
           employment_status: string
+          external_id: number | null
+          external_source: string | null
           full_name: string
           id: string
           job_title: string | null
@@ -238,6 +246,8 @@ export type Database = {
           department_id?: string | null
           email?: string | null
           employment_status?: string
+          external_id?: number | null
+          external_source?: string | null
           full_name: string
           id?: string
           job_title?: string | null
@@ -253,6 +263,8 @@ export type Database = {
           department_id?: string | null
           email?: string | null
           employment_status?: string
+          external_id?: number | null
+          external_source?: string | null
           full_name?: string
           id?: string
           job_title?: string | null
@@ -350,6 +362,7 @@ export type Database = {
           id: string
           logo_url: string | null
           name: string
+          project_manager_employee_id: string | null
           slug: string
           timezone: string
           updated_at: string
@@ -360,6 +373,7 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name: string
+          project_manager_employee_id?: string | null
           slug: string
           timezone?: string
           updated_at?: string
@@ -370,11 +384,20 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name?: string
+          project_manager_employee_id?: string | null
           slug?: string
           timezone?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "organizations_project_manager_employee_id_fkey"
+            columns: ["project_manager_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       permissions: {
         Row: {
@@ -503,6 +526,8 @@ export type Database = {
           created_by: string | null
           description: string | null
           end_date: string | null
+          external_id: number | null
+          external_source: string | null
           id: string
           name: string
           organization_id: string
@@ -518,6 +543,8 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           end_date?: string | null
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           name: string
           organization_id: string
@@ -533,6 +560,8 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           end_date?: string | null
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           name?: string
           organization_id?: string
@@ -731,6 +760,8 @@ export type Database = {
       services: {
         Row: {
           created_at: string
+          default_department_id: string | null
+          default_specialist_employee_id: string | null
           description: string | null
           id: string
           is_active: boolean
@@ -741,6 +772,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          default_department_id?: string | null
+          default_specialist_employee_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean
@@ -751,6 +784,8 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          default_department_id?: string | null
+          default_specialist_employee_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean
@@ -760,6 +795,20 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "services_default_department_id_fkey"
+            columns: ["default_department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "services_default_specialist_employee_id_fkey"
+            columns: ["default_specialist_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "services_organization_id_fkey"
             columns: ["organization_id"]
@@ -776,6 +825,7 @@ export type Database = {
           employee_id: string
           id: string
           organization_id: string
+          role_type: Database["public"]["Enums"]["task_role_type"]
           task_id: string
         }
         Insert: {
@@ -784,6 +834,7 @@ export type Database = {
           employee_id: string
           id?: string
           organization_id: string
+          role_type: Database["public"]["Enums"]["task_role_type"]
           task_id: string
         }
         Update: {
@@ -792,6 +843,7 @@ export type Database = {
           employee_id?: string
           id?: string
           organization_id?: string
+          role_type?: Database["public"]["Enums"]["task_role_type"]
           task_id?: string
         }
         Relationships: [
@@ -814,6 +866,13 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
           },
         ]
@@ -862,6 +921,13 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
           },
         ]
@@ -915,6 +981,67 @@ export type Database = {
           },
         ]
       }
+      task_stage_history: {
+        Row: {
+          created_at: string
+          duration_seconds: number | null
+          entered_at: string
+          exited_at: string | null
+          from_stage: Database["public"]["Enums"]["task_stage"] | null
+          id: string
+          moved_by: string | null
+          organization_id: string
+          task_id: string
+          to_stage: Database["public"]["Enums"]["task_stage"]
+        }
+        Insert: {
+          created_at?: string
+          duration_seconds?: number | null
+          entered_at?: string
+          exited_at?: string | null
+          from_stage?: Database["public"]["Enums"]["task_stage"] | null
+          id?: string
+          moved_by?: string | null
+          organization_id: string
+          task_id: string
+          to_stage: Database["public"]["Enums"]["task_stage"]
+        }
+        Update: {
+          created_at?: string
+          duration_seconds?: number | null
+          entered_at?: string
+          exited_at?: string | null
+          from_stage?: Database["public"]["Enums"]["task_stage"] | null
+          id?: string
+          moved_by?: string | null
+          organization_id?: string
+          task_id?: string
+          to_stage?: Database["public"]["Enums"]["task_stage"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_stage_history_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_template_items: {
         Row: {
           created_at: string
@@ -930,6 +1057,8 @@ export type Database = {
           task_template_id: string
           title: string
           updated_at: string
+          upload_offset_days_before_deadline: number | null
+          week_index: number | null
         }
         Insert: {
           created_at?: string
@@ -945,6 +1074,8 @@ export type Database = {
           task_template_id: string
           title: string
           updated_at?: string
+          upload_offset_days_before_deadline?: number | null
+          week_index?: number | null
         }
         Update: {
           created_at?: string
@@ -960,6 +1091,8 @@ export type Database = {
           task_template_id?: string
           title?: string
           updated_at?: string
+          upload_offset_days_before_deadline?: number | null
+          week_index?: number | null
         }
         Relationships: [
           {
@@ -1038,49 +1171,76 @@ export type Database = {
       }
       tasks: {
         Row: {
+          allocated_time_minutes: number | null
           completed_at: string | null
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
           description: string | null
           due_date: string | null
+          expected_progress_percent: number
+          external_id: number | null
+          external_source: string | null
           id: string
           organization_id: string
+          planned_date: string | null
           priority: string
+          progress_percent: number
+          progress_slip_percent: number
           project_id: string
           service_id: string | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at: string
           status: string
           title: string
           updated_at: string
         }
         Insert: {
+          allocated_time_minutes?: number | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
           description?: string | null
           due_date?: string | null
+          expected_progress_percent?: number
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           organization_id: string
+          planned_date?: string | null
           priority?: string
+          progress_percent?: number
+          progress_slip_percent?: number
           project_id: string
           service_id?: string | null
+          stage?: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at?: string
           status?: string
           title: string
           updated_at?: string
         }
         Update: {
+          allocated_time_minutes?: number | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
           description?: string | null
           due_date?: string | null
+          expected_progress_percent?: number
+          external_id?: number | null
+          external_source?: string | null
           id?: string
           organization_id?: string
+          planned_date?: string | null
           priority?: string
+          progress_percent?: number
+          progress_slip_percent?: number
           project_id?: string
           service_id?: string | null
+          stage?: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at?: string
           status?: string
           title?: string
           updated_at?: string
@@ -1155,9 +1315,172 @@ export type Database = {
           },
         ]
       }
+      whatsapp_groups: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          invite_url: string | null
+          kind: Database["public"]["Enums"]["whatsapp_group_kind"]
+          name: string
+          notes: string | null
+          organization_id: string
+          project_id: string
+          updated_at: string
+          whatsapp_chat_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invite_url?: string | null
+          kind: Database["public"]["Enums"]["whatsapp_group_kind"]
+          name: string
+          notes?: string | null
+          organization_id: string
+          project_id: string
+          updated_at?: string
+          whatsapp_chat_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invite_url?: string | null
+          kind?: Database["public"]["Enums"]["whatsapp_group_kind"]
+          name?: string
+          notes?: string | null
+          organization_id?: string
+          project_id?: string
+          updated_at?: string
+          whatsapp_chat_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_groups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_groups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      tasks_with_metrics: {
+        Row: {
+          allocated_time_minutes: number | null
+          completed_at: string | null
+          created_at: string | null
+          created_by: string | null
+          created_from_template_item_id: string | null
+          current_stage_seconds: number | null
+          delay_days: number | null
+          description: string | null
+          due_date: string | null
+          expected_progress_percent: number | null
+          id: string | null
+          organization_id: string | null
+          planned_date: string | null
+          priority: string | null
+          progress_percent: number | null
+          progress_slip_percent: number | null
+          project_id: string | null
+          service_id: string | null
+          stage: Database["public"]["Enums"]["task_stage"] | null
+          stage_entered_at: string | null
+          status: string | null
+          title: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          allocated_time_minutes?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_from_template_item_id?: string | null
+          current_stage_seconds?: never
+          delay_days?: never
+          description?: string | null
+          due_date?: string | null
+          expected_progress_percent?: number | null
+          id?: string | null
+          organization_id?: string | null
+          planned_date?: string | null
+          priority?: string | null
+          progress_percent?: number | null
+          progress_slip_percent?: number | null
+          project_id?: string | null
+          service_id?: string | null
+          stage?: Database["public"]["Enums"]["task_stage"] | null
+          stage_entered_at?: string | null
+          status?: string | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          allocated_time_minutes?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          created_from_template_item_id?: string | null
+          current_stage_seconds?: never
+          delay_days?: never
+          description?: string | null
+          due_date?: string | null
+          expected_progress_percent?: number | null
+          id?: string | null
+          organization_id?: string | null
+          planned_date?: string | null
+          priority?: string | null
+          progress_percent?: number | null
+          progress_slip_percent?: number | null
+          project_id?: string | null
+          service_id?: string | null
+          stage?: Database["public"]["Enums"]["task_stage"] | null
+          stage_entered_at?: string | null
+          status?: string | null
+          title?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_created_from_template_item_id_fkey"
+            columns: ["created_from_template_item_id"]
+            isOneToOne: false
+            referencedRelation: "task_template_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       current_user_organization_ids: { Args: never; Returns: string[] }
@@ -1166,9 +1489,27 @@ export type Database = {
         Args: { perm_key: string; target_org: string }
         Returns: boolean
       }
+      task_current_stage_seconds: {
+        Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
+        Returns: number
+      }
+      task_delay_days: {
+        Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
+        Returns: number
+      }
     }
     Enums: {
-      [_ in never]: never
+      task_role_type: "specialist" | "manager" | "agent" | "account_manager"
+      task_stage:
+        | "new"
+        | "in_progress"
+        | "manager_review"
+        | "specialist_review"
+        | "ready_to_send"
+        | "sent_to_client"
+        | "client_changes"
+        | "done"
+      whatsapp_group_kind: "client" | "internal"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1295,7 +1636,20 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      task_role_type: ["specialist", "manager", "agent", "account_manager"],
+      task_stage: [
+        "new",
+        "in_progress",
+        "manager_review",
+        "specialist_review",
+        "ready_to_send",
+        "sent_to_client",
+        "client_changes",
+        "done",
+      ],
+      whatsapp_group_kind: ["client", "internal"],
+    },
   },
 } as const
 
