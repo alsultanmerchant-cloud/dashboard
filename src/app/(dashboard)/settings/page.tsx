@@ -1,16 +1,18 @@
 import { Settings, Building2, User, Globe, Shield, Sparkles } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { listEmployees } from "@/lib/data/employees";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ROLE_LABELS } from "@/lib/labels";
+import { ProjectManagerPicker } from "./project-manager-picker";
 
 async function getOrgInfo(orgId: string) {
   const { data } = await supabaseAdmin
     .from("organizations")
-    .select("id, name, slug, default_locale, timezone, created_at")
+    .select("id, name, slug, default_locale, timezone, created_at, project_manager_employee_id")
     .eq("id", orgId)
     .maybeSingle();
   return data;
@@ -18,8 +20,21 @@ async function getOrgInfo(orgId: string) {
 
 export default async function SettingsPage() {
   const session = await requirePagePermission("settings.manage");
-  const org = await getOrgInfo(session.orgId);
+  const [org, employees] = await Promise.all([
+    getOrgInfo(session.orgId),
+    listEmployees(session.orgId),
+  ]);
   const ownerRole = session.roleKeys.includes("owner");
+
+  const employeeOptions = employees
+    .filter((e) => e.employment_status === "active")
+    .map((e) => ({
+      id: e.id,
+      full_name: e.full_name,
+      job_title: e.job_title ?? null,
+    }));
+  const currentPM =
+    employeeOptions.find((e) => e.id === org?.project_manager_employee_id) ?? null;
 
   return (
     <div>
@@ -43,6 +58,16 @@ export default async function SettingsPage() {
             <Field icon={<Globe className="size-4" />} label="اللغة الافتراضية" value={org?.default_locale === "ar" ? "العربية" : (org?.default_locale ?? "—")} />
             <Field icon={<Globe className="size-4" />} label="المنطقة الزمنية" value={org?.timezone ?? "—"} mono />
           </div>
+        </CardContent>
+      </Card>
+
+      <SectionTitle
+        title="مدير المشاريع العام"
+        description="الشخص الذي يظهر كـ Project Manager على لوحات المشاريع. عادةً ثابت لجميع المشاريع."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-5">
+          <ProjectManagerPicker current={currentPM} employees={employeeOptions} />
         </CardContent>
       </Card>
 

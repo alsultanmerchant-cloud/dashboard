@@ -37,15 +37,32 @@ export async function getProject(orgId: string, id: string) {
 export async function getProjectTaskSummary(orgId: string, projectId: string) {
   const { data } = await supabaseAdmin
     .from("tasks")
-    .select("status")
+    .select("stage, status")
     .eq("organization_id", orgId)
     .eq("project_id", projectId);
-  const summary: Record<string, number> = {
-    total: 0, todo: 0, in_progress: 0, review: 0, blocked: 0, done: 0, cancelled: 0,
-  };
+
+  const summary = {
+    total: 0,
+    // Sky Light / Rwasem stages
+    new: 0,
+    in_progress: 0,
+    manager_review: 0,
+    specialist_review: 0,
+    ready_to_send: 0,
+    sent_to_client: 0,
+    client_changes: 0,
+    done: 0,
+    // Legacy status counts (kept for any older callers).
+    todo: 0,
+    review: 0,
+    blocked: 0,
+    cancelled: 0,
+  } as Record<string, number>;
+
   for (const row of data ?? []) {
     summary.total += 1;
-    summary[row.status] = (summary[row.status] ?? 0) + 1;
+    if (row.stage) summary[row.stage] = (summary[row.stage] ?? 0) + 1;
+    if (row.status) summary[row.status] = (summary[row.status] ?? 0) + 1;
   }
   return summary;
 }

@@ -4,6 +4,7 @@
 import { cn } from "@/lib/utils";
 import {
   TASK_STATUS_LABELS,
+  TASK_STAGE_LABELS,
   PRIORITY_LABELS,
   PROJECT_STATUS_LABELS,
   HANDOVER_STATUS_LABELS,
@@ -11,6 +12,7 @@ import {
   URGENCY_LABELS,
   EMPLOYMENT_STATUS_LABELS,
   type TaskStatus,
+  type TaskStage,
   type Priority,
   type ProjectStatus,
   type HandoverStatus,
@@ -59,6 +61,29 @@ const taskTone: Record<TaskStatus, keyof typeof tones> = {
 export function TaskStatusBadge({ status, className }: { status: TaskStatus | string; className?: string }) {
   const t = taskTone[status as TaskStatus] ?? "muted";
   const label = TASK_STATUS_LABELS[status as TaskStatus] ?? status;
+  return (
+    <span className={cn(baseChip, tones[t], className)}>
+      <Dot tone={t} />
+      {label}
+    </span>
+  );
+}
+
+// Sky Light / Rwasem 8-stage workflow badge.
+const stageTone: Record<TaskStage, keyof typeof tones> = {
+  new: "muted",
+  in_progress: "cyan",
+  manager_review: "purple",
+  specialist_review: "amber",
+  ready_to_send: "blue",
+  sent_to_client: "blue",
+  client_changes: "pink",
+  done: "green",
+};
+
+export function TaskStageBadge({ stage, className }: { stage: TaskStage | string; className?: string }) {
+  const t = stageTone[stage as TaskStage] ?? "muted";
+  const label = TASK_STAGE_LABELS[stage as TaskStage] ?? stage;
   return (
     <span className={cn(baseChip, tones[t], className)}>
       <Dot tone={t} />

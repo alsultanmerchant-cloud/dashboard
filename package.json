@@ -6,12 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:odoo": "bun run scripts/sync-odoo.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",
     "@ai-sdk/react": "^3.0.118",
     "@base-ui/react": "^1.3.0",
+    "@dnd-kit/core": "^6.3.1",
     "@google/generative-ai": "^0.24.1",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.1",

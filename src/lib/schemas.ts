@@ -49,6 +49,45 @@ export const TaskStatusUpdateSchema = z.object({
   status: z.enum(["todo", "in_progress", "review", "blocked", "done", "cancelled"]),
 });
 
+export const TASK_STAGE_VALUES = [
+  "new",
+  "in_progress",
+  "manager_review",
+  "specialist_review",
+  "ready_to_send",
+  "sent_to_client",
+  "client_changes",
+  "done",
+] as const;
+
+export const TaskStageUpdateSchema = z.object({
+  task_id: uuidLoose,
+  stage: z.enum(TASK_STAGE_VALUES),
+});
+
+export const TASK_ROLE_VALUES = ["specialist", "manager", "agent", "account_manager"] as const;
+
+// Set/clear a task assignee for a single named slot.
+// employee_id = null clears the slot.
+export const TaskRoleAssignSchema = z.object({
+  task_id: uuidLoose,
+  role_type: z.enum(TASK_ROLE_VALUES),
+  employee_id: z
+    .union([z.literal(""), z.null(), uuidLoose])
+    .optional()
+    .transform((v) => (v && v !== "" ? v : null)),
+});
+
+// Sky Light WhatsApp group upsert.
+export const WhatsAppGroupUpsertSchema = z.object({
+  project_id: uuidLoose,
+  kind: z.enum(["client", "internal"]),
+  name: z.string().trim().min(2, { message: "اسم القروب قصير جدًا" }).max(200),
+  invite_url: optionalString,
+  whatsapp_chat_id: optionalString,
+  notes: optionalString,
+});
+
 export const TaskCommentSchema = z.object({
   task_id: uuidLoose,
   body: z.string().trim().min(1, { message: "اكتب التعليق" }).max(4000),

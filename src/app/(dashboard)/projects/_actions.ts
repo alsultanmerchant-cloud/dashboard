@@ -128,6 +128,7 @@ export async function createProjectAction(
       projectId: project.id,
       serviceIds: parsed.data.service_ids,
       projectStartDate: project.start_date ?? null,
+      accountManagerEmployeeId: parsed.data.account_manager_employee_id,
       createdByUserId: session.userId,
     });
   }

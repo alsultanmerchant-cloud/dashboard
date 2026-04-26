@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  Briefcase, Calendar, User, ListTodo, ChevronLeft,
+  Briefcase, Calendar, User, ListTodo,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { getProject, getProjectTaskSummary } from "@/lib/data/projects";
@@ -12,16 +11,14 @@ import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   ProjectStatusBadge, PriorityBadge, ServiceBadge,
-  TaskStatusBadge,
 } from "@/components/status-badges";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import {
-  DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
-  DataTableRow, DataTableCell,
-} from "@/components/data-table-shell";
 import { formatArabicShortDate } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
+import { TaskBoard, type BoardTask } from "./task-board";
+import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
+import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
+import type { TaskStage, TaskRoleType } from "@/lib/labels";
 
 export default async function ProjectDetailPage({
   params,
@@ -33,13 +30,33 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks] = await Promise.all([
+  const [summary, tasks, waGroups] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     listTasks(session.orgId, { projectId: project.id }),
+    listProjectWhatsAppGroups(session.orgId, project.id),
   ]);
 
   const client = Array.isArray(project.client) ? project.client[0] : project.client;
   const am = Array.isArray(project.account_manager) ? project.account_manager[0] : project.account_manager;
+
+  const waRows: WhatsAppGroupRow[] = (["client", "internal"] as const).map(
+    (kind) => {
+      const existing = waGroups.find((g) => g.kind === kind);
+      return existing
+        ? {
+            id: existing.id,
+            kind: existing.kind,
+            name: existing.name,
+            invite_url: existing.invite_url,
+          }
+        : {
+            id: null,
+            kind,
+            name: client?.name ? suggestGroupName(kind, client.name) : "",
+            invite_url: null,
+          };
+    },
+  );
 
   return (
     <div>
@@ -63,20 +80,20 @@ export default async function ProjectDetailPage({
         />
         <MetricCard
           label="قيد التنفيذ"
-          value={summary.in_progress + summary.review}
+          value={summary.in_progress}
           tone="info"
           icon={<Briefcase className="size-5" />}
         />
         <MetricCard
-          label="مكتملة"
-          value={summary.done}
-          tone="success"
+          label="قيد المراجعة"
+          value={summary.manager_review + summary.specialist_review}
+          tone="warning"
           icon={<ListTodo className="size-5" />}
         />
         <MetricCard
-          label="قيد الانتظار"
-          value={summary.todo + summary.blocked}
-          tone="warning"
+          label="مع العميل"
+          value={summary.ready_to_send + summary.sent_to_client + summary.client_changes}
+          tone="info"
           icon={<ListTodo className="size-5" />}
         />
       </div>
@@ -152,6 +169,14 @@ export default async function ProjectDetailPage({
         </CardContent>
       </Card>
 
+      <SectionTitle
+        title="مجموعات واتساب"
+        description="القناة الرسمية مع العميل والقروب الداخلي للفريق — تابع تسمية المنشور في الدليل."
+      />
+      <div className="mb-8">
+        <WhatsAppPanel projectId={project.id} rows={waRows} />
+      </div>
+
       <SectionTitle title="فريق المشروع" />
       <Card className="mb-8">
         <CardContent className="p-4">
@@ -180,8 +205,8 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title="المهام"
-        description={`${tasks.length} مهمة في هذا المشروع`}
+        title="لوحة المهام"
+        description={`${tasks.length} مهمة — اسحب البطاقة بين الأعمدة لتغيير المرحلة`}
       />
       {tasks.length === 0 ? (
         <EmptyState
@@ -190,43 +215,41 @@ export default async function ProjectDetailPage({
           variant="compact"
         />
       ) : (
-        <DataTableShell>
-          <DataTable>
-            <DataTableHead>
-              <tr>
-                <DataTableHeaderCell>المهمة</DataTableHeaderCell>
-                <DataTableHeaderCell>الحالة</DataTableHeaderCell>
-                <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
-                <DataTableHeaderCell>تاريخ التسليم</DataTableHeaderCell>
-                <DataTableHeaderCell aria-label="فتح" />
-              </tr>
-            </DataTableHead>
-            <tbody>
-              {tasks.map((t) => (
-                <DataTableRow key={t.id}>
-                  <DataTableCell className="font-medium">
-                    <Link href={`/tasks/${t.id}`} className="hover:text-cyan transition-colors">
-                      {t.title}
-                    </Link>
-                  </DataTableCell>
-                  <DataTableCell><TaskStatusBadge status={t.status} /></DataTableCell>
-                  <DataTableCell><PriorityBadge priority={t.priority} /></DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground" dir="ltr">{t.due_date ?? "—"}</DataTableCell>
-                  <DataTableCell>
-                    <Link
-                      href={`/tasks/${t.id}`}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
-                      aria-label="فتح"
-                    >
-                      <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                    </Link>
-                  </DataTableCell>
-                </DataTableRow>
-              ))}
-            </tbody>
-          </DataTable>
-        </DataTableShell>
+        <TaskBoard tasks={toBoardTasks(tasks)} />
       )}
     </div>
   );
+}
+
+// Map the listTasks() shape into the board's expected BoardTask shape.
+type RawTask = Awaited<ReturnType<typeof listTasks>>[number];
+function toBoardTasks(rows: RawTask[]): BoardTask[] {
+  return rows.map((t) => {
+    const service = Array.isArray(t.service) ? t.service[0] : t.service;
+    const role_slots: BoardTask["role_slots"] = {};
+    for (const ta of t.task_assignees ?? []) {
+      const e = Array.isArray(ta.employee) ? ta.employee[0] : ta.employee;
+      if (!e) continue;
+      role_slots[ta.role_type as TaskRoleType] = {
+        id: e.id,
+        full_name: e.full_name,
+        avatar_url: e.avatar_url,
+      };
+    }
+    return {
+      id: t.id,
+      title: t.title,
+      stage: (t.stage ?? "new") as TaskStage,
+      stage_entered_at: t.stage_entered_at ?? t.created_at,
+      planned_date: t.planned_date ?? null,
+      due_date: t.due_date ?? null,
+      priority: t.priority,
+      progress_percent: t.progress_percent ?? null,
+      expected_progress_percent: t.expected_progress_percent ?? null,
+      service: service
+        ? { id: service.id, name: service.name, slug: service.slug }
+        : null,
+      role_slots,
+    };
+  });
 }

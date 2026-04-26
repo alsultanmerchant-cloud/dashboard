@@ -4,7 +4,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { listTasks } from "@/lib/data/tasks";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { TaskStatusBadge, PriorityBadge, ServiceBadge } from "@/components/status-badges";
+import { TaskStageBadge, PriorityBadge, ServiceBadge } from "@/components/status-badges";
 import { Button } from "@/components/ui/button";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
@@ -14,11 +14,15 @@ import { copy } from "@/lib/copy";
 import { isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 
-const STATUS_FILTERS = [
+const STAGE_FILTERS = [
   { key: "all", label: "كل المهام" },
-  { key: "open", label: "مفتوحة", statuses: ["todo", "in_progress", "review", "blocked"] },
+  {
+    key: "open",
+    label: "مفتوحة",
+    stages: ["new", "in_progress", "manager_review", "specialist_review", "ready_to_send", "sent_to_client", "client_changes"],
+  },
   { key: "overdue", label: "متأخرة" },
-  { key: "done", label: "مكتملة", statuses: ["done"] },
+  { key: "done", label: "مكتملة", stages: ["done"] },
 ] as const;
 
 export default async function TasksPage({
@@ -28,11 +32,11 @@ export default async function TasksPage({
 }) {
   const session = await requirePagePermission("tasks.view");
   const sp = await searchParams;
-  const filter = (sp.filter ?? "open") as (typeof STATUS_FILTERS)[number]["key"];
+  const filter = (sp.filter ?? "open") as (typeof STAGE_FILTERS)[number]["key"];
 
-  const filterDef = STATUS_FILTERS.find((f) => f.key === filter) ?? STATUS_FILTERS[0];
+  const filterDef = STAGE_FILTERS.find((f) => f.key === filter) ?? STAGE_FILTERS[0];
   const tasks = await listTasks(session.orgId, {
-    status: "statuses" in filterDef ? [...filterDef.statuses!] : undefined,
+    stage: "stages" in filterDef ? [...filterDef.stages!] : undefined,
     overdue: filter === "overdue",
   });
 
@@ -45,7 +49,7 @@ export default async function TasksPage({
 
       {/* Filter chips */}
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5">
-        {STATUS_FILTERS.map((f) => (
+        {STAGE_FILTERS.map((f) => (
           <Link
             key={f.key}
             href={`/tasks?filter=${f.key}`}
@@ -78,9 +82,9 @@ export default async function TasksPage({
                 <DataTableHeaderCell>المهمة</DataTableHeaderCell>
                 <DataTableHeaderCell>المشروع</DataTableHeaderCell>
                 <DataTableHeaderCell>الخدمة</DataTableHeaderCell>
-                <DataTableHeaderCell>الحالة</DataTableHeaderCell>
+                <DataTableHeaderCell>المرحلة</DataTableHeaderCell>
                 <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
-                <DataTableHeaderCell>تاريخ التسليم</DataTableHeaderCell>
+                <DataTableHeaderCell>الموعد النهائي</DataTableHeaderCell>
                 <DataTableHeaderCell aria-label="فتح" />
               </tr>
             </DataTableHead>
@@ -89,7 +93,11 @@ export default async function TasksPage({
                 const project = Array.isArray(t.project) ? t.project[0] : t.project;
                 const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
                 const service = Array.isArray(t.service) ? t.service[0] : t.service;
-                const overdue = isOverdue(t.due_date) && t.status !== "done" && t.status !== "cancelled";
+                const deadline = t.planned_date ?? t.due_date;
+                const overdue = isOverdue(deadline) && t.stage !== "done";
+                const delayDays = deadline && t.stage !== "done"
+                  ? Math.floor((Date.now() - new Date(deadline).getTime()) / 86400000)
+                  : null;
                 return (
                   <DataTableRow key={t.id}>
                     <DataTableCell className="font-medium">
@@ -104,10 +112,13 @@ export default async function TasksPage({
                     <DataTableCell>
                       {service ? <ServiceBadge slug={service.slug} name={service.name} /> : <span className="text-xs text-muted-foreground">—</span>}
                     </DataTableCell>
-                    <DataTableCell><TaskStatusBadge status={t.status} /></DataTableCell>
+                    <DataTableCell><TaskStageBadge stage={t.stage} /></DataTableCell>
                     <DataTableCell><PriorityBadge priority={t.priority} /></DataTableCell>
                     <DataTableCell className={cn("text-xs tabular-nums", overdue ? "text-cc-red font-medium" : "text-muted-foreground")} dir="ltr">
-                      {t.due_date ?? "—"}
+                      <div>{deadline ?? "—"}</div>
+                      {delayDays != null && delayDays > 0 && (
+                        <div className="text-[10px] text-cc-red">+{delayDays}d</div>
+                      )}
                     </DataTableCell>
                     <DataTableCell>
                       <Link

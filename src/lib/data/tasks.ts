@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export type TaskFilters = {
   status?: string[];
+  stage?: string[];
   priority?: string[];
   projectId?: string;
   overdue?: boolean;
@@ -14,21 +15,24 @@ export async function listTasks(orgId: string, filters: TaskFilters = {}) {
   let q = supabaseAdmin
     .from("tasks")
     .select(`
-      id, title, status, priority, due_date, completed_at, created_at, project_id,
+      id, title, status, stage, stage_entered_at, planned_date,
+      progress_percent, expected_progress_percent,
+      priority, due_date, completed_at, created_at, project_id,
       project:projects ( id, name, client:clients ( name ) ),
       service:services ( id, name, slug ),
-      task_assignees ( employee:employee_profiles ( id, full_name, avatar_url ) )
+      task_assignees ( role_type, employee:employee_profiles ( id, full_name, avatar_url ) )
     `)
     .eq("organization_id", orgId)
     .order("created_at", { ascending: false })
     .limit(200);
 
   if (filters.status?.length) q = q.in("status", filters.status);
+  if (filters.stage?.length) q = q.in("stage", filters.stage);
   if (filters.priority?.length) q = q.in("priority", filters.priority);
   if (filters.projectId) q = q.eq("project_id", filters.projectId);
   if (filters.overdue) {
     const today = new Date().toISOString().slice(0, 10);
-    q = q.in("status", ["todo", "in_progress", "review", "blocked"]).lt("due_date", today);
+    q = q.neq("stage", "done").lt("planned_date", today);
   }
   if (filters.search) q = q.ilike("title", `%${filters.search}%`);
 
@@ -54,7 +58,7 @@ export async function getTask(orgId: string, id: string) {
       *,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name ),
-      task_assignees ( id, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
+      task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
     `)
     .eq("organization_id", orgId)
     .eq("id", id)
