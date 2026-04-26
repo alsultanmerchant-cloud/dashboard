@@ -26,16 +26,21 @@ The seeded organization slug is **`rawasm-demo`**. All UI assumes one org; the s
 Departments · Employees · Roles & Permissions · Services (Social Media · SEO · Media Buying) · Task Templates with default offsets · Audit logs · AI events foundation.
 
 ## Migrations
-Applied directly to the Supabase project via Management API. Source-of-truth files in `supabase/migrations/0001…0006`.
+Applied directly to the Supabase project via Management API. Source-of-truth files in `supabase/migrations/0001…0011`.
+
+## Odoo (Rwasem) integration
+The Skylight team runs on a customized Odoo 17 deployment (addons mirrored at `/Users/mahmoudmac/Documents/projects/skylight_addons-master`). The dashboard is the operator UI + AI layer on top of that system, not a replacement.
+- `src/lib/odoo/` — typed JSON-RPC client + idempotent importer (employees → clients → projects → tasks). Run with `bun run sync:odoo`.
+- Migration `0011_odoo_external_ref.sql` adds `external_source` + `external_id` to clients/projects/tasks/employee_profiles so re-runs upsert in place.
+- Writeback (dashboard → Odoo) not yet built — will live in a custom Odoo addon `mr_dashboard_sync`.
 
 ## Where to look
 - `src/lib/supabase/` — server/admin/middleware/browser clients + generated `types.ts`
 - `src/lib/supabase/types.ts` — generated TS types for the agency schema
 - `supabase/migrations/` — SQL migrations (already applied)
 - `docs/MVP_PLAN.md` — 10-phase execution plan with gates
-- `src/app/(dashboard)/` — modules (most pages are stubs/inherited; rewrites tracked in plan)
-- `src/lib/auth-context.tsx` — **legacy**, queries `user_profiles` (doesn't exist). Phase 2 rewrites this against `employee_profiles + roles + user_roles`.
-- `src/app/api/agent/route.ts` — **legacy** AI system prompt referencing old sales/deals tables. Phase 6 rewires.
+- `src/app/(dashboard)/` — modules
+- `src/app/api/agent/route.ts` — AI assistant (Gemini via @ai-sdk/google, model `gemini-3-flash-preview`). System prompt is grounded on the Rwasem schema + the Sky Light operations PDF workflow rules.
 
 ## Working rules
 - Never commit secrets; `.env.local` contains real keys, `.env.example` placeholders
