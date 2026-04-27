@@ -4,6 +4,7 @@ import type { Database } from "@/lib/supabase/types";
 
 type Stage = Database["public"]["Enums"]["task_stage"];
 type RoleType = Database["public"]["Enums"]["task_role_type"];
+type CommentKind = Database["public"]["Enums"]["task_comment_kind"];
 
 // Sky Light task activity feed.
 // Unified read-side projection over three sources:
@@ -23,6 +24,7 @@ export type TaskActivity =
       body: string;
       mentions: { employee_id: string; full_name: string }[];
       is_internal: boolean;
+      comment_kind: CommentKind;
     }
   | {
       kind: "stage_change";
@@ -51,7 +53,7 @@ export async function getTaskActivityFeed(
   const [commentsRes, stageHistoryRes, auditRes] = await Promise.all([
     supabaseAdmin
       .from("task_comments")
-      .select("id, body, is_internal, created_at, author_user_id")
+      .select("id, body, is_internal, created_at, author_user_id, kind")
       .eq("organization_id", orgId)
       .eq("task_id", taskId),
     supabaseAdmin
@@ -157,6 +159,7 @@ export async function getTaskActivityFeed(
       body: c.body,
       mentions: mentionsByComment.get(c.id) ?? [],
       is_internal: c.is_internal,
+      comment_kind: c.kind,
     });
   }
 

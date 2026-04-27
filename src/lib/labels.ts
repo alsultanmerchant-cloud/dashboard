@@ -170,3 +170,35 @@ export const TASK_ROLE_TONES: Record<TaskRoleType, string> = {
   agent: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   account_manager: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
+
+// Sky Light org structure (PDF). Used to filter task role pickers and
+// to render the grouped department picker on the employee invite form.
+export const DEPARTMENT_KINDS = [
+  "group",
+  "account_management",
+  "main_section",
+  "supporting_section",
+  "quality_control",
+  "other",
+] as const;
+export type DepartmentKind = (typeof DEPARTMENT_KINDS)[number];
+
+export const DEPARTMENT_KIND_LABELS: Record<DepartmentKind, string> = {
+  group: "مجموعة",
+  account_management: "إدارة الحسابات",
+  main_section: "الأقسام الأساسية",
+  supporting_section: "الأقسام المساندة",
+  quality_control: "الجودة",
+  other: "أخرى",
+};
+
+// Which department kinds each task role draws from per the PDF.
+// AM talks to client; Specialist defines requirements (Social/SEO/Media);
+// Agent executes (Design/Content/Video/Programming); Manager distributes
+// work and is typically a head of a Main or Supporting section.
+export const TASK_ROLE_ELIGIBLE_KINDS: Record<TaskRoleType, DepartmentKind[]> = {
+  account_manager: ["account_management"],
+  specialist: ["main_section"],
+  manager: ["main_section", "supporting_section"],
+  agent: ["supporting_section"],
+};

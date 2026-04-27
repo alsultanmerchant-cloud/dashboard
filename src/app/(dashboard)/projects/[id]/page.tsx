@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import {
-  Briefcase, Calendar, User, ListTodo,
+  Briefcase, Calendar, User, ListTodo, PauseCircle,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { getProject, getProjectTaskSummary } from "@/lib/data/projects";
@@ -17,6 +17,7 @@ import { formatArabicShortDate } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
 import { TaskBoard, type BoardTask } from "./task-board";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
+import { HoldDialog } from "./hold-dialog";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
 import type { TaskStage, TaskRoleType } from "@/lib/labels";
 
@@ -66,11 +67,40 @@ export default async function ProjectDetailPage({
         breadcrumbs={[{ label: "المشاريع", href: "/projects" }, { label: project.name }]}
         actions={
           <div className="flex items-center gap-2">
+            <HoldDialog
+              projectId={project.id}
+              status={project.status}
+              heldAt={project.held_at}
+              holdReason={project.hold_reason}
+            />
             <PriorityBadge priority={project.priority} />
             <ProjectStatusBadge status={project.status} />
           </div>
         }
       />
+
+      {project.status === "on_hold" && (
+        <Card className="mb-6 border-amber/30 bg-amber-dim/30">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <PauseCircle className="size-5 text-amber shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-amber">المشروع موقوف مؤقتًا</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    منذ {formatArabicShortDate(project.held_at)}
+                  </p>
+                </div>
+                {project.hold_reason && (
+                  <p className="mt-1 text-xs text-foreground/80 leading-relaxed">
+                    {project.hold_reason}
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-6">
         <MetricCard

@@ -92,6 +92,9 @@ export const TaskCommentSchema = z.object({
   task_id: uuidLoose,
   body: z.string().trim().min(1, { message: "اكتب التعليق" }).max(4000),
   is_internal: z.boolean().default(true),
+  kind: z
+    .enum(["note", "requirements", "modification"])
+    .default("note"),
 });
 
 export const HandoverSubmitSchema = z.object({

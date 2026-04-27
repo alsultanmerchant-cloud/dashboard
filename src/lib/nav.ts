@@ -3,6 +3,7 @@
 
 import {
   LayoutDashboard,
+  CalendarClock,
   Bell,
   Sparkles,
   Bot,
@@ -44,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "لوحة التحكم",
     items: [
       { label: "نظرة عامة", href: "/dashboard", icon: LayoutDashboard },
+      { label: "اليوم — رفع المهام", href: "/uploads", icon: CalendarClock, perm: "tasks.view" },
       { label: "التنبيهات", href: "/notifications", icon: Bell },
       { label: "الرؤى الذكية", href: "/ai-insights", icon: Sparkles },
       { label: "المساعد الذكي", href: "/agent", icon: Bot },
@@ -94,6 +96,7 @@ export const NAV_GROUPS: NavGroup[] = [
 // Flat title map used by the topbar.
 export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> = {
   "/dashboard": { title: "نظرة عامة", subtitle: "لوحة تنفيذية مركزة على الإشارات الأهم الآن" },
+  "/uploads": { title: "اليوم — رفع المهام", subtitle: "مهامك التي يجب رفعها قبل الديدلاين، مرتبة بحسب موعد الرفع" },
   "/notifications": { title: "التنبيهات", subtitle: "كل الإشارات والتسليمات في مكان واحد" },
   "/ai-insights": { title: "الرؤى الذكية", subtitle: "ملخصات وأنماط مستخرجة من نشاط الفريق" },
   "/agent": { title: "المساعد الذكي", subtitle: "طبقة ذكاء فوق بيانات الوكالة" },

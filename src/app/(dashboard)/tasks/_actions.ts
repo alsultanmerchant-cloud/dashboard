@@ -198,6 +198,7 @@ export async function addTaskCommentAction(input: {
   taskId: string;
   body: string;
   isInternal?: boolean;
+  kind?: "note" | "requirements" | "modification";
 }): Promise<CommentResult> {
   let session;
   try {
@@ -210,6 +211,7 @@ export async function addTaskCommentAction(input: {
     task_id: input.taskId,
     body: input.body,
     is_internal: input.isInternal ?? true,
+    kind: input.kind ?? "note",
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -231,6 +233,7 @@ export async function addTaskCommentAction(input: {
       author_user_id: session.userId,
       body: parsed.data.body,
       is_internal: parsed.data.is_internal,
+      kind: parsed.data.kind,
     })
     .select("id")
     .single();
@@ -285,7 +288,11 @@ export async function addTaskCommentAction(input: {
     action: "task.comment_add",
     entityType: "task",
     entityId: parsed.data.task_id,
-    metadata: { comment_id: comment.id, mentions: resolved.length },
+    metadata: {
+      comment_id: comment.id,
+      mentions: resolved.length,
+      kind: parsed.data.kind,
+    },
   });
   await logAiEvent({
     organizationId: session.orgId,
@@ -293,7 +300,11 @@ export async function addTaskCommentAction(input: {
     eventType: "TASK_COMMENT_ADDED",
     entityType: "task",
     entityId: parsed.data.task_id,
-    payload: { comment_id: comment.id, mentions: resolved.length },
+    payload: {
+      comment_id: comment.id,
+      mentions: resolved.length,
+      kind: parsed.data.kind,
+    },
   });
 
   revalidatePath(`/tasks/${parsed.data.task_id}`);

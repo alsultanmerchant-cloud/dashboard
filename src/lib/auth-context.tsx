@@ -67,12 +67,60 @@ const LEGACY_ALLOWED_FOR_OWNER = [
   "users",
 ];
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export type AuthInitialUser = {
+  id: string;
+  email: string;
+  name: string;
+  employeeId: string;
+  orgId: string;
+  departmentId: string | null;
+  jobTitle: string | null;
+  avatarUrl: string | null;
+  roleKeys: string[];
+  roleNames: string[];
+  permissions: string[];
+  isOwner: boolean;
+  orgName: string;
+};
+
+function hydrate(initial: AuthInitialUser): AuthUser {
+  return {
+    id: initial.id,
+    email: initial.email,
+    name: initial.name,
+    employeeId: initial.employeeId,
+    orgId: initial.orgId,
+    departmentId: initial.departmentId,
+    jobTitle: initial.jobTitle,
+    avatarUrl: initial.avatarUrl,
+    roleKeys: initial.roleKeys,
+    roleNames: initial.roleNames,
+    permissions: new Set(initial.permissions),
+    isOwner: initial.isOwner,
+    roleName: initial.roleNames[0] ?? "",
+    allowedPages: LEGACY_ALLOWED_FOR_OWNER,
+    isSuperAdmin: initial.isOwner,
+  };
+}
+
+export function AuthProvider({
+  children,
+  initialUser,
+}: {
+  children: ReactNode;
+  initialUser?: AuthInitialUser;
+}) {
   const router = useRouter();
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [orgs, setOrgs] = useState<{ id: string; name: string; nameAr: string }[]>([]);
-  const [activeOrgId, setActiveOrgId] = useState("");
+  const [user, setUser] = useState<AuthUser | null>(
+    initialUser ? hydrate(initialUser) : null,
+  );
+  const [loading, setLoading] = useState(!initialUser);
+  const [orgs, setOrgs] = useState<{ id: string; name: string; nameAr: string }[]>(
+    initialUser
+      ? [{ id: initialUser.orgId, name: initialUser.orgName, nameAr: initialUser.orgName }]
+      : [],
+  );
+  const [activeOrgId, setActiveOrgId] = useState(initialUser?.orgId ?? "");
 
   const loadUser = useCallback(async () => {
     const supabase = createClient();
@@ -153,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    loadUser();
+    if (!initialUser) loadUser();
 
     const supabase = createClient();
     const {
@@ -162,13 +210,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === "SIGNED_OUT") {
         setUser(null);
         setLoading(false);
-      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+      } else if (event === "SIGNED_IN") {
         loadUser();
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [loadUser]);
+  }, [loadUser, initialUser]);
 
   const signOut = useCallback(async () => {
     const supabase = createClient();

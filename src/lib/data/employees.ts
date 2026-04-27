@@ -5,7 +5,7 @@ export async function listEmployees(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select(
-      "*, department:departments!employee_profiles_department_id_fkey ( id, name, slug )",
+      "*, department:departments!employee_profiles_department_id_fkey ( id, name, slug, kind )",
     )
     .eq("organization_id", orgId)
     .order("created_at", { ascending: true });
@@ -38,8 +38,9 @@ export async function listServices(orgId: string) {
 export async function listDepartments(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("departments")
-    .select("id, name, slug, description")
+    .select("id, name, slug, description, kind, parent_department_id")
     .eq("organization_id", orgId)
+    .order("kind")
     .order("name");
   if (error) throw error;
   return data ?? [];

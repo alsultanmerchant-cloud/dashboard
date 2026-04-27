@@ -12,15 +12,41 @@ import {
   DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { inviteEmployeeAction, type EmployeeInviteState } from "./_actions";
+import { DEPARTMENT_KIND_LABELS, type DepartmentKind } from "@/lib/labels";
 
 type Option = { id: string; label: string };
+type DepartmentOption = Option & {
+  kind: DepartmentKind;
+  parent_department_id: string | null;
+};
 
 export function InviteEmployeeDialog({
   departments, roles,
 }: {
-  departments: Option[];
+  departments: DepartmentOption[];
   roles: Option[];
 }) {
+  // Group leaf departments under their parent group; back-office "other"
+  // and standalone kinds (account_management, quality_control) are bucketed
+  // under their own DEPARTMENT_KIND_LABELS heading. Skips "group" rows
+  // themselves — those are headings, not assignable departments.
+  const departmentGroups = (() => {
+    const groupNameById = new Map<string, string>();
+    for (const d of departments) {
+      if (d.kind === "group") groupNameById.set(d.id, d.label);
+    }
+    const buckets = new Map<string, { label: string; items: DepartmentOption[] }>();
+    for (const d of departments) {
+      if (d.kind === "group") continue;
+      const heading = d.parent_department_id
+        ? groupNameById.get(d.parent_department_id) ?? DEPARTMENT_KIND_LABELS[d.kind]
+        : DEPARTMENT_KIND_LABELS[d.kind];
+      const bucket = buckets.get(heading) ?? { label: heading, items: [] };
+      bucket.items.push(d);
+      buckets.set(heading, bucket);
+    }
+    return Array.from(buckets.values());
+  })();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<EmployeeInviteState | undefined, FormData>(
@@ -87,8 +113,12 @@ export function InviteEmployeeDialog({
                   className="flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   <option value="">— غير محدد —</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.label}</option>
+                  {departmentGroups.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.items.map((d) => (
+                        <option key={d.id} value={d.id}>{d.label}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

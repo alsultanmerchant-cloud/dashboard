@@ -18,6 +18,7 @@ import { TaskStatusSelect } from "../task-status-select";
 import { CommentComposer } from "../comment-composer";
 import { TaskRolePanel } from "../task-role-panel";
 import { TaskActivityFeed } from "../task-activity-feed";
+import { CommentsFeed } from "./comments-feed";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,8 @@ export default async function TaskDetailPage({
               full_name: e.full_name,
               job_title: e.job_title ?? null,
               avatar_url: e.avatar_url,
+              department_kind: null,
+              department_name: null,
             },
           }
         : null;
@@ -56,12 +59,17 @@ export default async function TaskDetailPage({
 
   const employeeOptions = employees
     .filter((e) => e.employment_status === "active")
-    .map((e) => ({
-      id: e.id,
-      full_name: e.full_name,
-      job_title: e.job_title ?? null,
-      avatar_url: e.avatar_url ?? null,
-    }));
+    .map((e) => {
+      const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+      return {
+        id: e.id,
+        full_name: e.full_name,
+        job_title: e.job_title ?? null,
+        avatar_url: e.avatar_url ?? null,
+        department_kind: dept?.kind ?? null,
+        department_name: dept?.name ?? null,
+      };
+    });
 
   const project = Array.isArray(task.project) ? task.project[0] : task.project;
   const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
@@ -147,8 +155,14 @@ export default async function TaskDetailPage({
         </TabsList>
 
         <TabsContent value="activity" className="space-y-4">
-          <TaskActivityFeed items={activity} />
-          <CommentComposer taskId={task.id} />
+          <CommentsFeed items={activity} />
+          <CommentComposer
+            taskId={task.id}
+            currentStage={task.stage}
+            hasRequirements={activity.some(
+              (a) => a.kind === "note" && a.comment_kind === "requirements",
+            )}
+          />
         </TabsContent>
 
         <TabsContent value="description">

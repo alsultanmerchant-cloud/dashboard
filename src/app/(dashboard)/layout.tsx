@@ -1,169 +1,54 @@
-"use client";
+import { requireSession } from "@/lib/auth-server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { DashboardShell } from "./dashboard-shell";
+import type { AuthInitialUser } from "@/lib/auth-context";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Topbar } from "@/components/layout/topbar";
-import { TopbarProvider } from "@/components/layout/topbar-context";
-import { NotificationPanel } from "@/components/layout/notification-panel";
-import { AIChatFAB } from "@/components/ai/ai-chat-fab";
-import { CommandPaletteProvider } from "@/components/command-palette";
-import { AuthProvider, useAuth } from "@/lib/auth-context";
-import { OrgProvider } from "@/lib/org-context";
-import { Skeleton } from "@/components/ui/skeleton";
-import { createClient } from "@/lib/supabase/client";
-import type { AppNotification } from "@/types";
-
-type NotificationRow = {
-  id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  entity_type: string | null;
-  entity_id: string | null;
-  read_at: string | null;
-  created_at: string;
-};
-
-const TYPE_ICONS: Record<string, string> = {
-  HANDOVER_SUBMITTED: "📨",
-  PROJECT_CREATED: "🗂️",
-  TASK_CREATED: "📋",
-  TASK_STATUS_CHANGED: "🔄",
-  TASK_COMMENT_ADDED: "💬",
-  MENTION_CREATED: "💬",
-  TASK_OVERDUE_DETECTED: "⏰",
-  default: "🔔",
-};
-
-function rowToNotification(row: NotificationRow): AppNotification {
-  return {
-    id: row.id,
-    type: "crud_action",
-    icon: TYPE_ICONS[row.type] ?? TYPE_ICONS.default,
-    message: row.body ? `${row.title} — ${row.body}` : row.title,
-    section: row.entity_type ?? "notification",
-    timestamp: row.created_at,
-    isRead: !!row.read_at,
-  };
-}
-
-function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="space-y-4 w-full max-w-md px-6">
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-32 w-full rounded-2xl" />
-        </div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
-}
-
-function NotificationsLoader({
-  onLoad,
-}: {
-  onLoad: (n: AppNotification[]) => void;
-}) {
-  const { user } = useAuth();
-  useEffect(() => {
-    if (!user?.id || !user.orgId) return;
-    const supabase = createClient();
-    supabase
-      .from("notifications")
-      .select("id, type, title, body, entity_type, entity_id, read_at, created_at")
-      .eq("organization_id", user.orgId)
-      .eq("recipient_user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
-        if (!data) return;
-        onLoad((data as NotificationRow[]).map(rowToNotification));
-      });
-  }, [user?.id, user?.orgId, onLoad]);
-  return null;
-}
-
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const session = await requireSession();
 
-  const addNotifications = useCallback((next: AppNotification[]) => {
-    setNotifications((prev) => {
-      const seen = new Set(prev.map((n) => n.id));
-      const fresh = next.filter((n) => !seen.has(n.id));
-      return [...fresh, ...prev];
-    });
-  }, []);
+  const { data: profile } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("department_id, job_title, avatar_url, email")
+    .eq("id", session.employeeId)
+    .maybeSingle();
 
-  const unreadCount = useMemo(
-    () => notifications.filter((n) => !n.isRead).length,
-    [notifications],
-  );
+  const { data: org } = await supabaseAdmin
+    .from("organizations")
+    .select("id, name")
+    .eq("id", session.orgId)
+    .maybeSingle();
 
-  const isAgentPage = pathname === "/agent";
+  const { data: roleRows } = await supabaseAdmin
+    .from("user_roles")
+    .select("role:roles ( key, name )")
+    .eq("user_id", session.userId)
+    .eq("organization_id", session.orgId);
 
-  return (
-    <OrgProvider>
-      <AuthProvider>
-        <TopbarProvider>
-          <CommandPaletteProvider />
-          <NotificationsLoader onLoad={addNotifications} />
-          <div className="min-h-screen bg-background panel-grid">
-            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+  const roleNames: string[] = [];
+  for (const row of roleRows ?? []) {
+    const role = Array.isArray(row.role) ? row.role[0] : row.role;
+    if (role?.name) roleNames.push(role.name);
+  }
 
-            <div className="lg:mr-[268px] min-h-screen">
-              <Topbar
-                unreadCount={unreadCount}
-                onBellClick={() => setNotifOpen((p) => !p)}
-                onMenuClick={() => setSidebarOpen(true)}
-              />
-              <main className="px-4 sm:px-6 pb-12 pt-5">
-                <AuthGate>{children}</AuthGate>
-              </main>
-            </div>
+  const initialUser: AuthInitialUser = {
+    id: session.userId,
+    email: profile?.email ?? session.email,
+    name: session.fullName,
+    employeeId: session.employeeId,
+    orgId: session.orgId,
+    departmentId: profile?.department_id ?? null,
+    jobTitle: profile?.job_title ?? null,
+    avatarUrl: profile?.avatar_url ?? null,
+    roleKeys: session.roleKeys,
+    roleNames,
+    permissions: Array.from(session.permissions),
+    isOwner: session.isOwner,
+    orgName: org?.name ?? "",
+  };
 
-            {notifOpen && (
-              <NotificationPanel
-                notifications={notifications}
-                onClose={() => setNotifOpen(false)}
-                onMarkAllRead={() =>
-                  setNotifications((prev) =>
-                    prev.map((n) => ({ ...n, isRead: true })),
-                  )
-                }
-                onClearAll={() => {
-                  setNotifications([]);
-                  setNotifOpen(false);
-                }}
-              />
-            )}
-
-            {!isAgentPage && (
-              <AIChatFAB onClick={() => router.push("/agent")} />
-            )}
-          </div>
-        </TopbarProvider>
-      </AuthProvider>
-    </OrgProvider>
-  );
+  return <DashboardShell initialUser={initialUser}>{children}</DashboardShell>;
 }

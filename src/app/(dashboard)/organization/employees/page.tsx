@@ -27,7 +27,12 @@ export default async function EmployeesPage() {
 
   const inviteButton = (
     <InviteEmployeeDialog
-      departments={departments.map((d) => ({ id: d.id, label: d.name }))}
+      departments={departments.map((d) => ({
+        id: d.id,
+        label: d.name,
+        kind: d.kind,
+        parent_department_id: d.parent_department_id,
+      }))}
       roles={roleOptions.map((r) => ({ id: r.id, label: ROLE_LABELS[r.key] ?? r.name }))}
     />
   );

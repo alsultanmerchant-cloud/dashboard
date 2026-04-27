@@ -13,7 +13,9 @@ import {
   TASK_ROLE_TYPES,
   TASK_ROLE_LABELS,
   TASK_ROLE_TONES,
+  TASK_ROLE_ELIGIBLE_KINDS,
   type TaskRoleType,
+  type DepartmentKind,
 } from "@/lib/labels";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -27,6 +29,8 @@ type Employee = {
   full_name: string;
   job_title: string | null;
   avatar_url: string | null;
+  department_kind: DepartmentKind | null;
+  department_name: string | null;
 };
 
 type SlotAssignment = {
@@ -75,6 +79,16 @@ function SlotRow({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+
+  // Sky Light routing: each slot only sees employees from the relevant
+  // department kinds. If filter yields nothing (e.g. no employee yet
+  // assigned to the right dept) we fall back to the full list so the
+  // user isn't blocked during initial setup.
+  const allowedKinds = TASK_ROLE_ELIGIBLE_KINDS[role];
+  const filtered = employees.filter(
+    (e) => e.department_kind != null && allowedKinds.includes(e.department_kind),
+  );
+  const options = filtered.length > 0 ? filtered : employees;
 
   function commit(employeeId: string | null) {
     start(async () => {
@@ -128,10 +142,10 @@ function SlotRow({
             <SelectValue placeholder="غير معيّن" />
           </SelectTrigger>
           <SelectContent>
-            {employees.map((e) => (
+            {options.map((e) => (
               <SelectItem key={e.id} value={e.id}>
                 {e.full_name}
-                {e.job_title ? ` — ${e.job_title}` : ""}
+                {e.job_title ? ` — ${e.job_title}` : e.department_name ? ` — ${e.department_name}` : ""}
               </SelectItem>
             ))}
           </SelectContent>

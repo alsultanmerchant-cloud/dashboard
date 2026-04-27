@@ -170,6 +170,7 @@ export type Database = {
           description: string | null
           head_employee_id: string | null
           id: string
+          kind: Database["public"]["Enums"]["department_kind"]
           name: string
           organization_id: string
           parent_department_id: string | null
@@ -181,6 +182,7 @@ export type Database = {
           description?: string | null
           head_employee_id?: string | null
           id?: string
+          kind?: Database["public"]["Enums"]["department_kind"]
           name: string
           organization_id: string
           parent_department_id?: string | null
@@ -192,6 +194,7 @@ export type Database = {
           description?: string | null
           head_employee_id?: string | null
           id?: string
+          kind?: Database["public"]["Enums"]["department_kind"]
           name?: string
           organization_id?: string
           parent_department_id?: string | null
@@ -528,6 +531,8 @@ export type Database = {
           end_date: string | null
           external_id: number | null
           external_source: string | null
+          held_at: string | null
+          hold_reason: string | null
           id: string
           name: string
           organization_id: string
@@ -545,6 +550,8 @@ export type Database = {
           end_date?: string | null
           external_id?: number | null
           external_source?: string | null
+          held_at?: string | null
+          hold_reason?: string | null
           id?: string
           name: string
           organization_id: string
@@ -562,6 +569,8 @@ export type Database = {
           end_date?: string | null
           external_id?: number | null
           external_source?: string | null
+          held_at?: string | null
+          hold_reason?: string | null
           id?: string
           name?: string
           organization_id?: string
@@ -884,6 +893,7 @@ export type Database = {
           created_at: string
           id: string
           is_internal: boolean
+          kind: Database["public"]["Enums"]["task_comment_kind"]
           organization_id: string
           task_id: string
           updated_at: string
@@ -894,6 +904,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_internal?: boolean
+          kind?: Database["public"]["Enums"]["task_comment_kind"]
           organization_id: string
           task_id: string
           updated_at?: string
@@ -904,6 +915,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_internal?: boolean
+          kind?: Database["public"]["Enums"]["task_comment_kind"]
           organization_id?: string
           task_id?: string
           updated_at?: string
@@ -1315,6 +1327,159 @@ export type Database = {
           },
         ]
       }
+      wa_message_templates: {
+        Row: {
+          body_template: string
+          created_at: string
+          id: string
+          is_active: boolean
+          language: string
+          meta_template_name: string | null
+          name: string
+          organization_id: string
+          service_id: string | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          target: string
+          updated_at: string
+        }
+        Insert: {
+          body_template: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          language?: string
+          meta_template_name?: string | null
+          name: string
+          organization_id: string
+          service_id?: string | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          target?: string
+          updated_at?: string
+        }
+        Update: {
+          body_template?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          language?: string
+          meta_template_name?: string | null
+          name?: string
+          organization_id?: string
+          service_id?: string | null
+          stage?: Database["public"]["Enums"]["task_stage"]
+          target?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_message_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_message_templates_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_outbox: {
+        Row: {
+          attempts: number
+          body: string
+          created_at: string
+          id: string
+          last_error: string | null
+          meta_template_name: string | null
+          organization_id: string
+          recipient_chat_id: string | null
+          recipient_employee_id: string | null
+          recipient_phone: string | null
+          recipient_type: string
+          scheduled_at: string
+          sent_at: string | null
+          status: string
+          task_id: string | null
+          template_id: string | null
+        }
+        Insert: {
+          attempts?: number
+          body: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          meta_template_name?: string | null
+          organization_id: string
+          recipient_chat_id?: string | null
+          recipient_employee_id?: string | null
+          recipient_phone?: string | null
+          recipient_type: string
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          task_id?: string | null
+          template_id?: string | null
+        }
+        Update: {
+          attempts?: number
+          body?: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          meta_template_name?: string | null
+          organization_id?: string
+          recipient_chat_id?: string | null
+          recipient_employee_id?: string | null
+          recipient_phone?: string | null
+          recipient_type?: string
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          task_id?: string | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_outbox_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_recipient_employee_id_fkey"
+            columns: ["recipient_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "wa_message_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_groups: {
         Row: {
           created_at: string
@@ -1484,11 +1649,19 @@ export type Database = {
     }
     Functions: {
       current_user_organization_ids: { Args: never; Returns: string[] }
+      enqueue_upload_deadline_reminders: {
+        Args: never
+        Returns: {
+          out_count: number
+          out_event_type: string
+        }[]
+      }
       has_org_access: { Args: { target_org: string }; Returns: boolean }
       has_permission: {
         Args: { perm_key: string; target_org: string }
         Returns: boolean
       }
+      refresh_task_progress: { Args: never; Returns: number }
       task_current_stage_seconds: {
         Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
         Returns: number
@@ -1499,6 +1672,14 @@ export type Database = {
       }
     }
     Enums: {
+      department_kind:
+        | "group"
+        | "account_management"
+        | "main_section"
+        | "supporting_section"
+        | "quality_control"
+        | "other"
+      task_comment_kind: "note" | "requirements" | "modification"
       task_role_type: "specialist" | "manager" | "agent" | "account_manager"
       task_stage:
         | "new"
@@ -1637,6 +1818,15 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      department_kind: [
+        "group",
+        "account_management",
+        "main_section",
+        "supporting_section",
+        "quality_control",
+        "other",
+      ],
+      task_comment_kind: ["note", "requirements", "modification"],
       task_role_type: ["specialist", "manager", "agent", "account_manager"],
       task_stage: [
         "new",
