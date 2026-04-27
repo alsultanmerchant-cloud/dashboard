@@ -53,16 +53,16 @@ export function CommentsFeed({ items }: { items: TaskActivity[] }) {
       )}
 
       {modifications.length > 0 && (
-        <Card className="border-warning/30 bg-warning/5">
+        <Card className="border-amber/30 bg-amber/5">
           <CardContent className="p-4 space-y-3">
-            <div className="flex items-center gap-2 text-warning">
+            <div className="flex items-center gap-2 text-amber">
               <RefreshCw className="size-4" />
               <h3 className="text-sm font-semibold">تعديلات العميل</h3>
             </div>
             <ol className="space-y-3">
               {modifications.map((c, i) => (
                 <li key={c.id} className="space-y-1.5">
-                  <p className="text-[11px] font-medium text-warning">
+                  <p className="text-[11px] font-medium text-amber">
                     تعديل #{i + 1}
                   </p>
                   <CommentRow item={c} />
