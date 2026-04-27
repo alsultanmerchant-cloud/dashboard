@@ -144,8 +144,10 @@ export function AuthProvider({
       .eq("user_id", authUser.id)
       .maybeSingle();
 
+    // Defensive: if the RLS-scoped client read fails for any reason, do NOT wipe
+    // the SSR-hydrated user — the server-side session in `requireSession()` is
+    // still authoritative. Just stop loading.
     if (profileErr || !profileRow) {
-      setUser(null);
       setLoading(false);
       return;
     }

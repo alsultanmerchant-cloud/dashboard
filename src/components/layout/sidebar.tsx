@@ -17,7 +17,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const { user, signOut, orgs, hasPermission } = useAuth();
 
   const isItemVisible = (item: NavItem) => {
-    if (!user) return false;
+    // Resilience: if the client AuthProvider hasn't hydrated yet (or failed silently),
+    // still surface items that don't require a specific permission so the sidebar
+    // never appears blank. Per-route permission enforcement still happens server-side
+    // via requirePagePermission().
+    if (!user) return !item.perm;
     if (user.isOwner) return true;
     if (!item.perm) return true; // public-to-org item
     return hasPermission(item.perm);
