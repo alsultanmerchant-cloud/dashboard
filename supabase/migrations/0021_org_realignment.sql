@@ -10,31 +10,23 @@
 --   * leaf rows for the 7 technical departments + admin/finance/sales
 --
 -- This migration is purely additive on top of that:
---   1. departments.head_user_id  (FK auth.users) — owner-spec literal column
---   2. employee_profiles.position (head | team_lead | specialist | agent | admin)
---   3. department_team_leads     (multi-lead, per-department)
---   4. permission 'org.manage_structure' bound to owner + admin
+--   1. employee_profiles.position (head | team_lead | specialist | agent | admin)
+--   2. department_team_leads     (multi-lead, per-department)
+--   3. permission 'org.manage_structure' bound to owner + admin
 --
--- We DO NOT recreate the kind enum, do NOT reseed departments, and do NOT
--- touch the existing `departments.head_employee_id` column. UI code can
--- continue to use `head_employee_id` for joins; `head_user_id` exists to
--- satisfy the owner spec verbatim and is intended for any callers that
--- already hold an auth user id.
--- All operations are idempotent; safe to re-run.
+-- The original dispatch spec asked for a new departments.head_user_id (FK
+-- auth.users) but the schema already has departments.head_employee_id (FK
+-- employee_profiles.id), which matches the existing manager_employee_id
+-- pattern. We use head_employee_id as the canonical column and DO NOT add
+-- head_user_id. setDepartmentHead resolves the caller-supplied user id to
+-- the corresponding employee_profile row.
+--
+-- We DO NOT recreate the kind enum and do NOT reseed departments — both
+-- are already in place from migration 0018. All operations are idempotent;
+-- safe to re-run.
 -- =========================================================================
 
--- 1. departments.head_user_id ----------------------------------------------
-alter table public.departments
-  add column if not exists head_user_id uuid references auth.users(id) on delete set null;
-
-create index if not exists idx_departments_head_user
-  on public.departments(head_user_id)
-  where head_user_id is not null;
-
-comment on column public.departments.head_user_id is
-  'Optional auth.users link for the department head. Co-exists with head_employee_id which is the canonical UI join.';
-
--- 2. employee_profiles.position --------------------------------------------
+-- 1. employee_profiles.position --------------------------------------------
 alter table public.employee_profiles
   add column if not exists position text;
 
@@ -60,7 +52,7 @@ create index if not exists idx_employee_profiles_position
 comment on column public.employee_profiles.position is
   '4-tier org position per owner spec §16: head | team_lead | specialist | agent | admin. NULL = unset (legacy/imported users awaiting review).';
 
--- 3. department_team_leads -------------------------------------------------
+-- 2. department_team_leads -------------------------------------------------
 create table if not exists public.department_team_leads (
   department_id uuid not null references public.departments(id) on delete cascade,
   user_id       uuid not null references auth.users(id)         on delete cascade,
@@ -90,44 +82,24 @@ create policy department_team_leads_insert
   on public.department_team_leads
   for insert
   to authenticated
-  with check (
-    public.has_permission(
-      '11111111-1111-1111-1111-111111111111'::uuid,
-      'org.manage_structure'
-    )
-  );
+  with check ( public.has_permission('org.manage_structure') );
 
 drop policy if exists department_team_leads_update on public.department_team_leads;
 create policy department_team_leads_update
   on public.department_team_leads
   for update
   to authenticated
-  using (
-    public.has_permission(
-      '11111111-1111-1111-1111-111111111111'::uuid,
-      'org.manage_structure'
-    )
-  )
-  with check (
-    public.has_permission(
-      '11111111-1111-1111-1111-111111111111'::uuid,
-      'org.manage_structure'
-    )
-  );
+  using      ( public.has_permission('org.manage_structure') )
+  with check ( public.has_permission('org.manage_structure') );
 
 drop policy if exists department_team_leads_delete on public.department_team_leads;
 create policy department_team_leads_delete
   on public.department_team_leads
   for delete
   to authenticated
-  using (
-    public.has_permission(
-      '11111111-1111-1111-1111-111111111111'::uuid,
-      'org.manage_structure'
-    )
-  );
+  using ( public.has_permission('org.manage_structure') );
 
--- 4. Permission seed -------------------------------------------------------
+-- 3. Permission seed -------------------------------------------------------
 insert into public.permissions (key, description) values
   ('org.manage_structure',
    'تعديل هيكل الوكالة: رؤساء الأقسام، قادة الفرق، مناصب الموظفين')

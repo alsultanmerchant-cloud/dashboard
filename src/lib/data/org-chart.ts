@@ -19,7 +19,6 @@ export type OrgDepartment = {
   description: string | null;
   kind: string;
   parent_department_id: string | null;
-  head_user_id: string | null;
   head_employee_id: string | null;
   head?: OrgEmployee | null;
   teamLeads: OrgEmployee[];
@@ -56,7 +55,7 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       supabaseAdmin
         .from("departments")
         .select(
-          "id, name, slug, description, kind, parent_department_id, head_user_id, head_employee_id",
+          "id, name, slug, description, kind, parent_department_id, head_employee_id",
         )
         .eq("organization_id", orgId),
       supabaseAdmin
@@ -104,7 +103,6 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       description: d.description ?? null,
       kind: (d as { kind: string }).kind,
       parent_department_id: d.parent_department_id ?? null,
-      head_user_id: (d as { head_user_id: string | null }).head_user_id ?? null,
       head_employee_id: d.head_employee_id ?? null,
       head: null,
       teamLeads: [],
@@ -113,12 +111,10 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
     });
   }
 
-  // Resolve heads: prefer head_user_id (T1 column); fall back to legacy
-  // head_employee_id (existed pre-T1 on this org's schema).
+  // Resolve heads via head_employee_id (the canonical FK to
+  // employee_profiles.id, mirroring the existing manager_employee_id pattern).
   for (const dept of byId.values()) {
-    if (dept.head_user_id) {
-      dept.head = empByUserId.get(dept.head_user_id) ?? null;
-    } else if (dept.head_employee_id) {
+    if (dept.head_employee_id) {
       dept.head = empById.get(dept.head_employee_id) ?? null;
     }
   }

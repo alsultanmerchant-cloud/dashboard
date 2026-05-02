@@ -47,9 +47,10 @@ function flattenZodIssues(error: z.ZodError): Record<string, string> {
 }
 
 /**
- * Set (or clear, when userId=null) the Head of a department. Stores the
- * auth.user id on `head_user_id` AND mirrors the equivalent
- * employee_profiles.id on `head_employee_id` so legacy reads keep working.
+ * Set (or clear, when userId=null) the Head of a department. Resolves the
+ * caller-supplied auth.user id to its employee_profile row and stores the
+ * profile id on `head_employee_id` (the canonical column, FK to
+ * employee_profiles, mirrors the existing manager_employee_id pattern).
  */
 export async function setDepartmentHead(input: {
   departmentId: string;
@@ -94,10 +95,7 @@ export async function setDepartmentHead(input: {
 
   const { error: updErr } = await supabaseAdmin
     .from("departments")
-    .update({
-      head_user_id: parsed.data.userId,
-      head_employee_id: employeeId,
-    })
+    .update({ head_employee_id: employeeId })
     .eq("id", parsed.data.departmentId);
   if (updErr) return { error: updErr.message };
 
@@ -109,8 +107,8 @@ export async function setDepartmentHead(input: {
     entityId: parsed.data.departmentId,
     metadata: {
       department_name: dept.name,
-      head_user_id: parsed.data.userId,
       head_employee_id: employeeId,
+      source_user_id: parsed.data.userId,
     },
   });
   await logAiEvent({
@@ -121,7 +119,7 @@ export async function setDepartmentHead(input: {
     entityId: parsed.data.departmentId,
     payload: {
       department_name: dept.name,
-      head_user_id: parsed.data.userId,
+      head_employee_id: employeeId,
       cleared: parsed.data.userId === null,
     },
     importance: "normal",
