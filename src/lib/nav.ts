@@ -17,6 +17,7 @@ import {
   Building,
   Users,
   Shield,
+  Network,
   BarChart3,
   Settings,
   Heart,
@@ -72,6 +73,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "المنظمة",
     items: [
+      { label: "هيكل الوكالة", href: "/organization/chart", icon: Network, perm: "employees.view" },
       { label: "الأقسام", href: "/organization/departments", icon: Building, perm: "employees.view" },
       { label: "الموظفون", href: "/organization/employees", icon: Users, perm: "employees.view" },
       { label: "الأدوار والصلاحيات", href: "/organization/roles", icon: Shield, perm: "settings.manage" },
@@ -110,6 +112,7 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/projects": { title: "المشاريع", subtitle: "متابعة المشاريع والخدمات وفريق التنفيذ" },
   "/tasks": { title: "المهام", subtitle: "كل مهام الفرق مع حالات الإنجاز والأولوية" },
   "/task-templates": { title: "قوالب المهام", subtitle: "تعريف سير العمل الافتراضي لكل خدمة" },
+  "/organization/chart": { title: "هيكل الوكالة", subtitle: "الشجرة الكاملة: أقسام، رؤساء، قادة فرق، أعضاء" },
   "/organization/departments": { title: "الأقسام", subtitle: "هيكل الوكالة وتقسيمات الفرق" },
   "/organization/employees": { title: "الموظفون", subtitle: "بيانات أعضاء الفريق" },
   "/organization/roles": { title: "الأدوار والصلاحيات", subtitle: "مصفوفة الصلاحيات لكل دور وظيفي" },

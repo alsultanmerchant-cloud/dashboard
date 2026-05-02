@@ -91,6 +91,61 @@ export const copy = {
     title: "الصفحة غير موجودة",
     description: "الرابط الذي اتبعته لا يقابل أي صفحة في النظام.",
   },
+  organization: {
+    chartTitle: "هيكل الوكالة",
+    chartDescription:
+      "العرض الشجري لهيكل سكاي لايت — الأقسام، رؤساء الأقسام، قادة الفرق وأعضاء الفريق.",
+    sectionTechnical: "الأقسام التقنية",
+    sectionAccountManagement: "إدارة الحسابات",
+    sectionMain: "الأقسام الأساسية",
+    sectionSupporting: "الأقسام المساندة",
+    sectionAdmin: "الإدارة والمساندة",
+    sectionSales: "المبيعات والتيلي سيلز",
+    head: "رئيس القسم",
+    teamLeads: "قادة الفرق",
+    members: "أعضاء الفريق",
+    noHead: "لم يُعيَّن رئيس قسم بعد",
+    noTeamLeads: "لا يوجد قادة فرق",
+    noMembers: "لا يوجد أعضاء بعد",
+    setHead: "تعيين رئيس القسم",
+    addTeamLead: "إضافة قائد فريق",
+    removeTeamLead: "إزالة",
+    setPosition: "تعيين المنصب",
+    positions: {
+      head: "رئيس قسم",
+      team_lead: "قائد فريق",
+      specialist: "متخصص",
+      agent: "منفّذ",
+      admin: "إداري",
+      none: "غير محدد",
+    },
+    chartEmpty: {
+      title: "لم تُهيكل الوكالة بعد",
+      description:
+        "ابدأ بتعيين رؤساء الأقسام وقادة الفرق لتظهر الشجرة الكاملة.",
+    },
+    chartError: {
+      title: "تعذّر تحميل هيكل الوكالة",
+      description:
+        "حدث خطأ أثناء قراءة الأقسام والموظفين. حدّث الصفحة، وإذا تكرر الخطأ تواصل مع مسؤول النظام.",
+    },
+    departmentDetail: {
+      backToChart: "العودة إلى الهيكل",
+      headSection: "رئيس القسم",
+      teamLeadsSection: "قادة الفرق",
+      membersSection: "أعضاء القسم",
+      adminTools: "أدوات الإدارة",
+      pickHead: "اختر رئيسًا للقسم…",
+      pickTeamLead: "اختر قائد فريق لإضافته…",
+      mustHavePerm:
+        "تعديل الهيكل متاح لحاملي صلاحية «تعديل هيكل الوكالة» فقط.",
+    },
+    salesGated: {
+      title: "أقسام المبيعات مخفية حاليًا",
+      description:
+        "فعّل المفتاح المميّز sales_track_enabled لإظهار قسم المبيعات والتيلي سيلز في الهيكل.",
+    },
+  },
   featureFlags: {
     pageTitle: "المفاتيح المميّزة",
     pageDescription:
