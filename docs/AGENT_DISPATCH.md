@@ -44,6 +44,15 @@ Re-coordinated migration filenames:
 | T9    | `0028_reporting_views.sql`        | 0023                      |
 | T10   | `0029_cutover_import.sql` (script wrapper, no schema change) |  |
 
+**Tasks-schema reality (surfaced by T2's partial run, important for T2/T3/T5):**
+
+The original prompts spoke of `tasks.assignee_ids uuid[]`, `tasks.owner_user_id`, and `tasks.follower_ids` — none of these columns exist. The live schema uses:
+- `public.task_assignees (task_id, employee_id, role_type)` — join table for assignments. To gate by "is the calling user assigned to this task", join through `employee_profiles.user_id = auth.uid()`.
+- `tasks.created_by` (uuid, references `auth.users.id`) — the owner-ish column. Treat this as `owner_user_id`.
+- `task_followers` does not yet exist; T3's migration creates it.
+
+Update RLS prompts and server-action prompts accordingly: the assignment check is a `NOT EXISTS` / `EXISTS` against `task_assignees` joined to `employee_profiles`, NOT `auth.uid() = ANY(assignee_ids)`.
+
 **Existing-state delta agents must handle (inspect before writing CREATE TABLE / ALTER):**
 
 - `departments.kind` enum **already exists** with values `group | account_management | main_section | supporting_section | quality_control | other` (migration 0018). T1's prompt originally proposed a 3-value `('technical','sales','admin')` check — **do NOT recreate the column**. Instead, T1 should treat the existing enum as canonical and add only what is missing (`parent_department_id` if absent, `head_user_id`, position column, `department_team_leads` table). Sales-track departments are already seeded (`sales`, `tele-sales`, `management`, `hr`, `finance` with `kind='other'`) — flag-gate them via T0 rather than reseeding.
