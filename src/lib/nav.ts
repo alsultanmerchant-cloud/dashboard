@@ -22,6 +22,7 @@ import {
   Heart,
   Banknote,
   Target,
+  Flag,
   type LucideIcon,
 } from "lucide-react";
 
@@ -81,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "التقارير", href: "/reports", icon: BarChart3, perm: "reports.view" },
       { label: "الإعدادات", href: "/settings", icon: Settings, perm: "settings.manage" },
+      { label: "المفاتيح المميّزة", href: "/settings/feature-flags", icon: Flag, perm: "feature_flag.manage" },
     ],
   },
   {
@@ -113,6 +115,7 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/organization/roles": { title: "الأدوار والصلاحيات", subtitle: "مصفوفة الصلاحيات لكل دور وظيفي" },
   "/reports": { title: "التقارير", subtitle: "ملخصات تنفيذية متعددة المستويات" },
   "/settings": { title: "الإعدادات", subtitle: "إعدادات النظام والوكالة" },
+  "/settings/feature-flags": { title: "المفاتيح المميّزة", subtitle: "إدارة الوحدات والمسارات الجديدة قبل إطلاقها" },
   "/hr": { title: "الموارد البشرية", subtitle: "ينطلق في مرحلة لاحقة" },
   "/finance": { title: "المالية", subtitle: "ينطلق في مرحلة لاحقة" },
 };
