@@ -79,7 +79,15 @@ export default async function ProjectDetailPage({
         }
       />
 
-      {project.status === "on_hold" && (
+      {/*
+        HOLD ribbon. Per dispatch T3: key off held_at IS NOT NULL (the
+        canonical signal, since project_status is text on this DB and
+        adding a 'hold' enum is not required). holdProjectAction also
+        flips status to 'on_hold' for legacy reads, but the visual cue
+        here is grounded on the timestamp so a partially-applied state
+        (status without held_at, or vice versa) still surfaces a ribbon.
+      */}
+      {project.held_at && (
         <Card className="mb-6 border-amber/30 bg-amber-dim/30">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">

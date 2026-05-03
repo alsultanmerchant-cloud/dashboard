@@ -6,6 +6,7 @@ export async function listProjects(orgId: string) {
     .from("projects")
     .select(`
       id, name, status, priority, start_date, end_date, created_at,
+      hold_reason, held_at,
       client:clients ( id, name ),
       account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name ),
       project_services ( service:services ( id, name, slug ) ),

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Briefcase, ChevronLeft } from "lucide-react";
+import { Briefcase, ChevronLeft, PauseCircle } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listProjects } from "@/lib/data/projects";
 import { listClients } from "@/lib/data/clients";
@@ -88,9 +88,23 @@ export default async function ProjectsPage() {
                 return (
                   <DataTableRow key={p.id}>
                     <DataTableCell className="font-medium">
-                      <Link href={`/projects/${p.id}`} className="hover:text-cyan transition-colors">
-                        {p.name}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link href={`/projects/${p.id}`} className="hover:text-cyan transition-colors">
+                          {p.name}
+                        </Link>
+                        {p.held_at && (
+                          // HOLD ribbon — keys off held_at (per dispatch T3).
+                          // Reason surfaces on hover via the title attribute,
+                          // matching the PDF's "HOLD overlay" behavior.
+                          <span
+                            title={p.hold_reason ?? "المشروع موقوف"}
+                            className="inline-flex items-center gap-1 rounded-full border border-cc-red/40 bg-cc-red/15 px-2 py-0.5 text-[10px] font-semibold text-cc-red"
+                          >
+                            <PauseCircle className="size-3" />
+                            موقوف
+                          </span>
+                        )}
+                      </div>
                     </DataTableCell>
                     <DataTableCell className="text-muted-foreground">{client?.name ?? "—"}</DataTableCell>
                     <DataTableCell>

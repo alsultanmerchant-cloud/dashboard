@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Calendar, Briefcase } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
+import { Calendar, Briefcase, AlertTriangle } from "lucide-react";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask } from "@/lib/data/tasks";
 import { listEmployees } from "@/lib/data/employees";
 import { getTaskActivityFeed } from "@/lib/data/task-activity";
+import {
+  listTaskFollowers,
+  listFollowerCandidates,
+  listTaskStageHistory,
+} from "@/lib/data/task-detail";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,8 +22,9 @@ import {
 import { TaskStatusSelect } from "../task-status-select";
 import { CommentComposer } from "../comment-composer";
 import { TaskRolePanel } from "../task-role-panel";
-import { TaskActivityFeed } from "../task-activity-feed";
 import { CommentsFeed } from "./comments-feed";
+import { FollowersPanel } from "./followers-panel";
+import { StageHistoryTimeline } from "./stage-history-timeline";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
@@ -31,12 +37,28 @@ export default async function TaskDetailPage({
   const { id } = await params;
   const session = await requirePagePermission("tasks.view");
 
-  const [task, employees, activity] = await Promise.all([
+  const [task, employees, activity, followers, stageHistory] = await Promise.all([
     getTask(session.orgId, id),
     listEmployees(session.orgId),
     getTaskActivityFeed(session.orgId, id),
+    listTaskFollowers(session.orgId, id),
+    listTaskStageHistory(session.orgId, id),
   ]);
   if (!task) notFound();
+
+  // Followers picker excludes anyone already following.
+  const followerCandidates = await listFollowerCandidates(
+    session.orgId,
+    followers.map((f) => f.user_id),
+  );
+
+  // Permission to add/remove followers: same shape as the server action
+  // (creator OR view_all OR manage_followers). The action is the
+  // canonical gate; this just hides the picker for unprivileged users.
+  const canManageFollowers =
+    task.created_by === session.userId ||
+    hasPermission(session, "task.view_all") ||
+    hasPermission(session, "task.manage_followers");
 
   const roleSlots = (task.task_assignees ?? [])
     .map((ta) => {
@@ -76,9 +98,19 @@ export default async function TaskDetailPage({
   const service = Array.isArray(task.service) ? task.service[0] : task.service;
   const deadline = task.planned_date ?? task.due_date;
   const overdue = isOverdue(deadline) && task.stage !== "done";
-  const delayDays = deadline && task.stage !== "done"
-    ? Math.floor((Date.now() - new Date(deadline).getTime()) / 86400000)
-    : null;
+  // For DONE tasks, prefer the stored generated column (migration 0023):
+  // it freezes at the actual completion delay and survives re-renders.
+  // For in-flight tasks, compute the running delay from "now".
+  // The migration guarantees stored.delay_days is non-null only when
+  // stage='done' AND deadline + completed_at exist.
+  type TaskWithDelay = typeof task & { delay_days?: number | null };
+  const storedDelay = (task as TaskWithDelay).delay_days ?? null;
+  const delayDays = task.stage === "done"
+    ? storedDelay
+    : deadline
+      ? Math.floor((Date.now() - new Date(deadline).getTime()) / 86400000)
+      : null;
+  const showDelayBanner = delayDays !== null && delayDays > 0;
 
   return (
     <div className="max-w-4xl">
@@ -91,6 +123,23 @@ export default async function TaskDetailPage({
         ]}
         actions={<TaskStatusSelect taskId={task.id} currentStatus={task.status} />}
       />
+
+      {showDelayBanner && (
+        <Card className="mb-4 border-cc-red/40 bg-cc-red/10">
+          <CardContent className="p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-cc-red">
+              <AlertTriangle className="size-4" />
+              {task.stage === "done"
+                ? `تأخر التسليم بـ ${delayDays} يوم`
+                : `متأخر بـ ${delayDays} يوم`}
+            </div>
+            <p className="mt-0.5 text-[11px] text-cc-red/80">
+              تجاوز الموعد النهائي مشكلة مع العميل (PDF §8.2). راجع السبب
+              وسجّله في ملاحظات المهمة.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -147,6 +196,21 @@ export default async function TaskDetailPage({
         <TaskRolePanel taskId={task.id} slots={roleSlots} employees={employeeOptions} />
       </div>
 
+      <SectionTitle
+        title="متابعون"
+        description="المتابعون يَرَون المهمة دون أن يتسلموا دورًا تنفيذيًا في مراحلها."
+      />
+      <Card className="mb-6">
+        <CardContent className="p-4">
+          <FollowersPanel
+            taskId={task.id}
+            followers={followers}
+            candidates={followerCandidates}
+            canManage={canManageFollowers}
+          />
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="activity" className="mt-2">
         <TabsList variant="line">
           <TabsTrigger value="activity">سجل النشاط</TabsTrigger>
@@ -178,20 +242,13 @@ export default async function TaskDetailPage({
         <TabsContent value="history">
           <Card>
             <CardContent className="p-4">
-              {(() => {
-                const stageItems = activity.filter(
+              <StageHistoryTimeline
+                rows={stageHistory}
+                fallbackActivity={activity.filter(
                   (a): a is Extract<typeof activity[number], { kind: "stage_change" }> =>
                     a.kind === "stage_change",
-                );
-                if (stageItems.length === 0) {
-                  return (
-                    <p className="text-sm text-muted-foreground">
-                      لم تنتقل المهمة بين المراحل بعد.
-                    </p>
-                  );
-                }
-                return <TaskActivityFeed items={stageItems} />;
-              })()}
+                )}
+              />
             </CardContent>
           </Card>
         </TabsContent>
