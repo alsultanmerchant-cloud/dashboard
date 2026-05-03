@@ -25,6 +25,8 @@ import {
   Banknote,
   Target,
   Flag,
+  FileSignature,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -73,6 +75,18 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: "تجاري",
+    items: [
+      { label: "العقود", href: "/contracts", icon: FileSignature, perm: "contract.view" },
+    ],
+  },
+  {
+    label: "العمليات",
+    items: [
+      { label: "التصعيدات", href: "/escalations", icon: ShieldAlert, perm: "escalation.view_own" },
+    ],
+  },
+  {
     label: "المنظمة",
     items: [
       { label: "هيكل الوكالة", href: "/organization/chart", icon: Network, perm: "employees.view" },
@@ -115,6 +129,7 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/tasks": { title: "المهام", subtitle: "كل مهام الفرق مع حالات الإنجاز والأولوية" },
   "/task-templates": { title: "قوالب المهام", subtitle: "تعريف سير العمل الافتراضي لكل خدمة" },
   "/service-categories": { title: "تصنيفات الخدمات", subtitle: "إدارة باقات الخدمات والقوالب المرتبطة بها" },
+  "/contracts": { title: "العقود", subtitle: "العقود التجارية والدفعات ودورات المتابعة الشهرية" },
   "/projects/new": { title: "مشروع جديد", subtitle: "اختر العميل والخدمات؛ ستظهر المهام في لوحة المعاينة" },
   "/organization/chart": { title: "هيكل الوكالة", subtitle: "الشجرة الكاملة: أقسام، رؤساء، قادة فرق، أعضاء" },
   "/organization/departments": { title: "الأقسام", subtitle: "هيكل الوكالة وتقسيمات الفرق" },
@@ -123,6 +138,7 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/reports": { title: "التقارير", subtitle: "ملخصات تنفيذية متعددة المستويات" },
   "/settings": { title: "الإعدادات", subtitle: "إعدادات النظام والوكالة" },
   "/settings/feature-flags": { title: "المفاتيح المميّزة", subtitle: "إدارة الوحدات والمسارات الجديدة قبل إطلاقها" },
+  "/escalations": { title: "التصعيدات والاستثناءات", subtitle: "صندوق وارد التصعيدات الموجَّهة إليك مع متابعة الاستثناءات المفتوحة" },
   "/hr": { title: "الموارد البشرية", subtitle: "ينطلق في مرحلة لاحقة" },
   "/finance": { title: "المالية", subtitle: "ينطلق في مرحلة لاحقة" },
 };
