@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Briefcase, ChevronLeft, PauseCircle } from "lucide-react";
+import { Briefcase, ChevronLeft, PauseCircle, RefreshCw } from "lucide-react";
+import { daysUntilRenewal } from "@/lib/data/renewals";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listProjects } from "@/lib/data/projects";
 import { listClients } from "@/lib/data/clients";
@@ -100,6 +101,21 @@ export default async function ProjectsPage() {
                         <Link href={`/projects/${p.id}`} className="hover:text-cyan transition-colors">
                           {p.name}
                         </Link>
+                        {(() => {
+                          const d = daysUntilRenewal(
+                            (p as { next_renewal_date?: string | null }).next_renewal_date ?? null,
+                          );
+                          if (d === null || d < 0 || d > 14) return null;
+                          return (
+                            <span
+                              title="موعد التجديد قريب"
+                              className="inline-flex items-center gap-1 rounded-full border border-amber/40 bg-amber-dim px-2 py-0.5 text-[10px] font-semibold text-amber"
+                            >
+                              <RefreshCw className="size-3" />
+                              تجديد خلال {d} يوم
+                            </span>
+                          );
+                        })()}
                         {p.held_at && (
                           // HOLD ribbon — keys off held_at (per dispatch T3).
                           // Reason surfaces on hover via the title attribute,

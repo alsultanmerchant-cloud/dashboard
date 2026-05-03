@@ -1,9 +1,12 @@
 import Link from "next/link";
 import {
   Briefcase, CheckCircle2, AlertTriangle, Bell, Users, Target, Sparkles,
-  Inbox, ArrowUpLeft, Clock,
+  Inbox, ArrowUpLeft, Clock, RefreshCw, ShieldAlert,
 } from "lucide-react";
+import { countRenewalsThisMonth } from "@/lib/data/renewals";
 import { requireSession } from "@/lib/auth-server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { Badge } from "@/components/ui/badge";
 import {
   getDashboardStats, getRecentHandovers, getOverdueTasks, getActivityFeed,
 } from "@/lib/data/dashboard";
@@ -21,12 +24,28 @@ import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const session = await requireSession();
-  const [stats, handovers, overdue, activity] = await Promise.all([
+  const [stats, handovers, overdue, activity, renewalsThisMonth, openExceptionsRaw] = await Promise.all([
     getDashboardStats(session.orgId, session.userId),
     getRecentHandovers(session.orgId, 5),
     getOverdueTasks(session.orgId, 6),
     getActivityFeed(session.orgId, 12),
+    countRenewalsThisMonth(session.orgId),
+    supabaseAdmin
+      .from("exceptions")
+      .select("kind")
+      .eq("organization_id", session.orgId)
+      .is("resolved_at", null),
   ]);
+
+  // T5: count open exceptions, broken down by kind.
+  const openExceptions = openExceptionsRaw.data ?? [];
+  const exceptionsByKind: Record<string, number> = {
+    client: 0, deadline: 0, quality: 0, resource: 0,
+  };
+  for (const r of openExceptions) {
+    exceptionsByKind[r.kind as string] = (exceptionsByKind[r.kind as string] ?? 0) + 1;
+  }
+  const totalOpenExceptions = openExceptions.length;
 
   return (
     <div>
@@ -84,6 +103,13 @@ export default async function DashboardPage() {
           icon={<Bell className="size-5" />}
           tone="purple"
           href="/notifications"
+        />
+        <MetricCard
+          label="تجديدات هذا الشهر"
+          value={renewalsThisMonth}
+          icon={<RefreshCw className="size-5" />}
+          tone={renewalsThisMonth > 0 ? "warning" : "default"}
+          href="/projects?filter=renewals_this_month"
         />
         <MetricCard
           label="أحداث ذكية اليوم"

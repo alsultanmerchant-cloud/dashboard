@@ -19,6 +19,8 @@ import { TaskBoard, type BoardTask } from "./task-board";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
+import { listProjectRenewalCycles, daysUntilRenewal } from "@/lib/data/renewals";
+import { RenewalsPanel } from "./renewals/renewals-panel";
 import type { TaskStage, TaskRoleType } from "@/lib/labels";
 
 export default async function ProjectDetailPage({
@@ -31,11 +33,15 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks, waGroups] = await Promise.all([
+  const [summary, tasks, waGroups, renewalCycles] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     listTasks(session.orgId, { projectId: project.id }),
     listProjectWhatsAppGroups(session.orgId, project.id),
+    listProjectRenewalCycles(session.orgId, project.id),
   ]);
+  const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
+  const canManageRenewal =
+    session.isOwner || session.permissions.has("renewal.manage");
 
   const client = Array.isArray(project.client) ? project.client[0] : project.client;
   const am = Array.isArray(project.account_manager) ? project.account_manager[0] : project.account_manager;
@@ -73,6 +79,14 @@ export default async function ProjectDetailPage({
               heldAt={project.held_at}
               holdReason={project.hold_reason}
             />
+            {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
+              <span
+                className="inline-flex items-center rounded-full border border-amber/40 bg-amber-dim px-2 py-0.5 text-[10px] font-semibold text-amber"
+                title="موعد التجديد قريب"
+              >
+                تجديد خلال {renewalDays} يوم
+              </span>
+            )}
             <PriorityBadge priority={project.priority} />
             <ProjectStatusBadge status={project.status} />
           </div>
@@ -241,6 +255,20 @@ export default async function ProjectDetailPage({
           )}
         </CardContent>
       </Card>
+
+      <SectionTitle
+        title="دورات التجديد"
+        description="جدول التجديد المعتمد للمشروع وسجل الدورات السابقة."
+      />
+      <div className="mb-8">
+        <RenewalsPanel
+          projectId={project.id}
+          cycleLengthMonths={(project as { cycle_length_months?: number | null }).cycle_length_months ?? null}
+          nextRenewalDate={(project as { next_renewal_date?: string | null }).next_renewal_date ?? null}
+          cycles={renewalCycles}
+          canManage={canManageRenewal}
+        />
+      </div>
 
       <SectionTitle
         title="لوحة المهام"
