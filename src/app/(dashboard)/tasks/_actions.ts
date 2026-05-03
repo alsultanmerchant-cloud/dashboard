@@ -32,6 +32,23 @@ const STAGE_EXIT_ROLE: Record<TaskStageEnum, TaskRoleEnum | null> = {
   client_changes: "account_manager", // AM bounces it back after fixes
   done: null,                    // terminal — owner/admin only
 };
+
+// =========================================================================
+// Per-edge transition permission keys (seeded by migration 0022).
+// The DB trigger `assert_stage_transition_allowed` (migration 0015) is the
+// canonical enforcement; this map exists so a caller holding the seeded
+// permission key gets a friendly pre-flight pass instead of bumping into a
+// raw Postgres errcode='42501'. Keys are absent → fall back to the
+// task-role-on-assignment check (which mirrors the trigger).
+// =========================================================================
+const STAGE_TRANSITION_PERM: Record<string, string> = {
+  "in_progress->manager_review": "task.transition.specialist_to_manager_review",
+  "manager_review->specialist_review": "task.transition.manager_to_specialist_review",
+  "specialist_review->ready_to_send": "task.transition.specialist_to_ready_to_send",
+  "ready_to_send->sent_to_client": "task.transition.ready_to_send_to_sent",
+  "sent_to_client->client_changes": "task.transition.sent_to_client_changes",
+  "client_changes->done": "task.transition.client_changes_to_done",
+};
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent, createNotification } from "@/lib/audit";
@@ -135,25 +152,53 @@ export async function moveTaskStageAction(input: {
     return { ok: true, from: existing.stage, to: parsed.data.stage };
   }
 
-  // Stage transition gating: who is allowed to move this task out of its
-  // current stage? Owners and admins bypass. Anyone with tasks.admin bypass.
+  // Stage transition pre-flight gating. The DB trigger
+  // `assert_stage_transition_allowed` (migration 0015) is the canonical
+  // enforcement; this block exists to surface a friendly Arabic error
+  // before the round-trip. The two MUST agree:
+  //   • Trigger bypass: global roles owner / admin / manager.
+  //   • Trigger allow:  caller is on task_assignees with the role_type
+  //                     matching the edge.
+  // We mirror that here, plus a permission-based fast-path: if the caller
+  // holds the per-edge `task.transition.<...>` permission seeded by
+  // migration 0022, they pass pre-flight (the trigger will still re-check).
   const requiredRole = STAGE_EXIT_ROLE[existing.stage as TaskStageEnum];
+  // Bypass: owner OR `task.view_all` holder. Migration 0022 binds
+  // `task.view_all` to owner / admin / manager / account_manager — the same
+  // bypass set the DB trigger `assert_stage_transition_allowed` honors. By
+  // gating on the permission key (not role-name strings) the friendly
+  // pre-flight stays in lockstep with the trigger; if the binding changes
+  // in a later migration both sides shift together.
   const bypass =
-    session.isOwner ||
-    session.roleKeys.includes("admin") ||
-    session.permissions.has("tasks.admin");
-  if (!bypass && requiredRole) {
-    const slot = (existing.task_assignees ?? []).find(
-      (a) => a.role_type === requiredRole,
-    );
-    if (!slot || slot.employee_id !== session.employeeId) {
-      return {
-        error: `هذه النقلة مخصصة لـ${ROLE_AR[requiredRole]} المُسنَد للمهمة`,
-      };
+    session.isOwner || session.permissions.has("task.view_all");
+
+  if (!bypass) {
+    // Per-edge permission key (e.g. specialist_to_ready_to_send). Holding
+    // this key is a hard pass for the friendly check.
+    const edgeKey = `${existing.stage}->${parsed.data.stage}`;
+    const edgePerm = STAGE_TRANSITION_PERM[edgeKey];
+    const hasEdgePerm = !!edgePerm && session.permissions.has(edgePerm);
+
+    if (!hasEdgePerm) {
+      if (requiredRole === null) {
+        return { error: "لا يمكن إعادة فتح مهمة منتهية إلا بصلاحية إدارية" };
+      }
+      if (requiredRole) {
+        // Match the trigger's per-edge role list (specialist|manager edges,
+        // agent|manager on in_progress→manager_review, etc.). We only stash
+        // the "primary" role here for the friendly error; the trigger
+        // handles the wider set. The check is "is the caller the assignee
+        // for this role on this task?".
+        const slot = (existing.task_assignees ?? []).find(
+          (a) => a.role_type === requiredRole,
+        );
+        if (!slot || slot.employee_id !== session.employeeId) {
+          return {
+            error: `هذه النقلة مخصصة لـ${ROLE_AR[requiredRole]} المُسنَد للمهمة`,
+          };
+        }
+      }
     }
-  }
-  if (!bypass && requiredRole === null) {
-    return { error: "لا يمكن إعادة فتح مهمة منتهية إلا بصلاحية إدارية" };
   }
 
   const { error } = await supabaseAdmin
@@ -219,11 +264,31 @@ export async function addTaskCommentAction(input: {
 
   const { data: task } = await supabaseAdmin
     .from("tasks")
-    .select("id, project_id")
+    .select(`
+      id, project_id, created_by,
+      task_assignees ( employee_id )
+    `)
     .eq("id", parsed.data.task_id)
     .eq("organization_id", session.orgId)
     .maybeSingle();
   if (!task) return { error: "المهمة غير موجودة" };
+
+  // Authorship gate: the caller may add a comment if they are
+  //   • holder of `task.view_all` (heads / AM / admin / owner), OR
+  //   • the task creator (`tasks.created_by`), OR
+  //   • on `task_assignees` for this task (any role_type).
+  // This mirrors the read-side RLS chain in migration 0022 so the writer
+  // never invents visibility on a task they couldn't read.
+  const canComment =
+    session.isOwner ||
+    session.permissions.has("task.view_all") ||
+    task.created_by === session.userId ||
+    (task.task_assignees ?? []).some(
+      (a) => a.employee_id === session.employeeId,
+    );
+  if (!canComment) {
+    return { error: "لا يمكنك التعليق على مهمة لست مُسنَدًا إليها" };
+  }
 
   const { data: comment, error } = await supabaseAdmin
     .from("task_comments")
