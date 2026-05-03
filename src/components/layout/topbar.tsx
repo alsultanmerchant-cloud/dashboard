@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useTopbarControls, type TimeFilter } from "@/components/layout/topbar-context";
 import { MONTHS_AR } from "@/lib/utils/constants";
 import { PAGE_TITLES } from "@/lib/nav";
-import { CommandPaletteTrigger } from "@/components/command-palette";
+import { CommandPaletteTrigger, QuickCreateTrigger } from "@/components/command-palette";
 
 const TIME_FILTERS: TimeFilter[] = ["اليوم", "الأسبوع", "الشهر", "الكل"];
 
@@ -129,9 +129,14 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
             ))}
           </div>
 
-          {/* Cmd-K trigger — desktop only */}
-          <div className="hidden md:block">
+          {/* Quick-create + Cmd-K trigger — desktop only */}
+          <div className="hidden md:flex items-center gap-2">
+            <QuickCreateTrigger />
             <CommandPaletteTrigger />
+          </div>
+          {/* Mobile quick-create */}
+          <div className="md:hidden">
+            <QuickCreateTrigger />
           </div>
 
           {/* Clock + Calendar */}

@@ -1,29 +1,135 @@
 "use client";
 
-// Cmd-K command palette stub. Phase 1 ships the shell + global keyboard hook.
-// Phase 3 wires in real navigation/quick-action commands once the new sidebar nav exists.
+// Cmd-K command palette. Two sections:
+//   1. Quick create (project / handover / task template / category)
+//   2. Navigate (every NAV_GROUPS item the caller can see)
+// Items are filtered to the caller's permissions on the client, then
+// permission-checked again server-side at the destination route.
 
 import * as React from "react";
-import { Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Kbd } from "@/components/kbd";
 import { Input } from "@/components/ui/input";
-import { copy } from "@/lib/copy";
+import { NAV_GROUPS, type NavItem } from "@/lib/nav";
+import { useAuth } from "@/lib/auth-context";
+import { cn } from "@/lib/utils";
+
+type Command = {
+  id: string;
+  label: string;
+  group: string;
+  href: string;
+  perm?: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  keywords?: string;
+  isCreate?: boolean;
+};
+
+const QUICK_CREATE: Command[] = [
+  { id: "create-project", label: "مشروع جديد", group: "إنشاء سريع", href: "/projects/new", perm: "projects.manage", isCreate: true, keywords: "project new add" },
+  { id: "create-handover", label: "تسليم جديد من المبيعات", group: "إنشاء سريع", href: "/handover", perm: "handover.create", isCreate: true, keywords: "handover sales" },
+  { id: "create-template", label: "قالب مهمة جديد", group: "إنشاء سريع", href: "/task-templates", perm: "templates.manage", isCreate: true, keywords: "template task" },
+  { id: "create-category", label: "تصنيف خدمة جديد", group: "إنشاء سريع", href: "/service-categories", perm: "category.manage_templates", isCreate: true, keywords: "category service" },
+];
+
+function navItemsAsCommands(): Command[] {
+  const out: Command[] = [];
+  for (const g of NAV_GROUPS) {
+    for (const item of g.items as NavItem[]) {
+      if (item.comingSoon) continue;
+      out.push({
+        id: `nav-${item.href}`,
+        label: item.label,
+        group: g.label,
+        href: item.href,
+        perm: item.perm,
+        icon: item.icon,
+      });
+    }
+  }
+  return out;
+}
 
 export function CommandPaletteProvider() {
+  const router = useRouter();
+  const { hasPermission, user } = useAuth();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  const listRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const keyHandler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((v) => !v);
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    const openHandler = () => setOpen(true);
+    window.addEventListener("keydown", keyHandler);
+    window.addEventListener("command-palette:open", openHandler);
+    return () => {
+      window.removeEventListener("keydown", keyHandler);
+      window.removeEventListener("command-palette:open", openHandler);
+    };
   }, []);
+
+  // Reset state on close.
+  React.useEffect(() => {
+    if (!open) { setQuery(""); setActiveIdx(0); }
+  }, [open]);
+
+  const allCommands = React.useMemo(() => {
+    const navCmds = navItemsAsCommands();
+    const allowed = (c: Command) => !c.perm || (user?.isOwner ?? false) || hasPermission(c.perm);
+    return [...QUICK_CREATE, ...navCmds].filter(allowed);
+  }, [user, hasPermission]);
+
+  const filtered = React.useMemo(() => {
+    if (!query.trim()) return allCommands;
+    const q = query.toLowerCase();
+    return allCommands.filter((c) =>
+      c.label.toLowerCase().includes(q) ||
+      c.group.toLowerCase().includes(q) ||
+      (c.keywords ?? "").toLowerCase().includes(q),
+    );
+  }, [allCommands, query]);
+
+  // Group for display.
+  const groups = React.useMemo(() => {
+    const map = new Map<string, Command[]>();
+    for (const c of filtered) {
+      if (!map.has(c.group)) map.set(c.group, []);
+      map.get(c.group)!.push(c);
+    }
+    return Array.from(map.entries());
+  }, [filtered]);
+
+  // Flat list for keyboard nav (matches visual order).
+  const flat = React.useMemo(() => groups.flatMap(([, items]) => items), [groups]);
+
+  React.useEffect(() => { setActiveIdx(0); }, [query]);
+
+  const run = (cmd: Command) => {
+    setOpen(false);
+    router.push(cmd.href);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, flat.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const cmd = flat[activeIdx];
+      if (cmd) run(cmd);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -31,7 +137,7 @@ export function CommandPaletteProvider() {
         <div className="border-b border-white/5 p-3">
           <DialogTitle className="sr-only">لوحة الأوامر</DialogTitle>
           <DialogDescription className="sr-only">
-            ابحث في النظام وافتح الوحدات بسرعة. اضغط Esc للإغلاق.
+            ابحث في النظام أو اكتب أمرًا. اضغط Enter لفتح، Esc للإغلاق.
           </DialogDescription>
           <div className="relative">
             <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -39,26 +145,67 @@ export function CommandPaletteProvider() {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
               placeholder="ابحث أو اكتب أمرًا…"
               className="h-10 border-0 bg-transparent pe-9 text-base shadow-none focus-visible:ring-0"
             />
           </div>
         </div>
-        <div className="max-h-72 overflow-y-auto p-3">
-          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            {copy.comingNext.title} — لوحة الأوامر تربط الانتقال بين الوحدات والإجراءات السريعة في المرحلة القادمة.
-          </p>
+        <div ref={listRef} className="max-h-80 overflow-y-auto p-2">
+          {flat.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              لا توجد نتائج
+            </p>
+          ) : (
+            groups.map(([groupLabel, items]) => (
+              <div key={groupLabel} className="mb-2 last:mb-0">
+                <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                  {groupLabel}
+                </p>
+                <ul>
+                  {items.map((c) => {
+                    const flatIdx = flat.indexOf(c);
+                    const active = flatIdx === activeIdx;
+                    const Icon = c.icon ?? (c.isCreate ? Plus : Search);
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => run(c)}
+                          onMouseEnter={() => setActiveIdx(flatIdx)}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm text-start transition-colors",
+                            active ? "bg-cyan/10 text-foreground" : "text-foreground/90 hover:bg-white/[0.04]",
+                          )}
+                        >
+                          <span className={cn(
+                            "flex size-7 items-center justify-center rounded-lg",
+                            c.isCreate ? "bg-cyan/15 text-cyan" : "bg-white/[0.04] text-muted-foreground",
+                          )}>
+                            <Icon className="size-3.5" />
+                          </span>
+                          <span className="flex-1 truncate">{c.label}</span>
+                          {active && (
+                            <Kbd>↵</Kbd>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
         </div>
         <div className="flex items-center justify-between gap-2 border-t border-white/5 px-3 py-2 text-[11px] text-muted-foreground">
-          <span>تنقل</span>
+          <span>{flat.length} نتيجة</span>
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>
-            <span className="ms-1">للتنقل</span>
+            <span className="ms-1">تنقل</span>
             <Kbd>↵</Kbd>
-            <span className="ms-1">للفتح</span>
+            <span className="ms-1">فتح</span>
             <Kbd>Esc</Kbd>
-            <span className="ms-1">للإغلاق</span>
           </span>
         </div>
       </DialogContent>
@@ -73,13 +220,7 @@ export function CommandPaletteTrigger({ className }: { className?: string }) {
   }, []);
 
   const trigger = () => {
-    const evt = new KeyboardEvent("keydown", {
-      key: "k",
-      bubbles: true,
-      ctrlKey: !isMac,
-      metaKey: isMac,
-    });
-    window.dispatchEvent(evt);
+    window.dispatchEvent(new Event("command-palette:open"));
   };
 
   return (
@@ -97,6 +238,32 @@ export function CommandPaletteTrigger({ className }: { className?: string }) {
         <Kbd>{isMac ? "⌘" : "Ctrl"}</Kbd>
         <Kbd>K</Kbd>
       </span>
+    </button>
+  );
+}
+
+/**
+ * Visible "+جديد" trigger in the topbar that opens the palette pre-filtered
+ * to quick-create actions (we just open the palette with no query — the
+ * Quick Create group renders first by ordering).
+ */
+export function QuickCreateTrigger({ className }: { className?: string }) {
+  const trigger = () => {
+    window.dispatchEvent(new Event("command-palette:open"));
+  };
+  return (
+    <button
+      type="button"
+      onClick={trigger}
+      className={
+        className ??
+        "inline-flex items-center gap-1.5 rounded-xl border border-cyan/30 bg-cyan/10 px-3 py-1.5 text-xs font-medium text-cyan transition-colors hover:bg-cyan/15"
+      }
+      aria-label="إنشاء جديد"
+      title="إنشاء جديد (Cmd+K)"
+    >
+      <Plus className="size-3.5" />
+      <span>جديد</span>
     </button>
   );
 }

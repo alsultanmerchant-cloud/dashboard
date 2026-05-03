@@ -38,10 +38,16 @@ export default async function ContractsPage({
 }) {
   const session = await requirePagePermission("contract.view");
   const sp = await searchParams;
+  // `am=me` resolves to the caller's employee_id (only AMs/team_leads with
+  // an employee profile can use it). Lets a head/admin cycle between "كل
+  // العقود" and "عقودي". RLS in 0028 already enforces the per-AM scope at
+  // the DB layer for non-privileged callers — this is the UI knob.
+  const amParam = typeof sp.am === "string" ? sp.am : undefined;
+  const isMine = amParam === "me" && !!session.employeeId;
   const filters = {
     status: typeof sp.status === "string" ? sp.status : undefined,
     target: typeof sp.target === "string" ? sp.target : undefined,
-    amEmployeeId: typeof sp.am === "string" ? sp.am : undefined,
+    amEmployeeId: isMine ? session.employeeId : amParam,
     startFrom: typeof sp.from === "string" ? sp.from : undefined,
     startTo: typeof sp.to === "string" ? sp.to : undefined,
   };
@@ -67,7 +73,10 @@ export default async function ContractsPage({
 
       {/* Filters (link-based for now; richer client-form in a follow-up) */}
       <div className="flex flex-wrap gap-2 mb-4 text-sm">
-        <FilterChip href="/contracts" label="الكل" active={!filters.status && !filters.target} />
+        {session.employeeId && (
+          <FilterChip href="/contracts?am=me" label="عقودي" active={isMine} />
+        )}
+        <FilterChip href="/contracts" label="الكل" active={!filters.status && !filters.target && !isMine} />
         <FilterChip href="/contracts?status=active" label="نشط" active={filters.status === "active"} />
         <FilterChip href="/contracts?status=hold" label="مُعلَّق" active={filters.status === "hold"} />
         <FilterChip href="/contracts?target=Overdue" label="متأخر" active={filters.target === "Overdue"} />
