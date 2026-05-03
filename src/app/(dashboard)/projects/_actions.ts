@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import { generateTasksForProjectFromServices } from "@/lib/workflows/generate-tasks";
+import { generateTasksFromCategories } from "@/lib/projects/generate-from-categories";
 
 export type ProjectFormState = {
   ok?: true;
@@ -29,6 +30,20 @@ export async function createProjectAction(
   const serviceIds = formData.getAll("service_ids").map(String).filter(Boolean);
   const generateTasks = formData.get("generate_tasks") !== "false";
 
+  // T4: per-service week-split metadata is shipped as a JSON blob on the
+  // form to avoid n form-fields per service. The shape is validated by zod
+  // below; the dialog/page builds it client-side.
+  let serviceWeekSplits: unknown[] = [];
+  const splitsRaw = formData.get("service_week_splits");
+  if (typeof splitsRaw === "string" && splitsRaw.length > 0) {
+    try {
+      const parsed = JSON.parse(splitsRaw);
+      if (Array.isArray(parsed)) serviceWeekSplits = parsed;
+    } catch {
+      // ignore — schema validation will surface the issue.
+    }
+  }
+
   const parsed = ProjectCreateSchema.safeParse({
     client_id: formData.get("client_id"),
     name: formData.get("name"),
@@ -40,6 +55,7 @@ export async function createProjectAction(
     account_manager_employee_id: formData.get("account_manager_employee_id"),
     service_ids: serviceIds,
     generate_tasks: generateTasks,
+    service_week_splits: serviceWeekSplits,
   });
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -90,13 +106,29 @@ export async function createProjectAction(
     payload: { name: project.name, services: parsed.data.service_ids.length },
   });
 
+  // Build a quick lookup of per-service overrides supplied via the form.
+  const splitBySid = new Map<string, { week_split: boolean; weeks: number | null; category_id: string | null }>();
+  for (const s of parsed.data.service_week_splits) {
+    splitBySid.set(s.service_id, {
+      week_split: s.week_split,
+      weeks: s.weeks ?? null,
+      category_id: s.category_id ?? null,
+    });
+  }
+
   if (parsed.data.service_ids.length > 0) {
     await supabaseAdmin.from("project_services").insert(
-      parsed.data.service_ids.map((service_id) => ({
-        organization_id: session!.orgId,
-        project_id: project.id,
-        service_id,
-      })),
+      parsed.data.service_ids.map((service_id) => {
+        const split = splitBySid.get(service_id);
+        return {
+          organization_id: session!.orgId,
+          project_id: project.id,
+          service_id,
+          category_id: split?.category_id ?? null,
+          week_split: split?.week_split ?? false,
+          weeks: split?.week_split ? split?.weeks ?? null : null,
+        };
+      }),
     );
     for (const sid of parsed.data.service_ids) {
       await logAiEvent({
@@ -105,7 +137,7 @@ export async function createProjectAction(
         eventType: "PROJECT_SERVICE_ATTACHED",
         entityType: "project",
         entityId: project.id,
-        payload: { service_id: sid },
+        payload: { service_id: sid, week_split: splitBySid.get(sid)?.week_split ?? false },
         importance: "low",
       });
     }
@@ -123,14 +155,41 @@ export async function createProjectAction(
 
   let taskCount = 0;
   if (parsed.data.generate_tasks && parsed.data.service_ids.length > 0) {
-    taskCount = await generateTasksForProjectFromServices({
-      organizationId: session.orgId,
-      projectId: project.id,
-      serviceIds: parsed.data.service_ids,
-      projectStartDate: project.start_date ?? null,
-      accountManagerEmployeeId: parsed.data.account_manager_employee_id,
-      createdByUserId: session.userId,
-    });
+    // T4 path: when any per-service override is present (week_split or
+    // category) use the categories engine which honours those signals.
+    // Otherwise fall back to the original handover/generate-tasks helper
+    // so existing flows keep behaving exactly as before.
+    const useCategoriesEngine = parsed.data.service_week_splits.some(
+      (s) => s.week_split || s.category_id,
+    );
+    if (useCategoriesEngine) {
+      const result = await generateTasksFromCategories({
+        organizationId: session.orgId,
+        projectId: project.id,
+        serviceSelections: parsed.data.service_ids.map((sid) => {
+          const split = splitBySid.get(sid);
+          return {
+            serviceId: sid,
+            weekSplit: split?.week_split ?? false,
+            weeks: split?.week_split ? split?.weeks ?? null : null,
+            categoryId: split?.category_id ?? null,
+          };
+        }),
+        projectStartDate: project.start_date ?? null,
+        accountManagerEmployeeId: parsed.data.account_manager_employee_id,
+        createdByUserId: session.userId,
+      });
+      taskCount = result.count;
+    } else {
+      taskCount = await generateTasksForProjectFromServices({
+        organizationId: session.orgId,
+        projectId: project.id,
+        serviceIds: parsed.data.service_ids,
+        projectStartDate: project.start_date ?? null,
+        accountManagerEmployeeId: parsed.data.account_manager_employee_id,
+        createdByUserId: session.userId,
+      });
+    }
   }
 
   revalidatePath("/projects");

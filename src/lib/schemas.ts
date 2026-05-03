@@ -41,6 +41,18 @@ export const ProjectCreateSchema = z.object({
     .transform((v) => v || null),
   service_ids: z.array(uuidLoose).default([]),
   generate_tasks: z.boolean().default(true),
+  // Per-service overrides (T4 categories engine). Keyed by service_id.
+  // `weeks` only honored when `week_split` is true; clamped to 1..12.
+  service_week_splits: z
+    .array(
+      z.object({
+        service_id: uuidLoose,
+        week_split: z.boolean().default(false),
+        weeks: z.number().int().min(1).max(12).nullable().default(null),
+        category_id: z.union([z.literal(""), uuidLoose]).optional().nullable().transform((v) => v || null),
+      }),
+    )
+    .default([]),
 });
 export type ProjectCreateInput = z.infer<typeof ProjectCreateSchema>;
 

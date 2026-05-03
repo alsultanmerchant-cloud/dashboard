@@ -31,11 +31,19 @@ export default async function ProjectsPage() {
   const amOptions = ams.map((a) => ({ id: a.id, label: a.full_name + (a.job_title ? ` — ${a.job_title}` : "") }));
 
   const newProjectButton = (
-    <NewProjectDialog
-      clients={clientOptions}
-      services={services}
-      accountManagers={amOptions}
-    />
+    <div className="flex items-center gap-2">
+      <Link
+        href="/projects/new"
+        className="inline-flex h-9 items-center justify-center rounded-lg border border-cyan/40 bg-cyan-dim px-3 text-sm font-medium text-cyan hover:bg-cyan-dim/80 transition-colors"
+      >
+        مشروع جديد بمعاينة المهام
+      </Link>
+      <NewProjectDialog
+        clients={clientOptions}
+        services={services}
+        accountManagers={amOptions}
+      />
+    </div>
   );
 
   return (
