@@ -1,6 +1,8 @@
 # Handoff — Sky Light dashboard, mid-execution
 
-**As of commit `59fa3ca` on `main` · 18 commits ahead of `origin/main` · not pushed**
+**As of commit `3047e37` on `main` · 20 commits ahead of `origin/main` · not pushed**
+
+**Wave 4 shipped** (`3047e37`): T6 Governance Enforcement + T7.5-finish Commercial Layer. Migrations 0027 + 0028 applied. Build 35 routes clean; 11/11 test files passing. **Open owner-decision**: per-AM RLS scoping uses Option B (`contracts.account_manager_id` as authority) — documented in `docs/phase-T7-5-questions.md` Q1, awaiting confirmation.
 
 You are picking up the Sky Light dashboard build (codename Rwasem / Rawasm), the operator + AI layer that gradually replaces a customized Odoo 17 deployment. Read this whole file before doing anything. Then read the docs it points at.
 
@@ -16,16 +18,16 @@ You are picking up the Sky Light dashboard build (codename Rwasem / Rawasm), the
 ✅ T4     Categories engine                            (e17394e)
 ✅ T5     Decisions + SLA + Escalation engine         (96114b7)
 ✅ T7     Renewal cycles                              (006a9cf)
-🟡 T7.5   Commercial layer — partial                  (a1bc76b)  see §6
+✅ T7.5   Commercial layer — finished                 (a1bc76b + 3047e37)
+✅ T6     Governance enforcement                      (3047e37)
 ⬜ T3.5   Head-of-department task filters             see docs/phase-T3.5-filters.md
-⬜ T6     Governance enforcement                      see docs/AGENT_DISPATCH.md T6
-⬜ T9     Reporting + KPIs                            blocked on T6 + T7.5-finish
+⬜ T9     Reporting + KPIs                            unblocked — ready to dispatch
 ⬜ T10    Cutover from Odoo                           blocked on everything above
 ```
 
-**Migrations applied to remote DB** (`vghokairfpzxcciwpokp`): up through 0026b. Verify with `mcp__supabase__list_tables` if you doubt it. Files in `supabase/migrations/` are the source of truth — every applied migration has a matching file.
+**Migrations applied to remote DB** (`vghokairfpzxcciwpokp`): up through 0028. Verify with `mcp__supabase__list_tables` if you doubt it. Files in `supabase/migrations/` are the source of truth — every applied migration has a matching file.
 
-**Build/tests last-green:** `bun run build` clean (33 routes); 9/9 `tests/*.test.mjs` files passing.
+**Build/tests last-green:** `bun run build` clean (35 routes); 11/11 `tests/*.test.mjs` files passing.
 
 ---
 
