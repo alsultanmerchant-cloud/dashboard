@@ -164,6 +164,35 @@ export type Database = {
           },
         ]
       }
+      department_team_leads: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          department_id: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          department_id: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          department_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_team_leads_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       departments: {
         Row: {
           created_at: string
@@ -240,6 +269,7 @@ export type Database = {
           manager_employee_id: string | null
           organization_id: string
           phone: string | null
+          position: string | null
           updated_at: string
           user_id: string | null
         }
@@ -257,6 +287,7 @@ export type Database = {
           manager_employee_id?: string | null
           organization_id: string
           phone?: string | null
+          position?: string | null
           updated_at?: string
           user_id?: string | null
         }
@@ -274,6 +305,7 @@ export type Database = {
           manager_employee_id?: string | null
           organization_id?: string
           phone?: string | null
+          position?: string | null
           updated_at?: string
           user_id?: string | null
         }
@@ -498,30 +530,46 @@ export type Database = {
       }
       project_services: {
         Row: {
+          category_id: string | null
           created_at: string
           id: string
           organization_id: string
           project_id: string
           service_id: string
           status: string
+          week_split: boolean
+          weeks: number | null
         }
         Insert: {
+          category_id?: string | null
           created_at?: string
           id?: string
           organization_id: string
           project_id: string
           service_id: string
           status?: string
+          week_split?: boolean
+          weeks?: number | null
         }
         Update: {
+          category_id?: string | null
           created_at?: string
           id?: string
           organization_id?: string
           project_id?: string
           service_id?: string
           status?: string
+          week_split?: boolean
+          weeks?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "project_services_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "service_categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "project_services_organization_id_fkey"
             columns: ["organization_id"]
@@ -790,6 +838,72 @@ export type Database = {
           },
         ]
       }
+      service_categories: {
+        Row: {
+          color: string | null
+          created_at: string
+          description: string | null
+          external_id: number | null
+          external_source: string | null
+          id: string
+          is_active: boolean
+          key: string
+          name_ar: string
+          name_en: string | null
+          organization_id: string
+          service_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          external_id?: number | null
+          external_source?: string | null
+          id?: string
+          is_active?: boolean
+          key: string
+          name_ar: string
+          name_en?: string | null
+          organization_id: string
+          service_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          external_id?: number | null
+          external_source?: string | null
+          id?: string
+          is_active?: boolean
+          key?: string
+          name_ar?: string
+          name_en?: string | null
+          organization_id?: string
+          service_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_categories_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       services: {
         Row: {
           created_at: string
@@ -961,6 +1075,42 @@ export type Database = {
           },
           {
             foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      task_followers: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks_with_metrics"
@@ -1156,39 +1306,80 @@ export type Database = {
       }
       task_templates: {
         Row: {
+          category_id: string | null
           created_at: string
           created_by: string | null
+          deadline_offset_days: number | null
+          default_followers_positions: string[]
+          default_owner_position: string | null
+          depends_on_template_id: string | null
           description: string | null
           id: string
           is_active: boolean
           name: string
           organization_id: string
           service_id: string
+          sla_minutes_in_progress: number | null
+          sla_minutes_new: number | null
+          sort_order: number
           updated_at: string
+          upload_offset_days: number | null
         }
         Insert: {
+          category_id?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_offset_days?: number | null
+          default_followers_positions?: string[]
+          default_owner_position?: string | null
+          depends_on_template_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean
           name: string
           organization_id: string
           service_id: string
+          sla_minutes_in_progress?: number | null
+          sla_minutes_new?: number | null
+          sort_order?: number
           updated_at?: string
+          upload_offset_days?: number | null
         }
         Update: {
+          category_id?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_offset_days?: number | null
+          default_followers_positions?: string[]
+          default_owner_position?: string | null
+          depends_on_template_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean
           name?: string
           organization_id?: string
           service_id?: string
+          sla_minutes_in_progress?: number | null
+          sla_minutes_new?: number | null
+          sort_order?: number
           updated_at?: string
+          upload_offset_days?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "task_templates_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "service_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_templates_depends_on_template_id_fkey"
+            columns: ["depends_on_template_id"]
+            isOneToOne: false
+            referencedRelation: "task_templates"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "task_templates_organization_id_fkey"
             columns: ["organization_id"]
@@ -1212,11 +1403,14 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          delay_days: number | null
           description: string | null
           due_date: string | null
           expected_progress_percent: number
           external_id: number | null
           external_source: string | null
+          hold_reason: string | null
+          hold_since: string | null
           id: string
           organization_id: string
           planned_date: string | null
@@ -1237,11 +1431,14 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          delay_days?: number | null
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number
           external_id?: number | null
           external_source?: string | null
+          hold_reason?: string | null
+          hold_since?: string | null
           id?: string
           organization_id: string
           planned_date?: string | null
@@ -1262,11 +1459,14 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          delay_days?: number | null
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number
           external_id?: number | null
           external_source?: string | null
+          hold_reason?: string | null
+          hold_since?: string | null
           id?: string
           organization_id?: string
           planned_date?: string | null
@@ -1575,6 +1775,10 @@ export type Database = {
           description: string | null
           due_date: string | null
           expected_progress_percent: number | null
+          external_id: number | null
+          external_source: string | null
+          hold_reason: string | null
+          hold_since: string | null
           id: string | null
           organization_id: string | null
           planned_date: string | null
@@ -1582,6 +1786,7 @@ export type Database = {
           progress_percent: number | null
           progress_slip_percent: number | null
           project_id: string | null
+          running_delay_days: number | null
           service_id: string | null
           stage: Database["public"]["Enums"]["task_stage"] | null
           stage_entered_at: string | null
@@ -1596,10 +1801,14 @@ export type Database = {
           created_by?: string | null
           created_from_template_item_id?: string | null
           current_stage_seconds?: never
-          delay_days?: never
+          delay_days?: number | null
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number | null
+          external_id?: number | null
+          external_source?: string | null
+          hold_reason?: string | null
+          hold_since?: string | null
           id?: string | null
           organization_id?: string | null
           planned_date?: string | null
@@ -1607,6 +1816,7 @@ export type Database = {
           progress_percent?: number | null
           progress_slip_percent?: number | null
           project_id?: string | null
+          running_delay_days?: never
           service_id?: string | null
           stage?: Database["public"]["Enums"]["task_stage"] | null
           stage_entered_at?: string | null
@@ -1621,10 +1831,14 @@ export type Database = {
           created_by?: string | null
           created_from_template_item_id?: string | null
           current_stage_seconds?: never
-          delay_days?: never
+          delay_days?: number | null
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number | null
+          external_id?: number | null
+          external_source?: string | null
+          hold_reason?: string | null
+          hold_since?: string | null
           id?: string | null
           organization_id?: string | null
           planned_date?: string | null
@@ -1632,6 +1846,7 @@ export type Database = {
           progress_percent?: number | null
           progress_slip_percent?: number | null
           project_id?: string | null
+          running_delay_days?: never
           service_id?: string | null
           stage?: Database["public"]["Enums"]["task_stage"] | null
           stage_entered_at?: string | null
@@ -1681,16 +1896,11 @@ export type Database = {
         }[]
       }
       has_org_access: { Args: { target_org: string }; Returns: boolean }
-      has_permission: {
-        Args: { perm_key: string; target_org: string }
-        Returns: boolean
-      }
+      has_permission:
+        | { Args: { perm_key: string }; Returns: boolean }
+        | { Args: { perm_key: string; target_org: string }; Returns: boolean }
       refresh_task_progress: { Args: never; Returns: number }
       task_current_stage_seconds: {
-        Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
-        Returns: number
-      }
-      task_delay_days: {
         Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
         Returns: number
       }
