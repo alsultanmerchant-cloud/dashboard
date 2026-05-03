@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
-  Briefcase, CheckCircle2, AlertTriangle, Bell, Users, Target, Sparkles,
-  Inbox, ArrowUpLeft, Clock, RefreshCw, ShieldAlert, FileSignature,
+  CheckCircle2, AlertTriangle, Sparkles,
+  ArrowUpLeft, Clock, RefreshCw, ShieldAlert, FileSignature, Wallet,
 } from "lucide-react";
 import { countRenewalsThisMonth } from "@/lib/data/renewals";
 import { countOpenViolations } from "@/lib/data/governance";
@@ -18,19 +18,28 @@ import { MetricCard } from "@/components/metric-card";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  HandoverStatusBadge, UrgencyBadge, PriorityBadge, TaskStatusBadge,
+  HandoverStatusBadge, UrgencyBadge, PriorityBadge,
 } from "@/components/status-badges";
 import { formatArabicShortDate, relativeTimeAr } from "@/lib/utils-format";
 import { AI_EVENT_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
+const sar = (n: number) =>
+  new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
+
+// Sky Light executive view: 4 hero KPIs answer "what matters today"
+// (revenue, operational risk, control health, churn signal). Below are
+// commercial mix + 3 watch-lists for the CEO/admin/head to act on.
 export default async function DashboardPage() {
   const session = await requireSession();
-  const [stats, handovers, overdue, activity, renewalsThisMonth, openExceptionsRaw, openGovernanceCount, commercialTiles] = await Promise.all([
+  const [
+    stats, handovers, overdue, activity, renewalsThisMonth,
+    openExceptionsRaw, openGovernanceCount, commercialTiles,
+  ] = await Promise.all([
     getDashboardStats(session.orgId, session.userId),
-    getRecentHandovers(session.orgId, 5),
-    getOverdueTasks(session.orgId, 6),
-    getActivityFeed(session.orgId, 12),
+    getRecentHandovers(session.orgId, 4),
+    getOverdueTasks(session.orgId, 5),
+    getActivityFeed(session.orgId, 8),
     countRenewalsThisMonth(session.orgId),
     supabaseAdmin
       .from("exceptions")
@@ -44,7 +53,6 @@ export default async function DashboardPage() {
     })),
   ]);
 
-  // T5: count open exceptions, broken down by kind.
   const openExceptions = openExceptionsRaw.data ?? [];
   const exceptionsByKind: Record<string, number> = {
     client: 0, deadline: 0, quality: 0, resource: 0,
@@ -58,109 +66,63 @@ export default async function DashboardPage() {
     <div>
       <PageHeader
         title={`مرحبًا، ${session.fullName}`}
-        description="ملخص حي للأنشطة في الوكالة. الأرقام محدّثة وفقًا لقاعدة البيانات الآن."
+        description="ملخص تنفيذي للوكالة. أربع مؤشرات رئيسية ثم ما يحتاج تدخّلًا الآن."
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
+      {/* Hero KPIs — the four that drive action */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <MetricCard
-          label="عملاء نشطون"
-          value={stats.activeClients}
-          icon={<Users className="size-5" />}
-          tone="default"
-          href="/clients"
-        />
-        <MetricCard
-          label="مشاريع جارية"
-          value={stats.activeProjects}
-          icon={<Briefcase className="size-5" />}
-          tone="info"
-          href="/projects"
-        />
-        <MetricCard
-          label="مهام مفتوحة"
-          value={stats.openTasks}
-          icon={<CheckCircle2 className="size-5" />}
+          label="إيرادات هذا الشهر"
+          value={sar(commercialTiles.totalValue)}
+          hint={`${commercialTiles.totalCount} عقد`}
+          icon={<Wallet className="size-5" />}
           tone="success"
-          href="/tasks?filter=open"
+          href="/contracts"
         />
         <MetricCard
           label="مهام متأخرة"
           value={stats.overdueTasks}
-          hint={stats.overdueTasks > 0 ? "تحتاج متابعة عاجلة" : undefined}
+          hint={stats.overdueTasks > 0 ? "تحتاج متابعة عاجلة" : "لا تأخيرات"}
           icon={<AlertTriangle className="size-5" />}
           tone={stats.overdueTasks > 0 ? "destructive" : "default"}
           href="/tasks?filter=overdue"
         />
         <MetricCard
-          label="تسليمات جديدة"
-          value={stats.newHandovers}
-          icon={<Inbox className="size-5" />}
-          tone="warning"
-          href="/handover"
-        />
-        <MetricCard
-          label="مهام مكتملة هذا الأسبوع"
-          value={stats.completedThisWeek}
-          icon={<Target className="size-5" />}
-          tone="success"
-        />
-        <MetricCard
-          label="تنبيهات لم تُقرأ"
-          value={stats.unreadNotifications}
-          icon={<Bell className="size-5" />}
-          tone="purple"
-          href="/notifications"
-        />
-        <MetricCard
-          label="تجديدات هذا الشهر"
-          value={renewalsThisMonth}
-          icon={<RefreshCw className="size-5" />}
-          tone={renewalsThisMonth > 0 ? "warning" : "default"}
-          href="/projects?filter=renewals_this_month"
-        />
-        <MetricCard
-          label="أحداث ذكية اليوم"
-          value={stats.aiEventsToday}
-          icon={<Sparkles className="size-5" />}
-          tone="default"
-          href="/ai-insights"
-        />
-        {/* T5: open escalations tile */}
-        <MetricCard
-          label="تصعيدات مفتوحة"
-          value={totalOpenExceptions}
-          icon={<ShieldAlert className="size-5" />}
-          tone={totalOpenExceptions > 0 ? "destructive" : "default"}
-          href="/escalations"
-        />
-        {/* T6: open governance violations tile */}
-        <MetricCard
           label="مخالفات حوكمة"
           value={openGovernanceCount}
+          hint={openGovernanceCount > 0 ? "افتح اللوحة" : "كل القواعد تُحترَم"}
           icon={<ShieldAlert className="size-5" />}
           tone={openGovernanceCount > 0 ? "destructive" : "default"}
           href="/governance"
         />
+        <MetricCard
+          label="تجديدات هذا الشهر"
+          value={renewalsThisMonth}
+          hint={renewalsThisMonth > 0 ? "تجديد قريب" : "لا تجديدات"}
+          icon={<RefreshCw className="size-5" />}
+          tone={renewalsThisMonth > 0 ? "warning" : "default"}
+          href="/projects?filter=renewals_this_month"
+        />
       </div>
 
-      {/* T7.5: CEO commercial tile group — additive section, not part of the main metric grid. */}
-      <Card className="mb-8 border-cyan/20">
+      {/* Commercial mix — revenue breakdown by movement type */}
+      <Card className="mb-6 border-cyan/20">
         <CardContent className="p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div>
               <p className="text-sm font-semibold inline-flex items-center gap-2">
                 <FileSignature className="size-4 text-cyan" />
-                تجاري — هذا الشهر
+                تركيبة الإيرادات هذا الشهر
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                عقود الشهر الحالي مُصنَّفة حسب نوع الحركة التجارية.
+                توزيع العقود حسب نوع الحركة (جديد · تجديد · رفع باقة · استرجاع · تعليق).
               </p>
             </div>
             <Link href="/contracts" className="text-xs text-cyan hover:underline">
               فتح صفحة العقود
             </Link>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 text-sm">
             {(["New","Renew","UPSELL","WinBack","Hold"] as const).map((k) => {
               const agg = commercialTiles.byType[k] ?? { count: 0, value: 0 };
               const labels: Record<string, string> = {
@@ -172,110 +134,65 @@ export default async function DashboardPage() {
                   <p className="text-[11px] text-muted-foreground">{labels[k]}</p>
                   <p className="text-base font-semibold tabular-nums">{agg.count}</p>
                   <p className="text-[11px] text-muted-foreground tabular-nums">
-                    {new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(agg.value)}
+                    {sar(agg.value)}
                   </p>
                 </div>
               );
             })}
-            <div className="rounded-lg border border-cyan/40 bg-cyan-dim p-2.5">
-              <p className="text-[11px] text-muted-foreground">الإجمالي</p>
-              <p className="text-base font-semibold tabular-nums">{commercialTiles.totalCount}</p>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                {new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(commercialTiles.totalValue)}
-              </p>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* T5: open exceptions breakdown by kind */}
-      {totalOpenExceptions > 0 && (
-        <Card className="mb-8 border-cc-red/30">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-semibold inline-flex items-center gap-2">
-                  <ShieldAlert className="size-4 text-cc-red" />
-                  استثناءات مفتوحة
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  مجموع الاستثناءات المفتوحة في الوكالة، موزَّعة حسب النوع.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">عميل · {exceptionsByKind.client}</Badge>
-                <Badge variant="outline">موعد · {exceptionsByKind.deadline}</Badge>
-                <Badge variant="outline">جودة · {exceptionsByKind.quality}</Badge>
-                <Badge variant="outline">موارد · {exceptionsByKind.resource}</Badge>
-                <Link
-                  href="/escalations"
-                  className="text-xs text-cyan hover:underline inline-flex items-center gap-1"
-                >
-                  فتح صندوق الوارد
-                </Link>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-2 mb-8">
+      {/* Three watch-lists — what needs attention right now */}
+      <div className="grid gap-6 lg:grid-cols-3 mb-8">
+        {/* 1. Open escalations + exceptions */}
         <div>
           <SectionTitle
-            title="آخر التسليمات"
-            description="نماذج التسليم الواردة مؤخرًا من فريق المبيعات"
+            title="استثناءات وتصعيدات"
+            description={totalOpenExceptions > 0
+              ? `${totalOpenExceptions} مفتوحة الآن`
+              : "لا استثناءات مفتوحة"}
             actions={
-              <Link href="/handover" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
+              <Link href="/escalations" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
                 <ArrowUpLeft className="size-3 icon-flip-rtl" />
-                عرض الكل
+                صندوق الوارد
               </Link>
             }
           />
-          {handovers.length === 0 ? (
+          {totalOpenExceptions === 0 ? (
             <EmptyState
               variant="compact"
-              title="لا توجد تسليمات"
-              description="أرسل أول تسليم من صفحة المبيعات."
+              icon={<ShieldAlert className="size-6" />}
+              title="لا تصعيدات الآن"
+              description="السجل نظيف — حافظ على هذا الأداء."
             />
           ) : (
-            <div className="space-y-2">
-              {handovers.map((h) => {
-                const project = Array.isArray(h.project) ? h.project[0] : h.project;
-                return (
-                  <Card key={h.id}>
-                    <CardContent className="p-3.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold truncate">{h.client_name}</span>
-                            <HandoverStatusBadge status={h.status} />
-                            <UrgencyBadge level={h.urgency_level} />
-                          </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {relativeTimeAr(h.created_at)}
-                            {project?.id && (
-                              <>
-                                {" · "}
-                                <Link href={`/projects/${project.id}`} className="text-cyan hover:underline">
-                                  المشروع
-                                </Link>
-                              </>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+            <Card>
+              <CardContent className="p-3.5 space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">عميل · {exceptionsByKind.client}</Badge>
+                  <Badge variant="outline">موعد · {exceptionsByKind.deadline}</Badge>
+                  <Badge variant="outline">جودة · {exceptionsByKind.quality}</Badge>
+                  <Badge variant="outline">موارد · {exceptionsByKind.resource}</Badge>
+                </div>
+                <Link
+                  href="/escalations"
+                  className="block text-xs text-cyan hover:underline pt-1"
+                >
+                  عرض القائمة الكاملة →
+                </Link>
+              </CardContent>
+            </Card>
           )}
         </div>
 
+        {/* 2. Overdue tasks */}
         <div>
           <SectionTitle
             title="مهام متأخرة"
-            description="تجاوزت تاريخ التسليم وهي مفتوحة"
+            description={overdue.length > 0
+              ? `${overdue.length} تجاوزت موعد التسليم`
+              : "كل المهام في وقتها"}
             actions={
               <Link href="/tasks?filter=overdue" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
                 <ArrowUpLeft className="size-3 icon-flip-rtl" />
@@ -287,8 +204,8 @@ export default async function DashboardPage() {
             <EmptyState
               variant="compact"
               icon={<CheckCircle2 className="size-6" />}
-              title="لا توجد مهام متأخرة"
-              description="كل المهام في وقتها — استمر في الزخم!"
+              title="لا تأخيرات"
+              description="كل المهام في وقتها."
             />
           ) : (
             <div className="space-y-2">
@@ -296,17 +213,17 @@ export default async function DashboardPage() {
                 const project = Array.isArray(t.project) ? t.project[0] : t.project;
                 return (
                   <Card key={t.id} className="border-cc-red/20">
-                    <CardContent className="p-3.5">
+                    <CardContent className="p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
-                          <Link href={`/tasks/${t.id}`} className="text-sm font-medium hover:text-cyan transition-colors">
+                          <Link href={`/tasks/${t.id}`} className="text-sm font-medium hover:text-cyan transition-colors line-clamp-1">
                             {t.title}
                           </Link>
-                          <p className="mt-1 text-[11px] text-muted-foreground truncate">
+                          <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
                             {project?.name ?? "—"}
                           </p>
                         </div>
-                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
                           <PriorityBadge priority={t.priority} />
                           <span className="text-[10px] text-cc-red tabular-nums" dir="ltr">
                             {formatArabicShortDate(t.due_date)}
@@ -320,11 +237,65 @@ export default async function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* 3. Recent handovers */}
+        <div>
+          <SectionTitle
+            title="آخر التسليمات"
+            description={handovers.length > 0
+              ? `${handovers.length} وردت مؤخرًا`
+              : "لا تسليمات جديدة"}
+            actions={
+              <Link href="/handover" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
+                <ArrowUpLeft className="size-3 icon-flip-rtl" />
+                عرض الكل
+              </Link>
+            }
+          />
+          {handovers.length === 0 ? (
+            <EmptyState
+              variant="compact"
+              title="لا تسليمات"
+              description="أرسل أول تسليم من صفحة المبيعات."
+            />
+          ) : (
+            <div className="space-y-2">
+              {handovers.map((h) => {
+                const project = Array.isArray(h.project) ? h.project[0] : h.project;
+                return (
+                  <Card key={h.id}>
+                    <CardContent className="p-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold truncate">{h.client_name}</span>
+                          <HandoverStatusBadge status={h.status} />
+                          <UrgencyBadge level={h.urgency_level} />
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {relativeTimeAr(h.created_at)}
+                          {project?.id && (
+                            <>
+                              {" · "}
+                              <Link href={`/projects/${project.id}`} className="text-cyan hover:underline">
+                                المشروع
+                              </Link>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Activity feed — the chronological record of system events */}
       <SectionTitle
         title="نشاط الفريق"
-        description="مجمَّع من الأحداث الذكية المسجَّلة في النظام"
+        description="مجمَّع من الأحداث الذكية المسجَّلة"
         actions={
           <Link href="/ai-insights" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
             <Sparkles className="size-3" />

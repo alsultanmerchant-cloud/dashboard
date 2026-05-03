@@ -100,3 +100,29 @@ export async function requirePagePermissionAny(perms: string[]): Promise<ServerS
   }
   return session;
 }
+
+/**
+ * Picks the home page that best matches the caller's daily job (Sky Light
+ * operations PDF §9 + audit in this session). Used by `/` and the auth
+ * callback so each role lands on the page they actually use.
+ *
+ * Owner / admin / head → /dashboard (CEO-style overview is built for them)
+ * Account manager      → /am/<id>/dashboard (their book + monthly cycles)
+ * Specialist           → /uploads (upload-deadline queue per PDF §11)
+ * Agent / team_lead    → /tasks (assigned-to-me list; agent queue page TBD)
+ *
+ * Falls back to /dashboard. The fallback is also safe to redirect to from
+ * `requirePagePermission` because /dashboard requires only a session.
+ */
+export function landingPathFor(session: ServerSession): string {
+  if (session.isOwner) return "/dashboard";
+  if (session.roleKeys.includes("admin")) return "/dashboard";
+  if (session.roleKeys.includes("manager")) return "/dashboard";
+  if (session.roleKeys.includes("account_manager") && session.employeeId) {
+    return `/am/${session.employeeId}/dashboard`;
+  }
+  if (session.roleKeys.includes("specialist")) return "/uploads";
+  if (session.roleKeys.includes("team_lead")) return "/tasks";
+  if (session.roleKeys.includes("agent")) return "/tasks";
+  return "/dashboard";
+}

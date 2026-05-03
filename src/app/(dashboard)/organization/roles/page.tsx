@@ -1,11 +1,11 @@
-import { Shield, Check } from "lucide-react";
+import { Shield } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listRolesWithPermissions, listAllPermissions } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ROLE_LABELS } from "@/lib/labels";
-import { cn } from "@/lib/utils";
+import { PermissionToggle } from "./permission-toggle";
 
 export default async function RolesPage() {
   const session = await requirePagePermission("settings.manage");
@@ -29,7 +29,7 @@ export default async function RolesPage() {
     <div>
       <PageHeader
         title="الأدوار والصلاحيات"
-        description="مصفوفة كاملة للأدوار الـ 8 والصلاحيات الـ 16. للتعديل التفصيلي قريبًا — حاليًا للعرض فقط."
+        description="مصفوفة الأدوار والصلاحيات. انقر على أي خانة لمنح أو سحب صلاحية. دور المالك يحصل على كل الصلاحيات تلقائيًا."
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Shield className="size-3 text-cyan" />
@@ -64,19 +64,16 @@ export default async function RolesPage() {
                     </div>
                   </td>
                   {roles.map((r) => {
-                    const has = roleHas.get(r.id)?.has(p.key);
+                    const has = roleHas.get(r.id)?.has(p.key) ?? false;
                     return (
                       <td key={r.id} className="px-2 py-2.5 text-center">
-                        {has ? (
-                          <span className={cn(
-                            "inline-flex size-6 items-center justify-center rounded-full",
-                            r.key === "owner" ? "bg-cyan-dim text-cyan" : "bg-green-dim text-cc-green",
-                          )}>
-                            <Check className="size-3.5" />
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground/30">—</span>
-                        )}
+                        <PermissionToggle
+                          roleId={r.id}
+                          permissionId={p.id}
+                          initialGranted={has || r.key === "owner"}
+                          isOwnerRole={r.key === "owner"}
+                          highlight={r.key === "owner"}
+                        />
                       </td>
                     );
                   })}

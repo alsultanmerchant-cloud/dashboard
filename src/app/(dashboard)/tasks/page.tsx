@@ -14,13 +14,15 @@ import { copy } from "@/lib/copy";
 import { isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 
+const OPEN_STAGES = [
+  "new", "in_progress", "manager_review", "specialist_review",
+  "ready_to_send", "sent_to_client", "client_changes",
+] as const;
+
 const STAGE_FILTERS = [
+  { key: "mine", label: "مهامي" },
   { key: "all", label: "كل المهام" },
-  {
-    key: "open",
-    label: "مفتوحة",
-    stages: ["new", "in_progress", "manager_review", "specialist_review", "ready_to_send", "sent_to_client", "client_changes"],
-  },
+  { key: "open", label: "مفتوحة", stages: OPEN_STAGES },
   { key: "overdue", label: "متأخرة" },
   { key: "done", label: "مكتملة", stages: ["done"] },
 ] as const;
@@ -32,12 +34,17 @@ export default async function TasksPage({
 }) {
   const session = await requirePagePermission("tasks.view");
   const sp = await searchParams;
-  const filter = (sp.filter ?? "open") as (typeof STAGE_FILTERS)[number]["key"];
+  // Agents/team_leads land here via landingPathFor with no filter →
+  // default to "mine" if the caller has an employee profile, else "open".
+  const requested = sp.filter as (typeof STAGE_FILTERS)[number]["key"] | undefined;
+  const filter: (typeof STAGE_FILTERS)[number]["key"] =
+    requested ?? (session.employeeId ? "mine" : "open");
 
   const filterDef = STAGE_FILTERS.find((f) => f.key === filter) ?? STAGE_FILTERS[0];
   const tasks = await listTasks(session.orgId, {
     stage: "stages" in filterDef ? [...filterDef.stages!] : undefined,
     overdue: filter === "overdue",
+    assignedToEmployeeId: filter === "mine" ? session.employeeId : undefined,
   });
 
   return (

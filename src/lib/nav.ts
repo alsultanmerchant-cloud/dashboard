@@ -2,14 +2,13 @@
 // Phase 4-7 swap individual `comingSoon` flags off as modules ship.
 
 import {
+  Home,
   LayoutDashboard,
   CalendarClock,
   Bell,
   Sparkles,
   Bot,
   Send,
-  UserSearch,
-  Megaphone,
   Building2,
   Briefcase,
   ListTodo,
@@ -21,9 +20,6 @@ import {
   Network,
   BarChart3,
   Settings,
-  Heart,
-  Banknote,
-  Target,
   Flag,
   FileSignature,
   ShieldAlert,
@@ -49,8 +45,11 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "لوحة التحكم",
     items: [
-      { label: "نظرة عامة", href: "/dashboard", icon: LayoutDashboard },
+      // Routes server-side to the role's home page (specialist→/uploads,
+      // AM→/am/<id>/dashboard, head/admin/owner→/dashboard, etc).
+      { label: "لوحتي", href: "/", icon: Home },
       { label: "اليوم — رفع المهام", href: "/uploads", icon: CalendarClock, perm: "tasks.view" },
+      { label: "نظرة عامة", href: "/dashboard", icon: LayoutDashboard },
       { label: "التنبيهات", href: "/notifications", icon: Bell },
       { label: "الرؤى الذكية", href: "/ai-insights", icon: Sparkles },
       { label: "المساعد الذكي", href: "/agent", icon: Bot },
@@ -60,8 +59,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "المبيعات",
     items: [
       { label: "التسليم من المبيعات", href: "/handover", icon: Send, perm: "handover.create" },
-      { label: "العملاء المحتملون", href: "/sales/leads", icon: UserSearch, comingSoon: true },
-      { label: "الفريق التجاري", href: "/sales/team", icon: Megaphone, comingSoon: true },
     ],
   },
   {
@@ -102,14 +99,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "التقارير", href: "/reports", icon: BarChart3, perm: "reports.view" },
       { label: "الإعدادات", href: "/settings", icon: Settings, perm: "settings.manage" },
       { label: "المفاتيح المميّزة", href: "/settings/feature-flags", icon: Flag, perm: "feature_flag.manage" },
-    ],
-  },
-  {
-    label: "مراحل لاحقة",
-    items: [
-      { label: "الموارد البشرية", href: "/hr", icon: Heart, comingSoon: true },
-      { label: "المالية", href: "/finance", icon: Banknote, comingSoon: true },
-      { label: "Sales CRM", href: "/sales", icon: Target, comingSoon: true },
     ],
   },
 ];

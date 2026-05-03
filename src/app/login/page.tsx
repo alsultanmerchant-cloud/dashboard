@@ -27,7 +27,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    // Server-side `/` resolves to the role's home page via landingPathFor.
+    router.push("/");
   }
 
   return (
