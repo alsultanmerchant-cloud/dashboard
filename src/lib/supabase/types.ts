@@ -839,6 +839,71 @@ export type Database = {
         }
         Relationships: []
       }
+      governance_violations: {
+        Row: {
+          detected_at: string
+          id: string
+          kind: string
+          note: string | null
+          organization_id: string
+          project_id: string | null
+          resolved_at: string | null
+          resolver_user_id: string | null
+          task_id: string | null
+        }
+        Insert: {
+          detected_at?: string
+          id?: string
+          kind: string
+          note?: string | null
+          organization_id: string
+          project_id?: string | null
+          resolved_at?: string | null
+          resolver_user_id?: string | null
+          task_id?: string | null
+        }
+        Update: {
+          detected_at?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          organization_id?: string
+          project_id?: string | null
+          resolved_at?: string | null
+          resolver_user_id?: string | null
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "governance_violations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_violations_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       installments: {
         Row: {
           actual_amount: number | null
@@ -2870,3 +2935,4 @@ export const Constants = {
     },
   },
 } as const
+

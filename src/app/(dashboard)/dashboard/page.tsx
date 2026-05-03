@@ -1,9 +1,11 @@
 import Link from "next/link";
 import {
   Briefcase, CheckCircle2, AlertTriangle, Bell, Users, Target, Sparkles,
-  Inbox, ArrowUpLeft, Clock, RefreshCw, ShieldAlert,
+  Inbox, ArrowUpLeft, Clock, RefreshCw, ShieldAlert, FileSignature,
 } from "lucide-react";
 import { countRenewalsThisMonth } from "@/lib/data/renewals";
+import { countOpenViolations } from "@/lib/data/governance";
+import { getCeoCommercialTiles } from "@/lib/data/contracts";
 import { requireSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +26,7 @@ import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const session = await requireSession();
-  const [stats, handovers, overdue, activity, renewalsThisMonth, openExceptionsRaw] = await Promise.all([
+  const [stats, handovers, overdue, activity, renewalsThisMonth, openExceptionsRaw, openGovernanceCount, commercialTiles] = await Promise.all([
     getDashboardStats(session.orgId, session.userId),
     getRecentHandovers(session.orgId, 5),
     getOverdueTasks(session.orgId, 6),
@@ -35,6 +37,11 @@ export default async function DashboardPage() {
       .select("kind")
       .eq("organization_id", session.orgId)
       .is("resolved_at", null),
+    countOpenViolations(session.orgId),
+    getCeoCommercialTiles(session.orgId).catch(() => ({
+      month: "", byType: {} as Record<string, { count: number; value: number }>,
+      totalCount: 0, totalValue: 0,
+    })),
   ]);
 
   // T5: count open exceptions, broken down by kind.
@@ -126,7 +133,60 @@ export default async function DashboardPage() {
           tone={totalOpenExceptions > 0 ? "destructive" : "default"}
           href="/escalations"
         />
+        {/* T6: open governance violations tile */}
+        <MetricCard
+          label="مخالفات حوكمة"
+          value={openGovernanceCount}
+          icon={<ShieldAlert className="size-5" />}
+          tone={openGovernanceCount > 0 ? "destructive" : "default"}
+          href="/governance"
+        />
       </div>
+
+      {/* T7.5: CEO commercial tile group — additive section, not part of the main metric grid. */}
+      <Card className="mb-8 border-cyan/20">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <p className="text-sm font-semibold inline-flex items-center gap-2">
+                <FileSignature className="size-4 text-cyan" />
+                تجاري — هذا الشهر
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                عقود الشهر الحالي مُصنَّفة حسب نوع الحركة التجارية.
+              </p>
+            </div>
+            <Link href="/contracts" className="text-xs text-cyan hover:underline">
+              فتح صفحة العقود
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+            {(["New","Renew","UPSELL","WinBack","Hold"] as const).map((k) => {
+              const agg = commercialTiles.byType[k] ?? { count: 0, value: 0 };
+              const labels: Record<string, string> = {
+                New: "جديد", Renew: "تجديد", UPSELL: "رفع باقة",
+                WinBack: "استرجاع", Hold: "تعليق",
+              };
+              return (
+                <div key={k} className="rounded-lg border border-border p-2.5">
+                  <p className="text-[11px] text-muted-foreground">{labels[k]}</p>
+                  <p className="text-base font-semibold tabular-nums">{agg.count}</p>
+                  <p className="text-[11px] text-muted-foreground tabular-nums">
+                    {new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(agg.value)}
+                  </p>
+                </div>
+              );
+            })}
+            <div className="rounded-lg border border-cyan/40 bg-cyan-dim p-2.5">
+              <p className="text-[11px] text-muted-foreground">الإجمالي</p>
+              <p className="text-base font-semibold tabular-nums">{commercialTiles.totalCount}</p>
+              <p className="text-[11px] text-muted-foreground tabular-nums">
+                {new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(commercialTiles.totalValue)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* T5: open exceptions breakdown by kind */}
       {totalOpenExceptions > 0 && (

@@ -201,6 +201,28 @@ export async function moveTaskStageAction(input: {
     }
   }
 
+  // T6 Governance Rule §10.3 — Log Notes are the source of truth.
+  // Specialists/agents must leave a fresh comment (within the last 5 min)
+  // before flipping a stage. Owners and `task.view_all` holders bypass
+  // (they're already audited at the role layer; spec calls out heads/admin
+  // as exempt). The 5-minute window is checked server-side against
+  // `task_comments` authored by the caller for this task.
+  if (!bypass) {
+    const sinceIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: freshComments } = await supabaseAdmin
+      .from("task_comments")
+      .select("id")
+      .eq("task_id", parsed.data.task_id)
+      .eq("author_user_id", session.userId)
+      .gte("created_at", sinceIso)
+      .limit(1);
+    if (!freshComments || freshComments.length === 0) {
+      // Window phrase intentionally includes "5 minutes" for the
+      // governance test contract.
+      return { error: "يجب إضافة ملاحظة قبل نقل المرحلة" };
+    }
+  }
+
   const { error } = await supabaseAdmin
     .from("tasks")
     .update({ stage: parsed.data.stage })

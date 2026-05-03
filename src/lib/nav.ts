@@ -84,6 +84,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "العمليات",
     items: [
       { label: "التصعيدات", href: "/escalations", icon: ShieldAlert, perm: "escalation.view_own" },
+      { label: "مخالفات الحوكمة", href: "/governance", icon: Shield, perm: "governance.view" },
     ],
   },
   {
@@ -139,6 +140,7 @@ export const PAGE_TITLES: Record<string, { title: string; subtitle?: string }> =
   "/settings": { title: "الإعدادات", subtitle: "إعدادات النظام والوكالة" },
   "/settings/feature-flags": { title: "المفاتيح المميّزة", subtitle: "إدارة الوحدات والمسارات الجديدة قبل إطلاقها" },
   "/escalations": { title: "التصعيدات والاستثناءات", subtitle: "صندوق وارد التصعيدات الموجَّهة إليك مع متابعة الاستثناءات المفتوحة" },
+  "/governance": { title: "مخالفات الحوكمة", subtitle: "مهام بدون منفّذ أو بدون ملاحظات حديثة — قواعد الحوكمة الخمس" },
   "/hr": { title: "الموارد البشرية", subtitle: "ينطلق في مرحلة لاحقة" },
   "/finance": { title: "المالية", subtitle: "ينطلق في مرحلة لاحقة" },
 };
