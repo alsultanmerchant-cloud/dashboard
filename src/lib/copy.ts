@@ -86,6 +86,31 @@ export const copy = {
       title: "لا توجد دورات تجديد",
       description: "اضبط جدول التجديد ثم ابدأ دورة جديدة لتُولَّد المهام تلقائيًا.",
     },
+    escalations: {
+      title: "لا توجد تصعيدات",
+      description: "ستظهر هنا التصعيدات الموجَّهة إليك تلقائيًا عند خرق SLA.",
+    },
+    exceptions: {
+      title: "لا توجد استثناءات",
+      description: "افتح استثناءً يدويًا من صفحة المهمة عندما يستدعي الموقف ذلك.",
+    },
+  },
+  escalations: {
+    kindLabels: {
+      client: "عميل",
+      deadline: "موعد",
+      quality: "جودة",
+      resource: "موارد",
+    },
+    statusLabels: {
+      open: "مفتوح",
+      acknowledged: "مُقَرّ به",
+      closed: "مغلق",
+    },
+    openException: "فتح استثناء",
+    resolveException: "إغلاق الاستثناء",
+    acknowledge: "إقرار",
+    badgeOpen: "استثناء مفتوح",
   },
   comingNext: {
     title: "قريبًا في المرحلة التالية",

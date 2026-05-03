@@ -118,7 +118,46 @@ export default async function DashboardPage() {
           tone="default"
           href="/ai-insights"
         />
+        {/* T5: open escalations tile */}
+        <MetricCard
+          label="تصعيدات مفتوحة"
+          value={totalOpenExceptions}
+          icon={<ShieldAlert className="size-5" />}
+          tone={totalOpenExceptions > 0 ? "destructive" : "default"}
+          href="/escalations"
+        />
       </div>
+
+      {/* T5: open exceptions breakdown by kind */}
+      {totalOpenExceptions > 0 && (
+        <Card className="mb-8 border-cc-red/30">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold inline-flex items-center gap-2">
+                  <ShieldAlert className="size-4 text-cc-red" />
+                  استثناءات مفتوحة
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  مجموع الاستثناءات المفتوحة في الوكالة، موزَّعة حسب النوع.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">عميل · {exceptionsByKind.client}</Badge>
+                <Badge variant="outline">موعد · {exceptionsByKind.deadline}</Badge>
+                <Badge variant="outline">جودة · {exceptionsByKind.quality}</Badge>
+                <Badge variant="outline">موارد · {exceptionsByKind.resource}</Badge>
+                <Link
+                  href="/escalations"
+                  className="text-xs text-cyan hover:underline inline-flex items-center gap-1"
+                >
+                  فتح صندوق الوارد
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2 mb-8">
         <div>

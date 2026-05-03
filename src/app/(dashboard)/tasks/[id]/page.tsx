@@ -25,6 +25,8 @@ import { TaskRolePanel } from "../task-role-panel";
 import { CommentsFeed } from "./comments-feed";
 import { FollowersPanel } from "./followers-panel";
 import { StageHistoryTimeline } from "./stage-history-timeline";
+import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,16 @@ export default async function TaskDetailPage({
     session.orgId,
     followers.map((f) => f.user_id),
   );
+
+  // T5: detect any open exception on this task (read-only side query).
+  const { data: openExc } = await supabaseAdmin
+    .from("exceptions")
+    .select("id")
+    .eq("task_id", id)
+    .is("resolved_at", null)
+    .limit(1);
+  const hasOpenException = (openExc ?? []).length > 0;
+  const canOpenException = hasPermission(session, "exception.open");
 
   // Permission to add/remove followers: same shape as the server action
   // (creator OR view_all OR manage_followers). The action is the
@@ -123,6 +135,16 @@ export default async function TaskDetailPage({
         ]}
         actions={<TaskStatusSelect taskId={task.id} currentStatus={task.status} />}
       />
+
+      {(hasOpenException || canOpenException) && (
+        <div className="mb-4">
+          <TaskExceptionBadge
+            taskId={task.id}
+            hasOpenException={hasOpenException}
+            canOpen={canOpenException}
+          />
+        </div>
+      )}
 
       {showDelayBanner && (
         <Card className="mb-4 border-cc-red/40 bg-cc-red/10">
