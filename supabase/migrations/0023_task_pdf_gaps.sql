@@ -49,6 +49,11 @@
 drop view if exists public.tasks_with_metrics;
 drop function if exists public.task_delay_days(public.tasks);
 
+-- NOTE: STORED generated columns require IMMUTABLE expressions. A bare
+-- `completed_at::date` cast on a timestamptz is NOT immutable (depends on
+-- session TimeZone). Anchoring the cast with `at time zone 'UTC'` makes
+-- it immutable: literal timezone constants are immutable per Postgres
+-- function-volatility rules.
 alter table public.tasks
   add column if not exists delay_days integer
     generated always as (
@@ -58,7 +63,7 @@ alter table public.tasks
          and completed_at is not null
         then greatest(
           0,
-          (completed_at::date - planned_date)
+          ((completed_at at time zone 'UTC')::date - planned_date)
         )
       end
     ) stored,
