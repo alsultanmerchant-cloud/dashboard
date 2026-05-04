@@ -76,17 +76,75 @@ export const EMPLOYMENT_STATUS_LABELS: Record<EmploymentStatus, string> = {
   terminated: "خارج الخدمة",
 };
 
-export const AI_EVENT_LABELS: Record<string, string> = {
-  HANDOVER_SUBMITTED: "تسليم جديد من المبيعات",
-  PROJECT_CREATED: "مشروع جديد",
-  PROJECT_SERVICE_ATTACHED: "إضافة خدمة لمشروع",
-  TASK_CREATED: "مهمة جديدة",
-  TASK_STATUS_CHANGED: "تغيير حالة مهمة",
-  TASK_COMMENT_ADDED: "تعليق جديد على مهمة",
-  MENTION_CREATED: "إشارة لموظف",
-  NOTIFICATION_CREATED: "تنبيه جديد",
-  TASK_OVERDUE_DETECTED: "مهمة متأخرة",
+// Event type → human label, icon, and visibility tier.
+// Tiers control which events appear in the dashboard activity feed:
+//   "key"        → always shown to owners (business-critical)
+//   "operational" → shown when nothing key happened (work-in-progress signals)
+//   "noise"      → never shown on the dashboard (admin/audit log only)
+
+export type AiEventTier = "key" | "operational" | "noise";
+
+export interface AiEventMeta {
+  label: string;
+  tier: AiEventTier;
+}
+
+export const AI_EVENT_META: Record<string, AiEventMeta> = {
+  // ── Sales / commercial pipeline ──────────────────────────────────────
+  HANDOVER_SUBMITTED:              { label: "تسليم جديد من المبيعات",   tier: "key" },
+  CLIENT_CREATED:                  { label: "إضافة عميل جديد",          tier: "key" },
+  PROJECT_CREATED:                 { label: "مشروع جديد بدأ",           tier: "key" },
+  PROJECT_HELD:                    { label: "مشروع مُعلَّق",              tier: "key" },
+  PROJECT_RESUMED:                 { label: "استئناف مشروع",             tier: "key" },
+  PROJECT_RENEWAL_SCHEDULE_SET:    { label: "جدولة تجديد مشروع",         tier: "key" },
+  PROJECT_SERVICE_ATTACHED:        { label: "إضافة خدمة لمشروع",         tier: "operational" },
+
+  // ── Contracts & money ────────────────────────────────────────────────
+  CONTRACT_INSTALLMENT_RECEIVED:   { label: "استلام دفعة عقد",            tier: "key" },
+  CONTRACT_EVENT_RECORDED:         { label: "حدث عقد جديد",              tier: "key" },
+  CONTRACT_CYCLE_ADDED:            { label: "بدء دورة عقد",              tier: "key" },
+  CONTRACT_CYCLE_ROLLED:           { label: "تدوير دورة عقد",            tier: "operational" },
+  CONTRACT_MEETING_RECORDED:       { label: "اجتماع عقد",                tier: "operational" },
+  RENEWAL_CYCLE_STARTED:           { label: "بدء دورة تجديد",            tier: "key" },
+  RENEWAL_DUE_SOON:                { label: "تجديد قريب",                tier: "key" },
+
+  // ── Risk & governance ────────────────────────────────────────────────
+  EXCEPTION_OPENED:                { label: "فتح تصعيد",                 tier: "key" },
+  EXCEPTION_RESOLVED:              { label: "حل تصعيد",                  tier: "key" },
+  ESCALATION_ACKNOWLEDGED:         { label: "تأكيد استلام تصعيد",         tier: "operational" },
+  GOVERNANCE_VIOLATION_RESOLVED:   { label: "حل مخالفة حوكمة",           tier: "key" },
+  SLA_BREACHED:                    { label: "انتهاك SLA",                tier: "key" },
+  TASK_OVERDUE_DETECTED:           { label: "مهمة متأخرة",               tier: "operational" },
+  TASK_HELD:                       { label: "مهمة مُعلَّقة",                tier: "operational" },
+
+  // ── Tasks ────────────────────────────────────────────────────────────
+  TASK_CREATED:                    { label: "مهمة جديدة",                tier: "operational" },
+  TASK_STATUS_CHANGED:             { label: "تغيير حالة مهمة",            tier: "operational" },
+  TASK_COMMENT_ADDED:              { label: "تعليق جديد",                tier: "operational" },
+  TASK_FOLLOWER_ADDED:             { label: "متابع جديد",                tier: "noise" },
+  TASK_FOLLOWER_REMOVED:           { label: "إزالة متابع",                tier: "noise" },
+
+  // ── HR / org ─────────────────────────────────────────────────────────
+  EMPLOYEE_INVITED:                { label: "دعوة موظف جديد",            tier: "key" },
+  ORG_HEAD_ASSIGNED:               { label: "تعيين رئيس قسم",             tier: "operational" },
+  ORG_POSITION_SET:                { label: "تحديث موقع تنظيمي",         tier: "noise" },
+  ORG_TEAM_LEAD_ADDED:             { label: "تعيين قائد فريق",            tier: "operational" },
+  ORG_TEAM_LEAD_REMOVED:           { label: "إزالة قائد فريق",            tier: "noise" },
+
+  // ── System ───────────────────────────────────────────────────────────
+  WEEKLY_DIGEST_READY:             { label: "تقرير أسبوعي جاهز",          tier: "operational" },
+
+  // ── Pure noise ───────────────────────────────────────────────────────
+  MENTION_CREATED:                 { label: "إشارة لموظف",                tier: "noise" },
+  NOTIFICATION_CREATED:            { label: "تنبيه جديد",                 tier: "noise" },
+  FEATURE_FLAG_TOGGLED:            { label: "تبديل ميزة",                  tier: "noise" },
+  FEATURE_FLAG_ROLES_CHANGED:      { label: "تعديل أدوار ميزة",            tier: "noise" },
 };
+
+// Backward-compat label-only export for places that just need the Arabic name.
+export const AI_EVENT_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(AI_EVENT_META).map(([k, v]) => [k, v.label]),
+);
 
 export const ROLE_LABELS: Record<string, string> = {
   owner: "المالك",

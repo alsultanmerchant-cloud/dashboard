@@ -2,7 +2,8 @@ import Link from "next/link";
 import {
   CheckCircle2, AlertTriangle, Sparkles,
   ArrowUpLeft, Clock, RefreshCw, ShieldAlert, FileSignature, Wallet,
-  Activity, Timer, ListChecks, TrendingUp,
+  Activity, Timer, ListChecks, TrendingUp, Users, Send,
+  Briefcase, Target, ShieldCheck,
 } from "lucide-react";
 import { countRenewalsThisMonth } from "@/lib/data/renewals";
 import { getCeoCommercialTiles } from "@/lib/data/contracts";
@@ -24,8 +25,40 @@ import {
   HandoverStatusBadge, UrgencyBadge, PriorityBadge,
 } from "@/components/status-badges";
 import { formatArabicShortDate, relativeTimeAr } from "@/lib/utils-format";
-import { AI_EVENT_LABELS } from "@/lib/labels";
+import { AI_EVENT_META } from "@/lib/labels";
+import { TaskStageBadge } from "@/components/status-badges";
 import { cn } from "@/lib/utils";
+
+// Pick an icon by event-type prefix so the feed reads at a glance.
+function eventIcon(eventType: string) {
+  if (eventType.startsWith("HANDOVER")) return Send;
+  if (eventType.startsWith("CLIENT")) return Users;
+  if (eventType.startsWith("PROJECT")) return Briefcase;
+  if (eventType.startsWith("CONTRACT") || eventType.startsWith("RENEWAL")) return FileSignature;
+  if (eventType.startsWith("EXCEPTION") || eventType.startsWith("ESCALATION")) return ShieldAlert;
+  if (eventType.startsWith("GOVERNANCE")) return ShieldCheck;
+  if (eventType.startsWith("SLA") || eventType.startsWith("TASK_OVERDUE")) return AlertTriangle;
+  if (eventType.startsWith("EMPLOYEE") || eventType.startsWith("ORG")) return Users;
+  if (eventType.startsWith("WEEKLY_DIGEST")) return ListChecks;
+  if (eventType.startsWith("TASK")) return Target;
+  return Activity;
+}
+
+// A short Arabic context line per event type group, replacing the cryptic
+// raw "entity_type" we were rendering before ("task" / "notification").
+function eventContext(eventType: string): string {
+  if (eventType.startsWith("HANDOVER")) return "المبيعات";
+  if (eventType.startsWith("CLIENT")) return "العملاء";
+  if (eventType.startsWith("PROJECT")) return "المشاريع";
+  if (eventType.startsWith("CONTRACT") || eventType.startsWith("RENEWAL")) return "العقود";
+  if (eventType.startsWith("EXCEPTION") || eventType.startsWith("ESCALATION")) return "التصعيدات";
+  if (eventType.startsWith("GOVERNANCE")) return "الحوكمة";
+  if (eventType.startsWith("SLA")) return "خرق SLA";
+  if (eventType.startsWith("EMPLOYEE") || eventType.startsWith("ORG")) return "الموظفون";
+  if (eventType.startsWith("WEEKLY_DIGEST")) return "النظام";
+  if (eventType.startsWith("TASK")) return "المهام";
+  return "النظام";
+}
 
 const sar = (n: number) =>
   new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
@@ -53,7 +86,7 @@ export default async function DashboardPage() {
       total: 0,
     })),
     getRecentHandovers(session.orgId, 4),
-    getActivityFeed(session.orgId, 8),
+    getActivityFeed(session.orgId, 30),
     countRenewalsThisMonth(session.orgId),
     supabaseAdmin
       .from("exceptions")
@@ -265,31 +298,53 @@ export default async function DashboardPage() {
             />
           ) : (
             <div className="space-y-2">
-              {odooMetrics.overdueTasks.map((t) => (
-                <Card key={t.odooId} className="border-cc-red/20">
-                  <CardContent className="p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          href={`/tasks/odoo/${t.odooId}`}
-                          className="text-sm font-medium hover:text-cyan transition-colors line-clamp-1"
-                        >
-                          {t.name}
-                        </Link>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
-                          {t.projectName ?? "—"}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <PriorityBadge priority={t.priority} />
-                        <span className="text-[10px] text-cc-red tabular-nums" dir="ltr">
-                          {formatArabicShortDate(t.deadline)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+              {odooMetrics.overdueTasks.map((t) => {
+                const daysLate = t.deadline
+                  ? Math.floor((Date.now() - new Date(t.deadline).getTime()) / 86400000)
+                  : 0;
+                return (
+                  <Link
+                    key={t.odooId}
+                    href={`/tasks/odoo/${t.odooId}`}
+                    className="group block"
+                  >
+                    <Card className="border-cc-red/30 transition-colors group-hover:border-cc-red/60 group-hover:bg-cc-red/[0.03]">
+                      <CardContent className="p-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            {/* Title */}
+                            <p className="text-sm font-medium line-clamp-1 group-hover:text-cyan transition-colors">
+                              {t.name}
+                            </p>
+                            {/* Project */}
+                            <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
+                              {t.projectName ?? "—"}
+                            </p>
+                            {/* Stage + assignee count + priority chips */}
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <TaskStageBadge stage={t.stage} />
+                              <PriorityBadge priority={t.priority} />
+                              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                                <Users className="size-3" />
+                                {t.assigneeIds.length}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Days-late hero */}
+                          <div className="flex flex-col items-center justify-center rounded-lg bg-cc-red/15 px-3 py-2 shrink-0 min-w-[60px]">
+                            <span className="text-2xl font-bold tabular-nums leading-none text-cc-red">
+                              {daysLate}
+                            </span>
+                            <span className="text-[9px] uppercase tracking-wider text-cc-red/80 mt-1">
+                              يوم تأخير
+                            </span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </div>
@@ -348,57 +403,96 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Activity feed — the chronological record of system events */}
-      <SectionTitle
-        title="نشاط الفريق"
-        description="مجمَّع من الأحداث الذكية المسجَّلة"
-        actions={
-          <Link href="/ai-insights" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
-            <Sparkles className="size-3" />
-            الرؤى الذكية
-          </Link>
-        }
-      />
-      {activity.length === 0 ? (
-        <EmptyState
-          variant="compact"
-          title="لا يوجد نشاط بعد"
-          description="مع بدء استخدام النظام ستتراكم الأحداث هنا."
-        />
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <ul className="divide-y divide-white/[0.04]">
-              {activity.map((a) => {
-                const label = AI_EVENT_LABELS[a.event_type] ?? a.event_type;
-                const isHigh = a.importance === "high" || a.importance === "critical";
-                return (
-                  <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={cn(
-                        "flex size-8 items-center justify-center rounded-lg shrink-0",
-                        isHigh ? "bg-cc-red/15 text-cc-red" : "bg-cyan-dim text-cyan",
-                      )}>
-                        <Sparkles className="size-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{label}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {a.entity_type ?? "—"}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground shrink-0 inline-flex items-center gap-1">
-                      <Clock className="size-3" />
-                      {relativeTimeAr(a.created_at)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      {/* Latest important events — filtered to business-relevant signals.
+          The "noise" tier (FEATURE_FLAG_*, NOTIFICATION_CREATED, etc.)
+          is hidden so the owner sees actionable activity, not log spam. */}
+      {(() => {
+        const filtered = activity
+          .filter((a) => {
+            const meta = AI_EVENT_META[a.event_type];
+            return !meta || meta.tier !== "noise";
+          })
+          .slice(0, 8);
+
+        return (
+          <>
+            <SectionTitle
+              title="آخر الأحداث المهمة"
+              description={
+                filtered.length > 0
+                  ? "تسليمات، عقود، تصعيدات، وقرارات — مفلترة لتُظهر ما يحتاج انتباهك"
+                  : "ستظهر هنا التسليمات والعقود والتصعيدات والقرارات المؤثّرة"
+              }
+              actions={
+                <Link href="/ai-insights" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
+                  <Sparkles className="size-3" />
+                  كل الأحداث
+                </Link>
+              }
+            />
+            {filtered.length === 0 ? (
+              <EmptyState
+                variant="compact"
+                icon={<Activity className="size-6" />}
+                title="لا أحداث مهمّة الآن"
+                description="مع تسجيل أوّل تسليم أو عقد أو تصعيد ستظهر هنا."
+              />
+            ) : (
+              <Card>
+                <CardContent className="p-0">
+                  <ul className="divide-y divide-white/[0.04]">
+                    {filtered.map((a) => {
+                      const meta = AI_EVENT_META[a.event_type];
+                      const label = meta?.label ?? a.event_type;
+                      const isKey = meta?.tier === "key";
+                      const isHigh = a.importance === "high" || a.importance === "critical";
+                      const accent = isHigh
+                        ? "bg-cc-red/15 text-cc-red"
+                        : isKey
+                          ? "bg-cyan-dim text-cyan"
+                          : "bg-white/[0.04] text-muted-foreground";
+                      const Icon = eventIcon(a.event_type);
+                      return (
+                        <li
+                          key={a.id}
+                          className="flex items-center justify-between gap-3 px-4 py-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className={cn(
+                                "flex size-9 items-center justify-center rounded-lg shrink-0",
+                                accent,
+                              )}
+                            >
+                              <Icon className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{label}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {eventContext(a.event_type)}
+                                {isHigh && (
+                                  <>
+                                    {" · "}
+                                    <span className="text-cc-red">عالي الأهمية</span>
+                                  </>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[11px] text-muted-foreground shrink-0 inline-flex items-center gap-1">
+                            <Clock className="size-3" />
+                            {relativeTimeAr(a.created_at)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }
