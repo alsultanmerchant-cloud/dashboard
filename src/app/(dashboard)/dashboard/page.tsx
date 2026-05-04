@@ -5,17 +5,16 @@ import {
   Activity, Timer, ListChecks, TrendingUp,
 } from "lucide-react";
 import { countRenewalsThisMonth } from "@/lib/data/renewals";
-import { countOpenViolations } from "@/lib/data/governance";
 import { getCeoCommercialTiles } from "@/lib/data/contracts";
-import {
-  countReworkThisWeek, getOnTimePct, countClosedThisWeek, countReviewBacklog,
-} from "@/lib/data/reports";
 import { requireSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
 import {
-  getDashboardStats, getRecentHandovers, getOverdueTasks, getActivityFeed,
+  getRecentHandovers, getActivityFeed,
 } from "@/lib/data/dashboard";
+import {
+  getDashboardOdooMetrics, getOdooGovernanceViolations,
+} from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
@@ -37,13 +36,23 @@ const sar = (n: number) =>
 export default async function DashboardPage() {
   const session = await requireSession();
   const [
-    stats, handovers, overdue, activity, renewalsThisMonth,
-    openExceptionsRaw, openGovernanceCount, commercialTiles,
-    reworkThisWeek, onTime, closedThisWeek, reviewBacklog,
+    odooMetrics, governance, handovers, activity, renewalsThisMonth,
+    openExceptionsRaw, commercialTiles,
   ] = await Promise.all([
-    getDashboardStats(session.orgId, session.userId),
+    getDashboardOdooMetrics().catch(() => ({
+      overdueCount: 0, reworkCount: 0, reviewBacklog: 0, closedThisWeek: 0,
+      onTimePct: null, onTimeSample: 0, onTimeHits: 0,
+      overdueTasks: [], totalProjects: 0, totalActiveProjects: 0, totalClients: 0,
+    })),
+    getOdooGovernanceViolations().catch(() => ({
+      violations: [],
+      countsByKind: {
+        unowned_task: 0, missing_deadline: 0,
+        stuck_in_review: 0, overdue_no_progress: 0,
+      },
+      total: 0,
+    })),
     getRecentHandovers(session.orgId, 4),
-    getOverdueTasks(session.orgId, 5),
     getActivityFeed(session.orgId, 8),
     countRenewalsThisMonth(session.orgId),
     supabaseAdmin
@@ -51,16 +60,12 @@ export default async function DashboardPage() {
       .select("kind")
       .eq("organization_id", session.orgId)
       .is("resolved_at", null),
-    countOpenViolations(session.orgId),
     getCeoCommercialTiles(session.orgId).catch(() => ({
       month: "", byType: {} as Record<string, { count: number; value: number }>,
       totalCount: 0, totalValue: 0,
     })),
-    countReworkThisWeek(session.orgId).catch(() => 0),
-    getOnTimePct(session.orgId, 30).catch(() => ({ pct: null, sample: 0, onTime: 0 })),
-    countClosedThisWeek(session.orgId).catch(() => 0),
-    countReviewBacklog(session.orgId).catch(() => 0),
   ]);
+  const openGovernanceCount = governance.total;
 
   const openExceptions = openExceptionsRaw.data ?? [];
   const exceptionsByKind: Record<string, number> = {
@@ -90,10 +95,10 @@ export default async function DashboardPage() {
         />
         <MetricCard
           label="مهام متأخرة"
-          value={stats.overdueTasks}
-          hint={stats.overdueTasks > 0 ? "تحتاج متابعة عاجلة" : "لا تأخيرات"}
+          value={odooMetrics.overdueCount}
+          hint={odooMetrics.overdueCount > 0 ? "تحتاج متابعة عاجلة" : "لا تأخيرات"}
           icon={<AlertTriangle className="size-5" />}
-          tone={stats.overdueTasks > 0 ? "destructive" : "default"}
+          tone={odooMetrics.overdueCount > 0 ? "destructive" : "default"}
           href="/tasks?filter=overdue"
         />
         <MetricCard
@@ -117,36 +122,42 @@ export default async function DashboardPage() {
       {/* T9 KPI tiles — operational pulse (rework / on-time / productivity / review backlog) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <MetricCard
-          label="إعادة عمل هذا الأسبوع"
-          value={reworkThisWeek}
-          hint={reworkThisWeek > 0 ? "تعليقات Client Changes" : "لا إعادة عمل"}
+          label="إعادة عمل (Client Changes)"
+          value={odooMetrics.reworkCount}
+          hint={odooMetrics.reworkCount > 0 ? "في مرحلة تعديلات العميل" : "لا إعادة عمل"}
           icon={<Activity className="size-5" />}
-          tone={reworkThisWeek > 0 ? "warning" : "default"}
-          href="/reports"
+          tone={odooMetrics.reworkCount > 0 ? "warning" : "default"}
+          href="/tasks"
         />
         <MetricCard
           label="التسليم في الموعد"
-          value={onTime.pct === null ? "—" : `${onTime.pct}%`}
-          hint={onTime.sample === 0 ? "لا عيّنة بعد" : `آخر 30 يومًا · ${onTime.sample}`}
+          value={odooMetrics.onTimePct === null ? "—" : `${odooMetrics.onTimePct}%`}
+          hint={odooMetrics.onTimeSample === 0 ? "لا عيّنة بعد" : `آخر 30 يومًا · ${odooMetrics.onTimeSample}`}
           icon={<Timer className="size-5" />}
-          tone={onTime.pct === null ? "default" : onTime.pct >= 85 ? "success" : onTime.pct >= 70 ? "warning" : "destructive"}
-          href="/reports"
+          tone={odooMetrics.onTimePct === null
+            ? "default"
+            : odooMetrics.onTimePct >= 85
+              ? "success"
+              : odooMetrics.onTimePct >= 70
+                ? "warning"
+                : "destructive"}
+          href="/tasks"
         />
         <MetricCard
           label="إنتاجية الأسبوع"
-          value={closedThisWeek}
+          value={odooMetrics.closedThisWeek}
           hint="مهام أُغلقت هذا الأسبوع"
           icon={<TrendingUp className="size-5" />}
-          tone={closedThisWeek > 0 ? "info" : "default"}
-          href="/reports"
+          tone={odooMetrics.closedThisWeek > 0 ? "info" : "default"}
+          href="/tasks"
         />
         <MetricCard
           label="عُلوق المراجعة"
-          value={reviewBacklog}
-          hint={reviewBacklog > 0 ? "أكثر من يومَي عمل" : "لا تأخّر"}
+          value={odooMetrics.reviewBacklog}
+          hint={odooMetrics.reviewBacklog > 0 ? "في انتظار مراجعة المدير/المتخصص" : "لا تأخّر"}
           icon={<ListChecks className="size-5" />}
-          tone={reviewBacklog > 0 ? "destructive" : "default"}
-          href="/reports"
+          tone={odooMetrics.reviewBacklog > 0 ? "destructive" : "default"}
+          href="/tasks"
         />
       </div>
 
@@ -235,8 +246,8 @@ export default async function DashboardPage() {
         <div>
           <SectionTitle
             title="مهام متأخرة"
-            description={overdue.length > 0
-              ? `${overdue.length} تجاوزت موعد التسليم`
+            description={odooMetrics.overdueCount > 0
+              ? `${odooMetrics.overdueCount} تجاوزت موعد التسليم`
               : "كل المهام في وقتها"}
             actions={
               <Link href="/tasks?filter=overdue" className="text-xs text-cyan hover:underline inline-flex items-center gap-1">
@@ -245,7 +256,7 @@ export default async function DashboardPage() {
               </Link>
             }
           />
-          {overdue.length === 0 ? (
+          {odooMetrics.overdueTasks.length === 0 ? (
             <EmptyState
               variant="compact"
               icon={<CheckCircle2 className="size-6" />}
@@ -254,31 +265,31 @@ export default async function DashboardPage() {
             />
           ) : (
             <div className="space-y-2">
-              {overdue.map((t) => {
-                const project = Array.isArray(t.project) ? t.project[0] : t.project;
-                return (
-                  <Card key={t.id} className="border-cc-red/20">
-                    <CardContent className="p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <Link href={`/tasks/${t.id}`} className="text-sm font-medium hover:text-cyan transition-colors line-clamp-1">
-                            {t.title}
-                          </Link>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
-                            {project?.name ?? "—"}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <PriorityBadge priority={t.priority} />
-                          <span className="text-[10px] text-cc-red tabular-nums" dir="ltr">
-                            {formatArabicShortDate(t.due_date)}
-                          </span>
-                        </div>
+              {odooMetrics.overdueTasks.map((t) => (
+                <Card key={t.odooId} className="border-cc-red/20">
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={`/tasks/odoo/${t.odooId}`}
+                          className="text-sm font-medium hover:text-cyan transition-colors line-clamp-1"
+                        >
+                          {t.name}
+                        </Link>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
+                          {t.projectName ?? "—"}
+                        </p>
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <PriorityBadge priority={t.priority} />
+                        <span className="text-[10px] text-cc-red tabular-nums" dir="ltr">
+                          {formatArabicShortDate(t.deadline)}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
         </div>

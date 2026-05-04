@@ -1,16 +1,14 @@
 import Link from "next/link";
 import { ListTodo, ChevronLeft } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listTasks } from "@/lib/data/tasks";
+import { listLiveTasks } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { TaskStageBadge, PriorityBadge, ServiceBadge } from "@/components/status-badges";
-import { Button } from "@/components/ui/button";
+import { TaskStageBadge, PriorityBadge } from "@/components/status-badges";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
-import { copy } from "@/lib/copy";
 import { isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +18,6 @@ const OPEN_STAGES = [
 ] as const;
 
 const STAGE_FILTERS = [
-  { key: "mine", label: "مهامي" },
   { key: "all", label: "كل المهام" },
   { key: "open", label: "مفتوحة", stages: OPEN_STAGES },
   { key: "overdue", label: "متأخرة" },
@@ -30,28 +27,24 @@ const STAGE_FILTERS = [
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; odooProjectId?: string }>;
 }) {
-  const session = await requirePagePermission("tasks.view");
+  await requirePagePermission("tasks.view");
   const sp = await searchParams;
-  // Agents/team_leads land here via landingPathFor with no filter →
-  // default to "mine" if the caller has an employee profile, else "open".
-  const requested = sp.filter as (typeof STAGE_FILTERS)[number]["key"] | undefined;
-  const filter: (typeof STAGE_FILTERS)[number]["key"] =
-    requested ?? (session.employeeId ? "mine" : "open");
-
+  const filter = (sp.filter as (typeof STAGE_FILTERS)[number]["key"]) ?? "open";
   const filterDef = STAGE_FILTERS.find((f) => f.key === filter) ?? STAGE_FILTERS[0];
-  const tasks = await listTasks(session.orgId, {
+
+  const tasks = await listLiveTasks({
     stage: "stages" in filterDef ? [...filterDef.stages!] : undefined,
     overdue: filter === "overdue",
-    assignedToEmployeeId: filter === "mine" ? session.employeeId : undefined,
+    projectOdooId: sp.odooProjectId ? Number(sp.odooProjectId) : undefined,
   });
 
   return (
     <div>
       <PageHeader
         title="المهام"
-        description="كل مهام الفرق مع حالات الإنجاز والأولوية والإسناد. انقر على المهمة لفتح التفاصيل والتعليقات."
+        description="مهام الفرق مع حالات الإنجاز والأولوية — مباشرة من Odoo."
       />
 
       {/* Filter chips */}
@@ -78,8 +71,8 @@ export default async function TasksPage({
       {tasks.length === 0 ? (
         <EmptyState
           icon={<ListTodo className="size-6" />}
-          title={copy.empty.tasks.title}
-          description={copy.empty.tasks.description}
+          title="لا توجد مهام"
+          description="لا توجد مهام تطابق هذا الفلتر حالياً."
         />
       ) : (
         <DataTableShell>
@@ -88,7 +81,6 @@ export default async function TasksPage({
               <tr>
                 <DataTableHeaderCell>المهمة</DataTableHeaderCell>
                 <DataTableHeaderCell>المشروع</DataTableHeaderCell>
-                <DataTableHeaderCell>الخدمة</DataTableHeaderCell>
                 <DataTableHeaderCell>المرحلة</DataTableHeaderCell>
                 <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
                 <DataTableHeaderCell>الموعد النهائي</DataTableHeaderCell>
@@ -97,39 +89,41 @@ export default async function TasksPage({
             </DataTableHead>
             <tbody>
               {tasks.map((t) => {
-                const project = Array.isArray(t.project) ? t.project[0] : t.project;
-                const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
-                const service = Array.isArray(t.service) ? t.service[0] : t.service;
-                const deadline = t.planned_date ?? t.due_date;
-                const overdue = isOverdue(deadline) && t.stage !== "done";
-                const delayDays = deadline && t.stage !== "done"
-                  ? Math.floor((Date.now() - new Date(deadline).getTime()) / 86400000)
+                const overdue = isOverdue(t.deadline) && t.stage !== "done";
+                const delayDays = t.deadline && t.stage !== "done"
+                  ? Math.floor((Date.now() - new Date(t.deadline).getTime()) / 86400000)
                   : null;
                 return (
-                  <DataTableRow key={t.id}>
+                  <DataTableRow key={t.odooId}>
                     <DataTableCell className="font-medium">
-                      <Link href={`/tasks/${t.id}`} className="hover:text-cyan transition-colors">
-                        {t.title}
+                      <Link href={`/tasks/odoo/${t.odooId}`} className="hover:text-cyan transition-colors">
+                        {t.name}
                       </Link>
                     </DataTableCell>
-                    <DataTableCell className="text-xs">
-                      <div className="text-foreground">{project?.name ?? "—"}</div>
-                      {client?.name && <div className="text-muted-foreground">{client.name}</div>}
+                    <DataTableCell className="text-xs text-muted-foreground">
+                      {t.projectName ?? "—"}
                     </DataTableCell>
                     <DataTableCell>
-                      {service ? <ServiceBadge slug={service.slug} name={service.name} /> : <span className="text-xs text-muted-foreground">—</span>}
+                      <TaskStageBadge stage={t.stage} />
                     </DataTableCell>
-                    <DataTableCell><TaskStageBadge stage={t.stage} /></DataTableCell>
-                    <DataTableCell><PriorityBadge priority={t.priority} /></DataTableCell>
-                    <DataTableCell className={cn("text-xs tabular-nums", overdue ? "text-cc-red font-medium" : "text-muted-foreground")} dir="ltr">
-                      <div>{deadline ?? "—"}</div>
+                    <DataTableCell>
+                      <PriorityBadge priority={t.priority} />
+                    </DataTableCell>
+                    <DataTableCell
+                      className={cn(
+                        "text-xs tabular-nums",
+                        overdue ? "text-cc-red font-medium" : "text-muted-foreground",
+                      )}
+                      dir="ltr"
+                    >
+                      <div>{t.deadline ?? "—"}</div>
                       {delayDays != null && delayDays > 0 && (
                         <div className="text-[10px] text-cc-red">+{delayDays}d</div>
                       )}
                     </DataTableCell>
                     <DataTableCell>
                       <Link
-                        href={`/tasks/${t.id}`}
+                        href={`/tasks/odoo/${t.odooId}`}
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
                         aria-label="فتح"
                       >

@@ -1,76 +1,57 @@
 import Link from "next/link";
-import { ShieldCheck, Briefcase, FileWarning, UserX, Workflow, Lock } from "lucide-react";
-import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import {
+  ShieldCheck, Briefcase, FileWarning, UserX, Clock, AlertTriangle,
+} from "lucide-react";
+import { requirePagePermission } from "@/lib/auth-server";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatArabicDateTime } from "@/lib/utils-format";
 import {
-  getOpenViolations,
-  getOpenViolationCounts,
-  GOVERNANCE_KIND_LABELS_AR,
-  type GovernanceViolationKind,
-  type GovernanceViolationRow,
-} from "@/lib/data/governance";
-import { ResolveViolationInline } from "./resolve-violation-inline";
+  getOdooGovernanceViolations,
+  ODOO_GOVERNANCE_KIND_LABELS,
+  type OdooGovernanceKind,
+} from "@/lib/odoo/live";
 
 export const dynamic = "force-dynamic";
 
-const KIND_ICON: Record<GovernanceViolationKind, React.ReactNode> = {
-  missing_log_note: <FileWarning className="size-5" />,
+const KIND_ICON: Record<OdooGovernanceKind, React.ReactNode> = {
   unowned_task: <UserX className="size-5" />,
-  stage_jump: <Workflow className="size-5" />,
-  permission_breach: <Lock className="size-5" />,
+  missing_deadline: <FileWarning className="size-5" />,
+  stuck_in_review: <Clock className="size-5" />,
+  overdue_no_progress: <AlertTriangle className="size-5" />,
+};
+
+const KIND_TONE: Record<OdooGovernanceKind, "warning" | "destructive" | "default"> = {
+  unowned_task: "destructive",
+  missing_deadline: "warning",
+  stuck_in_review: "destructive",
+  overdue_no_progress: "destructive",
 };
 
 export default async function GovernancePage() {
-  const session = await requirePagePermission("governance.view");
-  const [violations, counts] = await Promise.all([
-    getOpenViolations(session.orgId),
-    getOpenViolationCounts(session.orgId),
-  ]);
-  const canResolve = hasPermission(session, "governance.resolve");
-
-  const total =
-    counts.missing_log_note +
-    counts.unowned_task +
-    counts.stage_jump +
-    counts.permission_breach;
+  await requirePagePermission("governance.view");
+  const result = await getOdooGovernanceViolations();
+  const { violations, countsByKind, total } = result;
 
   return (
     <div>
       <PageHeader
         title="مخالفات الحوكمة"
-        description="قواعد الحوكمة الخمس (مواصفات المالك §10): مهام بلا منفّذ، ملاحظات مفقودة، قفز مراحل، اختراق صلاحيات. كل المخالفات المفتوحة هنا."
+        description="قواعد الحوكمة محسوبة مباشرة من Odoo: مهام بلا منفّذ، بدون موعد نهائي، عالقة في المراجعة، أو متأخّرة ولم تُبدأ."
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-        <MetricCard
-          label={GOVERNANCE_KIND_LABELS_AR.missing_log_note}
-          value={counts.missing_log_note}
-          icon={KIND_ICON.missing_log_note}
-          tone={counts.missing_log_note > 0 ? "warning" : "default"}
-        />
-        <MetricCard
-          label={GOVERNANCE_KIND_LABELS_AR.unowned_task}
-          value={counts.unowned_task}
-          icon={KIND_ICON.unowned_task}
-          tone={counts.unowned_task > 0 ? "destructive" : "default"}
-        />
-        <MetricCard
-          label={GOVERNANCE_KIND_LABELS_AR.stage_jump}
-          value={counts.stage_jump}
-          icon={KIND_ICON.stage_jump}
-          tone={counts.stage_jump > 0 ? "warning" : "default"}
-        />
-        <MetricCard
-          label={GOVERNANCE_KIND_LABELS_AR.permission_breach}
-          value={counts.permission_breach}
-          icon={KIND_ICON.permission_breach}
-          tone={counts.permission_breach > 0 ? "destructive" : "default"}
-        />
+        {(Object.keys(ODOO_GOVERNANCE_KIND_LABELS) as OdooGovernanceKind[]).map((k) => (
+          <MetricCard
+            key={k}
+            label={ODOO_GOVERNANCE_KIND_LABELS[k]}
+            value={countsByKind[k]}
+            icon={KIND_ICON[k]}
+            tone={countsByKind[k] > 0 ? KIND_TONE[k] : "default"}
+          />
+        ))}
       </div>
 
       <section>
@@ -79,62 +60,52 @@ export default async function GovernancePage() {
           <EmptyState
             icon={<ShieldCheck className="size-6" />}
             title="لا توجد مخالفات مفتوحة"
-            description="كل قواعد الحوكمة الخمس مُلتزَم بها في الوقت الراهن."
+            description="كل قواعد الحوكمة مُلتزَم بها في الوقت الراهن."
           />
         ) : (
           <div className="space-y-2">
-            {violations.map((row: GovernanceViolationRow) => {
-              const task = Array.isArray(row.task) ? row.task[0] : row.task;
-              const project = Array.isArray(row.project) ? row.project[0] : row.project;
-              const kindLabel =
-                GOVERNANCE_KIND_LABELS_AR[row.kind] ?? row.kind;
-              return (
-                <Card key={row.id} className="border-cc-red/30">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <Badge variant="destructive" className="text-[10px]">
-                            {kindLabel}
-                          </Badge>
-                          {task && (
-                            <Link
-                              href={`/tasks/${task.id}`}
-                              className="text-sm font-semibold hover:text-cyan inline-flex items-center gap-1"
-                            >
-                              <Briefcase className="size-3.5" />
-                              {task.title}
-                            </Link>
-                          )}
-                          {project && (
-                            <Link
-                              href={`/projects/${project.id}`}
-                              className="text-[11px] text-muted-foreground hover:text-cyan"
-                            >
-                              · {project.name}
-                            </Link>
-                          )}
-                        </div>
-                        {row.note && (
-                          <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                            {row.note}
-                          </p>
+            {violations.map((row, i) => (
+              <Card key={`${row.kind}-${row.taskOdooId}-${i}`} className="border-cc-red/30">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <Badge variant="destructive" className="text-[10px]">
+                          {ODOO_GOVERNANCE_KIND_LABELS[row.kind]}
+                        </Badge>
+                        <Link
+                          href={`/tasks/odoo/${row.taskOdooId}`}
+                          className="text-sm font-semibold hover:text-cyan inline-flex items-center gap-1"
+                        >
+                          <Briefcase className="size-3.5" />
+                          {row.taskName}
+                        </Link>
+                        {row.projectId && row.projectName && (
+                          <Link
+                            href={`/projects/odoo/${row.projectId}`}
+                            className="text-[11px] text-muted-foreground hover:text-cyan"
+                          >
+                            · {row.projectName}
+                          </Link>
                         )}
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          رُصدت: {formatArabicDateTime(row.detected_at)}
-                        </p>
                       </div>
-                      {canResolve && (
-                        <ResolveViolationInline violationId={row.id} />
-                      )}
+                      <p className="text-[11px] text-muted-foreground" dir="ltr">
+                        {row.deadline
+                          ? `Deadline: ${row.deadline}`
+                          : "No deadline set"}
+                      </p>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
       </section>
+
+      <div className="mt-8 rounded-2xl border border-cyan/20 bg-cyan-dim/20 p-4 text-xs text-foreground/90 leading-relaxed">
+        المخالفات تُحسب لحظياً من Odoo عند كل فتح للصفحة — لا حاجة لزر &quot;حلّ&quot;. لإغلاق مخالفة، عدّل المهمة في Odoo (أضف منفّذًا، ضع موعدًا، حرّكها للمرحلة التالية).
+      </div>
     </div>
   );
 }

@@ -1,77 +1,71 @@
 import Link from "next/link";
-import { Briefcase, ChevronLeft, PauseCircle, RefreshCw } from "lucide-react";
-import { daysUntilRenewal } from "@/lib/data/renewals";
+import { Briefcase, ChevronLeft, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listProjects } from "@/lib/data/projects";
-import { listClients } from "@/lib/data/clients";
-import { listAccountManagers, listServices } from "@/lib/data/employees";
+import { listLiveProjects } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import {
-  ProjectStatusBadge, PriorityBadge, ServiceBadge,
-} from "@/components/status-badges";
-import { Button } from "@/components/ui/button";
+import { MetricCard } from "@/components/metric-card";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
 import { formatArabicShortDate } from "@/lib/utils-format";
-import { copy } from "@/lib/copy";
-import { NewProjectDialog } from "./new-project-dialog";
 
 export default async function ProjectsPage() {
-  const session = await requirePagePermission("projects.view");
-  const [projects, clients, services, ams] = await Promise.all([
-    listProjects(session.orgId),
-    listClients(session.orgId),
-    listServices(session.orgId),
-    listAccountManagers(session.orgId),
-  ]);
+  await requirePagePermission("projects.view");
+  const projects = await listLiveProjects();
 
-  const clientOptions = clients.map((c) => ({ id: c.id, label: c.name }));
-  const amOptions = ams.map((a) => ({ id: a.id, label: a.full_name + (a.job_title ? ` — ${a.job_title}` : "") }));
-
-  const newProjectButton = (
-    <div className="flex items-center gap-2">
-      <Link
-        href="/projects/new"
-        className="inline-flex h-9 items-center justify-center rounded-lg border border-cyan/40 bg-cyan-dim px-3 text-sm font-medium text-cyan hover:bg-cyan-dim/80 transition-colors"
-      >
-        مشروع جديد بمعاينة المهام
-      </Link>
-      <NewProjectDialog
-        clients={clientOptions}
-        services={services}
-        accountManagers={amOptions}
-      />
-    </div>
-  );
+  // Aggregate analytics across all projects
+  const totalTasks = projects.reduce((sum, p) => sum + p.taskCount, 0);
+  const projectsWithManager = projects.filter((p) => p.managerName).length;
+  const avgTasksPerProject = projects.length
+    ? Math.round(totalTasks / projects.length)
+    : 0;
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="المشاريع"
-        description="كل مشاريع الوكالة، الخدمات المقدمة، فريق التنفيذ، والمهام المرتبطة."
-        actions={newProjectButton}
+        description="كل مشاريع الوكالة، العملاء، فريق التنفيذ، وعدد المهام — مباشرة من Odoo."
       />
+
+      {/* Analytics overview */}
+      {projects.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="إجمالي المشاريع"
+            value={projects.length}
+            icon={<Briefcase className="size-5" />}
+            tone="default"
+          />
+          <MetricCard
+            label="إجمالي المهام"
+            value={totalTasks}
+            icon={<ListTodo className="size-5" />}
+            tone="info"
+          />
+          <MetricCard
+            label="متوسط المهام"
+            value={avgTasksPerProject}
+            hint="لكل مشروع"
+            icon={<CheckCircle2 className="size-5" />}
+            tone="success"
+          />
+          <MetricCard
+            label="مشاريع بمدير"
+            value={projectsWithManager}
+            hint={`${projects.length - projectsWithManager} بدون مدير`}
+            icon={<AlertTriangle className="size-5" />}
+            tone={projectsWithManager === projects.length ? "success" : "warning"}
+          />
+        </div>
+      )}
 
       {projects.length === 0 ? (
         <EmptyState
           icon={<Briefcase className="size-6" />}
-          title={copy.empty.projects.title}
-          description={
-            clients.length === 0
-              ? "أنشئ عميلًا أولًا، ثم تستطيع إنشاء أول مشروع."
-              : copy.empty.projects.description
-          }
-          action={clients.length > 0 ? newProjectButton : (
-            <Link
-              href="/clients"
-              className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              الذهاب إلى العملاء
-            </Link>
-          )}
+          title="لا توجد مشاريع"
+          description="لا توجد مشاريع نشطة في Odoo حالياً."
         />
       ) : (
         <DataTableShell>
@@ -80,83 +74,53 @@ export default async function ProjectsPage() {
               <tr>
                 <DataTableHeaderCell>المشروع</DataTableHeaderCell>
                 <DataTableHeaderCell>العميل</DataTableHeaderCell>
-                <DataTableHeaderCell>الخدمات</DataTableHeaderCell>
-                <DataTableHeaderCell>الحالة</DataTableHeaderCell>
-                <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
+                <DataTableHeaderCell>مدير المشروع</DataTableHeaderCell>
                 <DataTableHeaderCell>المهام</DataTableHeaderCell>
-                <DataTableHeaderCell>المسؤول</DataTableHeaderCell>
-                <DataTableHeaderCell>البدء</DataTableHeaderCell>
+                <DataTableHeaderCell>تاريخ البدء</DataTableHeaderCell>
                 <DataTableHeaderCell aria-label="إجراءات" />
               </tr>
             </DataTableHead>
             <tbody>
-              {projects.map((p) => {
-                const client = Array.isArray(p.client) ? p.client[0] : p.client;
-                const am = Array.isArray(p.account_manager) ? p.account_manager[0] : p.account_manager;
-                const taskCount = Array.isArray(p.tasks) ? p.tasks[0]?.count ?? 0 : 0;
-                return (
-                  <DataTableRow key={p.id}>
-                    <DataTableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Link href={`/projects/${p.id}`} className="hover:text-cyan transition-colors">
-                          {p.name}
-                        </Link>
-                        {(() => {
-                          const d = daysUntilRenewal(
-                            (p as { next_renewal_date?: string | null }).next_renewal_date ?? null,
-                          );
-                          if (d === null || d < 0 || d > 14) return null;
-                          return (
-                            <span
-                              title="موعد التجديد قريب"
-                              className="inline-flex items-center gap-1 rounded-full border border-amber/40 bg-amber-dim px-2 py-0.5 text-[10px] font-semibold text-amber"
-                            >
-                              <RefreshCw className="size-3" />
-                              تجديد خلال {d} يوم
-                            </span>
-                          );
-                        })()}
-                        {p.held_at && (
-                          // HOLD ribbon — keys off held_at (per dispatch T3).
-                          // Reason surfaces on hover via the title attribute,
-                          // matching the PDF's "HOLD overlay" behavior.
-                          <span
-                            title={p.hold_reason ?? "المشروع موقوف"}
-                            className="inline-flex items-center gap-1 rounded-full border border-cc-red/40 bg-cc-red/15 px-2 py-0.5 text-[10px] font-semibold text-cc-red"
-                          >
-                            <PauseCircle className="size-3" />
-                            موقوف
-                          </span>
-                        )}
-                      </div>
-                    </DataTableCell>
-                    <DataTableCell className="text-muted-foreground">{client?.name ?? "—"}</DataTableCell>
-                    <DataTableCell>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(p.project_services ?? []).map((ps, i) => {
-                          const s = Array.isArray(ps.service) ? ps.service[0] : ps.service;
-                          if (!s) return null;
-                          return <ServiceBadge key={i} slug={s.slug} name={s.name} />;
-                        })}
-                      </div>
-                    </DataTableCell>
-                    <DataTableCell><ProjectStatusBadge status={p.status} /></DataTableCell>
-                    <DataTableCell><PriorityBadge priority={p.priority} /></DataTableCell>
-                    <DataTableCell className="tabular-nums">{taskCount}</DataTableCell>
-                    <DataTableCell className="text-xs text-muted-foreground">{am?.full_name ?? "—"}</DataTableCell>
-                    <DataTableCell className="text-xs text-muted-foreground">{formatArabicShortDate(p.start_date)}</DataTableCell>
-                    <DataTableCell>
+              {projects.map((p) => (
+                <DataTableRow key={p.odooId}>
+                  <DataTableCell className="font-medium">
+                    <Link
+                      href={`/projects/odoo/${p.odooId}`}
+                      className="hover:text-cyan transition-colors"
+                    >
+                      {p.name}
+                    </Link>
+                  </DataTableCell>
+                  <DataTableCell className="text-muted-foreground">
+                    {p.clientId ? (
                       <Link
-                        href={`/projects/${p.id}`}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
-                        aria-label="فتح"
+                        href={`/clients/odoo/${p.clientId}`}
+                        className="hover:text-cyan transition-colors"
                       >
-                        <ChevronLeft className="size-3.5 icon-flip-rtl" />
+                        {p.clientName ?? "—"}
                       </Link>
-                    </DataTableCell>
-                  </DataTableRow>
-                );
-              })}
+                    ) : (
+                      "—"
+                    )}
+                  </DataTableCell>
+                  <DataTableCell className="text-xs text-muted-foreground">
+                    {p.managerName ?? "—"}
+                  </DataTableCell>
+                  <DataTableCell className="tabular-nums">{p.taskCount}</DataTableCell>
+                  <DataTableCell className="text-xs text-muted-foreground">
+                    {formatArabicShortDate(p.startDate)}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <Link
+                      href={`/projects/odoo/${p.odooId}`}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+                      aria-label="فتح"
+                    >
+                      <ChevronLeft className="size-3.5 icon-flip-rtl" />
+                    </Link>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
             </tbody>
           </DataTable>
         </DataTableShell>

@@ -9,14 +9,9 @@ import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { getReportsOdooData } from "@/lib/odoo/live";
 import {
-  getDepartmentSlaCompliance,
-  getReworkHeatmapByService,
-  getAgentLeaderboard,
-  getRenewalForecast90d,
-  getOnTimePct,
-  getReviewBacklog,
-  getLatestStoredDigest,
+  getRenewalForecast90d, getLatestStoredDigest,
 } from "@/lib/data/reports";
 import { SummarizeWeekButton } from "./summarize-week-button";
 
@@ -31,26 +26,23 @@ function pctTone(pct: number | null): "success" | "warning" | "destructive" | "d
 
 export default async function ReportsPage() {
   const session = await requirePagePermission("reports.view");
-  const [
-    sla, heatmap, leaderboard, renewals, onTime, backlog, latestDigest,
-  ] = await Promise.all([
-    getDepartmentSlaCompliance(session.orgId),
-    getReworkHeatmapByService(session.orgId),
-    getAgentLeaderboard(session.orgId, 4),
+  // Reports KPIs come live from Odoo — single round-trip aggregator.
+  // Renewals + weekly digest stay Supabase-native (those concepts don't
+  // exist in Odoo).
+  const [reports, renewals, latestDigest] = await Promise.all([
+    getReportsOdooData(),
     getRenewalForecast90d(session.orgId),
-    getOnTimePct(session.orgId, 30),
-    getReviewBacklog(session.orgId),
     getLatestStoredDigest(session.orgId),
   ]);
 
-  const maxRework = Math.max(1, ...heatmap.map((h) => h.rework_count));
-  const maxLb = Math.max(1, ...leaderboard.map((l) => l.closed_count));
+  const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
+  const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
 
   return (
     <div>
       <PageHeader
         title="التقارير"
-        description="مؤشّرات أداء الوكالة لهذا الأسبوع، موزّعة على الأقسام والخدمات والأفراد."
+        description="مؤشّرات أداء الوكالة لهذا الأسبوع، مُحتسبة مباشرة من بيانات Odoo."
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Sparkles className="size-3 text-cyan" />
@@ -75,28 +67,31 @@ export default async function ReportsPage() {
         </CardContent>
       </Card>
 
-      <SectionTitle title="مؤشرات الأسبوع" description="نسبة التسليم في الموعد، المتراكم في المراجعة، والإجمالي" />
+      <SectionTitle
+        title="مؤشرات الأسبوع"
+        description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
+      />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
         <MetricCard
           label="التسليم في الموعد"
-          value={onTime.pct === null ? "—" : `${onTime.pct}%`}
-          hint={onTime.sample === 0 ? "لا عيّنة بعد" : `عيّنة ${onTime.sample}`}
+          value={reports.onTime.pct === null ? "—" : `${reports.onTime.pct}%`}
+          hint={reports.onTime.sample === 0 ? "لا عيّنة بعد" : `عيّنة ${reports.onTime.sample}`}
           icon={<Timer className="size-5" />}
-          tone={pctTone(onTime.pct)}
+          tone={pctTone(reports.onTime.pct)}
         />
         <MetricCard
           label="عُلوق المراجعة"
-          value={backlog.length}
-          hint={backlog.length === 0 ? "لا تأخّر" : "أكثر من يومَي عمل"}
+          value={reports.reviewBacklog.length}
+          hint={reports.reviewBacklog.length === 0 ? "لا تأخّر" : "بانتظار مراجعة"}
           icon={<AlertTriangle className="size-5" />}
-          tone={backlog.length > 0 ? "destructive" : "default"}
+          tone={reports.reviewBacklog.length > 0 ? "destructive" : "default"}
         />
         <MetricCard
-          label="إعادة العمل (إجمالي تعليقات)"
-          value={heatmap.reduce((s, h) => s + h.rework_count, 0)}
-          hint={`${heatmap.length} خدمة`}
+          label="إعادة العمل (Client Changes)"
+          value={reports.reworkTotal}
+          hint={`${reports.reworkByProject.length} مشروع متأثّر`}
           icon={<Activity className="size-5" />}
-          tone={heatmap.length > 0 ? "warning" : "default"}
+          tone={reports.reworkTotal > 0 ? "warning" : "default"}
         />
         <MetricCard
           label="تجديدات قادمة (90 يومًا)"
@@ -107,22 +102,28 @@ export default async function ReportsPage() {
         />
       </div>
 
-      {/* Per-department SLA compliance */}
+      {/* Per-project SLA compliance — replaces per-department which required
+          mapping not present in Odoo. Worst 10 projects by % within deadline. */}
       <SectionTitle
-        title="التزام SLA حسب القسم"
-        description="نسبة المهام المفتوحة التي ما زالت داخل حدود الزمن المسموح لمرحلتها"
+        title="التزام الموعد النهائي حسب المشروع"
+        description="نسبة المهام المفتوحة التي ما زالت ضمن الموعد — أسوأ 10 مشاريع"
       />
-      {sla.length === 0 ? (
+      {reports.projectCompliance.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
-          لا توجد مهام نشطة بقواعد SLA مطبَّقة.
+          لا توجد مهام مفتوحة لتقييم الالتزام.
         </p>
       ) : (
         <Card className="mb-8">
           <CardContent className="p-5 space-y-3">
-            {sla.map((d) => (
-              <div key={d.department_id ?? "_none"}>
+            {reports.projectCompliance.map((d) => (
+              <div key={d.projectId}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium">{d.department_name}</span>
+                  <Link
+                    href={`/projects/odoo/${d.projectId}`}
+                    className="text-sm font-medium hover:text-cyan transition-colors truncate max-w-[60%]"
+                  >
+                    {d.projectName}
+                  </Link>
                   <span className="text-sm font-bold tabular-nums">
                     {d.pct === null ? "—" : `${d.pct}%`}
                     <span className="text-xs text-muted-foreground mr-1.5"> / {d.total} مهمة</span>
@@ -140,25 +141,30 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {/* Rework heat-map by service */}
+      {/* Rework heat-map by project */}
       <SectionTitle
-        title="إعادة العمل حسب الخدمة"
-        description="حرارة التعليقات أثناء مرحلة Client Changes — يكشف الخدمات الأكثر إرهاقًا"
+        title="إعادة العمل حسب المشروع"
+        description="عدد المهام في مرحلة Client Changes — يكشف المشاريع الأكثر إرهاقًا"
       />
-      {heatmap.length === 0 ? (
+      {reports.reworkByProject.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
-          لا تعليقات إعادة عمل مسجَّلة بعد.
+          لا توجد مهام في مرحلة تعديلات العميل.
         </p>
       ) : (
         <Card className="mb-8">
           <CardContent className="p-5 space-y-3">
-            {heatmap.map((h) => {
-              const pct = (h.rework_count / maxRework) * 100;
+            {reports.reworkByProject.map((h) => {
+              const pct = (h.count / maxRework) * 100;
               return (
-                <div key={h.service_id ?? "_none"}>
+                <div key={h.projectId}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium">{h.service_name}</span>
-                    <span className="text-sm font-bold tabular-nums">{h.rework_count}</span>
+                    <Link
+                      href={`/projects/odoo/${h.projectId}`}
+                      className="text-sm font-medium hover:text-cyan transition-colors truncate max-w-[60%]"
+                    >
+                      {h.projectName}
+                    </Link>
+                    <span className="text-sm font-bold tabular-nums">{h.count}</span>
                   </div>
                   <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
                     <div
@@ -179,22 +185,22 @@ export default async function ReportsPage() {
         description="عدد المهام المُغلقة + استخدام نسبيّ (من الأعلى إنتاجًا = 100%)"
         actions={<Users className="size-4 text-muted-foreground" />}
       />
-      {leaderboard.length === 0 ? (
+      {reports.agentLeaderboard.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
           لا بيانات إنتاج بعد.
         </p>
       ) : (
         <Card className="mb-8">
           <CardContent className="p-5 space-y-3">
-            {leaderboard.slice(0, 10).map((row) => {
-              const pct = (row.closed_count / maxLb) * 100;
+            {reports.agentLeaderboard.map((row) => {
+              const pct = (row.closedCount / maxLb) * 100;
               return (
-                <div key={row.user_id}>
+                <div key={row.userId}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium">{row.full_name}</span>
+                    <span className="text-sm font-medium">{row.fullName}</span>
                     <span className="text-sm tabular-nums">
-                      <span className="font-bold">{row.closed_count}</span>
-                      <span className="text-xs text-muted-foreground mr-1.5"> · {row.utilization_pct}%</span>
+                      <span className="font-bold">{row.closedCount}</span>
+                      <span className="text-xs text-muted-foreground mr-1.5"> · {row.utilizationPct}%</span>
                     </span>
                   </div>
                   <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
@@ -210,7 +216,7 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {/* Renewal forecast */}
+      {/* Renewal forecast (still Supabase-native) */}
       <SectionTitle
         title="توقّع التجديدات — التسعون يومًا القادمة"
         description="مرتَّبة بحسب الأقرب موعدًا"
@@ -256,7 +262,7 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {/* Weekly digest */}
+      {/* Weekly digest (Supabase-native) */}
       <SectionTitle
         title="موجز الأسبوع المخزَّن"
         description={
@@ -309,7 +315,7 @@ export default async function ReportsPage() {
       <div className="mt-4 rounded-2xl border border-cyan/20 bg-cyan-dim/20 p-5 flex items-start gap-3">
         <BarChart3 className="size-5 text-cyan shrink-0 mt-0.5" />
         <div className="text-sm text-foreground/90 leading-relaxed">
-          هذه التقارير تُحسب من قواعد بيانات حيّة (4 Postgres views) عند كل فتح للصفحة. لإصدار الموجز الأسبوعي يدويًا، شغِّل دالة weekly-digest من لوحة Supabase.
+          مؤشرات الأداء (KPIs والمشاريع والأفراد) تُحسب مباشرة من Odoo عند كل فتح للصفحة. التجديدات والموجز الأسبوعي قراءة من قاعدة لوحة التحكم.
         </div>
       </div>
     </div>
