@@ -56,6 +56,41 @@ export async function listContracts(orgId: string, filters: ContractListFilters 
   return data ?? [];
 }
 
+export async function listContractsPaged(
+  orgId: string,
+  filters: ContractListFilters = {},
+  paging: { page?: number; pageSize?: number } = {},
+) {
+  const pageSize = Math.max(1, Math.min(100, paging.pageSize ?? 25));
+  const page = Math.max(1, paging.page ?? 1);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let q = supabaseAdmin
+    .from("contracts")
+    .select(
+      `id, start_date, end_date, total_value, paid_value, target, status, duration_months,
+       client:clients(id, name),
+       am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
+       type:contract_types(id, key, name_ar),
+       package:packages(id, key, name_ar)`,
+      { count: "exact" },
+    )
+    .eq("organization_id", orgId)
+    .order("start_date", { ascending: false })
+    .range(from, to);
+
+  if (filters.status) q = q.eq("status", filters.status);
+  if (filters.target) q = q.eq("target", filters.target);
+  if (filters.amEmployeeId) q = q.eq("account_manager_id", filters.amEmployeeId);
+  if (filters.startFrom) q = q.gte("start_date", filters.startFrom);
+  if (filters.startTo) q = q.lte("start_date", filters.startTo);
+
+  const { data, error, count } = await q;
+  if (error) throw error;
+  return { rows: data ?? [], total: count ?? 0, page, pageSize };
+}
+
 export async function listContractTypes(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("contract_types")

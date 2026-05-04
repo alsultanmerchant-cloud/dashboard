@@ -3,8 +3,9 @@ import {
 } from "lucide-react";
 import { requireSession, hasPermission } from "@/lib/auth-server";
 import {
-  listLeaves, getLeavesSummary,
+  listLeaves, listLeavesPaged, getLeavesSummary,
 } from "@/lib/data/leaves";
+import { Pagination } from "@/components/pagination";
 import {
   LEAVE_TYPES, LEAVE_TYPE_LABEL,
   LEAVE_STATUS_LABEL, LEAVE_STATUS_BADGE,
@@ -19,21 +20,29 @@ import { cn } from "@/lib/utils";
 import { RequestLeaveDialog } from "./request-leave-dialog";
 import { DecideLeaveButtons } from "./decide-leave-buttons";
 
-export default async function HrPage() {
+const RECENT_PAGE_SIZE = 20;
+
+export default async function HrPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await requireSession();
   const canView = hasPermission(session, "hr.view");
   const canManage = hasPermission(session, "hr.manage");
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
 
   // Even employees without hr.view see their own requests via RLS
-  const [summary, recent, mine] = await Promise.all([
+  const [summary, recentPage, mine] = await Promise.all([
+    canView ? getLeavesSummary(session.orgId) : Promise.resolve(null),
     canView
-      ? getLeavesSummary(session.orgId)
-      : Promise.resolve(null),
-    canView
-      ? listLeaves(session.orgId, { limit: 20 })
-      : Promise.resolve([]),
+      ? listLeavesPaged(session.orgId, { page, pageSize: RECENT_PAGE_SIZE })
+      : Promise.resolve({ rows: [], total: 0, page, pageSize: RECENT_PAGE_SIZE }),
     listLeaves(session.orgId, { userId: session.userId, limit: 10 }),
   ]);
+  const recent = recentPage.rows;
+  const recentTotal = recentPage.total;
 
   const maxByType = summary
     ? Math.max(...LEAVE_TYPES.map((t) => summary.byType[t].days), 1)
@@ -213,6 +222,15 @@ export default async function HrPage() {
                   </ul>
                 </CardContent>
               </Card>
+            )}
+            {recentTotal > RECENT_PAGE_SIZE && (
+              <div className="mt-4">
+                <Pagination
+                  total={recentTotal}
+                  pageSize={RECENT_PAGE_SIZE}
+                  currentPage={page}
+                />
+              </div>
             )}
           </div>
         </>

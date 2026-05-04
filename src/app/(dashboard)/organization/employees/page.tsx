@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { Users, Mail, Phone, ChevronLeft } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveEmployees } from "@/lib/odoo/live";
+import { listLiveEmployeesPaged } from "@/lib/odoo/live";
 import { listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { Pagination } from "@/components/pagination";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
@@ -14,10 +15,18 @@ import {
 import { ROLE_LABELS } from "@/lib/labels";
 import { InviteEmployeeDialog } from "./invite-employee-dialog";
 
-export default async function EmployeesPage() {
+const PAGE_SIZE = 25;
+
+export default async function EmployeesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await requirePagePermission("employees.view");
-  const [employees, departments, roleOptions] = await Promise.all([
-    listLiveEmployees(),
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
+  const [{ rows: employees, total }, departments, roleOptions] = await Promise.all([
+    listLiveEmployeesPaged({ page, pageSize: PAGE_SIZE }),
     listDepartments(session.orgId),
     listOrgRoleOptions(session.orgId),
   ]);
@@ -42,7 +51,7 @@ export default async function EmployeesPage() {
         actions={inviteButton}
       />
 
-      {employees.length === 0 ? (
+      {total === 0 ? (
         <EmptyState
           icon={<Users className="size-6" />}
           title="لا يوجد موظفون"
@@ -118,6 +127,12 @@ export default async function EmployeesPage() {
             </tbody>
           </DataTable>
         </DataTableShell>
+      )}
+
+      {total > 0 && (
+        <div className="mt-4">
+          <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
+        </div>
       )}
     </div>
   );

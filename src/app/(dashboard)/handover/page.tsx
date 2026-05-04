@@ -11,15 +11,25 @@ import {
   HandoverStatusBadge, UrgencyBadge,
 } from "@/components/status-badges";
 import { formatArabicDateTime } from "@/lib/utils-format";
+import { Pagination } from "@/components/pagination";
 import { HandoverForm } from "./handover-form";
 
-export default async function HandoverPage() {
+const PAGE_SIZE = 25;
+
+export default async function HandoverPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await requirePagePermissionAny(["handover.create", "handover.manage"]);
-  const [services, accountManagers, handovers] = await Promise.all([
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
+  const [services, accountManagers, handoverPage] = await Promise.all([
     listServices(session.orgId),
     listAccountManagers(session.orgId),
-    listHandovers(session.orgId),
+    listHandovers(session.orgId, { page, pageSize: PAGE_SIZE }),
   ]);
+  const { rows: handovers, total } = handoverPage;
 
   const amOptions = accountManagers.map((a) => ({
     id: a.id,
@@ -38,9 +48,9 @@ export default async function HandoverPage() {
       <div className="mt-12">
         <SectionTitle
           title="آخر التسليمات"
-          description={`${handovers.length} نموذج مسجَّل`}
+          description={`${total} نموذج مسجَّل`}
         />
-        {handovers.length === 0 ? (
+        {total === 0 ? (
           <EmptyState
             icon={<Inbox className="size-6" />}
             title="لا توجد تسليمات بعد"
@@ -92,6 +102,11 @@ export default async function HandoverPage() {
                 </Card>
               );
             })}
+          </div>
+        )}
+        {total > 0 && (
+          <div className="mt-4">
+            <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
           </div>
         )}
       </div>

@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ListTodo, ChevronLeft } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveTasks } from "@/lib/odoo/live";
+import { listLiveTasksPaged } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { Pagination } from "@/components/pagination";
 import { TaskStageBadge, PriorityBadge } from "@/components/status-badges";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
@@ -11,6 +12,8 @@ import {
 } from "@/components/data-table-shell";
 import { isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
+
+const PAGE_SIZE = 25;
 
 const OPEN_STAGES = [
   "new", "in_progress", "manager_review", "specialist_review",
@@ -27,17 +30,20 @@ const STAGE_FILTERS = [
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string; odooProjectId?: string }>;
+  searchParams: Promise<{ filter?: string; odooProjectId?: string; page?: string }>;
 }) {
   await requirePagePermission("tasks.view");
   const sp = await searchParams;
   const filter = (sp.filter as (typeof STAGE_FILTERS)[number]["key"]) ?? "open";
   const filterDef = STAGE_FILTERS.find((f) => f.key === filter) ?? STAGE_FILTERS[0];
+  const page = Math.max(1, Number(sp.page) || 1);
 
-  const tasks = await listLiveTasks({
+  const { rows: tasks, total } = await listLiveTasksPaged({
     stage: "stages" in filterDef ? [...filterDef.stages!] : undefined,
     overdue: filter === "overdue",
     projectOdooId: sp.odooProjectId ? Number(sp.odooProjectId) : undefined,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
@@ -64,11 +70,11 @@ export default async function TasksPage({
           </Link>
         ))}
         <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {tasks.length} مهمة
+          {total} مهمة
         </span>
       </div>
 
-      {tasks.length === 0 ? (
+      {total === 0 ? (
         <EmptyState
           icon={<ListTodo className="size-6" />}
           title="لا توجد مهام"
@@ -136,6 +142,12 @@ export default async function TasksPage({
             </tbody>
           </DataTable>
         </DataTableShell>
+      )}
+
+      {total > 0 && (
+        <div className="mt-4">
+          <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
+        </div>
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Pagination } from "@/components/pagination";
 import { copy } from "@/lib/copy";
 import { formatArabicDateTime } from "@/lib/utils-format";
 import { EscalationsToolbar } from "./escalations-toolbar";
@@ -13,6 +14,9 @@ import { ResolveExceptionInline } from "./resolve-exception-inline";
 import { AcknowledgeButton } from "./acknowledge-button";
 
 export const dynamic = "force-dynamic";
+
+const EXC_PAGE_SIZE = 25;
+const ESC_PAGE_SIZE = 25;
 
 const KIND_LABELS: Record<string, string> = {
   client: "عميل",
@@ -53,7 +57,7 @@ type EscalationRow = {
 export default async function EscalationsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ kind?: string }>;
+  searchParams?: Promise<{ kind?: string; epage?: string; spage?: string }>;
 }) {
   const session = await requirePagePermissionAny([
     "escalation.view_own",
@@ -63,45 +67,54 @@ export default async function EscalationsPage({
   const kindFilter = ["client", "deadline", "quality", "resource"].includes(sp.kind ?? "")
     ? (sp.kind as string)
     : null;
+  const ePage = Math.max(1, Number(sp.epage) || 1);
+  const sPage = Math.max(1, Number(sp.spage) || 1);
 
   const seeAll = hasPermission(session, "escalation.view_all");
 
-  // Exceptions visible to caller. RLS already filters; we add convenience
-  // sort + the optional kind filter. When seeAll is false we narrow to
-  // exceptions opened by the user (RLS would also surface tasks they own
-  // / follow / are assigned to via the policy from migration 0025).
+  const eFrom = (ePage - 1) * EXC_PAGE_SIZE;
+  const eTo = eFrom + EXC_PAGE_SIZE - 1;
   let exceptionsQuery = supabaseAdmin
     .from("exceptions")
     .select(
       "id, task_id, kind, reason, opened_at, resolved_at, opened_by, task:task_id ( id, title, project_id )",
+      { count: "exact" },
     )
     .eq("organization_id", session.orgId)
     .order("opened_at", { ascending: false })
-    .limit(200);
+    .range(eFrom, eTo);
   if (kindFilter) exceptionsQuery = exceptionsQuery.eq("kind", kindFilter);
   if (!seeAll) {
     exceptionsQuery = exceptionsQuery.eq("opened_by", session.userId);
   }
-  const { data: exceptions } = await exceptionsQuery;
+  const { data: exceptions, count: exceptionsTotal } = await exceptionsQuery;
 
-  // Escalations either raised TO the user, or all if seeAll.
+  // Open-by-kind counts come from a separate cheap aggregate (not the page slice).
+  let kindCountsQuery = supabaseAdmin
+    .from("exceptions")
+    .select("kind")
+    .eq("organization_id", session.orgId)
+    .is("resolved_at", null);
+  if (!seeAll) kindCountsQuery = kindCountsQuery.eq("opened_by", session.userId);
+  const { data: openKindRows } = await kindCountsQuery;
+  const counts: Record<string, number> = { client: 0, deadline: 0, quality: 0, resource: 0 };
+  for (const r of openKindRows ?? []) counts[r.kind] = (counts[r.kind] ?? 0) + 1;
+
+  const sFrom = (sPage - 1) * ESC_PAGE_SIZE;
+  const sTo = sFrom + ESC_PAGE_SIZE - 1;
   let escalationsQuery = supabaseAdmin
     .from("escalations")
     .select(
       "id, task_id, exception_id, level, status, raised_at, acknowledged_at, raised_to_user_id, task:task_id ( id, title )",
+      { count: "exact" },
     )
     .eq("organization_id", session.orgId)
     .order("raised_at", { ascending: false })
-    .limit(200);
+    .range(sFrom, sTo);
   if (!seeAll) {
     escalationsQuery = escalationsQuery.eq("raised_to_user_id", session.userId);
   }
-  const { data: escalations } = await escalationsQuery;
-
-  // Counts by kind for the breakdown chip strip.
-  const openExc = (exceptions ?? []).filter((e) => !e.resolved_at);
-  const counts: Record<string, number> = { client: 0, deadline: 0, quality: 0, resource: 0 };
-  for (const e of openExc) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+  const { data: escalations, count: escalationsTotal } = await escalationsQuery;
 
   return (
     <div>
@@ -182,6 +195,16 @@ export default async function EscalationsPage({
             })}
           </div>
         )}
+        {(exceptionsTotal ?? 0) > EXC_PAGE_SIZE && (
+          <div className="mt-4">
+            <Pagination
+              total={exceptionsTotal ?? 0}
+              pageSize={EXC_PAGE_SIZE}
+              currentPage={ePage}
+              pageParam="epage"
+            />
+          </div>
+        )}
       </section>
 
       <section>
@@ -238,6 +261,16 @@ export default async function EscalationsPage({
                 </Card>
               );
             })}
+          </div>
+        )}
+        {(escalationsTotal ?? 0) > ESC_PAGE_SIZE && (
+          <div className="mt-4">
+            <Pagination
+              total={escalationsTotal ?? 0}
+              pageSize={ESC_PAGE_SIZE}
+              currentPage={sPage}
+              pageParam="spage"
+            />
           </div>
         )}
       </section>

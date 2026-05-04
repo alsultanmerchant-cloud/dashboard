@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { FileSignature } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listContracts, getContractsSummary } from "@/lib/data/contracts";
+import { listContractsPaged, getContractsSummary } from "@/lib/data/contracts";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
+import { Pagination } from "@/components/pagination";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
 import { formatArabicShortDate } from "@/lib/utils-format";
+
+const PAGE_SIZE = 25;
 
 const STATUS_LABEL: Record<string, string> = {
   active: "نشط",
@@ -52,10 +55,12 @@ export default async function ContractsPage({
     startTo: typeof sp.to === "string" ? sp.to : undefined,
   };
 
-  const [contracts, summary] = await Promise.all([
-    listContracts(session.orgId, filters),
+  const page = Math.max(1, Number(typeof sp.page === "string" ? sp.page : "1") || 1);
+  const [contractsPage, summary] = await Promise.all([
+    listContractsPaged(session.orgId, filters, { page, pageSize: PAGE_SIZE }),
     getContractsSummary(session.orgId),
   ]);
+  const { rows: contracts, total } = contractsPage;
 
   return (
     <div>
@@ -146,6 +151,12 @@ export default async function ContractsPage({
             </tbody>
           </DataTable>
         </DataTableShell>
+      )}
+
+      {total > 0 && (
+        <div className="mt-4">
+          <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
+        </div>
       )}
     </div>
   );

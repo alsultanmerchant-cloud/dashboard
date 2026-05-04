@@ -52,8 +52,49 @@ export async function listLeaves(
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
-  // Resolve employee names from employee_profiles by user_id
-  const userIds = Array.from(new Set(data.map((r) => r.employee_user_id)));
+  return enrichLeaves(orgId, data);
+}
+
+export async function listLeavesPaged(
+  orgId: string,
+  opts: {
+    status?: LeaveStatus;
+    userId?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<{ rows: LeaveRow[]; total: number; page: number; pageSize: number }> {
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let q = supabaseAdmin
+    .from("leaves")
+    .select(
+      `id, employee_user_id, employee_profile_id, start_date, end_date, days,
+       leave_type, reason, status, decided_by, decided_at, decision_note,
+       created_by, created_at`,
+      { count: "exact" },
+    )
+    .eq("organization_id", orgId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (opts.status) q = q.eq("status", opts.status);
+  if (opts.userId) q = q.eq("employee_user_id", opts.userId);
+
+  const { data, error, count } = await q;
+  if (error) throw error;
+  const rows = data && data.length > 0 ? await enrichLeaves(orgId, data) : [];
+  return { rows, total: count ?? 0, page, pageSize };
+}
+
+async function enrichLeaves(
+  orgId: string,
+  rows: Array<Record<string, unknown> & { employee_user_id: string }>,
+): Promise<LeaveRow[]> {
+  const userIds = Array.from(new Set(rows.map((r) => r.employee_user_id)));
   const { data: profs } = await supabaseAdmin
     .from("employee_profiles")
     .select("user_id, full_name")
@@ -63,8 +104,7 @@ export async function listLeaves(
   for (const p of profs ?? []) {
     if (p.user_id && p.full_name) nameByUid.set(p.user_id, p.full_name);
   }
-
-  return data.map((r) => ({
+  return rows.map((r) => ({
     ...r,
     days: Number(r.days) || 0,
     employee_name: nameByUid.get(r.employee_user_id) ?? null,

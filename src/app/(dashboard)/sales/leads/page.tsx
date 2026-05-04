@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { UserSearch, Phone, Mail, Clock } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { listLeads } from "@/lib/data/leads";
+import { listLeadsPaged } from "@/lib/data/leads";
+import { Pagination } from "@/components/pagination";
 import {
   LEAD_STATUSES, LEAD_STATUS_LABEL, type LeadStatus,
 } from "@/lib/data/lead-statuses";
@@ -33,10 +34,12 @@ const FILTERS = [
   ...LEAD_STATUSES.map((s) => ({ key: s, label: LEAD_STATUS_LABEL[s] })),
 ] as const;
 
+const PAGE_SIZE = 25;
+
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; page?: string }>;
 }) {
   const session = await requirePagePermission("sales.view");
   const canManage = hasPermission(session, "sales.manage");
@@ -50,7 +53,12 @@ export default async function LeadsPage({
         ? "open"
         : (filter as LeadStatus);
 
-  const leads = await listLeads(session.orgId, { status: statusOpt });
+  const page = Math.max(1, Number(sp.page) || 1);
+  const { rows: leads, total } = await listLeadsPaged(session.orgId, {
+    status: statusOpt,
+    page,
+    pageSize: PAGE_SIZE,
+  });
 
   return (
     <div className="space-y-6">
@@ -77,7 +85,7 @@ export default async function LeadsPage({
           </Link>
         ))}
         <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {leads.length} عميل محتمل
+          {total} عميل محتمل
         </span>
       </div>
 
@@ -158,6 +166,14 @@ export default async function LeadsPage({
             </tbody>
           </DataTable>
         </DataTableShell>
+      )}
+
+      {leads.length > 0 && (
+        <Pagination
+          total={total}
+          pageSize={PAGE_SIZE}
+          currentPage={page}
+        />
       )}
     </div>
   );

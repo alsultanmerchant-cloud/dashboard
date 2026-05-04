@@ -61,6 +61,51 @@ export async function listLeads(
   })) as LeadRow[];
 }
 
+export async function listLeadsPaged(
+  orgId: string,
+  opts: {
+    status?: LeadStatus | "open";
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<{ rows: LeadRow[]; total: number; page: number; pageSize: number }> {
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let q = supabaseAdmin
+    .from("leads")
+    .select(
+      `id, name, contact_name, email, phone, status, source,
+       estimated_value, next_step_at, notes,
+       assigned_to_employee_id,
+       assigned_to:employee_profiles!leads_assigned_to_employee_id_fkey ( id, full_name ),
+       converted_client_id, created_at, updated_at`,
+      { count: "exact" },
+    )
+    .eq("organization_id", orgId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (opts.status === "open") {
+    q = q.in("status", OPEN_LEAD_STATUSES as unknown as string[]);
+  } else if (opts.status) {
+    q = q.eq("status", opts.status);
+  }
+
+  const { data, error, count } = await q;
+  if (error) throw error;
+  const rows = (data ?? []).map((r) => ({
+    ...r,
+    estimated_value: Number(r.estimated_value) || 0,
+    assigned_to: Array.isArray(r.assigned_to)
+      ? r.assigned_to[0] ?? null
+      : (r.assigned_to ?? null),
+  })) as LeadRow[];
+  return { rows, total: count ?? rows.length, page, pageSize };
+}
+
 export async function getLead(orgId: string, id: string): Promise<LeadRow | null> {
   const { data, error } = await supabaseAdmin
     .from("leads")

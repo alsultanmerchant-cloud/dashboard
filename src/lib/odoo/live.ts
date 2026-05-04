@@ -82,6 +82,82 @@ export async function listLiveProjects(): Promise<LiveProject[]> {
   });
 }
 
+export interface LiveProjectsPage {
+  rows: LiveProject[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totals: {
+    projects: number;
+    tasks: number;
+    withManager: number;
+  };
+}
+
+export async function listLiveProjectsPaged(opts: {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<LiveProjectsPage> {
+  const odoo = odooFromEnv();
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
+
+  const projectDomain = [["active", "=", true]];
+
+  const [rows, total, withManager, allTaskCounts] = await Promise.all([
+    odoo.searchRead<Record<string, unknown>>(
+      "project.project",
+      projectDomain,
+      ["id", "name", "partner_id", "user_id", "date_start", "date", "task_count"],
+      { limit: pageSize, offset, order: "id desc" },
+    ),
+    odoo.executeKw<number>("project.project", "search_count", [projectDomain]),
+    odoo.executeKw<number>("project.project", "search_count", [
+      [...projectDomain, ["user_id", "!=", false]],
+    ]),
+    odoo.searchRead<Record<string, unknown>>(
+      "project.project",
+      projectDomain,
+      ["task_count"],
+      { limit: 10000 },
+    ),
+  ]);
+
+  const tasksTotal = allTaskCounts.reduce(
+    (sum, r) => sum + ((r.task_count as number) ?? 0),
+    0,
+  );
+
+  const mapped: LiveProject[] = rows.map((r) => {
+    const partner = m2o(r.partner_id);
+    const user = m2o(r.user_id);
+    return {
+      odooId: r.id as number,
+      name: String(r.name),
+      clientId: partner?.[0] ?? null,
+      clientName: partner?.[1] ?? null,
+      managerId: user?.[0] ?? null,
+      managerName: user?.[1] ?? null,
+      startDate: str(r.date_start),
+      endDate: str(r.date),
+      taskCount: (r.task_count as number) ?? 0,
+    };
+  });
+
+  return {
+    rows: mapped,
+    total,
+    page,
+    pageSize,
+    totals: {
+      projects: total,
+      tasks: tasksTotal,
+      withManager,
+    },
+  };
+}
+
 export async function listLiveClients(): Promise<LiveClient[]> {
   const odoo = odooFromEnv();
   const rows = await odoo.searchRead<Record<string, unknown>>(
@@ -115,6 +191,121 @@ export async function listLiveClients(): Promise<LiveClient[]> {
     website: str(r.website),
     projectCount: projectCountMap.get(r.id as number) ?? 0,
   }));
+}
+
+export interface LiveClientsPage {
+  rows: LiveClient[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totals: {
+    clients: number;
+    activeClients: number; // with at least one active project
+    activeProjects: number;
+    reachable: number; // with email or phone
+  };
+}
+
+export async function listLiveClientsPaged(opts: {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<LiveClientsPage> {
+  const odoo = odooFromEnv();
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
+
+  const customerDomain = [
+    ["customer_rank", ">", 0],
+    ["is_company", "=", true],
+  ];
+
+  const [rows, total, activeProjects, reachable] = await Promise.all([
+    odoo.searchRead<Record<string, unknown>>(
+      "res.partner",
+      customerDomain,
+      ["id", "name", "email", "phone", "mobile", "website"],
+      { limit: pageSize, offset, order: "name asc" },
+    ),
+    odoo.executeKw<number>("res.partner", "search_count", [customerDomain]),
+    odoo.executeKw<number>(
+      "project.project",
+      "search_count",
+      [[["active", "=", true]]],
+    ),
+    odoo.executeKw<number>(
+      "res.partner",
+      "search_count",
+      [
+        [
+          ...customerDomain,
+          "|",
+          ["email", "!=", false],
+          ["phone", "!=", false],
+        ],
+      ],
+    ),
+  ]);
+
+  const partnerIds = rows.map((r) => r.id as number);
+  const projectRows = partnerIds.length
+    ? await odoo.searchRead<Record<string, unknown>>(
+        "project.project",
+        [["partner_id", "in", partnerIds], ["active", "=", true]],
+        ["id", "partner_id"],
+        { limit: 5000 },
+      )
+    : [];
+
+  const projectCountMap = new Map<number, number>();
+  for (const p of projectRows) {
+    const partner = m2o(p.partner_id);
+    if (partner) {
+      projectCountMap.set(partner[0], (projectCountMap.get(partner[0]) ?? 0) + 1);
+    }
+  }
+
+  // Active-clients count = distinct customers (matching the customer domain) with ≥1 active project
+  const allCustomerIds = await odoo.searchRead<Record<string, unknown>>(
+    "res.partner",
+    customerDomain,
+    ["id"],
+    { limit: 10000 },
+  );
+  const customerIdSet = new Set<number>(allCustomerIds.map((r) => r.id as number));
+  const allActiveProjects = await odoo.searchRead<Record<string, unknown>>(
+    "project.project",
+    [["active", "=", true], ["partner_id", "!=", false]],
+    ["partner_id"],
+    { limit: 10000 },
+  );
+  const activeClientIds = new Set<number>();
+  for (const p of allActiveProjects) {
+    const partner = m2o(p.partner_id);
+    if (partner && customerIdSet.has(partner[0])) activeClientIds.add(partner[0]);
+  }
+
+  const mapped: LiveClient[] = rows.map((r) => ({
+    odooId: r.id as number,
+    name: String(r.name),
+    email: str(r.email),
+    phone: str(r.phone) ?? str(r.mobile),
+    website: str(r.website),
+    projectCount: projectCountMap.get(r.id as number) ?? 0,
+  }));
+
+  return {
+    rows: mapped,
+    total,
+    page,
+    pageSize,
+    totals: {
+      clients: total,
+      activeClients: activeClientIds.size,
+      activeProjects,
+      reachable,
+    },
+  };
 }
 
 export interface ListLiveTasksOptions {
@@ -187,6 +378,92 @@ export async function listLiveTasks(opts: ListLiveTasksOptions = {}): Promise<Li
   }
 
   return tasks;
+}
+
+// Reverse map: dashboard stage key → Odoo stage name (for server-side filtering)
+const DASHBOARD_TO_ODOO_STAGE: Record<string, string> = {
+  new: "New",
+  in_progress: "In Progress",
+  manager_review: "Manager Review",
+  specialist_review: "Specialist Review",
+  ready_to_send: "Ready to Send",
+  sent_to_client: "Sent to Client",
+  client_changes: "Client Changes",
+  done: "Done",
+};
+
+export interface LiveTasksPage {
+  rows: LiveTask[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listLiveTasksPaged(
+  opts: ListLiveTasksOptions & { page?: number; pageSize?: number } = {},
+): Promise<LiveTasksPage> {
+  const odoo = odooFromEnv();
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
+
+  // Stage names lookup
+  const stages = await odoo.searchRead<Record<string, unknown>>(
+    "project.task.type",
+    [],
+    ["id", "name"],
+    { limit: 200 },
+  );
+  const stageNameById = new Map<number, string>();
+  for (const s of stages) stageNameById.set(s.id as number, String(s.name));
+
+  const domain: unknown[] = [];
+  if (opts.projectOdooId) domain.push(["project_id", "=", opts.projectOdooId]);
+  if (opts.assigneeUserId) domain.push(["user_ids", "in", [opts.assigneeUserId]]);
+  if (opts.overdue) {
+    const today = new Date().toISOString().slice(0, 10);
+    domain.push(["date_deadline", "<", today]);
+    domain.push(["stage_id.name", "!=", "Done"]);
+  }
+  if (opts.stage?.length) {
+    const odooNames = opts.stage
+      .map((k) => DASHBOARD_TO_ODOO_STAGE[k])
+      .filter((v): v is string => Boolean(v));
+    if (odooNames.length) domain.push(["stage_id.name", "in", odooNames]);
+  }
+
+  const [rows, total] = await Promise.all([
+    odoo.searchRead<Record<string, unknown>>(
+      "project.task",
+      domain,
+      ["id", "name", "project_id", "stage_id", "date_deadline", "priority", "user_ids"],
+      { limit: pageSize, offset, order: "id desc" },
+    ),
+    odoo.executeKw<number>("project.task", "search_count", [domain]),
+  ]);
+
+  const tasks: LiveTask[] = rows.map((r) => {
+    const project = m2o(r.project_id);
+    const stageM2o = m2o(r.stage_id);
+    const stageName = stageM2o ? (stageNameById.get(stageM2o[0]) ?? stageM2o[1]) : "New";
+    const stage = mapStageName(stageName);
+    const deadlineRaw = str(r.date_deadline);
+    const deadline = deadlineRaw ? deadlineRaw.slice(0, 10) : null;
+    const userIds = Array.isArray(r.user_ids) ? (r.user_ids as number[]) : [];
+    return {
+      odooId: r.id as number,
+      name: String(r.name),
+      projectId: project?.[0] ?? null,
+      projectName: project?.[1] ?? null,
+      stage,
+      stageName,
+      deadline,
+      priority: (r.priority as string) === "1" ? "high" : "medium",
+      assigneeIds: userIds,
+    };
+  });
+
+  return { rows: tasks, total, page, pageSize };
 }
 
 export interface LiveTaskDetail {
@@ -919,4 +1196,50 @@ export async function listLiveEmployees(): Promise<LiveEmployee[]> {
       managerName: manager?.[1] ?? null,
     };
   });
+}
+
+export interface LiveEmployeesPage {
+  rows: LiveEmployee[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listLiveEmployeesPaged(opts: {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<LiveEmployeesPage> {
+  const odoo = odooFromEnv();
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
+  const domain = [["active", "=", true]];
+
+  const [rows, total] = await Promise.all([
+    odoo.searchRead<Record<string, unknown>>(
+      "hr.employee",
+      domain,
+      ["id", "name", "work_email", "work_phone", "job_title", "department_id", "parent_id"],
+      { limit: pageSize, offset, order: "name asc" },
+    ),
+    odoo.executeKw<number>("hr.employee", "search_count", [domain]),
+  ]);
+
+  const mapped: LiveEmployee[] = rows.map((r) => {
+    const dept = m2o(r.department_id);
+    const manager = m2o(r.parent_id);
+    return {
+      odooId: r.id as number,
+      name: String(r.name),
+      email: str(r.work_email),
+      phone: str(r.work_phone),
+      jobTitle: str(r.job_title),
+      departmentId: dept?.[0] ?? null,
+      departmentName: dept?.[1] ?? null,
+      managerId: manager?.[0] ?? null,
+      managerName: manager?.[1] ?? null,
+    };
+  });
+
+  return { rows: mapped, total, page, pageSize };
 }

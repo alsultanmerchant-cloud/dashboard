@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Inbox,
   ChevronLeft,
+  ArrowRight,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listMyUploadQueue, type UploadQueueRow, type UploadBucket } from "@/lib/data/uploads";
@@ -15,9 +16,14 @@ import { SectionTitle } from "@/components/section-title";
 import { MetricCard, type MetricTone } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import { Pagination } from "@/components/pagination";
 import { PriorityBadge, ServiceBadge, TaskStageBadge } from "@/components/status-badges";
 import { formatArabicShortDate } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
+
+const COLLAPSED_PER_BUCKET = 8;
+const EXPANDED_PAGE_SIZE = 25;
+const VALID_BUCKETS: UploadBucket[] = ["overdue", "today", "this_week", "later"];
 
 type BucketDef = {
   key: UploadBucket;
@@ -78,8 +84,13 @@ function formatDelta(daysDelta: number): string {
   return `بعد ${daysDelta} أيام`;
 }
 
-export default async function UploadsPage() {
+export default async function UploadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ bucket?: string; page?: string }>;
+}) {
   const session = await requirePagePermission("tasks.view");
+  const sp = await searchParams;
 
   if (!session.employeeId) {
     return (
@@ -109,6 +120,10 @@ export default async function UploadsPage() {
 
   const total = rows.length;
 
+  const bucketParam = sp.bucket as UploadBucket | undefined;
+  const expanded = bucketParam && VALID_BUCKETS.includes(bucketParam) ? bucketParam : null;
+  const page = Math.max(1, Number(sp.page) || 1);
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -116,17 +131,26 @@ export default async function UploadsPage() {
         description="مهامك كمختص مرتبة بحسب موعد الرفع. يُحسب الموعد بطرح فترة الرفع المسبقة من الديدلاين كما في دليل عمليات Sky Light."
       />
 
-      {/* Metric cards */}
+      {/* Metric cards (also act as quick links to expanded views) */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {BUCKETS.map((b) => (
-          <MetricCard
+          <Link
             key={b.key}
-            label={b.label}
-            value={groups[b.key].length}
-            hint={b.description}
-            tone={b.tone}
-            icon={b.icon}
-          />
+            href={groups[b.key].length > 0 ? `/uploads?bucket=${b.key}` : "/uploads"}
+            className={cn(
+              "rounded-2xl transition-colors",
+              expanded === b.key && "ring-1 ring-cyan/40",
+              groups[b.key].length === 0 && "pointer-events-none opacity-70",
+            )}
+          >
+            <MetricCard
+              label={b.label}
+              value={groups[b.key].length}
+              hint={b.description}
+              tone={b.tone}
+              icon={b.icon}
+            />
+          </Link>
         ))}
       </div>
 
@@ -135,6 +159,12 @@ export default async function UploadsPage() {
           icon={<Inbox className="size-6" />}
           title="لا توجد مهام تنتظر الرفع"
           description="عندما تُسند إليك مهمة كمختص وتقترب من الديدلاين، ستظهر هنا تلقائيًا."
+        />
+      ) : expanded ? (
+        <ExpandedBucket
+          def={BUCKETS.find((b) => b.key === expanded)!}
+          rows={groups[expanded]}
+          page={page}
         />
       ) : (
         <div className="space-y-6">
@@ -148,6 +178,8 @@ export default async function UploadsPage() {
 }
 
 function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }) {
+  const visible = rows.slice(0, COLLAPSED_PER_BUCKET);
+  const hidden = rows.length - visible.length;
   return (
     <section>
       <SectionTitle
@@ -166,14 +198,72 @@ function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }
               {def.emptyText}
             </div>
           ) : (
+            <>
+              <ul className="divide-y divide-white/[0.05]">
+                {visible.map((r) => (
+                  <UploadRow key={r.id} row={r} accent={def.rowAccent} />
+                ))}
+              </ul>
+              {hidden > 0 && (
+                <Link
+                  href={`/uploads?bucket=${def.key}`}
+                  className="flex items-center justify-center gap-1.5 border-t border-white/[0.05] px-4 py-3 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim/30"
+                >
+                  عرض الكل ({rows.length})
+                  <ArrowRight className="size-3.5 icon-flip-rtl" />
+                </Link>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function ExpandedBucket({
+  def,
+  rows,
+  page,
+}: {
+  def: BucketDef;
+  rows: UploadQueueRow[];
+  page: number;
+}) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / EXPANDED_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const from = (safePage - 1) * EXPANDED_PAGE_SIZE;
+  const slice = rows.slice(from, from + EXPANDED_PAGE_SIZE);
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <SectionTitle title={def.label} description={def.description} />
+        <Link
+          href="/uploads"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowRight className="size-3.5" />
+          العودة لكل المهام
+        </Link>
+      </div>
+      <Card>
+        <CardContent className="p-0">
+          {slice.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {def.emptyText}
+            </div>
+          ) : (
             <ul className="divide-y divide-white/[0.05]">
-              {rows.map((r) => (
+              {slice.map((r) => (
                 <UploadRow key={r.id} row={r} accent={def.rowAccent} />
               ))}
             </ul>
           )}
         </CardContent>
       </Card>
+      <Pagination total={total} pageSize={EXPANDED_PAGE_SIZE} currentPage={safePage} />
     </section>
   );
 }

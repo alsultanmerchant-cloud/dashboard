@@ -85,7 +85,7 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
               )}
             </div>
             <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-foreground truncate">{title}</h2>
-            <p className="mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-muted-foreground hidden sm:block">{subtitle}</p>
+            <p className="mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-muted-foreground hidden xl:block truncate">{subtitle}</p>
           </div>
         </div>
 
@@ -111,8 +111,8 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
             </div>
           )}
 
-          {/* Time filters — hidden on mobile, visible on sm+ */}
-          <div className="hidden sm:flex items-center gap-1 rounded-2xl border border-white/6 bg-white/[0.03] p-1 sm:p-1.5">
+          {/* Time filters — hidden on small/medium, visible on xl+ */}
+          <div className="hidden xl:flex items-center gap-1 rounded-2xl border border-white/6 bg-white/[0.03] p-1 sm:p-1.5">
             {TIME_FILTERS.map((filter) => (
               <button
                 key={filter}
@@ -142,7 +142,7 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
           </div>
 
           {/* Clock + Calendar */}
-          <div className="hidden sm:flex items-center gap-2">
+          <div className="hidden xl:flex items-center gap-2">
             <span className="rounded-xl border border-white/6 bg-white/[0.03] px-3 py-1.5 text-xs text-muted-foreground font-mono" dir="ltr">
               {clockStr}
             </span>
@@ -163,8 +163,8 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
         </div>
       </div>
 
-      {/* Mobile collapsed filters */}
-      <div className="sm:hidden space-y-2">
+      {/* Compact filters (mobile/tablet/desktop below xl) */}
+      <div className="xl:hidden space-y-2">
         <div className="glass-surface flex items-center gap-2 rounded-2xl p-1.5">
           <button
             type="button"
@@ -266,7 +266,7 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
       {/* Desktop month bar */}
       <div
         ref={monthsRef}
-        className="hidden sm:flex glass-surface rounded-2xl px-2 sm:px-4 py-2 sm:py-2.5 items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide"
+        className="hidden xl:flex glass-surface rounded-2xl px-2 sm:px-4 py-2 sm:py-2.5 items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide"
       >
         {MONTHS_AR.map((month, idx) => {
           const isCurrentMonth = now ? idx === now.getMonth() : false;
