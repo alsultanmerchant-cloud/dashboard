@@ -2,10 +2,14 @@ import Link from "next/link";
 import {
   CheckCircle2, AlertTriangle, Sparkles,
   ArrowUpLeft, Clock, RefreshCw, ShieldAlert, FileSignature, Wallet,
+  Activity, Timer, ListChecks, TrendingUp,
 } from "lucide-react";
 import { countRenewalsThisMonth } from "@/lib/data/renewals";
 import { countOpenViolations } from "@/lib/data/governance";
 import { getCeoCommercialTiles } from "@/lib/data/contracts";
+import {
+  countReworkThisWeek, getOnTimePct, countClosedThisWeek, countReviewBacklog,
+} from "@/lib/data/reports";
 import { requireSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +39,7 @@ export default async function DashboardPage() {
   const [
     stats, handovers, overdue, activity, renewalsThisMonth,
     openExceptionsRaw, openGovernanceCount, commercialTiles,
+    reworkThisWeek, onTime, closedThisWeek, reviewBacklog,
   ] = await Promise.all([
     getDashboardStats(session.orgId, session.userId),
     getRecentHandovers(session.orgId, 4),
@@ -51,6 +56,10 @@ export default async function DashboardPage() {
       month: "", byType: {} as Record<string, { count: number; value: number }>,
       totalCount: 0, totalValue: 0,
     })),
+    countReworkThisWeek(session.orgId).catch(() => 0),
+    getOnTimePct(session.orgId, 30).catch(() => ({ pct: null, sample: 0, onTime: 0 })),
+    countClosedThisWeek(session.orgId).catch(() => 0),
+    countReviewBacklog(session.orgId).catch(() => 0),
   ]);
 
   const openExceptions = openExceptionsRaw.data ?? [];
@@ -102,6 +111,42 @@ export default async function DashboardPage() {
           icon={<RefreshCw className="size-5" />}
           tone={renewalsThisMonth > 0 ? "warning" : "default"}
           href="/projects?filter=renewals_this_month"
+        />
+      </div>
+
+      {/* T9 KPI tiles — operational pulse (rework / on-time / productivity / review backlog) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MetricCard
+          label="إعادة عمل هذا الأسبوع"
+          value={reworkThisWeek}
+          hint={reworkThisWeek > 0 ? "تعليقات Client Changes" : "لا إعادة عمل"}
+          icon={<Activity className="size-5" />}
+          tone={reworkThisWeek > 0 ? "warning" : "default"}
+          href="/reports"
+        />
+        <MetricCard
+          label="التسليم في الموعد"
+          value={onTime.pct === null ? "—" : `${onTime.pct}%`}
+          hint={onTime.sample === 0 ? "لا عيّنة بعد" : `آخر 30 يومًا · ${onTime.sample}`}
+          icon={<Timer className="size-5" />}
+          tone={onTime.pct === null ? "default" : onTime.pct >= 85 ? "success" : onTime.pct >= 70 ? "warning" : "destructive"}
+          href="/reports"
+        />
+        <MetricCard
+          label="إنتاجية الأسبوع"
+          value={closedThisWeek}
+          hint="مهام أُغلقت هذا الأسبوع"
+          icon={<TrendingUp className="size-5" />}
+          tone={closedThisWeek > 0 ? "info" : "default"}
+          href="/reports"
+        />
+        <MetricCard
+          label="عُلوق المراجعة"
+          value={reviewBacklog}
+          hint={reviewBacklog > 0 ? "أكثر من يومَي عمل" : "لا تأخّر"}
+          icon={<ListChecks className="size-5" />}
+          tone={reviewBacklog > 0 ? "destructive" : "default"}
+          href="/reports"
         />
       </div>
 
