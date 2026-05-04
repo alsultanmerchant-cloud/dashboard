@@ -13,9 +13,13 @@ Wave 0  →  T0
 Wave 1  →  T1                 (depends on T0)
 Wave 2  →  T2  ‖  T3  ‖  T4   (depend on T1 — fully parallel, different schema areas)
 Wave 3  →  T5  ‖  T7  ‖  T7.5 (depend on T1+T4 — parallel, distinct concerns)
-Wave 4  →  T6                 (depends on T2 + T5)
-Wave 5  →  T9                 (depends on T1, T4, T5, T7, T7.5)
-Wave 6  →  T10                (depends on everything)
+Wave 4  →  T6                 (depends on T2 + T5)                  ✅ shipped
+Wave 4b →  Op-UX pass         (off-plan, role landing + UX polish)  ✅ shipped
+Wave 5a →  Edge-fn deploy     (orchestrator-only, no agent)          ⬜ next
+Wave 5b →  T9                 (depends on T1, T4, T5, T7, T7.5)      ⬜
+Wave 5c →  T3.5               (long-queued head filters)             ⬜
+Wave 5d →  Acc-Sheet importer (finish 6 of 7 tabs)                   ⬜
+Wave 6  →  T10                (depends on everything)                ⬜
 ```
 
 **Concurrency tips:**
@@ -41,8 +45,10 @@ Re-coordinated migration filenames:
 | T7    | `0026_renewals.sql`               | 0021                      |
 | T7.5  | `0026b_commercial_layer.sql`      | 0021b                     |
 | T6    | `0027_governance.sql`             | 0020                      |
-| T9    | `0028_reporting_views.sql`        | 0023                      |
-| T10   | `0029_cutover_import.sql` (script wrapper, no schema change) |  |
+| T9    | `0029_reporting_views.sql`        | 0028 (taken by T7.5 0028) |
+| T10   | `0030_cutover_import.sql` (script wrapper, no schema change) |  |
+
+**As of 2026-05-04, the latest applied migration is `0028_contracts_am_scoping`. T9 must use `0029`.**
 
 **Tasks-schema reality (surfaced by T2's partial run, important for T2/T3/T5):**
 
@@ -794,11 +800,13 @@ Ship phase T9 (Reporting + KPIs) as defined in docs/ENGINEERING_PLAN.md.
 Goal: the Monday-morning view from docs/MASTER_PLAN.md §2.1.
 
 Deliverables:
-  1. Migration 0028_reporting_views.sql — Postgres views:
+  1. Migration 0029_reporting_views.sql — Postgres views:
        v_rework_per_task    — count of task_comments during Client Changes stage
        v_on_time_delivery   — done tasks on/before deadline as %
        v_agent_productivity — closed tasks/week per agent + median Duration per stage
        v_review_backlog     — tasks stuck in Manager/Specialist Review > 2 days
+
+     NOTE: 0028 is taken (contracts_am_scoping). Use 0029.
 
   2. Server actions / API:
        getCEOWeeklyDigest() — composes JSON for the Monday email
@@ -806,8 +814,12 @@ Deliverables:
          — sends email + (later) WhatsApp template
 
   3. UI:
-       /dashboard — 4 new stat tiles (rework, on-time, productivity,
-         review backlog)
+       /dashboard — 4 new stat tiles ADDITIVELY in the existing hero grid
+         (rework, on-time, productivity, review backlog).
+         IMPORTANT: the dashboard was redesigned in the Operator-UX pass
+         (commits a718654 + b678073) into 4 hero KPIs + commercial card +
+         3 watch-lists. DO NOT rewrite the layout. Add tiles to the hero
+         grid; if it overflows, restructure to 8 tiles in 2 rows of 4.
        /reports — promote from placeholder:
          - Per-department SLA compliance
          - Rework heat-map by service
@@ -874,6 +886,80 @@ Deliverables:
 Acceptance: two consecutive weeks operating on the dashboard with zero
 need to open Odoo for technical work.
 ```
+
+---
+
+## T3.5 — Head per-employee task filters
+
+**Wave 5** · ~3 days · depends on T2, T4 (long-queued, owner-asked)
+
+Spec: `docs/phase-T3.5-filters.md` (5 sub-filters from owner's verbatim Arabic feedback).
+
+### Prompt
+```
+Ship phase T3.5 (Head-of-Department Task Filters) as defined in
+docs/phase-T3.5-filters.md.
+
+Implement filters #1, #2, #3a from the spec. Filters #4 and #5 are
+deferred to a later cycle (they need new schema; ship them only if scope
+allows in the time budget).
+
+Deliverables:
+  1. EDIT src/lib/data/tasks.ts — extend `listTasks` with:
+       - `directReportsOfEmployeeId?: string` filter (joins task_assignees
+         with employee_profiles WHERE manager_employee_id = X)
+       - `notRedistributed?: boolean` (sole assignee = caller AND
+         status != 'done')
+       - `forwardDeadlineBy?: string` (compute on read:
+         CASE WHEN status != 'done' AND deadline < <date> THEN
+              <date> - deadline END)
+
+  2. EDIT src/app/(dashboard)/tasks/page.tsx — when caller has role
+     "manager" (head):
+       - Show row of per-direct-report chips above the existing filter chips.
+       - Each chip filters to that employee's tasks.
+       - Add a "لم تُوزَّع بعد" chip for filter #2.
+       - Add a date picker for filter #3 ("متأخرات حتى…").
+
+  3. NEW src/lib/data/team.ts — `listDirectReports(headEmployeeId)`.
+
+  4. NEW tests/head-filters.test.mjs — assert filter SQL composes correctly
+     for each sub-filter.
+
+  5. NEW docs/phase-T3.5-report.md.
+
+Hard rules:
+  - Only "manager" role gets the new chips. Other roles see /tasks unchanged.
+  - DO NOT touch /tasks/_actions.ts (Op-UX pass redesigned the action layer).
+  - DO NOT introduce new RLS policies. The existing tasks_select scope is
+     correct; per-direct-report scoping is a UI-layer filter, not RLS.
+
+File ownership:
+  NEW: src/lib/data/team.ts, tests/head-filters.test.mjs, docs/phase-T3.5-report.md
+  EDIT: src/lib/data/tasks.ts, src/app/(dashboard)/tasks/page.tsx
+  MUST NOT TOUCH: any _actions.ts, types.ts, theming, T6/T7/T7.5 modules
+
+Time budget: 90 min. If scope overflows, partial-commit with #1 + chips
+working; defer the date picker to a follow-up.
+```
+
+---
+
+## Wave 5a — Edge functions deploy + cron (orchestrator-only)
+
+**No agent dispatch.** The orchestrator deploys the 4 functions and configures cron directly.
+
+Functions:
+- `supabase/functions/sla-watcher/index.ts` (T5) — daily 06:00 Asia/Riyadh
+- `supabase/functions/renewal-scheduler/index.ts` (T7) — daily 06:00 Asia/Riyadh
+- `supabase/functions/governance-watcher/index.ts` (T6) — daily 06:00 Asia/Riyadh
+- `supabase/functions/monthly-cycle-roller/index.ts` (T7.5-finish) — 1st of month 06:00 Asia/Riyadh
+
+Steps:
+1. `mcp__supabase__deploy_edge_function` for each.
+2. Configure cron (Vercel `cron.json` if Vercel-hosted, otherwise Supabase scheduled triggers).
+3. Smoke each: invoke once via `curl -X POST <function-url> -H "Authorization: Bearer <service-role>"` and verify expected rows in `escalations` / `notifications` / `governance_violations` / `monthly_cycles`.
+4. Document in `docs/phase-edge-deploy-report.md`: what was deployed, cron schedule, smoke result.
 
 ---
 
