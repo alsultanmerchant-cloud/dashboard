@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { formatArabicShortDate } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
-import { NewExpenseDialog } from "./new-expense-dialog";
+import { NewExpenseDialog } from "../new-expense-dialog";
 
 const sar = (n: number) =>
   new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
