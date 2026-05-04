@@ -20,9 +20,17 @@ import {
   Trash2,
   Globe,
   Database,
+  PanelRightOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useOrg } from "@/lib/org-context";
 
@@ -94,6 +102,7 @@ export default function AgentPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -135,7 +144,13 @@ export default function AgentPage() {
     setMessages([]);
     setInput("");
     setActiveConversation(null);
+    setHistoryOpen(false);
     inputRef.current?.focus();
+  };
+
+  const openConversation = (id: string) => {
+    setActiveConversation(id);
+    setHistoryOpen(false);
   };
 
   const copyText = async (content: string) => {
@@ -192,95 +207,145 @@ export default function AgentPage() {
     );
   };
 
+  const conversationsList = (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="p-3 border-b border-border">
+        <Button
+          onClick={handleNewChat}
+          variant="outline"
+          className="w-full justify-start gap-2 border-cyan/30 text-xs text-cyan hover:bg-cyan/10"
+        >
+          <MessageSquarePlus className="w-3.5 h-3.5" />
+          محادثة جديدة
+        </Button>
+      </div>
+      <ScrollArea className="flex-1 p-2">
+        {conversations.length === 0 ? (
+          <div className="px-3 py-8 text-center">
+            <Bot className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
+            <p className="text-[11px] text-muted-foreground">لا توجد محادثات سابقة</p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => openConversation(conv.id)}
+                className={cn(
+                  "group flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs transition-colors",
+                  activeConversation === conv.id
+                    ? "bg-cyan/10 text-cyan"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <span className="flex-1 truncate">{conv.title}</span>
+                <Trash2
+                  className="mr-1 h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-50 hover:!opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+                    if (activeConversation === conv.id) handleNewChat();
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+        )}
+      </ScrollArea>
+    </div>
+  );
+
   return (
-    <div className="flex gap-4 relative" style={{ height: "calc(100vh - 7rem)" }}>
-      {/* Conversations Sidebar */}
-      <div className="w-[240px] flex-shrink-0 cc-card rounded-xl flex flex-col overflow-hidden">
-        <div className="p-3 border-b border-border">
-          <Button
-            onClick={handleNewChat}
-            variant="outline"
-            className="w-full justify-start gap-2 text-xs border-cyan/30 text-cyan hover:bg-cyan/10"
-          >
-            <MessageSquarePlus className="w-3.5 h-3.5" />
-            محادثة جديدة
-          </Button>
-        </div>
-        <ScrollArea className="flex-1 p-2">
-          {conversations.length === 0 ? (
-            <div className="text-center py-8 px-3">
-              <Bot className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-              <p className="text-[11px] text-muted-foreground">لا توجد محادثات سابقة</p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {conversations.map((conv) => (
-                <button
-                  key={conv.id}
-                  onClick={() => setActiveConversation(conv.id)}
-                  className={cn(
-                    "w-full text-right px-3 py-2 rounded-lg text-xs transition-colors group flex items-center justify-between",
-                    activeConversation === conv.id
-                      ? "bg-cyan/10 text-cyan"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <span className="truncate flex-1">{conv.title}</span>
-                  <Trash2
-                    className="w-3 h-3 opacity-0 group-hover:opacity-50 hover:!opacity-100 flex-shrink-0 mr-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConversations((prev) => prev.filter((c) => c.id !== conv.id));
-                      if (activeConversation === conv.id) handleNewChat();
-                    }}
-                  />
-                </button>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
+    <div
+      className="relative flex h-[calc(100dvh-11.5rem)] min-h-[34rem] flex-col gap-4 lg:h-[calc(100vh-7rem)] lg:min-h-0 lg:flex-row"
+    >
+      {/* Desktop conversations rail */}
+      <div className="hidden w-[240px] flex-shrink-0 overflow-hidden rounded-xl cc-card lg:flex lg:flex-col">
+        {conversationsList}
       </div>
 
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent
+          side="right"
+          className="w-[88vw] max-w-[360px] border-border bg-card p-0 sm:w-[360px]"
+        >
+          <SheetHeader className="border-b border-border">
+            <SheetTitle>المحادثات</SheetTitle>
+            <SheetDescription>
+              افتح محادثة سابقة أو ابدأ محادثة جديدة.
+            </SheetDescription>
+          </SheetHeader>
+          {conversationsList}
+        </SheetContent>
+      </Sheet>
+
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col cc-card rounded-xl overflow-hidden min-h-0">
+      <div className="flex min-h-[70vh] flex-1 flex-col overflow-hidden rounded-xl cc-card lg:min-h-0">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan to-cc-purple flex items-center justify-center">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan to-cc-purple">
               <Bot className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-foreground">المساعد الذكي</h3>
-              <p className="text-[10px] text-muted-foreground">مستشار أعمال — مدعوم بـ Gemini AI</p>
+            <div className="min-w-0">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-cyan/20 bg-cyan/10 px-2 py-0.5 text-[10px] font-semibold text-cyan">
+                  AI Copilot
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  مدعوم ببيانات الشركة
+                </span>
+              </div>
+              <h3 className="truncate text-sm font-bold text-foreground sm:text-base">
+                المساعد الذكي
+              </h3>
+              <p className="text-[10px] text-muted-foreground sm:text-[11px]">
+                اسأل عن الأداء، الفريق، والمشاريع من شاشة واحدة واضحة.
+              </p>
             </div>
           </div>
-          {messages.length > 0 && (
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="ghost"
-              size="sm"
-              onClick={handleNewChat}
-              className="text-muted-foreground text-xs gap-1.5"
+              size="icon"
+              onClick={() => setHistoryOpen(true)}
+              className="lg:hidden rounded-xl bg-white/[0.03] hover:bg-white/[0.06]"
+              aria-label="فتح المحادثات"
             >
-              <RotateCcw className="w-3 h-3" />
-              محادثة جديدة
+              <PanelRightOpen className="h-4 w-4 text-muted-foreground" />
             </Button>
-          )}
+            {messages.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleNewChat}
+                className="gap-1.5 text-xs text-muted-foreground"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="hidden sm:inline">محادثة جديدة</span>
+                <span className="sm:hidden">جديد</span>
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5" ref={scrollRef}>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5" ref={scrollRef}>
           {messages.length === 0 ? (
             /* Empty State — Suggested Prompts */
-            <div className="flex flex-col items-center justify-center h-full py-12">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan/20 to-cc-purple/20 flex items-center justify-center mb-5">
+            <div className="flex h-full flex-col items-center justify-center py-8 sm:py-12">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan/20 to-cc-purple/20 sm:h-16 sm:w-16">
                 <Sparkles className="w-8 h-8 text-cyan" />
               </div>
-              <h2 className="text-lg font-bold text-foreground mb-1">مرحباً! أنا المساعد الذكي</h2>
-              <p className="text-xs text-muted-foreground mb-8 max-w-md text-center">
-                أقدر أساعدك في تحليل بيانات الشركة، متابعة الأداء، وتقديم توصيات عملية. اختر موضوع أو اكتب سؤالك.
+              <h2 className="mb-1 text-center text-lg font-bold text-foreground">
+                مرحباً، أنا المساعد الذكي
+              </h2>
+              <p className="mb-6 max-w-md text-center text-xs leading-6 text-muted-foreground sm:mb-8">
+                أساعدك في تحليل بيانات الشركة، متابعة الأداء، وتقديم توصيات عملية.
+                ابدأ بسؤال مباشر أو اختر واحدة من هذه المحاور.
               </p>
 
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-2xl">
+              <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {SUGGESTED_PROMPTS.map((item, i) => {
                   const Icon = item.icon;
                   return (
@@ -288,7 +353,7 @@ export default function AgentPage() {
                       key={i}
                       onClick={() => handlePromptClick(item.prompt)}
                       className={cn(
-                        "flex items-start gap-3 p-3.5 rounded-xl border text-right transition-all",
+                        "flex items-start gap-3 rounded-xl border p-3.5 text-right transition-all",
                         item.bg
                       )}
                     >
@@ -306,15 +371,15 @@ export default function AgentPage() {
             </div>
           ) : (
             /* Chat Messages */
-            <div className="space-y-6 py-5">
+            <div className="space-y-5 py-4 sm:space-y-6 sm:py-5">
               {messages.map((msg) => {
                 const text = getMessageText(msg);
                 return (
-                  <div key={msg.id} className="flex gap-3">
+                  <div key={msg.id} className="flex gap-2.5 sm:gap-3">
                     {/* Avatar */}
                     <div
                       className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5",
+                        "mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg",
                         msg.role === "user"
                           ? "bg-cyan/15"
                           : "bg-gradient-to-br from-cyan/20 to-cc-purple/20"
@@ -465,17 +530,17 @@ export default function AgentPage() {
         </div>
 
         {/* Input Area — always visible */}
-        <div className="flex-shrink-0 p-4 border-t border-border bg-card">
-          <div className="flex items-end gap-3">
+        <div className="sticky bottom-0 z-10 flex-shrink-0 border-t border-border bg-card/95 p-3 backdrop-blur-sm sm:p-4">
+          <div className="flex items-end gap-2 sm:gap-3">
             <div className="flex-1 relative">
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="اسأل عن المبيعات، الفريق، الدعم، المالية..."
+                placeholder="اسأل عن المبيعات، الفريق، الدعم، أو المشاريع..."
                 rows={1}
-                className="w-full resize-none bg-muted/50 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground border border-border focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25 transition-colors"
+                className="w-full resize-none rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25"
                 style={{ minHeight: "48px", maxHeight: "120px" }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;
@@ -488,12 +553,12 @@ export default function AgentPage() {
               type="button"
               onClick={() => submitMessage(input)}
               disabled={!input.trim() || isLoading}
-              className="h-12 w-12 rounded-xl bg-gradient-to-br from-cyan to-cyan/80 hover:from-cyan/90 hover:to-cyan/70 text-background disabled:opacity-30"
+              className="h-12 w-12 rounded-xl bg-gradient-to-br from-cyan to-cyan/80 text-background hover:from-cyan/90 hover:to-cyan/70 disabled:opacity-30"
             >
               <Send className="w-4 h-4" />
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground text-center mt-2">
+          <p className="mt-2 text-center text-[10px] text-muted-foreground">
             المساعد الذكي مدعوم بـ Gemini AI — الإجابات مبنية على بيانات الشركة الفعلية
           </p>
         </div>

@@ -2,6 +2,18 @@ import { streamText, generateText, convertToModelMessages, tool, stepCountIs } f
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  listLiveProjects,
+  listLiveClients,
+  listLiveTasks,
+  listLiveEmployees,
+  getLiveProject,
+  getLiveClient,
+  getLiveTask,
+  getLiveEmployee,
+  listLiveTaskMessages,
+  computeTaskAnalytics,
+} from "@/lib/odoo/live";
 import { z } from "zod";
 
 const google = createGoogleGenerativeAI({
@@ -49,6 +61,13 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 6. **التوقعات والمخاطر**: استخراج أنماط من البيانات (تأخر متكرر، ضغط على قسم معين، عملاء يحتاجون متابعة)
 7. **استعلام قاعدة البيانات**: استخدم queryDatabase للاستعلام عن أي جدول من الجداول المسموحة
 8. **البحث في الويب**: استخدم webSearch للمعلومات العامة (اتجاهات السوق، ممارسات الصناعة، أدوات تسويقية حديثة)
+9. **بيانات أودو الحية (Rwasem)**: استخدم أدوات odoo* للوصول المباشر إلى نظام أودو (rwasem) — هذه البيانات لحظية وليست منسوخة:
+   - \`odooListProjects\` / \`odooGetProject\`: المشاريع في أودو
+   - \`odooListClients\` / \`odooGetClient\`: العملاء (شركات customer_rank>0)
+   - \`odooListTasks\` / \`odooGetTask\`: المهام مع فلاتر (overdue, stage, projectOdooId, assigneeUserId)
+   - \`odooListEmployees\` / \`odooGetEmployee\`: الموظفون مع تحليلات مهامهم
+   - \`odooGetTaskMessages\`: محادثات المهمة (mail.message)
+   - استخدم Odoo حين يسأل المستخدم عن بيانات لحظية أو حالات لم تُستورد بعد، واستخدم queryDatabase حين يحتاج للوحات لوحة التحكم والـ ai_events.
 
 ## الجداول المتاحة لـ queryDatabase
 - **clients**: العملاء (name, contact_name, phone, email, status, source, created_at)
@@ -239,7 +258,7 @@ export async function POST(req: Request) {
       model: google("gemini-3-flash-preview"),
       system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(8),
       tools: {
         webSearch: tool({
           description: "Search the web for current information (industry news, competitor info, marketing trends, agency tools).",
@@ -260,6 +279,135 @@ export async function POST(req: Request) {
                 error: err instanceof Error ? err.message : "Search failed",
                 query,
               };
+            }
+          },
+        }),
+        odooListProjects: tool({
+          description: "List active projects directly from the live Odoo (Rwasem) system. Returns up to 500 projects with client, manager, dates, and task counts.",
+          inputSchema: z.object({}),
+          execute: async () => {
+            try {
+              const data = await listLiveProjects();
+              return { success: true as const, count: data.length, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooGetProject: tool({
+          description: "Fetch a single project from live Odoo with its tasks and computed analytics (byStage, overdue, completion %).",
+          inputSchema: z.object({
+            odooId: z.number().describe("The Odoo project.project id"),
+          }),
+          execute: async ({ odooId }) => {
+            try {
+              const data = await getLiveProject(odooId);
+              if (!data) return { success: false as const, error: "Project not found in Odoo" };
+              return { success: true as const, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooListClients: tool({
+          description: "List company clients (customer_rank>0, is_company=true) from live Odoo with project counts.",
+          inputSchema: z.object({}),
+          execute: async () => {
+            try {
+              const data = await listLiveClients();
+              return { success: true as const, count: data.length, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooGetClient: tool({
+          description: "Fetch a single client from live Odoo (res.partner) with all their projects.",
+          inputSchema: z.object({
+            odooId: z.number().describe("The Odoo res.partner id"),
+          }),
+          execute: async ({ odooId }) => {
+            try {
+              const data = await getLiveClient(odooId);
+              if (!data) return { success: false as const, error: "Client not found in Odoo" };
+              return { success: true as const, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooListTasks: tool({
+          description: "List tasks from live Odoo with optional filters. Use overdue=true for late tasks, stage to filter by mapped stage keys (new, in_progress, manager_review, specialist_review, ready_to_send, sent_to_client, client_changes, done). Returns analytics summary alongside the rows.",
+          inputSchema: z.object({
+            overdue: z.boolean().optional().describe("Only past-deadline, non-done tasks"),
+            stage: z.array(z.string()).optional().describe("Mapped stage keys to include"),
+            projectOdooId: z.number().optional().describe("Filter to a specific Odoo project id"),
+            assigneeUserId: z.number().optional().describe("Filter to tasks assigned to this Odoo res.users id"),
+            limit: z.number().default(200),
+          }),
+          execute: async ({ overdue, stage, projectOdooId, assigneeUserId, limit }) => {
+            try {
+              const tasks = await listLiveTasks({ overdue, stage, projectOdooId, assigneeUserId, limit });
+              const analytics = computeTaskAnalytics(tasks);
+              return { success: true as const, count: tasks.length, analytics, data: tasks };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooGetTask: tool({
+          description: "Fetch a single task from live Odoo with description, deadlines, assignees, and stage.",
+          inputSchema: z.object({
+            odooId: z.number().describe("The Odoo project.task id"),
+          }),
+          execute: async ({ odooId }) => {
+            try {
+              const data = await getLiveTask(odooId);
+              if (!data) return { success: false as const, error: "Task not found in Odoo" };
+              return { success: true as const, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooGetTaskMessages: tool({
+          description: "Fetch the message thread (Log Notes / emails) for a task from live Odoo's mail.message.",
+          inputSchema: z.object({
+            odooId: z.number().describe("The Odoo project.task id"),
+          }),
+          execute: async ({ odooId }) => {
+            try {
+              const data = await listLiveTaskMessages(odooId);
+              return { success: true as const, count: data.length, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooListEmployees: tool({
+          description: "List active employees from live Odoo (hr.employee) with department and manager.",
+          inputSchema: z.object({}),
+          execute: async () => {
+            try {
+              const data = await listLiveEmployees();
+              return { success: true as const, count: data.length, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
+            }
+          },
+        }),
+        odooGetEmployee: tool({
+          description: "Fetch a single employee from live Odoo with their currently-assigned tasks and computed analytics.",
+          inputSchema: z.object({
+            odooId: z.number().describe("The Odoo hr.employee id"),
+          }),
+          execute: async ({ odooId }) => {
+            try {
+              const data = await getLiveEmployee(odooId);
+              if (!data) return { success: false as const, error: "Employee not found in Odoo" };
+              return { success: true as const, data };
+            } catch (err) {
+              return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
             }
           },
         }),
