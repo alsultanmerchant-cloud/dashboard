@@ -61,7 +61,15 @@ export default async function ContractsPage({
     <div>
       <PageHeader
         title="العقود"
-        description="كل العقود التجارية مع الحالة، المُسوّق المسؤول، الباقة، والقيمة المتبقّية. مصدر البيانات: ورقة Acc."
+        description="كل العقود التجارية مع الحالة، المُسوّق المسؤول، الباقة، والقيمة المتبقّية."
+        actions={
+          <Link
+            href="/contracts/import"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim px-3 text-xs font-medium text-cyan hover:bg-cyan-dim/80 transition-colors"
+          >
+            استيراد من Excel
+          </Link>
+        }
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
