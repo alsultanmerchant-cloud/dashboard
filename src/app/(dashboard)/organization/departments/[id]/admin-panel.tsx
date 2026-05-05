@@ -2,12 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Loader2, X, Plus, Crown, Shield, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { copy } from "@/lib/copy";
 import {
   setDepartmentHead,
   addTeamLead,
@@ -36,6 +36,7 @@ export function DepartmentAdminPanel({
   candidates: Candidate[];
 }) {
   const router = useRouter();
+  const t = useTranslations("Organization");
   const [pending, startTransition] = useTransition();
   const [headPick, setHeadPick] = useState<string>(currentHeadUserId ?? "");
   const [leadPick, setLeadPick] = useState<string>("");
@@ -54,7 +55,7 @@ export function DepartmentAdminPanel({
       if (result.error) {
         toast.error(result.error);
       } else {
-        toast.success("تم تحديث رئيس القسم");
+        toast.success(t("headUpdated"));
         router.refresh();
       }
     });
@@ -67,7 +68,7 @@ export function DepartmentAdminPanel({
       if (result.error) {
         toast.error(result.error);
       } else {
-        toast.success("تمت إضافة قائد الفريق");
+        toast.success(t("leadAdded"));
         setLeadPick("");
         router.refresh();
       }
@@ -80,7 +81,7 @@ export function DepartmentAdminPanel({
       if (result.error) {
         toast.error(result.error);
       } else {
-        toast.success("تمت إزالة قائد الفريق");
+        toast.success(t("leadRemoved"));
         router.refresh();
       }
     });
@@ -91,7 +92,7 @@ export function DepartmentAdminPanel({
       <CardContent className="p-4 space-y-5">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Settings2 className="size-4 text-cyan" />
-          {copy.organization.departmentDetail.adminTools}
+          {t("adminTools")}
         </div>
 
         {/* Head picker */}
@@ -101,7 +102,7 @@ export function DepartmentAdminPanel({
             className="flex items-center gap-1.5 text-xs font-medium text-foreground"
           >
             <Crown className="size-3" />
-            {copy.organization.head}
+            {t("head")}
           </label>
           <div className="flex gap-2 flex-wrap">
             <select
@@ -111,7 +112,7 @@ export function DepartmentAdminPanel({
               disabled={pending}
               className="flex-1 min-w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan"
             >
-              <option value="">— {copy.organization.noHead} —</option>
+              <option value="">— {t("noHead")} —</option>
               {candidates.map((c) => (
                 <option key={c.user_id} value={c.user_id}>
                   {c.full_name}
@@ -126,7 +127,7 @@ export function DepartmentAdminPanel({
               size="sm"
             >
               {pending && <Loader2 className="size-3.5 animate-spin" />}
-              {copy.organization.setHead}
+              {t("setHead")}
             </Button>
           </div>
         </div>
@@ -138,7 +139,7 @@ export function DepartmentAdminPanel({
             className="flex items-center gap-1.5 text-xs font-medium text-foreground"
           >
             <Shield className="size-3" />
-            {copy.organization.teamLeads}
+            {t("teamLeads")}
           </label>
 
           {currentTeamLeadUserIds.length > 0 && (
@@ -156,7 +157,7 @@ export function DepartmentAdminPanel({
                       type="button"
                       onClick={() => onRemoveLead(uid)}
                       disabled={pending}
-                      aria-label={`${copy.organization.removeTeamLead} ${c?.full_name ?? ""}`}
+                      aria-label={`${t("removeTeamLead")} ${c?.full_name ?? ""}`}
                       className="rounded-full p-0.5 hover:bg-cc-red/20"
                     >
                       <X className="size-3" />
@@ -175,7 +176,7 @@ export function DepartmentAdminPanel({
               disabled={pending}
               className="flex-1 min-w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan"
             >
-              <option value="">{copy.organization.departmentDetail.pickTeamLead}</option>
+              <option value="">{t("pickTeamLead")}</option>
               {eligibleForLead.map((c) => (
                 <option key={c.user_id} value={c.user_id}>
                   {c.full_name}
@@ -195,7 +196,7 @@ export function DepartmentAdminPanel({
               ) : (
                 <Plus className="size-3.5" />
               )}
-              {copy.organization.addTeamLead}
+              {t("addTeamLead")}
             </Button>
           </div>
         </div>

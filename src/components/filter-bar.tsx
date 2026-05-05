@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import { Search, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { copy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 
 export interface FilterBarProps {
@@ -16,6 +16,8 @@ export interface FilterBarProps {
 }
 
 export function FilterBar({ search, onClear, hasActiveFilters, children, className }: FilterBarProps) {
+  const tF = useTranslations("Forms");
+  const tA = useTranslations("Actions");
   return (
     <div
       className={cn(
@@ -25,12 +27,12 @@ export function FilterBar({ search, onClear, hasActiveFilters, children, classNa
     >
       {search && (
         <div className="relative min-w-0 flex-1 max-w-sm">
-          <Search className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute rtl:right-2.5 ltr:left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search.value}
             onChange={(e) => search.onChange(e.target.value)}
-            placeholder={search.placeholder ?? copy.forms.placeholderSearch}
-            className="pe-8"
+            placeholder={search.placeholder ?? tF("placeholderSearch")}
+            className="rtl:pe-8 ltr:ps-8"
             type="search"
             inputMode="search"
           />
@@ -40,7 +42,7 @@ export function FilterBar({ search, onClear, hasActiveFilters, children, classNa
       {hasActiveFilters && onClear && (
         <Button variant="ghost" size="sm" onClick={onClear} className="text-muted-foreground">
           <X className="size-3.5" />
-          {copy.actions.clearFilters}
+          {tA("clearFilters")}
         </Button>
       )}
     </div>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ShieldAlert, Briefcase } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermissionAny, hasPermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
@@ -7,7 +8,6 @@ import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Pagination } from "@/components/pagination";
-import { copy } from "@/lib/copy";
 import { formatArabicDateTime } from "@/lib/utils-format";
 import { EscalationsToolbar } from "./escalations-toolbar";
 import { ResolveExceptionInline } from "./resolve-exception-inline";
@@ -17,19 +17,6 @@ export const dynamic = "force-dynamic";
 
 const EXC_PAGE_SIZE = 25;
 const ESC_PAGE_SIZE = 25;
-
-const KIND_LABELS: Record<string, string> = {
-  client: "عميل",
-  deadline: "موعد",
-  quality: "جودة",
-  resource: "موارد",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  open: "مفتوح",
-  acknowledged: "مُقَرّ به",
-  closed: "مغلق",
-};
 
 type ExceptionRow = {
   id: string;
@@ -63,13 +50,16 @@ export default async function EscalationsPage({
     "escalation.view_own",
     "escalation.view_all",
   ]);
-  const sp = (await searchParams) ?? {};
+  const [sp, t] = await Promise.all([
+    searchParams ?? Promise.resolve({}),
+    getTranslations("Escalations"),
+  ]);
+
   const kindFilter = ["client", "deadline", "quality", "resource"].includes(sp.kind ?? "")
     ? (sp.kind as string)
     : null;
   const ePage = Math.max(1, Number(sp.epage) || 1);
   const sPage = Math.max(1, Number(sp.spage) || 1);
-
   const seeAll = hasPermission(session, "escalation.view_all");
 
   const eFrom = (ePage - 1) * EXC_PAGE_SIZE;
@@ -84,12 +74,9 @@ export default async function EscalationsPage({
     .order("opened_at", { ascending: false })
     .range(eFrom, eTo);
   if (kindFilter) exceptionsQuery = exceptionsQuery.eq("kind", kindFilter);
-  if (!seeAll) {
-    exceptionsQuery = exceptionsQuery.eq("opened_by", session.userId);
-  }
+  if (!seeAll) exceptionsQuery = exceptionsQuery.eq("opened_by", session.userId);
   const { data: exceptions, count: exceptionsTotal } = await exceptionsQuery;
 
-  // Open-by-kind counts come from a separate cheap aggregate (not the page slice).
   let kindCountsQuery = supabaseAdmin
     .from("exceptions")
     .select("kind")
@@ -111,22 +98,22 @@ export default async function EscalationsPage({
     .eq("organization_id", session.orgId)
     .order("raised_at", { ascending: false })
     .range(sFrom, sTo);
-  if (!seeAll) {
-    escalationsQuery = escalationsQuery.eq("raised_to_user_id", session.userId);
-  }
+  if (!seeAll) escalationsQuery = escalationsQuery.eq("raised_to_user_id", session.userId);
   const { data: escalations, count: escalationsTotal } = await escalationsQuery;
+
+  const kindKeys = ["client", "deadline", "quality", "resource"] as const;
 
   return (
     <div>
       <PageHeader
-        title="التصعيدات والاستثناءات"
-        description="صندوق وارد التصعيدات الموجَّهة إليك. تتبَّع الاستثناءات المفتوحة وأقرَّها أو أغلقها."
+        title={t("pageTitle")}
+        description={t("pageDescription")}
       />
 
       <div className="mb-6 flex flex-wrap gap-2">
-        {(["client", "deadline", "quality", "resource"] as const).map((k) => (
+        {kindKeys.map((k) => (
           <Badge key={k} variant="outline" className="text-xs">
-            {KIND_LABELS[k]} · {counts[k]}
+            {t(`kindLabels.${k}`)} · {counts[k]}
           </Badge>
         ))}
       </div>
@@ -134,12 +121,12 @@ export default async function EscalationsPage({
       <EscalationsToolbar activeKind={kindFilter} />
 
       <section className="mb-10">
-        <h2 className="mb-3 text-base font-semibold">الاستثناءات</h2>
+        <h2 className="mb-3 text-base font-semibold">{t("exceptions")}</h2>
         {(exceptions ?? []).length === 0 ? (
           <EmptyState
             icon={<ShieldAlert className="size-6" />}
-            title="لا توجد استثناءات"
-            description={copy.empty.notifications.description}
+            title={t("noExceptions")}
+            description={t("noEscalationsDescription")}
           />
         ) : (
           <div className="space-y-2">
@@ -157,10 +144,10 @@ export default async function EscalationsPage({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <Badge variant={isOpen ? "destructive" : "secondary"} className="text-[10px]">
-                            {KIND_LABELS[row.kind] ?? row.kind}
+                            {t(`kindLabels.${row.kind as "client" | "deadline" | "quality" | "resource"}`) ?? row.kind}
                           </Badge>
                           <Badge variant="outline" className="text-[10px]">
-                            {isOpen ? "مفتوح" : "مغلق"}
+                            {isOpen ? t("isOpen") : t("isClosed")}
                           </Badge>
                           {task && (
                             <Link
@@ -176,11 +163,11 @@ export default async function EscalationsPage({
                           {row.reason}
                         </p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          فُتح: {formatArabicDateTime(row.opened_at)}
+                          {t("openedAt")}: {formatArabicDateTime(row.opened_at)}
                           {row.resolved_at && (
                             <>
                               {" · "}
-                              أُغلق: {formatArabicDateTime(row.resolved_at)}
+                              {t("closedAt")}: {formatArabicDateTime(row.resolved_at)}
                             </>
                           )}
                         </p>
@@ -208,12 +195,12 @@ export default async function EscalationsPage({
       </section>
 
       <section>
-        <h2 className="mb-3 text-base font-semibold">التصعيدات</h2>
+        <h2 className="mb-3 text-base font-semibold">{t("escalationsSection")}</h2>
         {(escalations ?? []).length === 0 ? (
           <EmptyState
             icon={<ShieldAlert className="size-6" />}
-            title="لا توجد تصعيدات"
-            description="ستظهر هنا التصعيدات الموجَّهة إليك تلقائيًا عند خرق SLA."
+            title={t("noEscalations")}
+            description={t("noEscalationsDescription")}
           />
         ) : (
           <div className="space-y-2">
@@ -230,10 +217,10 @@ export default async function EscalationsPage({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <Badge variant={row.status === "open" ? "destructive" : "secondary"} className="text-[10px]">
-                            {STATUS_LABELS[row.status] ?? row.status}
+                            {t(`statusLabels.${row.status as "open" | "acknowledged" | "closed"}`) ?? row.status}
                           </Badge>
                           <Badge variant="outline" className="text-[10px]">
-                            مستوى {row.level}
+                            {t("level", { n: row.level })}
                           </Badge>
                           {task && (
                             <Link
@@ -246,11 +233,11 @@ export default async function EscalationsPage({
                           )}
                         </div>
                         <p className="text-[11px] text-muted-foreground">
-                          رفع التصعيد: {formatArabicDateTime(row.raised_at)}
+                          {t("raisedAt")}: {formatArabicDateTime(row.raised_at)}
                           {row.acknowledged_at && (
                             <>
                               {" · "}
-                              تم الإقرار: {formatArabicDateTime(row.acknowledged_at)}
+                              {t("acknowledgedAt")}: {formatArabicDateTime(row.acknowledged_at)}
                             </>
                           )}
                         </p>

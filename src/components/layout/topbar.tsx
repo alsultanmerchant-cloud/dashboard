@@ -68,12 +68,12 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
             className="lg:hidden shrink-0 rounded-xl bg-white/40 hover:bg-white/60 dark:bg-soft-2 dark:hover:bg-soft-2"
             onClick={onMenuClick}
           >
-            <Menu className="w-5 h-5 text-foreground/80 dark:text-muted-foreground" />
+            <Menu className="w-5 h-5 text-white/90 dark:text-muted-foreground" />
           </Button>
 
           <div className="min-w-0">
-            <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-foreground truncate">{title}</h2>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-foreground/70 dark:text-muted-foreground hidden md:block truncate">{subtitle}</p>
+            <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">{title}</h2>
+            <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">{subtitle}</p>
           </div>
         </div>
 

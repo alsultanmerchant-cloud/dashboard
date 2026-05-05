@@ -1,10 +1,10 @@
 import { Inbox } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Pagination } from "@/components/pagination";
-import { copy } from "@/lib/copy";
 import { NotificationsList } from "./notifications-list";
 
 const PAGE_SIZE = 30;
@@ -15,7 +15,11 @@ export default async function NotificationsPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const session = await requirePagePermission("notifications.view");
-  const sp = await searchParams;
+  const [sp, tP, tE] = await Promise.all([
+    searchParams,
+    getTranslations("NotificationsPage"),
+    getTranslations("Empty"),
+  ]);
   const page = Math.max(1, Number(sp.page) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -36,15 +40,15 @@ export default async function NotificationsPage({
   return (
     <div>
       <PageHeader
-        title="التنبيهات"
-        description="كل الإشارات والتسليمات وتحديثات المهام في مكان واحد. اضغط على أي تنبيه لفتحه ووسمه كمقروء."
+        title={tP("title")}
+        description={tP("description")}
       />
 
       {total === 0 ? (
         <EmptyState
           icon={<Inbox className="size-6" />}
-          title={copy.empty.notifications.title}
-          description={copy.empty.notifications.description}
+          title={tE("notifications.title")}
+          description={tE("notifications.description")}
         />
       ) : (
         <>

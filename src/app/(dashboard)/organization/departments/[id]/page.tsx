@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronRight, Crown, Shield, Users, Building } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import {
   requirePagePermission,
   hasPermission,
 } from "@/lib/auth-server";
 import { loadOrgChart } from "@/lib/data/org-chart";
-import { copy } from "@/lib/copy";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +20,10 @@ export default async function DepartmentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await requirePagePermission("employees.view");
+  const [session, t] = await Promise.all([
+    requirePagePermission("employees.view"),
+    getTranslations("Organization"),
+  ]);
   const { id } = await params;
   const chart = await loadOrgChart(session.orgId);
   const dept = chart.byId.get(id);
@@ -40,14 +43,23 @@ export default async function DepartmentDetailPage({
     }))
     .sort((a, b) => a.full_name.localeCompare(b.full_name, "ar"));
 
+  const posLabelMap: Record<string, string> = {
+    head: t("positions.head"),
+    team_lead: t("positions.team_lead"),
+    specialist: t("positions.specialist"),
+    agent: t("positions.agent"),
+    admin: t("positions.admin"),
+    none: t("positions.none"),
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={dept.name}
         description={dept.description ?? undefined}
         breadcrumbs={[
-          { label: "المنظمة" },
-          { label: copy.organization.chartTitle, href: "/organization/chart" },
+          { label: t("orgLabel") },
+          { label: t("chartTitle"), href: "/organization/chart" },
           { label: dept.name },
         ]}
       />
@@ -57,7 +69,7 @@ export default async function DepartmentDetailPage({
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Crown className="size-3.5" />
-              {copy.organization.head}
+              {t("head")}
             </div>
             {dept.head ? (
               <div>
@@ -67,7 +79,7 @@ export default async function DepartmentDetailPage({
                 )}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground italic">{copy.organization.noHead}</p>
+              <p className="text-sm text-muted-foreground italic">{t("noHead")}</p>
             )}
           </CardContent>
         </Card>
@@ -76,11 +88,11 @@ export default async function DepartmentDetailPage({
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Shield className="size-3.5" />
-              {copy.organization.teamLeads}
+              {t("teamLeads")}
             </div>
             {dept.teamLeads.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">
-                {copy.organization.noTeamLeads}
+                {t("noTeamLeads")}
               </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -98,7 +110,7 @@ export default async function DepartmentDetailPage({
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Users className="size-3.5" />
-              {copy.organization.members}
+              {t("members")}
             </div>
             <p className="text-2xl font-bold tabular-nums">
               {dept.members.length + dept.teamLeads.length + (dept.head ? 1 : 0)}
@@ -111,12 +123,12 @@ export default async function DepartmentDetailPage({
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
             <Users className="size-4 text-cyan" />
-            {copy.organization.members}
+            {t("members")}
           </div>
           {dept.members.length === 0 ? (
             <EmptyState
               icon={<Building className="size-6" />}
-              title={copy.organization.noMembers}
+              title={t("noMembers")}
               description={dept.description ?? undefined}
               variant="compact"
             />
@@ -139,9 +151,7 @@ export default async function DepartmentDetailPage({
                   </div>
                   {m.position && (
                     <Badge variant="outline" className="text-[10px] shrink-0">
-                      {copy.organization.positions[
-                        m.position as keyof typeof copy.organization.positions
-                      ] ?? m.position}
+                      {posLabelMap[m.position] ?? m.position}
                     </Badge>
                   )}
                 </li>
@@ -164,7 +174,7 @@ export default async function DepartmentDetailPage({
       ) : (
         <Card className="bg-card/40 border-dashed">
           <CardContent className="p-4 text-xs text-muted-foreground">
-            {copy.organization.departmentDetail.mustHavePerm}
+            {t("mustHavePerm")}
           </CardContent>
         </Card>
       )}
@@ -175,7 +185,7 @@ export default async function DepartmentDetailPage({
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-cyan transition-colors"
         >
           <ChevronRight className="size-3 icon-flip-rtl" />
-          {copy.organization.departmentDetail.backToChart}
+          {t("backToChart")}
         </Link>
       </div>
     </div>

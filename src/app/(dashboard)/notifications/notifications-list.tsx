@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import {
   Inbox, Send, Briefcase, ListTodo, MessageSquare, AtSign, Bell,
   CheckCheck, Loader2, Sparkles,
@@ -11,7 +12,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { copy } from "@/lib/copy";
 import { relativeTimeAr } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { markNotificationReadAction, markAllNotificationsReadAction } from "./_actions";
@@ -50,21 +50,24 @@ function entityHref(entityType: string | null, entityId: string | null): string 
   }
 }
 
-const FILTERS = [
-  { key: "all", label: "الكل" },
-  { key: "unread", label: "غير مقروءة" },
-  { key: "read", label: "مقروءة" },
-] as const;
-
 export function NotificationsList({
   notifications: initial,
 }: {
   notifications: Notification[];
 }) {
   const router = useRouter();
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
+  const tL = useTranslations("NotificationsList");
+  const tA = useTranslations("Actions");
+  const tE = useTranslations("Empty");
+  const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
   const [pendingAll, startAll] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const FILTERS = [
+    { key: "all" as const, label: tL("filterAll") },
+    { key: "unread" as const, label: tL("filterUnread") },
+    { key: "read" as const, label: tL("filterRead") },
+  ];
 
   const list = initial.filter((n) => {
     if (filter === "all") return true;
@@ -93,7 +96,7 @@ export function NotificationsList({
       if ("error" in res) {
         toast.error(res.error);
       } else {
-        toast.success(`تم تعليم ${res.updated} تنبيهًا كمقروء`);
+        toast.success(tA("markAllRead"));
         router.refresh();
       }
     });
@@ -122,7 +125,7 @@ export function NotificationsList({
           </button>
         ))}
         <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {list.length} تنبيه{list.length === 1 ? "" : "ًا"}
+          {tL("countLabel", { count: list.length })}
         </span>
         <Button
           variant="outline"
@@ -131,15 +134,15 @@ export function NotificationsList({
           onClick={handleMarkAll}
         >
           {pendingAll ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCheck className="size-3.5" />}
-          {copy.actions.markAllRead}
+          {tA("markAllRead")}
         </Button>
       </div>
 
       {list.length === 0 ? (
         <EmptyState
           icon={<Bell className="size-6" />}
-          title={copy.empty.notifications.title}
-          description={copy.empty.notifications.description}
+          title={tE("notifications.title")}
+          description={tE("notifications.description")}
         />
       ) : (
         <div className="space-y-2">
@@ -191,7 +194,7 @@ export function NotificationsList({
                           <>
                             <span>·</span>
                             <Link href={href} className="text-cyan hover:underline" onClick={(e) => e.stopPropagation()}>
-                              فتح
+                              {tL("openLink")}
                             </Link>
                           </>
                         )}

@@ -111,6 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
 // Flat title map used by the topbar. Values are keys under the `PageTitles`
 // namespace, suffixed with `.title` / `.subtitle`.
 export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: string }> = {
+  "/": { titleKey: "/dashboard.title", subtitleKey: "/dashboard.subtitle" },
   "/dashboard": { titleKey: "/dashboard.title", subtitleKey: "/dashboard.subtitle" },
   "/uploads": { titleKey: "/uploads.title", subtitleKey: "/uploads.subtitle" },
   "/notifications": { titleKey: "/notifications.title", subtitleKey: "/notifications.subtitle" },

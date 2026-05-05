@@ -1,13 +1,13 @@
 "use client";
-
+import { useTranslations } from "next-intl";
 import { ErrorState } from "@/components/error-state";
-import { copy } from "@/lib/copy";
 
-export default function FeatureFlagsError({ reset }: { reset: () => void }) {
+export default function Error({ reset }: { error?: Error; reset: () => void }) {
+  const t = useTranslations("Organization");
   return (
     <ErrorState
-      title={copy.featureFlags.error.title}
-      description={copy.featureFlags.error.description}
+      title={t("chartErrorTitle")}
+      description={t("chartErrorDescription")}
       onRetry={reset}
     />
   );

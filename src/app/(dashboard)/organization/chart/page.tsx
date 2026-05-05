@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Network, Users, Crown, Shield } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission, getServerSession } from "@/lib/auth-server";
 import { isFlagOn } from "@/lib/feature-flags";
 import {
@@ -8,7 +9,6 @@ import {
   type OrgChart,
   type OrgDepartment,
 } from "@/lib/data/org-chart";
-import { copy } from "@/lib/copy";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,26 +17,17 @@ import { ChartViews } from "./chart-views";
 
 export const dynamic = "force-dynamic";
 
-const KIND_LABEL: Record<string, string> = {
-  account_management: "إدارة الحسابات",
-  group: "مجموعة",
-  main_section: "قسم أساسي",
-  supporting_section: "قسم مساند",
-  quality_control: "الجودة",
-  other: "إداري / مساند",
-};
-
-const POSITION_LABEL = copy.organization.positions;
-
 function PersonChip({
   name,
   position,
   jobTitle,
+  positionLabel,
   variant = "member",
 }: {
   name: string;
   position: string | null;
   jobTitle: string | null;
+  positionLabel: string | null;
   variant?: "head" | "lead" | "member";
 }) {
   const styles = {
@@ -44,10 +35,6 @@ function PersonChip({
     lead: "bg-cyan/10 text-cyan ring-cyan/30",
     member: "bg-card/60 text-foreground ring-border/50",
   } as const;
-  const positionLabel =
-    position && position in POSITION_LABEL
-      ? POSITION_LABEL[position as keyof typeof POSITION_LABEL]
-      : null;
   return (
     <div
       className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ring-1 ${styles[variant]}`}
@@ -64,7 +51,24 @@ function PersonChip({
   );
 }
 
-function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number }) {
+// DepartmentNode needs translated strings passed down since it's rendered
+// inside an async server component but is itself a plain function.
+function DepartmentNode({
+  dept,
+  depth,
+  labels,
+}: {
+  dept: OrgDepartment;
+  depth: number;
+  labels: {
+    head: string;
+    noHead: string;
+    teamLeads: string;
+    members: string;
+    deptKindLabel: (kind: string) => string;
+    positionLabel: (pos: string) => string;
+  };
+}) {
   const memberCount = dept.members.length + dept.teamLeads.length + (dept.head ? 1 : 0);
   const isGroup = dept.kind === "group";
   return (
@@ -89,7 +93,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
                   {dept.name}
                 </Link>
                 <Badge variant="outline" className="text-[10px]">
-                  {KIND_LABEL[dept.kind] ?? dept.kind}
+                  {labels.deptKindLabel(dept.kind)}
                 </Badge>
                 <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                   <Users className="size-3" />
@@ -108,18 +112,19 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-medium text-muted-foreground min-w-20">
-                  {copy.organization.head}:
+                  {labels.head}:
                 </span>
                 {dept.head ? (
                   <PersonChip
                     name={dept.head.full_name}
                     position={dept.head.position}
                     jobTitle={dept.head.job_title}
+                    positionLabel={dept.head.position ? labels.positionLabel(dept.head.position) : null}
                     variant="head"
                   />
                 ) : (
                   <span className="text-[11px] text-muted-foreground italic">
-                    {copy.organization.noHead}
+                    {labels.noHead}
                   </span>
                 )}
               </div>
@@ -127,7 +132,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
               {dept.teamLeads.length > 0 && (
                 <div className="flex flex-wrap items-start gap-2">
                   <span className="text-[11px] font-medium text-muted-foreground min-w-20 mt-1">
-                    {copy.organization.teamLeads}:
+                    {labels.teamLeads}:
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {dept.teamLeads.map((l) => (
@@ -136,6 +141,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
                         name={l.full_name}
                         position={l.position}
                         jobTitle={l.job_title}
+                        positionLabel={l.position ? labels.positionLabel(l.position) : null}
                         variant="lead"
                       />
                     ))}
@@ -146,7 +152,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
               {dept.members.length > 0 && (
                 <div className="flex flex-wrap items-start gap-2">
                   <span className="text-[11px] font-medium text-muted-foreground min-w-20 mt-1">
-                    {copy.organization.members}:
+                    {labels.members}:
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {dept.members.slice(0, 8).map((m) => (
@@ -155,6 +161,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
                         name={m.full_name}
                         position={m.position}
                         jobTitle={m.job_title}
+                        positionLabel={m.position ? labels.positionLabel(m.position) : null}
                       />
                     ))}
                     {dept.members.length > 8 && (
@@ -173,7 +180,7 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
       {dept.children.length > 0 && (
         <div className="mt-3 space-y-3">
           {dept.children.map((child) => (
-            <DepartmentNode key={child.id} dept={child} depth={depth + 1} />
+            <DepartmentNode key={child.id} dept={child} depth={depth + 1} labels={labels} />
           ))}
         </div>
       )}
@@ -182,7 +189,10 @@ function DepartmentNode({ dept, depth }: { dept: OrgDepartment; depth: number })
 }
 
 export default async function OrgChartPage() {
-  const session = await requirePagePermission("employees.view");
+  const [session, t] = await Promise.all([
+    requirePagePermission("employees.view"),
+    getTranslations("Organization"),
+  ]);
   let chart = await loadOrgChart(session.orgId);
 
   // Hide Sales / Telesales subtree behind the feature flag.
@@ -192,16 +202,41 @@ export default async function OrgChartPage() {
 
   const totalDepts = chart.byId.size;
 
+  const kindLabelMap: Record<string, string> = {
+    account_management: t("deptKindLabels.account_management"),
+    group: t("deptKindLabels.group"),
+    main_section: t("deptKindLabels.main_section"),
+    supporting_section: t("deptKindLabels.supporting_section"),
+    quality_control: t("deptKindLabels.quality_control"),
+    other: t("deptKindLabels.other"),
+  };
+  const posLabelMap: Record<string, string> = {
+    head: t("positions.head"),
+    team_lead: t("positions.team_lead"),
+    specialist: t("positions.specialist"),
+    agent: t("positions.agent"),
+    admin: t("positions.admin"),
+    none: t("positions.none"),
+  };
+  const labels = {
+    head: t("head"),
+    noHead: t("noHead"),
+    teamLeads: t("teamLeads"),
+    members: t("members"),
+    deptKindLabel: (kind: string) => kindLabelMap[kind] ?? kind,
+    positionLabel: (pos: string) => posLabelMap[pos] ?? pos,
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title={copy.organization.chartTitle}
-        description={copy.organization.chartDescription}
+        title={t("chartTitle")}
+        description={t("chartDescription")}
         actions={
           <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan-dim px-3 py-1 text-xs text-cyan ring-1 ring-cyan/20">
             <Network className="size-3.5" />
             <span className="tabular-nums">{totalDepts}</span>
-            <span>قسم</span>
+            <span>{t("deptUnit")}</span>
           </span>
         }
       />
@@ -209,8 +244,8 @@ export default async function OrgChartPage() {
       {chart.roots.length === 0 ? (
         <EmptyState
           icon={<Network className="size-6" />}
-          title={copy.organization.chartEmpty.title}
-          description={copy.organization.chartEmpty.description}
+          title={t("chartEmptyTitle")}
+          description={t("chartEmptyDescription")}
         />
       ) : (
         <ChartViews chart={chart} />
@@ -220,9 +255,9 @@ export default async function OrgChartPage() {
         <Card className="bg-card/40 border-dashed">
           <CardContent className="p-4 text-xs text-muted-foreground">
             <strong className="font-medium text-foreground/80">
-              {copy.organization.salesGated.title}
+              {t("salesGatedTitle")}
             </strong>
-            <span className="ms-2">{copy.organization.salesGated.description}</span>
+            <span className="ms-2">{t("salesGatedDescription")}</span>
           </CardContent>
         </Card>
       )}

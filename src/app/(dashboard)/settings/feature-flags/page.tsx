@@ -2,6 +2,7 @@
 // Permission gate: feature_flag.manage (seeded for owner + admin).
 
 import { Flag } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { listFlags, type FeatureFlag } from "@/lib/feature-flags";
@@ -10,7 +11,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { copy } from "@/lib/copy";
 import { FlagRow } from "./flag-row";
 
 async function loadRoles(orgId: string) {
@@ -24,6 +24,7 @@ async function loadRoles(orgId: string) {
 
 export default async function FeatureFlagsPage() {
   const session = await requirePagePermission("feature_flag.manage");
+  const t = await getTranslations("FeatureFlags");
 
   let flags: FeatureFlag[] = [];
   let loadError = false;
@@ -38,28 +39,28 @@ export default async function FeatureFlagsPage() {
   return (
     <div>
       <PageHeader
-        title={copy.featureFlags.pageTitle}
-        description={copy.featureFlags.pageDescription}
+        title={t("pageTitle")}
+        description={t("pageDescription")}
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Flag className="size-3 text-cyan" />
-            {flags.length} مفتاح
+            {t("flagsCount", { count: flags.length })}
           </Badge>
         }
       />
 
       {loadError ? (
         <ErrorState
-          title={copy.featureFlags.error.title}
-          description={copy.featureFlags.error.description}
+          title={t("errorTitle")}
+          description={t("errorDescription")}
         />
       ) : flags.length === 0 ? (
         <Card>
           <CardContent className="p-6">
             <EmptyState
               icon={<Flag className="size-6" />}
-              title={copy.featureFlags.empty.title}
-              description={copy.featureFlags.empty.description}
+              title={t("emptyTitle")}
+              description={t("emptyDescription")}
             />
           </CardContent>
         </Card>

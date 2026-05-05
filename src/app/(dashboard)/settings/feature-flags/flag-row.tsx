@@ -6,6 +6,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Loader2, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { copy } from "@/lib/copy";
 import { ROLE_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import {
@@ -39,6 +39,8 @@ export function FlagRow({
   allRoles: Role[];
 }) {
   const router = useRouter();
+  const t = useTranslations("FeatureFlags");
+  const tA = useTranslations("Actions");
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
   const [roles, setRoles] = useState<string[]>(flag.rollout_roles ?? []);
@@ -50,10 +52,10 @@ export function FlagRow({
     start(async () => {
       const res = await toggleFeatureFlagAction({ key: flag.key, enabled: next });
       if ("error" in res) {
-        toast.error(`${copy.featureFlags.toggleError}: ${res.error}`);
+        toast.error(`${t("toggleError")}: ${res.error}`);
         return;
       }
-      toast.success(copy.featureFlags.toggleSuccess);
+      toast.success(t("toggleSuccess"));
       router.refresh();
     });
   }
@@ -68,7 +70,7 @@ export function FlagRow({
         toast.error(res.error);
         return;
       }
-      toast.success(copy.featureFlags.toggleSuccess);
+      toast.success(t("toggleSuccess"));
       setEditing(false);
       router.refresh();
     });
@@ -117,7 +119,7 @@ export function FlagRow({
                   : "bg-soft-2 text-muted-foreground",
               )}
             >
-              {flag.enabled ? copy.featureFlags.enabled : copy.featureFlags.disabled}
+              {flag.enabled ? t("enabled") : t("disabled")}
             </Badge>
           </div>
           {flag.description && (
@@ -135,11 +137,11 @@ export function FlagRow({
       <div className="mt-4 border-t border-soft pt-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            {copy.featureFlags.columnRoles}
+            {t("columnRoles")}
           </span>
           {(editing ? roles : flag.rollout_roles ?? []).length === 0 ? (
             <Badge variant="ghost" className="text-[10px]">
-              {copy.featureFlags.rolesAll}
+              {t("rolesAll")}
             </Badge>
           ) : (
             (editing ? roles : flag.rollout_roles).map((k) => (
@@ -154,7 +156,7 @@ export function FlagRow({
                   <button
                     type="button"
                     onClick={() => removeRole(k)}
-                    aria-label="إزالة"
+                    aria-label={t("removeRole")}
                     className="rounded hover:bg-soft-3"
                   >
                     <X className="size-3" />
@@ -168,7 +170,7 @@ export function FlagRow({
         {!editing ? (
           <div className="mt-3 flex items-center justify-between gap-2">
             <p className="text-[11px] text-muted-foreground">
-              {copy.featureFlags.helpRoles}
+              {t("helpRoles")}
             </p>
             <Button
               type="button"
@@ -177,7 +179,7 @@ export function FlagRow({
               onClick={() => setEditing(true)}
               disabled={pending}
             >
-              {copy.actions.edit}
+              {tA("edit")}
             </Button>
           </div>
         ) : (
@@ -189,7 +191,7 @@ export function FlagRow({
                 disabled={pending || remainingRoles.length === 0}
               >
                 <SelectTrigger className="min-w-48 bg-card/50 border-soft-2 text-sm">
-                  <SelectValue placeholder={copy.featureFlags.rolesAddPlaceholder} />
+                  <SelectValue placeholder={t("rolesAddPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {remainingRoles.map((r) => (
@@ -209,10 +211,10 @@ export function FlagRow({
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={commitRoles} disabled={pending}>
                 {pending && <Loader2 className="size-3.5 animate-spin" />}
-                {copy.featureFlags.saveRoles}
+                {t("saveRoles")}
               </Button>
               <Button size="sm" variant="ghost" onClick={cancelRoles} disabled={pending}>
-                {copy.featureFlags.cancelRoles}
+                {t("cancelRoles")}
               </Button>
             </div>
           </div>
@@ -221,7 +223,7 @@ export function FlagRow({
 
       {/* Row 3 — meta */}
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-soft pt-2 text-[11px] text-muted-foreground">
-        <span>{copy.featureFlags.columnUpdated}</span>
+        <span>{t("columnUpdated")}</span>
         <span dir="ltr" className="font-mono">{updatedLabel}</span>
       </div>
     </div>
