@@ -1,5 +1,194 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import type { LiveProject } from "@/lib/odoo/live";
+
+export interface ListProjectsPagedResult {
+  rows: LiveProject[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totals: { projects: number; tasks: number; withManager: number };
+}
+
+export interface ListProjectsPagedOpts {
+  organizationId: string;
+  page?: number;
+  pageSize?: number;
+  search?: string;
+}
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  color: number;
+  is_favorite: boolean;
+  store_name: string | null;
+  target: string | null;
+  last_update_status: string | null;
+  last_update_color: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  external_id: string | null;
+  client: { id: string; name: string; address: string | null; external_id: string | null } | null;
+  project_manager: { id: string; full_name: string; external_id: string | null } | null;
+  account_manager: { id: string; full_name: string; external_id: string | null } | null;
+};
+
+function externalToOdooId(ext: string | null | undefined): number {
+  if (!ext) return 0;
+  const n = Number(ext);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function safeTarget(v: string | null): LiveProject["target"] {
+  return v === "on_target" || v === "off_target" || v === "out" || v === "sales_deposit" || v === "renewed"
+    ? v
+    : null;
+}
+
+/**
+ * Supabase-backed equivalent of listLiveProjectsPaged() in src/lib/odoo/live.ts.
+ * Returns the same LiveProject shape so the projects-list UI renders unchanged.
+ */
+export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<ListProjectsPagedResult> {
+  const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
+  const page = Math.max(1, opts.page ?? 1);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const search = (opts.search ?? "").trim();
+
+  let q = supabaseAdmin
+    .from("projects")
+    .select(
+      `
+        id, name, description, color, is_favorite, store_name, target,
+        last_update_status, last_update_color,
+        start_date, end_date, external_id,
+        client:clients ( id, name, address, external_id ),
+        project_manager:employee_profiles!projects_project_manager_employee_id_fkey ( id, full_name, external_id ),
+        account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name, external_id )
+      `,
+      { count: "exact" },
+    )
+    .eq("organization_id", opts.organizationId)
+    .order("external_id", { ascending: false, nullsFirst: false })
+    .range(from, to);
+
+  if (search) {
+    // Match project name, store_name, or client name. Embedded-table filters
+    // use the dotted form: "client.name.ilike.%term%".
+    q = q.or(
+      `name.ilike.%${search}%,store_name.ilike.%${search}%,client.name.ilike.%${search}%`,
+    );
+  }
+
+  const { data: projectRows, count, error } = await q;
+  if (error) throw error;
+  const rows = (projectRows ?? []) as unknown as ProjectRow[];
+  const total = count ?? rows.length;
+
+  if (rows.length === 0) {
+    const emptyTotals = await aggregateProjectTotals(opts.organizationId);
+    return { rows: [], total, page, pageSize, totals: emptyTotals };
+  }
+
+  const projectIds = rows.map((r) => r.id);
+  const [countsRes, assignRes] = await Promise.all([
+    supabaseAdmin
+      .from("project_task_counts")
+      .select("project_id, task_count, open_task_count, closed_task_count")
+      .in("project_id", projectIds),
+    supabaseAdmin
+      .from("project_tag_assignments")
+      .select(`project_id, tag:project_tags ( id, name, external_id )`)
+      .in("project_id", projectIds),
+  ]);
+  if (countsRes.error) throw countsRes.error;
+  if (assignRes.error) throw assignRes.error;
+
+  const countsByProject = new Map<string, { task: number; open: number; closed: number }>();
+  for (const c of countsRes.data ?? []) {
+    countsByProject.set(c.project_id as string, {
+      task: Number(c.task_count) || 0,
+      open: Number(c.open_task_count) || 0,
+      closed: Number(c.closed_task_count) || 0,
+    });
+  }
+
+  const tagsByProject = new Map<string, { ids: number[]; names: string[] }>();
+  for (const row of (assignRes.data ?? []) as unknown as Array<{
+    project_id: string;
+    tag: { id: string; name: string; external_id: string | null } | null;
+  }>) {
+    if (!row.tag) continue;
+    const slot = tagsByProject.get(row.project_id) ?? { ids: [], names: [] };
+    slot.ids.push(externalToOdooId(row.tag.external_id));
+    slot.names.push(row.tag.name);
+    tagsByProject.set(row.project_id, slot);
+  }
+
+  const mapped: LiveProject[] = rows.map((r) => {
+    const odooId = externalToOdooId(r.external_id);
+    const counts = countsByProject.get(r.id) ?? { task: 0, open: 0, closed: 0 };
+    const tags = tagsByProject.get(r.id) ?? { ids: [], names: [] };
+    return {
+      odooId,
+      name: r.name,
+      clientId: r.client ? externalToOdooId(r.client.external_id) || null : null,
+      clientName: r.client?.name ?? null,
+      managerId: r.project_manager ? externalToOdooId(r.project_manager.external_id) || null : null,
+      managerName: r.project_manager?.full_name ?? null,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      taskCount: counts.task,
+      ref: `PRJ-${String(odooId || 0).padStart(5, "0")}`,
+      openTaskCount: counts.open,
+      closedTaskCount: counts.closed,
+      color: r.color ?? 0,
+      isFavorite: Boolean(r.is_favorite),
+      tagIds: tags.ids,
+      tagNames: tags.names,
+      lastUpdateStatus: r.last_update_status,
+      lastUpdateColor: r.last_update_color,
+      description: r.description,
+      storeName: r.store_name,
+      accountManagerId: r.account_manager ? externalToOdooId(r.account_manager.external_id) || null : null,
+      accountManagerName: r.account_manager?.full_name ?? null,
+      target: safeTarget(r.target),
+      stageId: null,
+      stageName: null,
+      siteAddress: r.client?.address ?? null,
+    };
+  });
+
+  const totals = await aggregateProjectTotals(opts.organizationId);
+
+  return { rows: mapped, total, page, pageSize, totals };
+}
+
+async function aggregateProjectTotals(organizationId: string) {
+  const [projectsCount, tasksCount, withMgrCount] = await Promise.all([
+    supabaseAdmin
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId),
+    supabaseAdmin
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId),
+    supabaseAdmin
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .not("project_manager_employee_id", "is", null),
+  ]);
+  return {
+    projects: projectsCount.count ?? 0,
+    tasks: tasksCount.count ?? 0,
+    withManager: withMgrCount.count ?? 0,
+  };
+}
 
 export async function listProjects(orgId: string) {
   const { data, error } = await supabaseAdmin

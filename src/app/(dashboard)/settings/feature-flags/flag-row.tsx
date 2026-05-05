@@ -249,17 +249,19 @@ function ToggleSwitch({
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
       className={cn(
-        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
-        "ring-1 ring-white/10 disabled:opacity-60",
-        checked ? "bg-cc-green/70" : "bg-soft-3",
+        "inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-[background-color,box-shadow]",
+        "ring-1 ring-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "disabled:cursor-not-allowed disabled:opacity-60",
+        checked
+          ? "justify-end bg-cc-green/80"
+          : "justify-start bg-soft-3/90",
       )}
     >
       <span
         className={cn(
-          "inline-block size-5 rounded-full bg-white shadow transition-transform",
-          // RTL: knob slides left when on, right when off (visual ON to the right
-          // would feel inverted in Arabic — matching native checkboxes).
-          checked ? "-translate-x-[22px]" : "-translate-x-0.5",
+          "block size-5 rounded-full bg-white/95 shadow-[0_1px_3px_rgba(15,23,42,0.28)] transition-transform",
+          checked ? "scale-100" : "scale-95",
         )}
       />
     </button>

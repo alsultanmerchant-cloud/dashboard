@@ -1,8 +1,11 @@
+"use client";
+
 // Rwasem-style project kanban card.
 // Mirrors the layout captured from skylight.rwasem.com — left color stripe,
 // favorite star, project name + ref, account manager line, progress bar,
 // service tag chips, key-value detail rows, footer with task count + status.
 
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Star, MoreVertical, User, Hash, Timer, Clock, ArrowRight } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
@@ -54,15 +57,23 @@ function progressOf(p: LiveProject): number {
 }
 
 export function ProjectCard({ project: p }: { project: LiveProject }) {
+  const router = useRouter();
   const progress = progressOf(p);
   const stripe = odooColor(p.color || 11);
+  const href = `/tasks?odooProjectId=${p.odooId}`;
 
   return (
     <article
+      role="button"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push(href); }}
+      aria-label={p.name}
       className={cn(
         "group relative overflow-hidden rounded-lg border border-border bg-card",
         "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.06)]",
         "transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.06)]",
+        "cursor-pointer",
       )}
     >
       {/* Left color stripe (Odoo project.color) */}
@@ -72,22 +83,14 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
         style={{ backgroundColor: stripe }}
       />
 
-      {/* Stretched link: clicking anywhere on the card opens the project
-          detail page (matches Odoo tile behavior). Inner buttons/links
-          opt back in via z-index + relative positioning. */}
-      <Link
-        href={`/projects/odoo/${p.odooId}`}
-        aria-label={p.name}
-        className="absolute inset-0 z-0"
-      />
-
-      <div className="relative z-10 ps-4 pe-3 pt-3 pb-2.5">
+      <div className="ps-4 pe-3 pt-3 pb-2.5">
         {/* Title row: star · name · kebab */}
         <div className="flex items-start gap-2">
           <button
             type="button"
+            onClick={(e) => e.stopPropagation()}
             className={cn(
-              "relative z-10 shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-amber-500",
+              "relative shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-amber-500",
               p.isFavorite && "text-amber-500",
             )}
             aria-label={p.isFavorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}
@@ -107,7 +110,8 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
 
           <button
             type="button"
-            className="relative z-10 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={(e) => e.stopPropagation()}
+            className="relative shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="إجراءات"
             title="المزيد"
           >

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { X, LogOut } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { NAV_GROUPS, type NavItem } from "@/lib/nav";
@@ -25,6 +26,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
   const expanded = hovered || pinned;
+
+  const collapseSidebar = () => {
+    setHovered(false);
+    setPinned(false);
+    onClose?.();
+  };
 
   const isItemVisible = (item: NavItem) => {
     if (!user) return !item.perm;
@@ -53,7 +60,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       <aside
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        onClick={() => setPinned((p) => !p)}
         data-expanded={expanded}
         className={cn(
           "fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform] duration-300 ease-in-out",
@@ -69,8 +75,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         )}
       >
         {/* Logo + org */}
-        <div className="px-2.5 lg:px-3 pt-4 pb-3 border-b border-sidebar-border">
-          <div className="flex items-start gap-3">
+        <div className={cn("px-2.5 lg:px-3 pt-4 pb-3 border-b border-sidebar-border", !expanded && "lg:px-2")}>
+          <div className={cn("flex items-start gap-3", !expanded && "lg:justify-center lg:gap-0")}>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sidebar-primary/15 ring-1 ring-sidebar-border shrink-0">
               <span className="text-sm font-extrabold tracking-[0.2em] text-sidebar-primary">CC</span>
             </div>
@@ -89,7 +95,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </p>
             </div>
             <button
-              onClick={onClose}
+              onClick={collapseSidebar}
               aria-label={tCommon("closeMenu")}
               className="lg:hidden flex items-center justify-center w-8 h-8 rounded-xl bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground/80 hover:text-sidebar-foreground transition-colors shrink-0"
             >
@@ -142,7 +148,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                       <li key={item.href}>
                         <Link
                           href={item.href}
-                          onClick={onClose}
+                          onClick={collapseSidebar}
                           title={itemLabel}
                           className={cn(
                             "group relative flex items-center gap-3 overflow-hidden rounded-xl px-2 py-2 text-[13px] transition-all duration-200",
@@ -195,7 +201,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         {/* User footer */}
-        <div className="m-2 lg:m-2 mt-0 rounded-2xl border border-sidebar-border bg-sidebar-accent p-2.5">
+        <div
+          className={cn(
+            "m-2 lg:m-2 mt-0 rounded-2xl border border-sidebar-border bg-sidebar-accent p-2.5 transition-all duration-200",
+            !expanded && "lg:border-transparent lg:bg-transparent lg:p-0",
+          )}
+        >
           <div
             className={cn(
               "mb-2.5 flex items-center justify-between gap-2 text-[10px] transition-opacity duration-200",
@@ -209,30 +220,43 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <span className="rounded-full bg-green-dim px-2 py-0.5 text-cc-green">{tApp("live")}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-sidebar-primary/20 flex items-center justify-center text-sidebar-primary text-xs font-bold ring-1 ring-sidebar-border shrink-0">
-              {user?.name?.[0] || "م"}
+          <div className={cn("flex items-center gap-2", !expanded && "lg:justify-center lg:gap-0")}>
+            <div
+              className={cn(
+                "flex items-center justify-center overflow-hidden shrink-0 transition-all duration-200",
+                !expanded
+                  ? "lg:h-11 lg:w-11 lg:rounded-2xl lg:bg-sidebar-primary/15 lg:ring-1 lg:ring-sidebar-border"
+                  : "h-9 w-9 rounded-xl bg-sidebar-primary/20 text-sidebar-primary ring-1 ring-sidebar-border",
+              )}
+            >
+              <Avatar
+                size="default"
+                className={cn(
+                  "size-full",
+                  !expanded && "lg:rounded-2xl lg:after:hidden",
+                )}
+              >
+                {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
+                <AvatarFallback
+                  className={cn(
+                    "bg-transparent font-bold",
+                    expanded ? "text-xs text-sidebar-primary" : "lg:text-sm lg:tracking-[0.2em] lg:text-sidebar-primary",
+                  )}
+                >
+                  {user?.name?.[0] || "م"}
+                </AvatarFallback>
+              </Avatar>
             </div>
             <div
               className={cn(
-                "flex-1 min-w-0 transition-opacity duration-200",
-                "lg:opacity-0",
+                "flex-1 min-w-0 transition-all duration-200",
+                "lg:w-0 lg:min-w-0 lg:overflow-hidden lg:opacity-0",
                 expanded && "lg:opacity-100",
+                expanded && "lg:w-auto lg:overflow-visible",
               )}
             >
               <p className="text-[13px] font-semibold text-sidebar-foreground truncate whitespace-nowrap">{user?.name || "..."}</p>
               <p className="text-[10px] text-sidebar-foreground/65 truncate whitespace-nowrap">{user?.roleName || ""}</p>
-            </div>
-            {/* Compact language switcher (icon-only) — visible when sidebar is collapsed too */}
-            <div
-              className={cn(
-                "transition-opacity duration-200",
-                "lg:opacity-100",
-                expanded && "lg:opacity-0 lg:pointer-events-none lg:w-0 lg:overflow-hidden",
-                "hidden lg:block",
-              )}
-            >
-              <LanguageSwitcher showLabel={false} />
             </div>
             <button
               onClick={(e) => {
@@ -243,8 +267,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               title={tCommon("signOut")}
               className={cn(
                 "flex items-center justify-center w-7 h-7 rounded-lg bg-sidebar-accent hover:bg-cc-red/15 text-sidebar-foreground/75 hover:text-cc-red transition-all duration-200 shrink-0",
-                "lg:opacity-0",
+                "lg:w-0 lg:opacity-0 lg:overflow-hidden lg:pointer-events-none",
                 expanded && "lg:opacity-100",
+                expanded && "lg:w-7 lg:pointer-events-auto",
               )}
             >
               <LogOut className="w-3.5 h-3.5" />

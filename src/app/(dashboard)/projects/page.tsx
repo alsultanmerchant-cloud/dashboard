@@ -1,6 +1,6 @@
 import { Briefcase, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveProjectsPaged } from "@/lib/odoo/live";
+import { listProjectsPaged } from "@/lib/data/projects";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
@@ -9,8 +9,9 @@ import { ProjectsList } from "./projects-list";
 const PAGE_SIZE = 25;
 
 export default async function ProjectsPage() {
-  await requirePagePermission("projects.view");
-  const { rows: projects, total, totals } = await listLiveProjectsPaged({
+  const session = await requirePagePermission("projects.view");
+  const { rows: projects, total, totals } = await listProjectsPaged({
+    organizationId: session.orgId,
     page: 1,
     pageSize: PAGE_SIZE,
   });
@@ -23,7 +24,7 @@ export default async function ProjectsPage() {
     <div className="space-y-6">
       <PageHeader
         title="المشاريع"
-        description="كل مشاريع الوكالة، العملاء، فريق التنفيذ، وعدد المهام — مباشرة من Odoo."
+        description="كل مشاريع الوكالة، العملاء، فريق التنفيذ، وعدد المهام."
       />
 
       {/* Analytics overview */}
@@ -62,7 +63,7 @@ export default async function ProjectsPage() {
         <EmptyState
           icon={<Briefcase className="size-6" />}
           title="لا توجد مشاريع"
-          description="لا توجد مشاريع نشطة في Odoo حالياً."
+          description="لا توجد مشاريع نشطة حالياً."
         />
       ) : (
         <ProjectsList

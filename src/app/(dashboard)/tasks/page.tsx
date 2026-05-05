@@ -1,6 +1,6 @@
 import { ListTodo } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { PageHeader } from "@/components/page-header";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { TasksListView } from "./tasks-list-view";
 import { ViewSwitcher } from "./view-switcher";
@@ -35,6 +35,7 @@ export default async function TasksPage({
     filter?: FilterKey;
     q?: string;
     projectId?: string;
+    odooProjectId?: string;
     groupBy?: string;
   }>;
 }) {
@@ -58,12 +59,26 @@ export default async function TasksPage({
           ? ["done"]
           : undefined;
 
+  // Resolve odooProjectId → Supabase project UUID when coming from the
+  // project card (which only knows the Odoo integer ID).
+  let resolvedProjectId = sp.projectId;
+  if (!resolvedProjectId && sp.odooProjectId) {
+    const { data } = await supabaseAdmin
+      .from("projects")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("external_source", "odoo")
+      .eq("external_id", Number(sp.odooProjectId))
+      .maybeSingle();
+    resolvedProjectId = data?.id;
+  }
+
   const tasks = await loadTasksForGlobalView(session.orgId, {
     stage: stageFilter,
     overdue: filterKey === "overdue",
     assignedToEmployeeId:
       filterKey === "mine" ? session.employeeId : undefined,
-    projectId: sp.projectId,
+    projectId: resolvedProjectId,
     search,
   });
 
@@ -89,11 +104,6 @@ export default async function TasksPage({
 
   return (
     <div>
-      <PageHeader
-        title="المهام"
-        description="جميع المهام عبر المشاريع — حركها بين المراحل بالسحب أو افتح التفاصيل."
-      />
-
       {/* Top toolbar — Rwasem-style smart search bar (Filters / Group By /
           Favorites in a single dropdown) on the right, view switcher on the left. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
@@ -120,4 +130,3 @@ export default async function TasksPage({
     </div>
   );
 }
-

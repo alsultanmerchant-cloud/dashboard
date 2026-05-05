@@ -34,13 +34,16 @@ export interface OdooPartner {
   is_company: boolean;
   customer_rank: number;
   comment: string | false;
+  street?: string | false;
+  street2?: string | false;
+  city?: string | false;
 }
 
 export interface OdooProject {
   id: number;
   name: string;
   partner_id: OdooMany2one;
-  user_id: OdooMany2one; // project manager
+  user_id: OdooMany2one; // project manager (Odoo standard)
   date_start: OdooDate;
   date: OdooDate; // end / deadline
   active: boolean;
@@ -49,6 +52,21 @@ export interface OdooProject {
   total_progress?: number;
   // From aptuem_project_default_task — services bought (M2M to project.category).
   category_ids?: OdooMany2many;
+  // Rwasem custom fields:
+  store_name?: string | false;
+  account_manager_id?: OdooMany2one;
+  target?: string | false;
+  color?: number;
+  is_favorite?: boolean;
+  tag_ids?: OdooMany2many;
+  last_update_status?: string | false;
+  last_update_color?: number | false;
+}
+
+export interface OdooProjectTag {
+  id: number;
+  name: string;
+  color: number;
 }
 
 export interface OdooProjectCategory {

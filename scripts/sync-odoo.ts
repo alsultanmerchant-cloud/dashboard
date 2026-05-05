@@ -20,6 +20,7 @@ console.log("[odoo-sync] summary:");
 console.log(`  employees:       ${summary.employees}`);
 console.log(`  clients:         ${summary.clients}`);
 console.log(`  services:        ${summary.services}`);
+console.log(`  tags:            ${summary.tags}`);
 console.log(`  projects:        ${summary.projects}`);
 console.log(`  tasks:           ${summary.tasks}`);
 console.log(`  task assignees:  ${summary.taskAssignees}`);

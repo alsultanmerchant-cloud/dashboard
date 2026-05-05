@@ -1,10 +1,9 @@
-import { PageHeaderSkeleton, TableSkeleton } from "@/components/skeletons";
+import { TableSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ClientsLoading() {
   return (
     <div>
-      <PageHeaderSkeleton />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Skeleton className="h-9 w-64" />
         <Skeleton className="h-9 w-28" />

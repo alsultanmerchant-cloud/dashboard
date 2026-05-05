@@ -1,7 +1,8 @@
 "use server";
 
 import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveProjectsPaged, type LiveProject } from "@/lib/odoo/live";
+import { listProjectsPaged } from "@/lib/data/projects";
+import type { LiveProject } from "@/lib/odoo/live";
 
 export type LoadMoreResult = {
   rows: LiveProject[];
@@ -14,8 +15,9 @@ export async function loadMoreProjectsAction(
   search: string,
   pageSize: number,
 ): Promise<LoadMoreResult> {
-  await requirePagePermission("projects.view");
-  const { rows, total } = await listLiveProjectsPaged({
+  const session = await requirePagePermission("projects.view");
+  const { rows, total } = await listProjectsPaged({
+    organizationId: session.orgId,
     page,
     pageSize,
     search,

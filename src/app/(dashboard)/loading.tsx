@@ -1,10 +1,9 @@
-import { PageHeaderSkeleton, StatRowSkeleton, CardListSkeleton } from "@/components/skeletons";
+import { StatRowSkeleton, CardListSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function DashboardLoading() {
   return (
     <div>
-      <PageHeaderSkeleton />
       <div className="mb-6">
         <StatRowSkeleton count={4} />
       </div>

@@ -114,7 +114,7 @@ export function DashboardShell({
                 onBellClick={() => setNotifOpen((p) => !p)}
                 onMenuClick={() => setSidebarOpen(true)}
               />
-              <main className="px-4 sm:px-6 pb-12 pt-5">
+              <main className="px-4 sm:px-6 pb-12 pt-8">
                 {children}
               </main>
             </div>

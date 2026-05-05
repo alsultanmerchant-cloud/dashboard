@@ -19,7 +19,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Loader2, Calendar, Clock, Hash, ChevronLeft, Star } from "lucide-react";
+import { Loader2, Calendar, Clock, Hash, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TASK_STAGES,
@@ -52,12 +52,16 @@ function PriorityStar({ priority, className }: { priority: string; className?: s
   );
 }
 
-// Next stage in the Rwasem 8-stage flow (used for the inline quick-advance
-// button on each kanban card).
+// Next / previous stage helpers (used for the ← → inline buttons).
 function nextStage(s: TaskStage): TaskStage | null {
   const i = TASK_STAGES.indexOf(s);
   if (i < 0 || i >= TASK_STAGES.length - 1) return null;
   return TASK_STAGES[i + 1];
+}
+function prevStage(s: TaskStage): TaskStage | null {
+  const i = TASK_STAGES.indexOf(s);
+  if (i <= 0) return null;
+  return TASK_STAGES[i - 1];
 }
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { moveTaskStageAction } from "../../tasks/_actions";
@@ -101,6 +105,38 @@ export type BoardTask = {
 
 // -------- helpers --------------------------------------------------------
 
+// Service slug → Odoo-palette hex (mirrors tag colors from skylight.rwasem.com).
+const SERVICE_COLOR: Record<string, string> = {
+  seo:                  "#dfb700", // amber/orange
+  "media-buying":       "#28a745", // green
+  media_buying:         "#28a745",
+  "social-media":       "#3597d3", // light blue
+  social_media:         "#3597d3",
+  "account-manager":    "#5b8a72", // olive green
+  account_manager:      "#5b8a72",
+  design:               "#9b59b6", // purple
+  content:              "#2a9d8f", // teal
+  photography:          "#f4a261", // sand
+  video:                "#e63946", // raspberry
+  copywriting:          "#264653", // dark teal
+};
+
+/** Returns the dot color for a service by slug (falls back to a stable hash). */
+function serviceColor(slug: string): string {
+  const direct = SERVICE_COLOR[slug.toLowerCase()];
+  if (direct) return direct;
+  // Try prefix match (e.g. "renewal-seo" → seo)
+  for (const [key, val] of Object.entries(SERVICE_COLOR)) {
+    if (slug.toLowerCase().includes(key.replace(/-/g, "_"))) return val;
+    if (slug.toLowerCase().includes(key)) return val;
+  }
+  // Stable hash fallback using the Odoo palette
+  const PALETTE = ["#9c9c9c","#d44d4d","#dfb700","#3597d3","#5b8a72","#9b59b6","#2a9d8f","#f4a261","#28a745","#5241c3"];
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
 function formatDuration(fromIso: string): string {
   const ms = Date.now() - new Date(fromIso).getTime();
   const hours = Math.floor(ms / 3_600_000);
@@ -112,15 +148,7 @@ function formatDuration(fromIso: string): string {
   return `${Math.floor(hours / 24)}ي`;
 }
 
-function delayFor(task: BoardTask): number | null {
-  const deadline = task.planned_date ?? task.due_date;
-  if (!deadline || task.stage === "done") return null;
-  const days = Math.floor((Date.now() - new Date(deadline).getTime()) / 86_400_000);
-  return days;
-}
-
-// Relative deadline label (e.g. "اليوم" / "متأخرة بـ 8 أيام" / "خلال 7 أيام").
-// Mirrors Rwasem's per-card "Today / 8 days ago / In 7 days" line.
+// Relative deadline label — mirrors Rwasem: "متأخرة ب X يوم" / "اليوم" / "خلال X أيام".
 function deadlineLabel(deadline: string | null): {
   label: string;
   tone: "late" | "today" | "soon" | "future";
@@ -129,11 +157,11 @@ function deadlineLabel(deadline: string | null): {
   const days = Math.round(
     (new Date(deadline).getTime() - Date.now()) / 86_400_000,
   );
-  if (days < 0) return { label: `متأخرة بـ ${-days} يوم`, tone: "late" };
+  if (days < 0) return { label: `متأخرة ب ${-days} يوم`, tone: "late" };
   if (days === 0) return { label: "اليوم", tone: "today" };
   if (days === 1) return { label: "غداً", tone: "soon" };
   if (days <= 7) return { label: `خلال ${days} أيام`, tone: "soon" };
-  return { label: `خلال ${days} يوم`, tone: "future" };
+  return { label: `لـ ${days} يوم`, tone: "future" };
 }
 
 // -------- card -----------------------------------------------------------
@@ -142,11 +170,13 @@ function TaskCard({
   task,
   dragging = false,
   onAdvance,
+  onRetreat,
   advancing = false,
 }: {
   task: BoardTask;
   dragging?: boolean;
   onAdvance?: (next: TaskStage) => void;
+  onRetreat?: (prev: TaskStage) => void;
   advancing?: boolean;
 }) {
   const stageDuration = formatDuration(task.stage_entered_at);
@@ -166,9 +196,10 @@ function TaskCard({
         : null;
   const slip = expected != null ? expected - progress : null;
   const nxt = nextStage(task.stage);
+  const prv = prevStage(task.stage);
   const ref = `TSK-${String(task.id).slice(0, 8).toUpperCase()}`;
-  const filledRoles = TASK_ROLE_TYPES.filter((r) => task.role_slots[r]);
-  const subtaskCount = filledRoles.length; // proxy until subtasks land in schema
+  const hasAssignee = TASK_ROLE_TYPES.some((r) => task.role_slots[r]);
+  const svcColor = task.service ? serviceColor(task.service.slug) : null;
 
   return (
     <div
@@ -180,27 +211,34 @@ function TaskCard({
       )}
       title={task.title}
     >
-      {/* ── o_kanban_record_top : muted REF · Project · Client line ── */}
-      <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground/90 line-clamp-1">
-        <Hash className="size-2.5 shrink-0" />
-        <span className="tabular-nums">{ref}</span>
+      {/* ── Row 1: REF · Project · Client · لـ X يوم · محدد ── */}
+      <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground/80 leading-none">
+        <span className="tabular-nums font-mono shrink-0">{ref}</span>
         {task.project && (
           <>
-            <span aria-hidden>·</span>
-            <span className="truncate">{task.project.name}</span>
-            {task.project.client_name && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="truncate opacity-70">
-                  {task.project.client_name}
-                </span>
-              </>
-            )}
+            <span aria-hidden className="opacity-40">·</span>
+            <span className="truncate min-w-0">
+              {task.project.name}
+              {task.project.client_name && (
+                <span className="opacity-60"> - {task.project.client_name}</span>
+              )}
+            </span>
           </>
+        )}
+        {dl && dl.tone === "future" && (
+          <>
+            <span aria-hidden className="opacity-40">·</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground/60">{dl.label}</span>
+          </>
+        )}
+        {hasAssignee && (
+          <span className="ms-auto shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
+            محدد
+          </span>
         )}
       </div>
 
-      {/* ── o_kanban_record_headings : bold task title ── */}
+      {/* ── Row 2: Task title ── */}
       <Link
         href={`/tasks/${task.id}`}
         className="block text-[13px] font-bold leading-snug text-foreground hover:text-primary transition-colors line-clamp-2"
@@ -209,42 +247,38 @@ function TaskCard({
         {task.title}
       </Link>
 
-      {/* ── o_kanban_record_body : tag chips + slip badge + deadline ── */}
+      {/* ── Row 3: service badge · overdue badge · Behind % ── */}
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         {task.service && (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-foreground"
+            className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] text-foreground"
             title={task.service.name}
           >
             <span
               aria-hidden
-              className="inline-block size-1.5 rounded-full bg-primary"
+              className="inline-block size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
             />
-            <span className="max-w-[12ch] truncate">{task.service.name}</span>
+            <span className="max-w-[14ch] truncate">{task.service.name}</span>
           </span>
         )}
-        {dl && (
+        {dl && dl.tone !== "future" && (
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] tabular-nums",
-              dl.tone === "late" &&
-                "bg-red-50 text-red-700 border border-red-200 font-semibold",
-              dl.tone === "today" &&
-                "bg-amber-50 text-amber-700 border border-amber-200 font-semibold",
-              dl.tone === "soon" &&
-                "bg-amber-50 text-amber-700 border border-amber-200",
-              dl.tone === "future" &&
-                "bg-muted text-muted-foreground",
+              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+              dl.tone === "late"  && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+              dl.tone === "today" && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+              dl.tone === "soon"  && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
             )}
             title={deadline ?? undefined}
           >
-            <Calendar className="size-2.5" />
+            <Calendar className="size-2.5 shrink-0" />
             {dl.label}
           </span>
         )}
         {slip != null && slip > 0 && (
           <span
-            className="inline-flex items-center rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 border border-red-200 tabular-nums"
+            className="inline-flex items-center rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400 tabular-nums"
             title="فرق التقدم"
           >
             Behind: {Math.round(slip)}%
@@ -252,8 +286,8 @@ function TaskCard({
         )}
       </div>
 
-      {/* ── o_kanban_record_progress : progress bar ── */}
-      {(progress > 0 || expected != null) && (
+      {/* ── Row 4: progress bar (only when meaningful) ── */}
+      {(progress > 0 || (expected != null && expected > 0)) && (
         <div
           className="mt-2"
           title={
@@ -277,9 +311,7 @@ function TaskCard({
             {expected != null && expected > 0 && (
               <div
                 className="absolute top-0 h-full w-0.5 bg-foreground/40"
-                style={{
-                  insetInlineStart: `${Math.min(100, Math.max(0, expected))}%`,
-                }}
+                style={{ insetInlineStart: `${Math.min(100, Math.max(0, expected))}%` }}
                 aria-hidden
               />
             )}
@@ -287,73 +319,63 @@ function TaskCard({
         </div>
       )}
 
-      {/* ── o_kanban_record_bottom : split row ─────────────────────── */}
+      {/* ── Row 5 (footer): duration · assignee dots | star · ← → ── */}
       <div className="mt-2 flex items-center justify-between gap-1.5">
-        {/* bottom-left : priority star · stage duration · subtask count */}
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <PriorityStar priority={task.priority} />
-          <span className="inline-flex items-center gap-0.5" title="مدة في المرحلة">
+        {/* left: stage duration · role dots */}
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-0.5 tabular-nums" title="مدة في المرحلة">
             <Clock className="size-3" />
-            <span className="tabular-nums">{stageDuration}</span>
+            {stageDuration}
           </span>
-          {subtaskCount > 0 && (
-            <span className="inline-flex items-center gap-0.5 tabular-nums" title="فريق المهمة">
-              {subtaskCount}/{TASK_ROLE_TYPES.length}
-            </span>
-          )}
-        </div>
-
-        {/* bottom-right : assignee avatars · next-stage action */}
-        <div className="flex items-center gap-1.5">
-          <div className="flex -space-x-1.5 rtl:space-x-reverse">
+          {/* Role-slot dots (filled = assigned, faded = empty) */}
+          <div className="flex items-center gap-0.5">
             {TASK_ROLE_TYPES.map((role) => {
               const e = task.role_slots[role];
               return e ? (
                 <Avatar
                   key={role}
                   size="sm"
-                  className={cn(
-                    "size-5 ring-2 ring-card",
-                    ROLE_DOT_RING[role],
-                  )}
+                  className={cn("size-5 ring-1 ring-card", ROLE_DOT_RING[role])}
                   title={`${TASK_ROLE_LABELS[role]}: ${e.full_name}`}
                 >
-                  <AvatarFallback className="text-[9px]">
-                    {e.full_name[0]}
-                  </AvatarFallback>
+                  <AvatarFallback className="text-[8px]">{e.full_name[0]}</AvatarFallback>
                 </Avatar>
               ) : (
                 <span
                   key={role}
-                  className={cn(
-                    "inline-block size-2 self-center rounded-full opacity-25",
-                    ROLE_DOT_FILL[role],
-                  )}
+                  className={cn("inline-block size-1.5 rounded-full opacity-20", ROLE_DOT_FILL[role])}
                   title={`${TASK_ROLE_LABELS[role]}: غير معيّن`}
                 />
               );
             })}
           </div>
+        </div>
 
+        {/* right: priority star · prev ← · next → */}
+        <div className="flex items-center gap-1">
+          <PriorityStar priority={task.priority} />
+          {prv && onRetreat && (
+            <button
+              type="button"
+              disabled={advancing}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onRetreat(prv); }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="inline-flex items-center rounded border border-border bg-muted/50 p-0.5 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary disabled:opacity-40"
+              title={`الرجوع إلى: ${TASK_STAGE_LABELS[prv]}`}
+            >
+              <ChevronRight className="size-3.5 icon-flip-rtl" />
+            </button>
+          )}
           {nxt && onAdvance && (
             <button
               type="button"
               disabled={advancing}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onAdvance(nxt);
-              }}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAdvance(nxt); }}
               onPointerDown={(e) => e.stopPropagation()}
-              className={cn(
-                "inline-flex items-center gap-0.5 rounded border border-primary/30 bg-primary/5 px-1 py-0.5",
-                "text-[10px] font-semibold text-primary transition-colors",
-                "hover:bg-primary hover:text-primary-foreground hover:border-primary",
-                "disabled:opacity-50 disabled:cursor-not-allowed",
-              )}
+              className="inline-flex items-center rounded border border-primary/30 bg-primary/5 p-0.5 text-primary transition-colors hover:bg-primary hover:text-primary-foreground hover:border-primary disabled:opacity-40"
               title={`نقل إلى: ${TASK_STAGE_LABELS[nxt]}`}
             >
-              <ChevronLeft className="size-3 icon-flip-rtl" />
+              <ChevronLeft className="size-3.5 icon-flip-rtl" />
             </button>
           )}
         </div>
@@ -367,10 +389,12 @@ function TaskCard({
 function DraggableCard({
   task,
   onAdvance,
+  onRetreat,
   advancing,
 }: {
   task: BoardTask;
   onAdvance?: (next: TaskStage) => void;
+  onRetreat?: (prev: TaskStage) => void;
   advancing?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -385,7 +409,7 @@ function DraggableCard({
       {...listeners}
       className={cn(isDragging && "opacity-30")}
     >
-      <TaskCard task={task} onAdvance={onAdvance} advancing={advancing} />
+      <TaskCard task={task} onAdvance={onAdvance} onRetreat={onRetreat} advancing={advancing} />
     </div>
   );
 }
@@ -397,6 +421,7 @@ function StageColumn({
   tasks,
   isMoving,
   onAdvance,
+  onRetreat,
   folded,
   onToggleFold,
 }: {
@@ -404,6 +429,7 @@ function StageColumn({
   tasks: BoardTask[];
   isMoving: boolean;
   onAdvance?: (taskId: string, next: TaskStage) => void;
+  onRetreat?: (taskId: string, prev: TaskStage) => void;
   folded: boolean;
   onToggleFold: () => void;
 }) {
@@ -474,6 +500,7 @@ function StageColumn({
                 task={t}
                 advancing={isMoving}
                 onAdvance={onAdvance ? (next) => onAdvance(t.id, next) : undefined}
+                onRetreat={onRetreat ? (prev) => onRetreat(t.id, prev) : undefined}
               />
             ))}
             {tasks.length === 0 && (
@@ -704,6 +731,7 @@ export function TaskBoard({
               tasks={grouped[s]}
               isMoving={pending}
               onAdvance={moveTask}
+              onRetreat={moveTask}
               folded={folded.has(s)}
               onToggleFold={() => toggleFold(s)}
             />

@@ -12,6 +12,7 @@ import {
   OdooPartner,
   OdooProject,
   OdooProjectCategory,
+  OdooProjectTag,
   OdooTask,
   OdooTaskStage,
   mapStageName,
@@ -32,6 +33,7 @@ export interface ImportContext {
   clientIdMap: Map<number, string>;
   projectIdMap: Map<number, string>;
   serviceIdMap: Map<number, string>;
+  tagIdMap: Map<number, string>;
   stageNameById: Map<number, string>;
   unassignedClientId: string | null;
   /** Maps Odoo res.users.id → Supabase employee_profiles.id via hr.employee.user_id. */
@@ -47,6 +49,8 @@ export interface ImportSummary {
   tasks: number;
   taskAssignees: number;
   services: number;
+  tags: number;
+  tagAssignments: number;
   errors: string[];
 }
 
@@ -197,11 +201,17 @@ async function importClients(ctx: ImportContext): Promise<number> {
       ["customer_rank", ">", 0],
       ["is_company", "=", true],
     ],
-    ["id", "name", "email", "phone", "mobile", "website", "comment"],
+    [
+      "id", "name", "email", "phone", "mobile", "website", "comment",
+      "street", "street2", "city",
+    ],
     { limit: 2000 },
   );
 
   for (const p of partners) {
+    const addressParts = [p.street, p.street2, p.city]
+      .map((s) => (s === false || s === undefined ? null : s))
+      .filter((s): s is string => Boolean(s));
     const row = {
       organization_id: ctx.organizationId,
       external_source: SOURCE,
@@ -211,6 +221,7 @@ async function importClients(ctx: ImportContext): Promise<number> {
       phone: nullable(p.phone) ?? nullable(p.mobile),
       company_website: nullable(p.website),
       notes: nullable(p.comment),
+      address: addressParts.length > 0 ? addressParts.join(", ") : null,
       status: "active",
     };
     const { data, error } = await supabaseAdmin
@@ -227,6 +238,14 @@ async function importClients(ctx: ImportContext): Promise<number> {
   return partners.length;
 }
 
+const ALLOWED_TARGETS = new Set([
+  "on_target",
+  "off_target",
+  "out",
+  "sales_deposit",
+  "renewed",
+]);
+
 async function importProjects(ctx: ImportContext): Promise<number> {
   const projects = await ctx.odoo.searchRead<OdooProject>(
     "project.project",
@@ -239,6 +258,15 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "date_start",
       "date",
       "description",
+      // Rwasem custom fields used by the projects list UI
+      "store_name",
+      "account_manager_id",
+      "target",
+      "color",
+      "is_favorite",
+      "tag_ids",
+      "last_update_status",
+      "last_update_color",
     ],
     { limit: 1000 },
   );
@@ -246,8 +274,7 @@ async function importProjects(ctx: ImportContext): Promise<number> {
   let imported = 0;
   for (const p of projects) {
     // Resolve client: real partner if linked, else fall back to a placeholder
-    // "Unassigned Client" so the project still imports. This catches Sky Light
-    // projects that exist in Odoo without partner_id (common in their data).
+    // "Unassigned Client" so the project still imports.
     let clientUuid: string | undefined;
     if (p.partner_id) {
       clientUuid = ctx.clientIdMap.get(p.partner_id[0]);
@@ -256,10 +283,19 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       clientUuid = await ensureUnassignedClient(ctx);
     }
 
-    const accountManagerUuid =
+    // Odoo user_id is the project manager; account_manager_id is the
+    // separate Rwasem custom field. They were previously conflated.
+    const projectManagerUuid =
       p.user_id && ctx.employeeIdMap.get(p.user_id[0])
         ? ctx.employeeIdMap.get(p.user_id[0])!
         : null;
+    const accountManagerUuid =
+      p.account_manager_id && ctx.employeeIdMap.get(p.account_manager_id[0])
+        ? ctx.employeeIdMap.get(p.account_manager_id[0])!
+        : null;
+
+    const targetRaw = typeof p.target === "string" ? p.target : null;
+    const target = targetRaw && ALLOWED_TARGETS.has(targetRaw) ? targetRaw : null;
 
     const row = {
       organization_id: ctx.organizationId,
@@ -267,12 +303,19 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       external_id: p.id,
       name: p.name,
       client_id: clientUuid,
+      project_manager_employee_id: projectManagerUuid,
       account_manager_employee_id: accountManagerUuid,
       start_date: nullable(p.date_start),
       end_date: nullable(p.date),
       description: nullable(p.description),
       status: "active",
       priority: "medium",
+      store_name: nullable(p.store_name),
+      target,
+      color: typeof p.color === "number" ? p.color : 0,
+      is_favorite: Boolean(p.is_favorite),
+      last_update_status: nullable(p.last_update_status),
+      last_update_color: typeof p.last_update_color === "number" ? p.last_update_color : null,
     };
     const { data, error } = await supabaseAdmin
       .from("projects")
@@ -283,10 +326,73 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       .single();
     if (error) throw new Error(`project ${p.id}: ${error.message}`);
     ctx.projectIdMap.set(p.id, data.id);
+
+    // Tag assignments — replace the project's tag set in one shot.
+    const tagIds = Array.isArray(p.tag_ids) ? p.tag_ids : [];
+    await syncProjectTagAssignments(ctx, data.id, tagIds);
+
     imported++;
   }
 
   return imported;
+}
+
+async function importProjectTags(ctx: ImportContext): Promise<number> {
+  const tags = await ctx.odoo.searchRead<OdooProjectTag>(
+    "project.tags",
+    [],
+    ["id", "name", "color"],
+    { limit: 500 },
+  );
+  for (const t of tags) {
+    const row = {
+      organization_id: ctx.organizationId,
+      external_source: SOURCE,
+      external_id: String(t.id),
+      name: t.name,
+      color: typeof t.color === "number" ? t.color : 0,
+    };
+    const { data, error } = await supabaseAdmin
+      .from("project_tags")
+      .upsert(row, { onConflict: "organization_id,external_source,external_id" })
+      .select("id")
+      .single();
+    if (error) throw new Error(`tag ${t.id} (${t.name}): ${error.message}`);
+    ctx.tagIdMap.set(t.id, data.id);
+  }
+  return tags.length;
+}
+
+async function syncProjectTagAssignments(
+  ctx: ImportContext,
+  projectUuid: string,
+  odooTagIds: number[],
+): Promise<number> {
+  // Wipe existing assignments for this project, then insert the current set.
+  // Cheaper to diff than to reconcile when the set is small (~5 tags max).
+  await supabaseAdmin
+    .from("project_tag_assignments")
+    .delete()
+    .eq("project_id", projectUuid);
+
+  const tagUuids = odooTagIds
+    .map((tid) => ctx.tagIdMap.get(tid))
+    .filter((x): x is string => Boolean(x));
+  if (tagUuids.length === 0) return 0;
+
+  const rows = tagUuids.map((tid) => ({
+    organization_id: ctx.organizationId,
+    project_id: projectUuid,
+    tag_id: tid,
+  }));
+  const { error } = await supabaseAdmin
+    .from("project_tag_assignments")
+    .insert(rows);
+  if (error) {
+    console.warn(`project ${projectUuid} tag assignments: ${error.message}`);
+    return 0;
+  }
+  return rows.length;
 }
 
 async function loadStages(ctx: ImportContext): Promise<void> {
@@ -419,6 +525,7 @@ export async function runImport(
     clientIdMap: new Map(),
     projectIdMap: new Map(),
     serviceIdMap: new Map(),
+    tagIdMap: new Map(),
     stageNameById: new Map(),
     unassignedClientId: null,
     odooUserToEmployee: new Map(),
@@ -432,6 +539,8 @@ export async function runImport(
     tasks: 0,
     taskAssignees: 0,
     services: 0,
+    tags: 0,
+    tagAssignments: 0,
     errors: [],
   };
 
@@ -452,6 +561,12 @@ export async function runImport(
     summary.services = await importServices(ctx);
   } catch (e) {
     summary.errors.push(`services: ${(e as Error).message}`);
+  }
+  // Tags must load before projects so syncProjectTagAssignments can resolve them.
+  try {
+    summary.tags = await importProjectTags(ctx);
+  } catch (e) {
+    summary.errors.push(`tags: ${(e as Error).message}`);
   }
   try {
     summary.projects = await importProjects(ctx);
@@ -474,6 +589,7 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
     { name: "clients", map: ctx.clientIdMap },
     { name: "projects", map: ctx.projectIdMap },
     { name: "services", map: ctx.serviceIdMap },
+    { name: "project_tags", map: ctx.tagIdMap },
   ] as const;
   for (const { name, map } of tables) {
     const { data } = await supabaseAdmin

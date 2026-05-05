@@ -9,11 +9,18 @@ interface TopbarControls {
   lastUpdatedAt?: string | null;
 }
 
+interface TopbarPageMeta {
+  title: string;
+  subtitle?: string;
+}
+
 export type TimeFilter = "اليوم" | "الأسبوع" | "الشهر" | "الكل";
 
 interface TopbarContextValue {
   controls: TopbarControls;
   setControls: React.Dispatch<React.SetStateAction<TopbarControls>>;
+  pageMeta: TopbarPageMeta | null;
+  setPageMeta: React.Dispatch<React.SetStateAction<TopbarPageMeta | null>>;
   activeMonth: string | null;
   setActiveMonth: (month: string | null) => void;
   /** Returns { month, year } for the selected month, or null if none selected */
@@ -28,6 +35,7 @@ const TopbarContext = createContext<TopbarContextValue | null>(null);
 
 export function TopbarProvider({ children }: { children: React.ReactNode }) {
   const [controls, setControls] = useState<TopbarControls>({});
+  const [pageMeta, setPageMeta] = useState<TopbarPageMeta | null>(null);
   const [activeMonth, setActiveMonthRaw] = useState<string | null>(null);
   const [activeFilter, setActiveFilterRaw] = useState<TimeFilter>("الكل");
 
@@ -72,6 +80,8 @@ export function TopbarProvider({ children }: { children: React.ReactNode }) {
     () => ({
       controls,
       setControls,
+      pageMeta,
+      setPageMeta,
       activeMonth,
       setActiveMonth,
       activeMonthIndex,
@@ -79,7 +89,7 @@ export function TopbarProvider({ children }: { children: React.ReactNode }) {
       setActiveFilter,
       filterCutoff,
     }),
-    [controls, activeMonth, setActiveMonth, activeMonthIndex, activeFilter, setActiveFilter, filterCutoff]
+    [controls, pageMeta, activeMonth, setActiveMonth, activeMonthIndex, activeFilter, setActiveFilter, filterCutoff]
   );
 
   return <TopbarContext.Provider value={value}>{children}</TopbarContext.Provider>;
