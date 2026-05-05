@@ -26,7 +26,7 @@ export async function listTaskStageHistory(
   const { data, error } = await supabaseAdmin
     .from("task_stage_history")
     .select(
-      "id, stage, entered_at, exited_at, duration_seconds, changed_by",
+      "id, to_stage, entered_at, exited_at, duration_seconds, moved_by",
     )
     .eq("organization_id", orgId)
     .eq("task_id", taskId)
@@ -37,7 +37,7 @@ export async function listTaskStageHistory(
   const userIds = Array.from(
     new Set(
       data
-        .map((r) => r.changed_by)
+        .map((r) => r.moved_by)
         .filter((u): u is string => typeof u === "string"),
     ),
   );
@@ -55,13 +55,13 @@ export async function listTaskStageHistory(
 
   return data.map((r) => ({
     id: r.id,
-    stage: r.stage,
+    stage: r.to_stage,
     entered_at: r.entered_at,
     exited_at: r.exited_at,
     duration_seconds: r.duration_seconds,
-    changed_by_user_id: r.changed_by,
-    changed_by_name: r.changed_by
-      ? (nameByUserId.get(r.changed_by) ?? "موظف")
+    changed_by_user_id: r.moved_by,
+    changed_by_name: r.moved_by
+      ? (nameByUserId.get(r.moved_by) ?? "موظف")
       : null,
   }));
 }

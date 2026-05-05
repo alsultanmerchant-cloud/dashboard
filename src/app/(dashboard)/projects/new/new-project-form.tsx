@@ -220,7 +220,7 @@ export function NewProjectForm({
                       "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
                       active
                         ? "border-cyan/40 bg-cyan-dim text-cyan"
-                        : "border-white/[0.06] bg-card text-muted-foreground hover:text-foreground",
+                        : "border-soft bg-card text-muted-foreground hover:text-foreground",
                     )}
                   >
                     <span className="text-start truncate">{s.name}</span>
@@ -235,7 +235,7 @@ export function NewProjectForm({
               const sel = splits[sid] ?? { week_split: false, weeks: 0, category_id: null };
               const cats = categories.filter((c) => c.service_id === sid);
               return (
-                <div key={sid} className="rounded-lg border border-white/[0.06] bg-card/40 p-3 text-xs space-y-2">
+                <div key={sid} className="rounded-lg border border-soft bg-card/40 p-3 text-xs space-y-2">
                   <div className="font-semibold">{svc?.name}</div>
                   {cats.length > 0 && (
                     <div className="flex items-center gap-2">
@@ -313,7 +313,7 @@ export function NewProjectForm({
           </div>
 
           {selectedServices.size === 0 ? (
-            <div className="rounded-lg border border-dashed border-white/[0.08] p-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-soft-2 p-6 text-center text-xs text-muted-foreground">
               اختر خدمة واحدة على الأقل لعرض المهام المتوقعة.
             </div>
           ) : preview.length === 0 ? (
@@ -330,7 +330,7 @@ export function NewProjectForm({
               {preview.map((t, i) => (
                 <li
                   key={`${t.templateItemId ?? "x"}-${i}`}
-                  className="rounded-lg border border-white/[0.06] bg-card/60 p-2.5"
+                  className="rounded-lg border border-soft bg-card/60 p-2.5"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="text-xs font-medium leading-tight">{t.title}</div>

@@ -13,6 +13,7 @@ import {
   GitCompareArrows,
   MessageSquare,
   Lock,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -26,22 +27,70 @@ import {
 import { formatArabicDateTime } from "@/lib/utils-format";
 import type { TaskActivity } from "@/lib/data/task-activity";
 
+// Group activity items by calendar date (in the user's locale) so we can
+// insert a header before each new day, mirroring Rwasem's "April 15, 2026"
+// dividers.
+function groupByDay(
+  items: TaskActivity[],
+): { date: string; key: string; items: TaskActivity[] }[] {
+  const groups: { date: string; key: string; items: TaskActivity[] }[] = [];
+  let currentKey: string | null = null;
+  for (const item of items) {
+    const d = new Date(item.created_at);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (key !== currentKey) {
+      groups.push({
+        date: d.toLocaleDateString("ar-SA-u-nu-latn", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+        key,
+        items: [],
+      });
+      currentKey = key;
+    }
+    groups[groups.length - 1].items.push(item);
+  }
+  return groups;
+}
+
 export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
   if (items.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center">
+      <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center">
         لا يوجد نشاط بعد. كن أول من يعلّق أو أسنِد المهمة لتظهر الحركات هنا.
       </p>
     );
   }
 
+  const groups = groupByDay(items);
+
   return (
     <ol className="space-y-3">
-      {items.map((item) => (
-        <li key={`${item.kind}:${item.id}`}>
-          {item.kind === "note" && <NoteRow item={item} />}
-          {item.kind === "stage_change" && <StageRow item={item} />}
-          {item.kind === "assignee_change" && <AssigneeRow item={item} />}
+      {groups.map((g) => (
+        <li key={g.key} className="space-y-3">
+          {/* Date divider — Rwasem-style "April 15, 2026" */}
+          <div className="flex items-center gap-2 py-1">
+            <div className="h-px flex-1 bg-soft" />
+            <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
+              {g.date}
+            </span>
+            <div className="h-px flex-1 bg-soft" />
+          </div>
+          <ol className="space-y-3">
+            {g.items.map((item) => (
+              <li key={`${item.kind}:${item.id}`}>
+                {item.kind === "note" && <NoteRow item={item} />}
+                {item.kind === "stage_change" && <StageRow item={item} />}
+                {item.kind === "assignee_change" && <AssigneeRow item={item} />}
+                {item.kind === "task_created" && <CreatedRow item={item} />}
+                {item.kind === "odoo_message" && <OdooMessageRow item={item} />}
+                {item.kind === "odoo_stage_change" && <OdooStageRow item={item} />}
+                {item.kind === "odoo_field_change" && <OdooFieldRow item={item} />}
+              </li>
+            ))}
+          </ol>
         </li>
       ))}
     </ol>
@@ -68,7 +117,7 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
                     عميل
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-soft-2 bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                     <Lock className="size-2.5" />
                     داخلي
                   </span>
@@ -166,7 +215,7 @@ function StageRow({ item }: { item: Extract<TaskActivity, { kind: "stage_change"
   const dur = item.duration_seconds ? formatDuration(item.duration_seconds) : null;
   return (
     <div className="flex items-start gap-3 px-1">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-card text-muted-foreground">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-soft-2 bg-card text-muted-foreground">
         <ArrowLeftRight className="size-3.5" />
       </div>
       <div className="flex-1 min-w-0">
@@ -232,7 +281,7 @@ function AssigneeRow({
   const subject = item.to_employee ?? item.from_employee;
   return (
     <div className="flex items-start gap-3 px-1">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-card text-muted-foreground">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-soft-2 bg-card text-muted-foreground">
         <GitCompareArrows className="size-3.5" />
       </div>
       <div className="flex-1 min-w-0">
@@ -253,6 +302,231 @@ function AssigneeRow({
             <>
               <span className="text-muted-foreground">إلى</span>
               <span className="font-medium">{subject.full_name}</span>
+            </>
+          )}
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatArabicDateTime(item.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ------- task_created ---------------------------------------------------
+
+function CreatedRow({
+  item,
+}: {
+  item: Extract<TaskActivity, { kind: "task_created" }>;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-soft bg-soft-1/40 px-3 py-2">
+      <Avatar size="sm" className="ring-1 ring-cyan/30">
+        <AvatarFallback>
+          <Sparkles className="size-3.5 text-cyan" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="font-medium">
+            {item.actor?.name ?? "النظام"}
+          </span>
+          <span className="text-muted-foreground">أنشأ المهمة في مرحلة</span>
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
+              TASK_STAGE_TONES[item.initial_stage],
+            )}
+          >
+            {TASK_STAGE_LABELS[item.initial_stage]}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatArabicDateTime(item.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ------- odoo_message ---------------------------------------------------
+// Mirrors a chatter entry pulled live from Odoo's `mail.message` for the
+// linked Odoo task. Body arrives as HTML — sanitize lightly (strip script /
+// style / event-handler attrs) before injecting.
+
+const ODOO_HTML_ALLOW = /<\/?(p|br|b|strong|i|em|u|a|ul|ol|li|span|div)(?:\s+[^>]*)?>/gi;
+
+function sanitizeOdooHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/<(?!\/?(p|br|b|strong|i|em|u|a|ul|ol|li|span|div)\b)[^>]+>/gi, "");
+}
+void ODOO_HTML_ALLOW; // kept as a reference for the allow-list
+
+// Highlight `@name` mentions inside the rendered HTML body. Wraps each
+// run in a cyan pill so the chatter visually matches Rwasem's mention chips.
+// Operates on text nodes only (won't touch attribute values or tag names).
+function highlightMentions(html: string): string {
+  return html.replace(
+    /(>|^|\s)(@[؀-ۿA-Za-z][؀-ۿA-Za-z0-9._-]{0,40})/g,
+    (_m, lead, mention) =>
+      `${lead}<span class="inline-flex items-center rounded-full bg-cyan/15 px-1.5 py-0.5 text-[11px] font-medium text-cyan">${mention}</span>`,
+  );
+}
+
+function attachmentIsImage(mime: string) {
+  return mime.startsWith("image/");
+}
+
+function OdooMessageRow({
+  item,
+}: {
+  item: Extract<TaskActivity, { kind: "odoo_message" }>;
+}) {
+  return (
+    <Card className="border-violet-500/20 bg-violet-500/5">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3">
+          <Avatar size="sm" className="ring-1 ring-violet-400/40">
+            <AvatarFallback>{item.actor?.name?.[0] ?? "·"}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex items-center gap-2 text-xs">
+              <span className="font-medium">{item.actor?.name ?? "Odoo"}</span>
+              <span
+                className="inline-flex items-center rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-violet-300"
+                title="مصدر Odoo (Rwasem)"
+              >
+                Odoo
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {formatArabicDateTime(item.created_at)}
+              </span>
+            </div>
+            <div
+              className="prose prose-invert prose-sm max-w-none text-sm leading-relaxed [&_a]:text-cyan [&_a]:underline-offset-2 [&_a:hover]:underline"
+              dangerouslySetInnerHTML={{
+                __html: highlightMentions(sanitizeOdooHtml(item.body_html)),
+              }}
+            />
+            {item.attachments.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {item.attachments.map((att) => (
+                  <a
+                    key={att.id}
+                    href={att.url ?? "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group inline-flex items-center gap-2 rounded-lg border border-soft bg-card/60 p-2 pe-3 text-xs transition-colors hover:border-cyan/40 hover:bg-soft-1"
+                    title={att.name}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex size-9 items-center justify-center rounded-md bg-soft-2 text-[10px] font-semibold uppercase",
+                        attachmentIsImage(att.mimetype) && "text-cyan",
+                      )}
+                    >
+                      {att.mimetype.split("/")[1]?.slice(0, 4) ?? "FILE"}
+                    </span>
+                    <span className="flex flex-col">
+                      <span className="line-clamp-1 max-w-[14rem] font-medium group-hover:text-cyan">
+                        {att.name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {att.mimetype}
+                      </span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Stage transitions pulled from Odoo's mail.tracking.value. Uses the same
+// visual language as native StageRow but tags the source as Odoo.
+function OdooStageRow({
+  item,
+}: {
+  item: Extract<TaskActivity, { kind: "odoo_stage_change" }>;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-soft bg-soft-1/40 px-3 py-2">
+      <Avatar size="sm" className="ring-1 ring-violet-400/40">
+        <AvatarFallback>
+          <ArrowLeftRight className="size-3.5 text-violet-300" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="font-medium">{item.actor?.name ?? "Odoo"}</span>
+          <span
+            className="inline-flex items-center rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-violet-300"
+            title="مصدر Odoo"
+          >
+            Odoo
+          </span>
+          <span className="text-muted-foreground">نقل المرحلة</span>
+          {item.from_label && (
+            <>
+              <span className="rounded-full border border-soft bg-card px-2 py-0.5 text-[10px]">
+                {item.from_label}
+              </span>
+              <ArrowLeftRight className="size-3 text-muted-foreground" />
+            </>
+          )}
+          <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 text-[10px] font-medium text-cyan">
+            {item.to_label}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatArabicDateTime(item.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Generic Odoo field tracking (anything that's not the stage). Renders as a
+// compact "field: from → to" row.
+function OdooFieldRow({
+  item,
+}: {
+  item: Extract<TaskActivity, { kind: "odoo_field_change" }>;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-soft bg-soft-1/40 px-3 py-2">
+      <Avatar size="sm" className="ring-1 ring-violet-400/40">
+        <AvatarFallback>
+          <GitCompareArrows className="size-3.5 text-violet-300" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="font-medium">{item.actor?.name ?? "Odoo"}</span>
+          <span className="inline-flex items-center rounded-full border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-violet-300">
+            Odoo
+          </span>
+          <span className="text-muted-foreground">{item.field}</span>
+          {item.from_label && (
+            <span className="line-clamp-1 max-w-[16rem] rounded border border-soft bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {item.from_label}
+            </span>
+          )}
+          {item.to_label && (
+            <>
+              <ArrowLeftRight className="size-3 text-muted-foreground" />
+              <span className="line-clamp-1 max-w-[16rem] rounded border border-cyan/30 bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+                {item.to_label}
+              </span>
             </>
           )}
         </div>

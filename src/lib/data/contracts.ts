@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export type ContractRow = {
@@ -268,7 +269,8 @@ export async function getAmDashboard(employeeId: string, monthIso?: string) {
   };
 }
 
-export async function getCeoCommercialTiles(orgId: string, monthIso?: string) {
+export const getCeoCommercialTiles = cache(_getCeoCommercialTiles);
+async function _getCeoCommercialTiles(orgId: string, monthIso?: string) {
   const ref = monthIso ? new Date(`${monthIso}T00:00:00.000Z`) : new Date();
   const { first, last } = monthBoundsUtc(ref);
 

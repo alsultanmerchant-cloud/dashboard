@@ -101,7 +101,7 @@ export function NotificationsList({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5">
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         {FILTERS.map((f) => (
           <button
             key={f.key}
@@ -110,7 +110,7 @@ export function NotificationsList({
               "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
               filter === f.key
                 ? "border-cyan/30 bg-cyan-dim text-cyan"
-                : "border-white/[0.06] bg-white/[0.02] text-muted-foreground hover:text-foreground",
+                : "border-soft bg-soft-1 text-muted-foreground hover:text-foreground",
             )}
           >
             {f.label}
@@ -165,7 +165,7 @@ export function NotificationsList({
                   >
                     <div className={cn(
                       "flex size-9 items-center justify-center rounded-xl shrink-0",
-                      unread ? "bg-cyan-dim text-cyan ring-1 ring-cyan/30" : "bg-white/[0.04] text-muted-foreground",
+                      unread ? "bg-cyan-dim text-cyan ring-1 ring-cyan/30" : "bg-soft-2 text-muted-foreground",
                     )}>
                       <Icon className="size-4" />
                     </div>

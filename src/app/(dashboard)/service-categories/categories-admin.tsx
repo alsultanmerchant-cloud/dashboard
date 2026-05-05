@@ -93,7 +93,7 @@ function CategoryRow({
           aria-label="تحريك للأعلى"
           onClick={() => move("up")}
           disabled={isFirst || pending}
-          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-white/[0.05] disabled:opacity-30 transition-colors"
+          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-soft-2 disabled:opacity-30 transition-colors"
         >
           <ArrowUp className="size-3" />
         </button>
@@ -102,7 +102,7 @@ function CategoryRow({
           aria-label="تحريك للأسفل"
           onClick={() => move("down")}
           disabled={isLast || pending}
-          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-white/[0.05] disabled:opacity-30 transition-colors"
+          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-soft-2 disabled:opacity-30 transition-colors"
         >
           <ArrowDown className="size-3" />
         </button>
@@ -111,7 +111,7 @@ function CategoryRow({
         <div className="flex items-center gap-2">
           <span className="font-medium">{cat.name_ar}</span>
           {!cat.is_active && (
-            <span className="rounded-full border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="rounded-full border border-soft px-1.5 py-0.5 text-[10px] text-muted-foreground">
               معطّل
             </span>
           )}

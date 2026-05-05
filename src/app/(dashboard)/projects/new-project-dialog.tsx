@@ -110,7 +110,7 @@ export function NewProjectDialog({
                       "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
                       active
                         ? "border-cyan/40 bg-cyan-dim text-cyan"
-                        : "border-white/[0.06] bg-card text-muted-foreground hover:text-foreground",
+                        : "border-soft bg-card text-muted-foreground hover:text-foreground",
                     )}
                   >
                     <span className="text-start truncate">{s.name}</span>

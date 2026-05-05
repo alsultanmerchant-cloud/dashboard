@@ -133,7 +133,7 @@ export async function submitHandoverAction(
 
   // 4. Create the project.
   const projectName = `${data.client_name} — ${
-    new Date(data.project_start_date ?? Date.now()).toLocaleDateString("ar-SA", {
+    new Date(data.project_start_date ?? Date.now()).toLocaleDateString("ar-SA-u-nu-latn", {
       month: "long",
       year: "numeric",
     })

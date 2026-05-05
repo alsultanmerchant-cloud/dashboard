@@ -1,18 +1,16 @@
-import Link from "next/link";
 import {
-  ShieldCheck, Briefcase, FileWarning, UserX, Clock, AlertTriangle,
+  ShieldCheck, FileWarning, UserX, Clock, AlertTriangle,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   getOdooGovernanceViolations,
   ODOO_GOVERNANCE_KIND_LABELS,
   type OdooGovernanceKind,
 } from "@/lib/odoo/live";
+import { ViolationsList } from "./violations-list";
 
 export const dynamic = "force-dynamic";
 
@@ -63,43 +61,7 @@ export default async function GovernancePage() {
             description="كل قواعد الحوكمة مُلتزَم بها في الوقت الراهن."
           />
         ) : (
-          <div className="space-y-2">
-            {violations.map((row, i) => (
-              <Card key={`${row.kind}-${row.taskOdooId}-${i}`} className="border-cc-red/30">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Badge variant="destructive" className="text-[10px]">
-                          {ODOO_GOVERNANCE_KIND_LABELS[row.kind]}
-                        </Badge>
-                        <Link
-                          href={`/tasks/odoo/${row.taskOdooId}`}
-                          className="text-sm font-semibold hover:text-cyan inline-flex items-center gap-1"
-                        >
-                          <Briefcase className="size-3.5" />
-                          {row.taskName}
-                        </Link>
-                        {row.projectId && row.projectName && (
-                          <Link
-                            href={`/projects/odoo/${row.projectId}`}
-                            className="text-[11px] text-muted-foreground hover:text-cyan"
-                          >
-                            · {row.projectName}
-                          </Link>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground" dir="ltr">
-                        {row.deadline
-                          ? `Deadline: ${row.deadline}`
-                          : "No deadline set"}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <ViolationsList items={violations} />
         )}
       </section>
 

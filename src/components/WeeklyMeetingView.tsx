@@ -33,7 +33,7 @@ interface WeeklyData {
 
 function emptyData(): WeeklyData {
   return {
-    weekLabel: `أسبوع ${new Date().toLocaleDateString("ar-SA", { day: "numeric", month: "long" })}`,
+    weekLabel: `أسبوع ${new Date().toLocaleDateString("ar-SA-u-nu-latn", { day: "numeric", month: "long" })}`,
     revenue: "", closed: "", closeRate: "", renewRate: "",
     members: [
       { name: "أ", calls: "", demos: "", closed: "", avgVal: "", rate: "", status: "🟡" },
@@ -241,16 +241,16 @@ export default function WeeklyMeetingView() {
       {/* ─── 90-Day Progress ─── */}
       <div style={{ ...cardStyle, marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>هدف 90 يوم: {GOAL_90DAY.toLocaleString()} ريال</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>هدف 90 يوم: {GOAL_90DAY.toLocaleString("en-US")} ريال</span>
           <span style={{ fontSize: 13, color: progressColor, fontWeight: 700 }}>{progressPct}%</span>
         </div>
         <div style={{ height: 10, borderRadius: 5, background: T.border }}>
           <div style={{ height: "100%", borderRadius: 5, background: progressColor, width: `${Math.min(progressPct, 100)}%`, transition: "width 0.3s" }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: T.mid }}>
-          <span>المحقق: {totalWeeklyRev.toLocaleString()} ريال</span>
-          <span>المتبقي: {Math.max(GOAL_90DAY - totalWeeklyRev, 0).toLocaleString()} ريال</span>
-          <span>الهدف الأسبوعي: {WEEKLY_TARGET.toLocaleString()} ريال</span>
+          <span>المحقق: {totalWeeklyRev.toLocaleString("en-US")} ريال</span>
+          <span>المتبقي: {Math.max(GOAL_90DAY - totalWeeklyRev, 0).toLocaleString("en-US")} ريال</span>
+          <span>الهدف الأسبوعي: {WEEKLY_TARGET.toLocaleString("en-US")} ريال</span>
         </div>
       </div>
 
@@ -314,7 +314,7 @@ function Tab1Numbers({ data, update }: { data: WeeklyData; update: (p: Partial<W
             />
             <ProgressBar value={val} max={c.target} color={c.color} />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11 }}>
-              <span style={{ color: T.mid }}>الهدف: {c.target.toLocaleString()} {c.unit}</span>
+              <span style={{ color: T.mid }}>الهدف: {c.target.toLocaleString("en-US")} {c.unit}</span>
               <span style={{ color: pctColor(pct) }}>{statusEmoji(pct)} {pct}%</span>
             </div>
           </div>
@@ -439,7 +439,7 @@ function Tab3Revenue({ data, update, updateWeeklyRev }: {
                 />
                 <ProgressBar value={val} max={w.tgt} />
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: T.mid }}>
-                  <span>الهدف: {w.tgt.toLocaleString()}</span>
+                  <span>الهدف: {w.tgt.toLocaleString("en-US")}</span>
                   <span>{pct}%</span>
                 </div>
               </div>
@@ -469,7 +469,7 @@ function Tab3Revenue({ data, update, updateWeeklyRev }: {
                 />
                 <ProgressBar value={val} max={s.target} color={s.color} />
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10, color: T.mid }}>
-                  <span>الهدف: {s.target.toLocaleString()} ريال</span>
+                  <span>الهدف: {s.target.toLocaleString("en-US")} ريال</span>
                   <span>{pct}%</span>
                 </div>
               </div>
@@ -555,7 +555,7 @@ function Tab4Retention({ data, update, retentionStats, referralStats, loadingSta
         </div>
         {refRows.map(r => {
           const dbVal = referralStats ? referralStats[r.field] : null;
-          const displayVal = dbVal !== null ? (r.unit === "%" ? `${dbVal}%` : r.unit === "ر.س" ? `${dbVal.toLocaleString()} ر.س` : String(dbVal)) : "—";
+          const displayVal = dbVal !== null ? (r.unit === "%" ? `${dbVal}%` : r.unit === "ر.س" ? `${dbVal.toLocaleString("en-US")} ر.س` : String(dbVal)) : "—";
           const pct = r.target && dbVal !== null ? Math.min(Math.round((dbVal / r.target) * 100), 100) : null;
           return (
             <div key={r.field} style={{ padding: "12px 0", borderBottom: `1px solid ${T.border}20` }}>

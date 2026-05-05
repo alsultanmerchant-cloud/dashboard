@@ -1,154 +1,123 @@
-import Link from "next/link";
-import { ListTodo, ChevronLeft } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveTasksPaged } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/empty-state";
-import { Pagination } from "@/components/pagination";
-import { TaskStageBadge, PriorityBadge } from "@/components/status-badges";
-import {
-  DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
-  DataTableRow, DataTableCell,
-} from "@/components/data-table-shell";
-import { isOverdue } from "@/lib/utils-format";
-import { cn } from "@/lib/utils";
-
-const PAGE_SIZE = 25;
+import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
+import { TasksListView } from "./tasks-list-view";
+import { ViewSwitcher } from "./view-switcher";
+import { loadTasksForGlobalView } from "./_loaders";
+import { SmartSearchBar } from "./smart-search-bar";
 
 const OPEN_STAGES = [
-  "new", "in_progress", "manager_review", "specialist_review",
-  "ready_to_send", "sent_to_client", "client_changes",
+  "new",
+  "in_progress",
+  "manager_review",
+  "specialist_review",
+  "ready_to_send",
+  "sent_to_client",
+  "client_changes",
 ] as const;
 
 const STAGE_FILTERS = [
+  { key: "open", label: "مفتوحة" },
   { key: "all", label: "كل المهام" },
-  { key: "open", label: "مفتوحة", stages: OPEN_STAGES },
   { key: "overdue", label: "متأخرة" },
-  { key: "done", label: "مكتملة", stages: ["done"] },
+  { key: "done", label: "مكتملة" },
+  { key: "mine", label: "مهامي" },
 ] as const;
+
+type FilterKey = (typeof STAGE_FILTERS)[number]["key"];
 
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string; odooProjectId?: string; page?: string }>;
+  searchParams: Promise<{
+    view?: string;
+    filter?: FilterKey;
+    q?: string;
+    projectId?: string;
+    groupBy?: string;
+  }>;
 }) {
-  await requirePagePermission("tasks.view");
+  const session = await requirePagePermission("tasks.view");
   const sp = await searchParams;
-  const filter = (sp.filter as (typeof STAGE_FILTERS)[number]["key"]) ?? "open";
-  const filterDef = STAGE_FILTERS.find((f) => f.key === filter) ?? STAGE_FILTERS[0];
-  const page = Math.max(1, Number(sp.page) || 1);
+  const view = sp.view ?? "kanban";
+  const filterKey = (sp.filter as FilterKey) ?? "open";
+  const search = sp.q?.trim() || undefined;
+  const groupBy: "stage" | "project" =
+    sp.groupBy === "project" ? "project" : "stage";
 
-  const { rows: tasks, total } = await listLiveTasksPaged({
-    stage: "stages" in filterDef ? [...filterDef.stages!] : undefined,
-    overdue: filter === "overdue",
-    projectOdooId: sp.odooProjectId ? Number(sp.odooProjectId) : undefined,
-    page,
-    pageSize: PAGE_SIZE,
+  // In kanban view we always render all 8 stages, so the "open" stage filter
+  // would just leave the "مكتملة" column permanently empty. Match Rwasem and
+  // include done tasks on kanban; list view keeps the strict filter.
+  const stageFilter =
+    view === "kanban" && filterKey === "open"
+      ? undefined
+      : filterKey === "open"
+        ? [...OPEN_STAGES]
+        : filterKey === "done"
+          ? ["done"]
+          : undefined;
+
+  const tasks = await loadTasksForGlobalView(session.orgId, {
+    stage: stageFilter,
+    overdue: filterKey === "overdue",
+    assignedToEmployeeId:
+      filterKey === "mine" ? session.employeeId : undefined,
+    projectId: sp.projectId,
+    search,
   });
+
+  // BoardTask shape for kanban (cross-project: project name shown on card).
+  const boardTasks: BoardTask[] = tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    stage: t.stage,
+    stage_entered_at: t.stage_entered_at,
+    planned_date: t.planned_date,
+    due_date: t.due_date,
+    priority: t.priority,
+    progress_percent: t.progress_percent,
+    expected_progress_percent: t.expected_progress_percent,
+    service: t.service,
+    project: {
+      id: t.project_id,
+      name: t.project_name,
+      client_name: t.client_name,
+    },
+    role_slots: t.role_slots,
+  }));
 
   return (
     <div>
       <PageHeader
         title="المهام"
-        description="مهام الفرق مع حالات الإنجاز والأولوية — مباشرة من Odoo."
+        description="جميع المهام عبر المشاريع — حركها بين المراحل بالسحب أو افتح التفاصيل."
       />
 
-      {/* Filter chips */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5">
-        {STAGE_FILTERS.map((f) => (
-          <Link
-            key={f.key}
-            href={`/tasks?filter=${f.key}`}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-              filter === f.key
-                ? "border-cyan/30 bg-cyan-dim text-cyan"
-                : "border-white/[0.06] bg-white/[0.02] text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {f.label}
-          </Link>
-        ))}
-        <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {total} مهمة
-        </span>
+      {/* Top toolbar — Rwasem-style smart search bar (Filters / Group By /
+          Favorites in a single dropdown) on the right, view switcher on the left. */}
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
+        <SmartSearchBar
+          initialQuery={search ?? ""}
+          filterKey={filterKey}
+          view={view}
+          groupBy={groupBy}
+          totalCount={tasks.length}
+        />
+        <ViewSwitcher current={view} />
       </div>
 
-      {total === 0 ? (
-        <EmptyState
-          icon={<ListTodo className="size-6" />}
-          title="لا توجد مهام"
-          description="لا توجد مهام تطابق هذا الفلتر حالياً."
-        />
-      ) : (
-        <DataTableShell>
-          <DataTable>
-            <DataTableHead>
-              <tr>
-                <DataTableHeaderCell>المهمة</DataTableHeaderCell>
-                <DataTableHeaderCell>المشروع</DataTableHeaderCell>
-                <DataTableHeaderCell>المرحلة</DataTableHeaderCell>
-                <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
-                <DataTableHeaderCell>الموعد النهائي</DataTableHeaderCell>
-                <DataTableHeaderCell aria-label="فتح" />
-              </tr>
-            </DataTableHead>
-            <tbody>
-              {tasks.map((t) => {
-                const overdue = isOverdue(t.deadline) && t.stage !== "done";
-                const delayDays = t.deadline && t.stage !== "done"
-                  ? Math.floor((Date.now() - new Date(t.deadline).getTime()) / 86400000)
-                  : null;
-                return (
-                  <DataTableRow key={t.odooId}>
-                    <DataTableCell className="font-medium">
-                      <Link href={`/tasks/odoo/${t.odooId}`} className="hover:text-cyan transition-colors">
-                        {t.name}
-                      </Link>
-                    </DataTableCell>
-                    <DataTableCell className="text-xs text-muted-foreground">
-                      {t.projectName ?? "—"}
-                    </DataTableCell>
-                    <DataTableCell>
-                      <TaskStageBadge stage={t.stage} />
-                    </DataTableCell>
-                    <DataTableCell>
-                      <PriorityBadge priority={t.priority} />
-                    </DataTableCell>
-                    <DataTableCell
-                      className={cn(
-                        "text-xs tabular-nums",
-                        overdue ? "text-cc-red font-medium" : "text-muted-foreground",
-                      )}
-                      dir="ltr"
-                    >
-                      <div>{t.deadline ?? "—"}</div>
-                      {delayDays != null && delayDays > 0 && (
-                        <div className="text-[10px] text-cc-red">+{delayDays}d</div>
-                      )}
-                    </DataTableCell>
-                    <DataTableCell>
-                      <Link
-                        href={`/tasks/odoo/${t.odooId}`}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
-                        aria-label="فتح"
-                      >
-                        <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                      </Link>
-                    </DataTableCell>
-                  </DataTableRow>
-                );
-              })}
-            </tbody>
-          </DataTable>
-        </DataTableShell>
+      {view === "list" && <TasksListView tasks={tasks} />}
+      {view === "kanban" && (
+        <TaskBoard tasks={boardTasks} groupBy={groupBy} />
       )}
-
-      {total > 0 && (
-        <div className="mt-4">
-          <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
+      {view === "calendar" && (
+        <div className="rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <ListTodo className="mx-auto mb-3 size-6" />
+          عرض التقويم قادم قريباً
         </div>
       )}
     </div>
   );
 }
+

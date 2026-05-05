@@ -45,7 +45,7 @@ export function ProjectManagerPicker({
         onValueChange={(v) => commit(v === "" ? null : v)}
         disabled={pending}
       >
-        <SelectTrigger className="min-w-64 bg-card/50 border-white/10 text-sm">
+        <SelectTrigger className="min-w-64 bg-card/50 border-soft-2 text-sm">
           <SelectValue placeholder="غير محدّد" />
         </SelectTrigger>
         <SelectContent>
@@ -61,7 +61,7 @@ export function ProjectManagerPicker({
         <button
           type="button"
           onClick={() => commit(null)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground"
           aria-label="إخلاء"
           title="إخلاء"
         >

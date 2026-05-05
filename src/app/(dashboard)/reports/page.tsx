@@ -109,7 +109,7 @@ export default async function ReportsPage() {
         description="نسبة المهام المفتوحة التي ما زالت ضمن الموعد — أسوأ 10 مشاريع"
       />
       {reports.projectCompliance.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           لا توجد مهام مفتوحة لتقييم الالتزام.
         </p>
       ) : (
@@ -129,7 +129,7 @@ export default async function ReportsPage() {
                     <span className="text-xs text-muted-foreground mr-1.5"> / {d.total} مهمة</span>
                   </span>
                 </div>
-                <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
+                <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-gradient-to-l from-cc-green to-cyan"
                     style={{ width: `${d.pct ?? 0}%` }}
@@ -147,7 +147,7 @@ export default async function ReportsPage() {
         description="عدد المهام في مرحلة Client Changes — يكشف المشاريع الأكثر إرهاقًا"
       />
       {reports.reworkByProject.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           لا توجد مهام في مرحلة تعديلات العميل.
         </p>
       ) : (
@@ -166,7 +166,7 @@ export default async function ReportsPage() {
                     </Link>
                     <span className="text-sm font-bold tabular-nums">{h.count}</span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-gradient-to-l from-amber to-cc-red"
                       style={{ width: `${pct}%` }}
@@ -186,7 +186,7 @@ export default async function ReportsPage() {
         actions={<Users className="size-4 text-muted-foreground" />}
       />
       {reports.agentLeaderboard.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           لا بيانات إنتاج بعد.
         </p>
       ) : (
@@ -203,7 +203,7 @@ export default async function ReportsPage() {
                       <span className="text-xs text-muted-foreground mr-1.5"> · {row.utilizationPct}%</span>
                     </span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/[0.05] overflow-hidden">
+                  <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-gradient-to-l from-cyan to-cc-purple"
                       style={{ width: `${pct}%` }}
@@ -227,7 +227,7 @@ export default async function ReportsPage() {
         }
       />
       {renewals.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           لا تجديدات في الأفق.
         </p>
       ) : (
@@ -267,7 +267,7 @@ export default async function ReportsPage() {
         title="موجز الأسبوع المخزَّن"
         description={
           latestDigest
-            ? `أُنشئ في ${new Date(latestDigest.generated_at).toLocaleString("ar-SA")}`
+            ? `أُنشئ في ${new Date(latestDigest.generated_at).toLocaleString("ar-SA-u-nu-latn")}`
             : "لم يُنشأ موجز أسبوعي بعد — يصدر تلقائيًا صباح الأحد"
         }
         actions={<ListChecks className="size-4 text-muted-foreground" />}
@@ -307,7 +307,7 @@ export default async function ReportsPage() {
           </CardContent>
         </Card>
       ) : (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-white/10 bg-card/30 px-4 py-6 text-center mb-8">
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           سيظهر هنا فور تشغيل أوّل دورة من weekly-digest.
         </p>
       )}

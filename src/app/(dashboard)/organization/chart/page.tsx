@@ -5,6 +5,7 @@ import { isFlagOn } from "@/lib/feature-flags";
 import {
   loadOrgChart,
   filterSalesSubtree,
+  type OrgChart,
   type OrgDepartment,
 } from "@/lib/data/org-chart";
 import { copy } from "@/lib/copy";
@@ -12,6 +13,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ChartViews } from "./chart-views";
 
 export const dynamic = "force-dynamic";
 
@@ -211,11 +213,7 @@ export default async function OrgChartPage() {
           description={copy.organization.chartEmpty.description}
         />
       ) : (
-        <div className="space-y-3">
-          {chart.roots.map((dept) => (
-            <DepartmentNode key={dept.id} dept={dept} depth={0} />
-          ))}
-        </div>
+        <ChartViews chart={chart} />
       )}
 
       {!showSales && (

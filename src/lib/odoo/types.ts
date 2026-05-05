@@ -47,6 +47,15 @@ export interface OdooProject {
   description: string | false;
   // From the rwasem_project_task_progress addon — may be absent on vanilla Odoo.
   total_progress?: number;
+  // From aptuem_project_default_task — services bought (M2M to project.category).
+  category_ids?: OdooMany2many;
+}
+
+export interface OdooProjectCategory {
+  id: number;
+  name: string;
+  active: boolean;
+  color: number;
 }
 
 export interface OdooTaskStage {
@@ -70,8 +79,8 @@ export interface OdooTask {
   progress_percentage?: number;
   expected_progress?: number;
   progress_slip?: number;
-  // Custom category from aptuem_project_default_task.
-  task_category_id?: OdooMany2one;
+  // Custom category from aptuem_project_default_task — the service category.
+  category_id?: OdooMany2one;
 }
 
 // Map Odoo stage names → dashboard task_stage enum.

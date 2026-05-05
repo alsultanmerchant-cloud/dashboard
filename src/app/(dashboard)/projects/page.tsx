@@ -1,29 +1,17 @@
-import Link from "next/link";
-import { Briefcase, ChevronLeft, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Briefcase, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listLiveProjectsPaged } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
-import { Pagination } from "@/components/pagination";
-import {
-  DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
-  DataTableRow, DataTableCell,
-} from "@/components/data-table-shell";
-import { formatArabicShortDate } from "@/lib/utils-format";
+import { ProjectsList } from "./projects-list";
 
 const PAGE_SIZE = 25;
 
-export default async function ProjectsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ page?: string }>;
-}) {
+export default async function ProjectsPage() {
   await requirePagePermission("projects.view");
-  const sp = await searchParams;
-  const page = Math.max(1, Number(sp.page) || 1);
   const { rows: projects, total, totals } = await listLiveProjectsPaged({
-    page,
+    page: 1,
     pageSize: PAGE_SIZE,
   });
 
@@ -77,66 +65,11 @@ export default async function ProjectsPage({
           description="لا توجد مشاريع نشطة في Odoo حالياً."
         />
       ) : (
-        <DataTableShell>
-          <DataTable>
-            <DataTableHead>
-              <tr>
-                <DataTableHeaderCell>المشروع</DataTableHeaderCell>
-                <DataTableHeaderCell>العميل</DataTableHeaderCell>
-                <DataTableHeaderCell>مدير المشروع</DataTableHeaderCell>
-                <DataTableHeaderCell>المهام</DataTableHeaderCell>
-                <DataTableHeaderCell>تاريخ البدء</DataTableHeaderCell>
-                <DataTableHeaderCell aria-label="إجراءات" />
-              </tr>
-            </DataTableHead>
-            <tbody>
-              {projects.map((p) => (
-                <DataTableRow key={p.odooId}>
-                  <DataTableCell className="font-medium">
-                    <Link
-                      href={`/projects/odoo/${p.odooId}`}
-                      className="hover:text-cyan transition-colors"
-                    >
-                      {p.name}
-                    </Link>
-                  </DataTableCell>
-                  <DataTableCell className="text-muted-foreground">
-                    {p.clientId ? (
-                      <Link
-                        href={`/clients/odoo/${p.clientId}`}
-                        className="hover:text-cyan transition-colors"
-                      >
-                        {p.clientName ?? "—"}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground">
-                    {p.managerName ?? "—"}
-                  </DataTableCell>
-                  <DataTableCell className="tabular-nums">{p.taskCount}</DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground">
-                    {formatArabicShortDate(p.startDate)}
-                  </DataTableCell>
-                  <DataTableCell>
-                    <Link
-                      href={`/projects/odoo/${p.odooId}`}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
-                      aria-label="فتح"
-                    >
-                      <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                    </Link>
-                  </DataTableCell>
-                </DataTableRow>
-              ))}
-            </tbody>
-          </DataTable>
-        </DataTableShell>
-      )}
-
-      {total > 0 && (
-        <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
+        <ProjectsList
+          initial={projects}
+          initialTotal={total}
+          pageSize={PAGE_SIZE}
+        />
       )}
     </div>
   );

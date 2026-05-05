@@ -41,7 +41,7 @@ export default async function RolesPage() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-white/[0.02] text-[11px] uppercase tracking-wider text-muted-foreground sticky top-0">
+            <thead className="bg-soft-1 text-[11px] uppercase tracking-wider text-muted-foreground sticky top-0">
               <tr>
                 <th className="px-3 py-2.5 text-start font-medium sticky right-0 bg-card/95 backdrop-blur-sm z-10 min-w-44">الصلاحية</th>
                 {roles.map((r) => (
@@ -56,7 +56,7 @@ export default async function RolesPage() {
             </thead>
             <tbody>
               {permissions.map((p) => (
-                <tr key={p.id} className="border-t border-white/[0.04] hover:bg-white/[0.02]">
+                <tr key={p.id} className="border-t border-soft hover:bg-soft-1">
                   <td className="px-3 py-2.5 sticky right-0 bg-card/95 backdrop-blur-sm">
                     <div>
                       <p className="text-sm font-medium">{p.description ?? p.key}</p>

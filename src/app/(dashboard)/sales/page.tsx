@@ -16,7 +16,7 @@ import { formatArabicShortDate, relativeTimeAr } from "@/lib/utils-format";
 import { NewLeadDialog } from "./new-lead-dialog";
 
 const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 const stageBarColor: Record<LeadStatus, string> = {
   new: "bg-cyan/60",
@@ -108,7 +108,7 @@ export default async function SalesPage() {
                     <div className="w-28 shrink-0 text-xs">
                       {LEAD_STATUS_LABEL[s]}
                     </div>
-                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/[0.04]">
+                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-soft-2">
                       <div
                         className={`absolute inset-y-0 right-0 ${stageBarColor[s]}`}
                         style={{ width: `${pct}%` }}
@@ -154,12 +154,12 @@ export default async function SalesPage() {
                   <li key={l.id}>
                     <Link
                       href={`/sales/leads`}
-                      className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                      className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-soft-2"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{l.name}</p>
                         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="rounded-full border border-white/[0.08] bg-white/[0.02] px-2 py-0.5">
+                          <span className="rounded-full border border-soft-2 bg-soft-1 px-2 py-0.5">
                             {LEAD_STATUS_LABEL[l.status]}
                           </span>
                           {l.source && <span>· {l.source}</span>}

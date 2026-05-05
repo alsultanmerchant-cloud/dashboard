@@ -73,7 +73,7 @@ export function MetricCard({
                     "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
                     trend.direction === "up" && "bg-green-dim text-cc-green",
                     trend.direction === "down" && "bg-red-dim text-cc-red",
-                    trend.direction === "flat" && "bg-white/[0.06] text-muted-foreground",
+                    trend.direction === "flat" && "bg-soft-2 text-muted-foreground",
                   )}
                 >
                   {trend.value}

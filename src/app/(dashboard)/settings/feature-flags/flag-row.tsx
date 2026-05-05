@@ -91,20 +91,20 @@ export function FlagRow({
   }
 
   const updatedAt = new Date(flag.updated_at);
-  const updatedLabel = updatedAt.toLocaleString("ar-SA-u-ca-gregory", {
+  const updatedLabel = updatedAt.toLocaleString("ar-SA-u-ca-gregory-nu-latn", {
     dateStyle: "medium",
     timeStyle: "short",
   });
 
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-card/40 p-4 sm:p-5">
+    <div className="rounded-2xl border border-soft bg-card/40 p-4 sm:p-5">
       {/* Row 1 — key + toggle */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <code
               dir="ltr"
-              className="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[12px]"
+              className="rounded-md bg-soft-2 px-2 py-0.5 font-mono text-[12px]"
             >
               {flag.key}
             </code>
@@ -114,7 +114,7 @@ export function FlagRow({
                 "text-[10px]",
                 flag.enabled
                   ? "bg-green-dim text-cc-green"
-                  : "bg-white/[0.04] text-muted-foreground",
+                  : "bg-soft-2 text-muted-foreground",
               )}
             >
               {flag.enabled ? copy.featureFlags.enabled : copy.featureFlags.disabled}
@@ -132,7 +132,7 @@ export function FlagRow({
       </div>
 
       {/* Row 2 — rollout_roles */}
-      <div className="mt-4 border-t border-white/[0.04] pt-3">
+      <div className="mt-4 border-t border-soft pt-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
             {copy.featureFlags.columnRoles}
@@ -155,7 +155,7 @@ export function FlagRow({
                     type="button"
                     onClick={() => removeRole(k)}
                     aria-label="إزالة"
-                    className="rounded hover:bg-white/[0.08]"
+                    className="rounded hover:bg-soft-3"
                   >
                     <X className="size-3" />
                   </button>
@@ -188,7 +188,7 @@ export function FlagRow({
                 onValueChange={(v) => addRole(v ?? "")}
                 disabled={pending || remainingRoles.length === 0}
               >
-                <SelectTrigger className="min-w-48 bg-card/50 border-white/10 text-sm">
+                <SelectTrigger className="min-w-48 bg-card/50 border-soft-2 text-sm">
                   <SelectValue placeholder={copy.featureFlags.rolesAddPlaceholder} />
                 </SelectTrigger>
                 <SelectContent>
@@ -220,7 +220,7 @@ export function FlagRow({
       </div>
 
       {/* Row 3 — meta */}
-      <div className="mt-4 flex items-center justify-between gap-2 border-t border-white/[0.04] pt-2 text-[11px] text-muted-foreground">
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-soft pt-2 text-[11px] text-muted-foreground">
         <span>{copy.featureFlags.columnUpdated}</span>
         <span dir="ltr" className="font-mono">{updatedLabel}</span>
       </div>
@@ -249,7 +249,7 @@ function ToggleSwitch({
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
         "ring-1 ring-white/10 disabled:opacity-60",
-        checked ? "bg-cc-green/70" : "bg-white/[0.08]",
+        checked ? "bg-cc-green/70" : "bg-soft-3",
       )}
     >
       <span

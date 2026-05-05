@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { MonthSelector } from "./month-selector";
 
 const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 // Headline tile (small, count-only)
 function StatTile({
@@ -28,7 +28,7 @@ function StatTile({
   icon?: React.ReactNode;
 }) {
   const accent = {
-    default: "border-white/[0.08] bg-card/60",
+    default: "border-soft-2 bg-card/60",
     success: "border-cc-green/30 bg-green-dim/30",
     warning: "border-amber/30 bg-amber-dim/30",
     destructive: "border-cc-red/30 bg-red-dim/30",
@@ -65,7 +65,7 @@ function MoneyRow({
     <div
       className={cn(
         "flex items-center justify-between gap-3",
-        isHeader && "border-b border-white/[0.08] pb-2 mb-1",
+        isHeader && "border-b border-soft-2 pb-2 mb-1",
       )}
     >
       <span
@@ -122,7 +122,7 @@ export default async function FinancePage({
         actions={
           <Link
             href="/finance/expenses"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-card/60 px-3 text-xs font-medium hover:bg-white/[0.06] transition-colors"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-soft-2 bg-card/60 px-3 text-xs font-medium hover:bg-soft-2 transition-colors"
           >
             <ReceiptText className="size-4" />
             المصروفات
@@ -243,7 +243,7 @@ export default async function FinancePage({
               </div>
               {income.expected > 0 && (
                 <div className="mt-3">
-                  <div className="h-1.5 w-full rounded-full bg-white/[0.05] overflow-hidden">
+                  <div className="h-1.5 w-full rounded-full bg-soft-2 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-gradient-to-l from-cc-green to-cyan"
                       style={{
@@ -358,7 +358,7 @@ export default async function FinancePage({
                 isBig
                 tone="success"
               />
-              <div className="pt-2 mt-2 border-t border-white/[0.08]">
+              <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
                   label="نسبة التحقّق"
                   value={
@@ -434,7 +434,7 @@ export default async function FinancePage({
                 isBig
                 tone="success"
               />
-              <div className="pt-2 mt-2 border-t border-white/[0.08]">
+              <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
                   label="نسبة تحصيل الدفعات"
                   value={

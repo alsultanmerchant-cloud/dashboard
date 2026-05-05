@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { NewLeadDialog } from "../new-lead-dialog";
 
 const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 const STATUS_BADGE: Record<LeadStatus, string> = {
   new: "border-cyan/40 bg-cyan-dim text-cyan",
@@ -69,7 +69,7 @@ export default async function LeadsPage({
       />
 
       {/* Filter chips */}
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         {FILTERS.map((f) => (
           <Link
             key={f.key}
@@ -78,7 +78,7 @@ export default async function LeadsPage({
               "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
               filter === f.key
                 ? "border-cyan/30 bg-cyan-dim text-cyan"
-                : "border-white/[0.06] bg-white/[0.02] text-muted-foreground hover:text-foreground",
+                : "border-soft bg-soft-1 text-muted-foreground hover:text-foreground",
             )}
           >
             {f.label}

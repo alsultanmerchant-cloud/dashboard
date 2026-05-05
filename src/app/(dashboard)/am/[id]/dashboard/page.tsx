@@ -17,7 +17,7 @@ import { formatArabicShortDate } from "@/lib/utils-format";
 
 function formatCurrency(value: number) {
   if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(value);
 }
 
 export default async function AmDashboardPage({

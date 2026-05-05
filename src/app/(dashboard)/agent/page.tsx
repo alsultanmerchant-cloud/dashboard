@@ -309,7 +309,7 @@ export default function AgentPage() {
               variant="ghost"
               size="icon"
               onClick={() => setHistoryOpen(true)}
-              className="lg:hidden rounded-xl bg-white/[0.03] hover:bg-white/[0.06]"
+              className="lg:hidden rounded-xl bg-soft-2 hover:bg-soft-2"
               aria-label="فتح المحادثات"
             >
               <PanelRightOpen className="h-4 w-4 text-muted-foreground" />
@@ -399,7 +399,7 @@ export default function AgentPage() {
                           {msg.role === "user" ? "أنت" : "المساعد الذكي"}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {new Date().toLocaleTimeString("ar-SA", {
+                          {new Date().toLocaleTimeString("ar-SA-u-nu-latn", {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}

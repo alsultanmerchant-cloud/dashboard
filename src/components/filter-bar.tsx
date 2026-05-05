@@ -19,7 +19,7 @@ export function FilterBar({ search, onClear, hasActiveFilters, children, classNa
   return (
     <div
       className={cn(
-        "mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5",
+        "mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-card/60 px-3 py-2.5",
         className,
       )}
     >

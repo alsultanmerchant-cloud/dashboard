@@ -1,5 +1,8 @@
+"use client";
+
 import * as React from "react";
 import { ChevronLeft, Sparkles } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +20,7 @@ export function ComingSoonPage({
   icon?: React.ReactNode;
   bullets?: string[];
 }) {
+  const t = useTranslations("ComingSoon");
   return (
     <div>
       <PageHeader
@@ -25,20 +29,20 @@ export function ComingSoonPage({
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Sparkles className="size-3 text-cyan" />
-            مرحلة {phase}
+            {t("phaseLabel", { phase })}
           </Badge>
         }
       />
       <EmptyState
         icon={icon ?? <Sparkles className="size-6" />}
-        title="قيد الإنشاء — قادم قريبًا"
-        description="هذه الوحدة جزء من خطة التطوير. الأساس جاهز في قاعدة البيانات وفي خطة التنفيذ، وستُفعَّل في المرحلة المحددة."
+        title={t("title")}
+        description={t("description")}
       />
       {bullets && bullets.length > 0 && (
         <div className="mt-6 rounded-2xl border border-cyan/15 bg-card p-5">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <ChevronLeft className="size-4 text-cyan icon-flip-rtl" />
-            ما الذي ستقدمه هذه الوحدة
+            {t("bulletsTitle")}
           </h2>
           <ul className="space-y-2 text-sm text-muted-foreground">
             {bullets.map((b, i) => (

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { odooFromEnv } from "./client";
 import { mapStageName } from "./types";
 
@@ -12,6 +13,26 @@ export interface LiveProject {
   startDate: string | null;
   endDate: string | null;
   taskCount: number;
+  // Rwasem-rich card fields
+  ref: string;                    // generated PRJ-NNNNN
+  openTaskCount: number;
+  closedTaskCount: number;
+  color: number;                  // Odoo color index 0..11
+  isFavorite: boolean;
+  tagIds: number[];
+  tagNames: string[];
+  lastUpdateStatus: string | null;
+  lastUpdateColor: number | null;
+  description: string | null;
+  // Rwasem custom (rwasem_customer_report addon)
+  storeName: string | null;
+  accountManagerId: number | null;
+  accountManagerName: string | null;
+  target: "on_target" | "off_target" | "out" | "sales_deposit" | "renewed" | null;
+  stageId: number | null;
+  stageName: string | null;
+  // Display fields derived from partner
+  siteAddress: string | null;
 }
 
 export interface LiveClient {
@@ -68,8 +89,9 @@ export async function listLiveProjects(): Promise<LiveProject[]> {
   return rows.map((r) => {
     const partner = m2o(r.partner_id);
     const user = m2o(r.user_id);
+    const id = r.id as number;
     return {
-      odooId: r.id as number,
+      odooId: id,
       name: String(r.name),
       clientId: partner?.[0] ?? null,
       clientName: partner?.[1] ?? null,
@@ -78,6 +100,23 @@ export async function listLiveProjects(): Promise<LiveProject[]> {
       startDate: str(r.date_start),
       endDate: str(r.date),
       taskCount: (r.task_count as number) ?? 0,
+      ref: `PRJ-${String(id).padStart(5, "0")}`,
+      openTaskCount: 0,
+      closedTaskCount: 0,
+      color: 0,
+      isFavorite: false,
+      tagIds: [],
+      tagNames: [],
+      lastUpdateStatus: null,
+      lastUpdateColor: null,
+      description: null,
+      storeName: null,
+      accountManagerId: null,
+      accountManagerName: null,
+      target: null,
+      stageId: null,
+      stageName: null,
+      siteAddress: null,
     };
   });
 }
@@ -97,19 +136,42 @@ export interface LiveProjectsPage {
 export async function listLiveProjectsPaged(opts: {
   page?: number;
   pageSize?: number;
+  search?: string;
 } = {}): Promise<LiveProjectsPage> {
   const odoo = odooFromEnv();
   const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
   const page = Math.max(1, opts.page ?? 1);
   const offset = (page - 1) * pageSize;
+  const search = (opts.search ?? "").trim();
 
-  const projectDomain = [["active", "=", true]];
+  // Odoo domain: project.name OR partner.name OR store_name.
+  // Polish-notation prefix operators ("|") combine the next two leaves.
+  const projectDomain: unknown[] = [["active", "=", true]];
+  if (search.length > 0) {
+    projectDomain.push(
+      "|",
+      "|",
+      ["name", "ilike", search],
+      ["partner_id.name", "ilike", search],
+      ["store_name", "ilike", search],
+    );
+  }
 
   const [rows, total, withManager, allTaskCounts] = await Promise.all([
     odoo.searchRead<Record<string, unknown>>(
       "project.project",
       projectDomain,
-      ["id", "name", "partner_id", "user_id", "date_start", "date", "task_count"],
+      [
+        "id", "name", "partner_id", "user_id", "date_start", "date",
+        "task_count", "open_task_count", "closed_task_count",
+        "color", "is_favorite", "tag_ids",
+        "last_update_status", "last_update_color", "description",
+        // Rwasem custom fields for richer cards.
+        // NOTE: stage_id is gated behind the technical group
+        // "Use Stages on Project" — the API user doesn't have it,
+        // so we surface last_update_status as the badge instead.
+        "store_name", "account_manager_id", "target",
+      ],
       { limit: pageSize, offset, order: "id desc" },
     ),
     odoo.executeKw<number>("project.project", "search_count", [projectDomain]),
@@ -129,11 +191,54 @@ export async function listLiveProjectsPaged(opts: {
     0,
   );
 
+  // Resolve tag names in one batch
+  const tagIdSet = new Set<number>();
+  for (const r of rows) {
+    const ids = (r.tag_ids as number[] | undefined) ?? [];
+    for (const id of ids) tagIdSet.add(id);
+  }
+  const tagNameById = new Map<number, string>();
+  if (tagIdSet.size > 0) {
+    const tagRows = await odoo.searchRead<Record<string, unknown>>(
+      "project.tags",
+      [["id", "in", [...tagIdSet]]],
+      ["id", "name"],
+      { limit: tagIdSet.size },
+    );
+    for (const t of tagRows) tagNameById.set(t.id as number, String(t.name));
+  }
+
+  // Resolve partner contact addresses in one batch (for "Site:" line)
+  const partnerIdSet = new Set<number>();
+  for (const r of rows) {
+    const partner = m2o(r.partner_id);
+    if (partner) partnerIdSet.add(partner[0]);
+  }
+  const partnerAddrById = new Map<number, string>();
+  if (partnerIdSet.size > 0) {
+    const partnerRows = await odoo.searchRead<Record<string, unknown>>(
+      "res.partner",
+      [["id", "in", [...partnerIdSet]]],
+      ["id", "street", "street2", "city"],
+      { limit: partnerIdSet.size },
+    );
+    for (const p of partnerRows) {
+      const parts = [str(p.street), str(p.street2), str(p.city)].filter(Boolean);
+      if (parts.length > 0) {
+        partnerAddrById.set(p.id as number, parts.join(", "));
+      }
+    }
+  }
+
   const mapped: LiveProject[] = rows.map((r) => {
     const partner = m2o(r.partner_id);
     const user = m2o(r.user_id);
+    const accountManager = m2o(r.account_manager_id);
+    const id = r.id as number;
+    const tagIds = ((r.tag_ids as number[] | undefined) ?? []).map(Number);
+    const targetRaw = str(r.target);
     return {
-      odooId: r.id as number,
+      odooId: id,
       name: String(r.name),
       clientId: partner?.[0] ?? null,
       clientName: partner?.[1] ?? null,
@@ -142,6 +247,30 @@ export async function listLiveProjectsPaged(opts: {
       startDate: str(r.date_start),
       endDate: str(r.date),
       taskCount: (r.task_count as number) ?? 0,
+      ref: `PRJ-${String(id).padStart(5, "0")}`,
+      openTaskCount: (r.open_task_count as number) ?? 0,
+      closedTaskCount: (r.closed_task_count as number) ?? 0,
+      color: (r.color as number) ?? 0,
+      isFavorite: Boolean(r.is_favorite),
+      tagIds,
+      tagNames: tagIds.map((tid) => tagNameById.get(tid) ?? "").filter(Boolean),
+      lastUpdateStatus: str(r.last_update_status),
+      lastUpdateColor: typeof r.last_update_color === "number" ? r.last_update_color : null,
+      description: str(r.description),
+      storeName: str(r.store_name),
+      accountManagerId: accountManager?.[0] ?? null,
+      accountManagerName: accountManager?.[1] ?? null,
+      target:
+        targetRaw === "on_target" ||
+        targetRaw === "off_target" ||
+        targetRaw === "out" ||
+        targetRaw === "sales_deposit" ||
+        targetRaw === "renewed"
+          ? targetRaw
+          : null,
+      stageId: null,
+      stageName: null,
+      siteAddress: partner ? partnerAddrById.get(partner[0]) ?? null : null,
     };
   });
 
@@ -482,12 +611,29 @@ export interface LiveTaskDetail {
   assigneeNames: string[];
 }
 
+export interface LiveTaskTracking {
+  field: string;            // human-friendly description (e.g. "Stage")
+  fieldName: string | null; // technical name (e.g. "stage_id")
+  from: string | null;
+  to: string | null;
+}
+
+export interface LiveTaskAttachment {
+  id: number;
+  name: string;
+  mimetype: string;
+  url: string | null;
+}
+
 export interface LiveTaskMessage {
   id: number;
   body: string;
   authorId: number | null;
   authorName: string | null;
   date: string;
+  messageType: string;
+  tracking: LiveTaskTracking[];
+  attachments: LiveTaskAttachment[];
 }
 
 export async function getLiveTask(odooId: number): Promise<LiveTaskDetail | null> {
@@ -540,21 +686,154 @@ export async function getLiveTask(odooId: number): Promise<LiveTaskDetail | null
 
 export async function listLiveTaskMessages(odooId: number): Promise<LiveTaskMessage[]> {
   const odoo = odooFromEnv();
+  // Include 'notification' so field tracking (stage / assignees) surfaces.
   const rows = await odoo.searchRead<Record<string, unknown>>(
     "mail.message",
-    [["res_id", "=", odooId], ["model", "=", "project.task"],
-     ["message_type", "in", ["comment", "email"]]],
-    ["id", "body", "author_id", "date"],
-    { limit: 100, order: "date asc" },
+    [
+      ["res_id", "=", odooId],
+      ["model", "=", "project.task"],
+      ["message_type", "in", ["comment", "email", "notification"]],
+    ],
+    [
+      "id", "body", "author_id", "date", "message_type",
+      "tracking_value_ids", "attachment_ids", "subtype_id",
+    ],
+    { limit: 200, order: "date asc" },
   );
+
+  // Pull all referenced tracking values + attachments in two batched reads.
+  // Odoo returns `false` for empty x2many fields, hence the array guard.
+  const trackingIds: number[] = [];
+  const attachmentIds: number[] = [];
+  for (const r of rows) {
+    if (Array.isArray(r.tracking_value_ids)) {
+      trackingIds.push(...(r.tracking_value_ids as number[]));
+    }
+    if (Array.isArray(r.attachment_ids)) {
+      attachmentIds.push(...(r.attachment_ids as number[]));
+    }
+  }
+
+  // Defensive: each side-fetch (tracking values, attachments) is wrapped on
+  // its own so a schema mismatch on one Odoo version doesn't kill the
+  // chatter feed. Both are best-effort enrichments.
+  let trackingRows: Record<string, unknown>[] = [];
+  let fieldNameById = new Map<number, { name: string; label: string }>();
+  if (trackingIds.length) {
+    try {
+      trackingRows = await odoo.searchRead<Record<string, unknown>>(
+        "mail.tracking.value",
+        [["id", "in", trackingIds]],
+        [
+          "id", "mail_message_id", "field_id",
+          "old_value_char", "old_value_text", "old_value_integer", "old_value_float",
+          "new_value_char", "new_value_text", "new_value_integer", "new_value_float",
+        ],
+      );
+      // Resolve field_id → human label via ir.model.fields. Odoo 17 dropped
+      // the denormalized `field_desc` column, so we go through the join.
+      const fieldIds = Array.from(
+        new Set(
+          trackingRows
+            .map((t) => m2o(t.field_id)?.[0])
+            .filter((v): v is number => typeof v === "number"),
+        ),
+      );
+      if (fieldIds.length) {
+        try {
+          const fields = await odoo.searchRead<Record<string, unknown>>(
+            "ir.model.fields",
+            [["id", "in", fieldIds]],
+            ["id", "name", "field_description"],
+          );
+          for (const f of fields) {
+            fieldNameById.set(f.id as number, {
+              name: String(f.name ?? ""),
+              label: String(f.field_description ?? f.name ?? ""),
+            });
+          }
+        } catch (err) {
+          console.warn("[odoo/live] ir.model.fields fetch failed", err);
+        }
+      }
+    } catch (err) {
+      console.warn("[odoo/live] mail.tracking.value fetch failed", err);
+    }
+  }
+  void fieldNameById;
+
+  let attachmentRows: Record<string, unknown>[] = [];
+  if (attachmentIds.length) {
+    try {
+      attachmentRows = await odoo.searchRead<Record<string, unknown>>(
+        "ir.attachment",
+        [["id", "in", attachmentIds]],
+        ["id", "name", "mimetype", "url"],
+      );
+    } catch (err) {
+      console.warn("[odoo/live] ir.attachment fetch failed", err);
+    }
+  }
+
+  const trackingByMessage = new Map<number, LiveTaskTracking[]>();
+  for (const t of trackingRows) {
+    const linkedMsg = m2o(t.mail_message_id)?.[0];
+    if (!linkedMsg) continue;
+    const old =
+      (t.old_value_char as string | false) ||
+      (t.old_value_text as string | false) ||
+      (t.old_value_integer != null && t.old_value_integer !== false
+        ? String(t.old_value_integer)
+        : null) ||
+      (t.old_value_float != null && t.old_value_float !== false
+        ? String(t.old_value_float)
+        : null);
+    const fresh =
+      (t.new_value_char as string | false) ||
+      (t.new_value_text as string | false) ||
+      (t.new_value_integer != null && t.new_value_integer !== false
+        ? String(t.new_value_integer)
+        : null) ||
+      (t.new_value_float != null && t.new_value_float !== false
+        ? String(t.new_value_float)
+        : null);
+    const fieldId = m2o(t.field_id)?.[0];
+    const fieldMeta =
+      typeof fieldId === "number" ? fieldNameById.get(fieldId) : undefined;
+    const arr = trackingByMessage.get(linkedMsg) ?? [];
+    arr.push({
+      field: fieldMeta?.label || fieldMeta?.name || "",
+      fieldName: fieldMeta?.name ?? null,
+      from: typeof old === "string" ? old : null,
+      to: typeof fresh === "string" ? fresh : null,
+    });
+    trackingByMessage.set(linkedMsg, arr);
+  }
+
+  const attachmentById = new Map<number, LiveTaskAttachment>();
+  for (const a of attachmentRows) {
+    attachmentById.set(a.id as number, {
+      id: a.id as number,
+      name: String(a.name ?? ""),
+      mimetype: String(a.mimetype ?? ""),
+      url: a.url ? String(a.url) : null,
+    });
+  }
+
   return rows.map((r) => {
     const author = m2o(r.author_id);
+    const ids = Array.isArray(r.attachment_ids) ? (r.attachment_ids as number[]) : [];
     return {
       id: r.id as number,
       body: stripOdooLinks(String(r.body ?? "")),
       authorId: author?.[0] ?? null,
       authorName: author?.[1] ?? null,
       date: String(r.date ?? ""),
+      messageType: String(r.message_type ?? "comment"),
+      tracking: trackingByMessage.get(r.id as number) ?? [],
+      attachments: ids
+        .map((id) => attachmentById.get(id))
+        .filter((a): a is LiveTaskAttachment => !!a),
     };
   });
 }
@@ -586,7 +865,8 @@ export interface DashboardOdooMetrics {
   totalClients: number;
 }
 
-export async function getDashboardOdooMetrics(): Promise<DashboardOdooMetrics> {
+export const getDashboardOdooMetrics = cache(_getDashboardOdooMetrics);
+async function _getDashboardOdooMetrics(): Promise<DashboardOdooMetrics> {
   const odoo = odooFromEnv();
 
   // Pre-load stage names
@@ -1032,7 +1312,6 @@ export function computeTaskAnalytics(tasks: LiveTask[]): TaskAnalytics {
 }
 
 export interface LiveProjectDetail extends LiveProject {
-  description: string | null;
   tasks: LiveTask[];
   analytics: TaskAnalytics;
 }
@@ -1042,16 +1321,55 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
   const rows = await odoo.read<Record<string, unknown>>(
     "project.project",
     [odooId],
-    ["id", "name", "partner_id", "user_id", "date_start", "date",
-     "description", "task_count"],
+    [
+      "id", "name", "partner_id", "user_id", "date_start", "date",
+      "description", "task_count",
+      "open_task_count", "closed_task_count",
+      "color", "is_favorite", "tag_ids",
+      "last_update_status", "last_update_color",
+      // Rwasem custom fields. stage_id intentionally omitted — gated by
+      // the technical group "Use Stages on Project" the API user lacks.
+      "store_name", "account_manager_id", "target",
+    ],
   );
   if (!rows.length) return null;
   const r = rows[0];
   const partner = m2o(r.partner_id);
   const user = m2o(r.user_id);
+  const accountManager = m2o(r.account_manager_id);
+  const tagIds = ((r.tag_ids as number[] | undefined) ?? []).map(Number);
 
+  // Resolve tag names + partner address in parallel.
+  const [tagRows, partnerRows] = await Promise.all([
+    tagIds.length > 0
+      ? odoo.searchRead<Record<string, unknown>>(
+          "project.tags",
+          [["id", "in", tagIds]],
+          ["id", "name"],
+          { limit: tagIds.length },
+        )
+      : Promise.resolve([] as Record<string, unknown>[]),
+    partner
+      ? odoo.read<Record<string, unknown>>(
+          "res.partner",
+          [partner[0]],
+          ["street", "street2", "city"],
+        )
+      : Promise.resolve([] as Record<string, unknown>[]),
+  ]);
+  const tagNameById = new Map<number, string>();
+  for (const t of tagRows) tagNameById.set(t.id as number, String(t.name));
+  let siteAddress: string | null = null;
+  if (partnerRows.length > 0) {
+    const p = partnerRows[0];
+    const parts = [str(p.street), str(p.street2), str(p.city)].filter(Boolean);
+    if (parts.length > 0) siteAddress = parts.join(", ");
+  }
+
+  const id = r.id as number;
+  const targetRaw = str(r.target);
   const base: LiveProject = {
-    odooId: r.id as number,
+    odooId: id,
     name: String(r.name),
     clientId: partner?.[0] ?? null,
     clientName: partner?.[1] ?? null,
@@ -1060,6 +1378,30 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
     startDate: str(r.date_start),
     endDate: str(r.date),
     taskCount: (r.task_count as number) ?? 0,
+    ref: `PRJ-${String(id).padStart(5, "0")}`,
+    openTaskCount: (r.open_task_count as number) ?? 0,
+    closedTaskCount: (r.closed_task_count as number) ?? 0,
+    color: (r.color as number) ?? 0,
+    isFavorite: Boolean(r.is_favorite),
+    tagIds,
+    tagNames: tagIds.map((tid) => tagNameById.get(tid) ?? "").filter(Boolean),
+    lastUpdateStatus: str(r.last_update_status),
+    lastUpdateColor: typeof r.last_update_color === "number" ? r.last_update_color : null,
+    description: str(r.description),
+    storeName: str(r.store_name),
+    accountManagerId: accountManager?.[0] ?? null,
+    accountManagerName: accountManager?.[1] ?? null,
+    target:
+      targetRaw === "on_target" ||
+      targetRaw === "off_target" ||
+      targetRaw === "out" ||
+      targetRaw === "sales_deposit" ||
+      targetRaw === "renewed"
+        ? targetRaw
+        : null,
+    stageId: null,
+    stageName: null,
+    siteAddress,
   };
 
   const tasks = await listLiveTasks({ projectOdooId: odooId, limit: 1000 });
@@ -1067,7 +1409,6 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
 
   return {
     ...base,
-    description: str(r.description),
     tasks,
     analytics,
   };
@@ -1102,8 +1443,9 @@ export async function getLiveClient(odooId: number): Promise<LiveClientDetail | 
   const projects: LiveProject[] = projectRows.map((p) => {
     const partner = m2o(p.partner_id);
     const user = m2o(p.user_id);
+    const id = p.id as number;
     return {
-      odooId: p.id as number,
+      odooId: id,
       name: String(p.name),
       clientId: partner?.[0] ?? null,
       clientName: partner?.[1] ?? null,
@@ -1112,6 +1454,23 @@ export async function getLiveClient(odooId: number): Promise<LiveClientDetail | 
       startDate: str(p.date_start),
       endDate: str(p.date),
       taskCount: (p.task_count as number) ?? 0,
+      ref: `PRJ-${String(id).padStart(5, "0")}`,
+      openTaskCount: 0,
+      closedTaskCount: 0,
+      color: 0,
+      isFavorite: false,
+      tagIds: [],
+      tagNames: [],
+      lastUpdateStatus: null,
+      lastUpdateColor: null,
+      description: null,
+      storeName: null,
+      accountManagerId: null,
+      accountManagerName: null,
+      target: null,
+      stageId: null,
+      stageName: null,
+      siteAddress: null,
     };
   });
 

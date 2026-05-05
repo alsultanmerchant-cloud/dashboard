@@ -7,24 +7,25 @@ import {
   getFinanceTotals, getMonthlyFinance, monthBoundsIso, ytdBoundsIso,
 } from "@/lib/data/finance";
 import {
-  listExpenses, getExpenseSummary, EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL,
+  getExpenseSummary, EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL,
 } from "@/lib/data/expenses";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
-import { formatArabicShortDate } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { NewExpenseDialog } from "../new-expense-dialog";
+import { loadMoreExpenses } from "./_actions";
+import { ExpensesList } from "./expenses-list";
 
 const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 const monthLabel = (ym: string) => {
   // YYYY-MM → readable Arabic month + year
   const [y, m] = ym.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
-  return new Intl.DateTimeFormat("ar-SA", { month: "short", year: "2-digit" }).format(d);
+  return new Intl.DateTimeFormat("ar-SA-u-nu-latn", { month: "short", year: "2-digit" }).format(d);
 };
 
 export default async function FinancePage() {
@@ -34,12 +35,12 @@ export default async function FinancePage() {
   const monthWin = monthBoundsIso();
   const ytdWin = ytdBoundsIso();
 
-  const [monthTotals, ytdTotals, monthly, recentExpenses, ytdExpenseSummary] =
+  const [monthTotals, ytdTotals, monthly, firstExpensesPage, ytdExpenseSummary] =
     await Promise.all([
       getFinanceTotals(session.orgId, monthWin),
       getFinanceTotals(session.orgId, ytdWin),
       getMonthlyFinance(session.orgId, 6),
-      listExpenses(session.orgId, { limit: 10 }),
+      loadMoreExpenses(null, null),
       getExpenseSummary(session.orgId, ytdWin),
     ]);
 
@@ -184,7 +185,7 @@ export default async function FinancePage() {
                       <div className="w-32 shrink-0 text-xs">
                         {EXPENSE_CATEGORY_LABEL[r.cat]}
                       </div>
-                      <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/[0.04]">
+                      <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-soft-2">
                         <div
                           className="absolute inset-y-0 right-0 bg-amber/60"
                           style={{ width: `${pct}%` }}
@@ -201,13 +202,13 @@ export default async function FinancePage() {
         </CardContent>
       </Card>
 
-      {/* Recent expenses */}
+      {/* All expenses (infinite scroll) */}
       <div>
         <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
           <ReceiptText className="size-4" />
-          آخر المصروفات
+          المصروفات
         </h2>
-        {recentExpenses.length === 0 ? (
+        {firstExpensesPage.items.length === 0 ? (
           <EmptyState
             icon={<Banknote className="size-6" />}
             title="لا توجد مصروفات"
@@ -215,40 +216,10 @@ export default async function FinancePage() {
             action={canManage ? <NewExpenseDialog /> : undefined}
           />
         ) : (
-          <Card>
-            <CardContent className="p-0">
-              <ul className="divide-y divide-white/[0.04]">
-                {recentExpenses.map((e) => (
-                  <li
-                    key={e.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {e.vendor || EXPENSE_CATEGORY_LABEL[e.category]}
-                      </p>
-                      <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <span className="rounded-full border border-white/[0.08] bg-white/[0.02] px-2 py-0.5">
-                          {EXPENSE_CATEGORY_LABEL[e.category]}
-                        </span>
-                        <span dir="ltr" className="tabular-nums">
-                          {formatArabicShortDate(e.expense_date)}
-                        </span>
-                        {e.description && (
-                          <span className="truncate">· {e.description}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-end">
-                      <p className="text-sm font-semibold tabular-nums text-amber">
-                        {sar(Number(e.amount))}
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          <ExpensesList
+            initialItems={firstExpensesPage.items}
+            initialNextCursor={firstExpensesPage.nextCursor}
+          />
         )}
       </div>
     </div>

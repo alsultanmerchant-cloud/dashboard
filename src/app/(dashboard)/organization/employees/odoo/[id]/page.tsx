@@ -153,7 +153,7 @@ function TaskList({ tasks }: { tasks: import("@/lib/odoo/live").LiveTask[] }) {
           <li key={t.odooId}>
             <Link
               href={`/tasks/odoo/${t.odooId}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-soft-2"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{t.name}</p>

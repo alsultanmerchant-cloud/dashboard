@@ -46,23 +46,95 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
 
-  /* CommandCenter accent colors */
-  --color-cyan: #00D4FF;
-  --color-cyan-dim: rgba(0, 212, 255, 0.14);
-  --color-cc-green: #10B981;
-  --color-green-dim: rgba(16, 185, 129, 0.14);
-  --color-amber: #F59E0B;
-  --color-amber-dim: rgba(245, 158, 11, 0.14);
-  --color-cc-red: #EF4444;
-  --color-red-dim: rgba(239, 68, 68, 0.14);
-  --color-cc-purple: #8B5CF6;
-  --color-purple-dim: rgba(139, 92, 246, 0.14);
-  --color-cc-blue: #7da6ff;
-  --color-blue-dim: rgba(125, 166, 255, 0.14);
-  --color-pink: #EC4899;
+  /* Rwasem accents (theme-aware via vars below) */
+  --color-cyan: var(--accent-cyan);
+  --color-cyan-dim: var(--accent-cyan-dim);
+  --color-cc-green: var(--accent-green);
+  --color-green-dim: var(--accent-green-dim);
+  --color-amber: var(--accent-amber);
+  --color-amber-dim: var(--accent-amber-dim);
+  --color-cc-red: var(--accent-red);
+  --color-red-dim: var(--accent-red-dim);
+  --color-cc-purple: var(--accent-purple);
+  --color-purple-dim: var(--accent-purple-dim);
+  --color-cc-blue: var(--accent-blue);
+  --color-blue-dim: var(--accent-blue-dim);
+  --color-pink: var(--accent-pink);
+
+  /* Rwasem-specific brand tokens */
+  --color-brand-indigo: var(--brand-indigo);
+  --color-brand-mauve: var(--brand-mauve);
+  --color-brand-lavender: var(--brand-lavender);
 }
 
+/* ---------- Light (Sky Light · Rwasem) — default ----------
+   Tokens captured live from skylight.rwasem.com (Sky Light's customized
+   Odoo Enterprise instance). Primary = Sky Light brand violet #5241C3. */
 :root {
+  --background: #f9f9f9;
+  --foreground: #1b1b1b;
+  --card: #ffffff;
+  --card-foreground: #1b1b1b;
+  --popover: #ffffff;
+  --popover-foreground: #1b1b1b;
+  --primary: #5241c3;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #1b1b1b;
+  --muted: #f3f3f3;
+  --muted-foreground: #6c757d;
+  --accent: #f0eefb;
+  --accent-foreground: #5241c3;
+  --destructive: #dc3545;
+  --border: #dee2e6;
+  --input: #ffffff;
+  --ring: rgba(82, 65, 195, 0.45);
+  --chart-1: #5241c3;
+  --chart-2: #28a745;
+  --chart-3: #ffc107;
+  --chart-4: #17a2b8;
+  --chart-5: #dc3545;
+  --radius: 0.5rem;
+
+  /* Top navbar (Rwasem signature solid violet) */
+  --sidebar: #5241c3;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #5241c3;
+  --sidebar-accent: rgba(255, 255, 255, 0.14);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.18);
+  --sidebar-ring: rgba(255, 255, 255, 0.4);
+
+  /* Brand */
+  --brand-indigo: #5241c3;
+  --brand-mauve: #7d3a52;
+  --brand-lavender: #c8c2ee;
+  --topbar-gradient-from: #5241c3;
+  --topbar-gradient-to: #5241c3;
+
+  /* Accent palette (Sky Light · Bootstrap-aligned) */
+  --accent-cyan: #17a2b8;
+  --accent-cyan-dim: rgba(23, 162, 184, 0.14);
+  --accent-green: #28a745;
+  --accent-green-dim: rgba(40, 167, 69, 0.14);
+  --accent-amber: #ffc107;
+  --accent-amber-dim: rgba(255, 193, 7, 0.18);
+  --accent-red: #dc3545;
+  --accent-red-dim: rgba(220, 53, 69, 0.14);
+  --accent-purple: #5241c3;
+  --accent-purple-dim: rgba(82, 65, 195, 0.14);
+  --accent-blue: #007bff;
+  --accent-blue-dim: rgba(0, 123, 255, 0.14);
+  --accent-pink: #e83e8c;
+
+  /* Surfaces — Odoo-style flat shadows */
+  --surface-elev: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --surface-elev-strong: 0 2px 8px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* ---------- Dark (legacy CommandCenter) ---------- */
+.dark {
   --background: #07090F;
   --foreground: #F1F5F9;
   --card: #111827;
@@ -86,7 +158,7 @@
   --chart-3: #F59E0B;
   --chart-4: #8B5CF6;
   --chart-5: #7da6ff;
-  --radius: 1rem;
+
   --sidebar: #0D1117;
   --sidebar-foreground: #F1F5F9;
   --sidebar-primary: #00D4FF;
@@ -95,6 +167,29 @@
   --sidebar-accent-foreground: #F1F5F9;
   --sidebar-border: #1E2A3A;
   --sidebar-ring: rgba(0, 212, 255, 0.3);
+
+  --brand-indigo: #00D4FF;
+  --brand-mauve: #EC4899;
+  --brand-lavender: #1E2A3A;
+  --topbar-gradient-from: #0D1117;
+  --topbar-gradient-to: #07090F;
+
+  --accent-cyan: #00D4FF;
+  --accent-cyan-dim: rgba(0, 212, 255, 0.14);
+  --accent-green: #10B981;
+  --accent-green-dim: rgba(16, 185, 129, 0.14);
+  --accent-amber: #F59E0B;
+  --accent-amber-dim: rgba(245, 158, 11, 0.14);
+  --accent-red: #EF4444;
+  --accent-red-dim: rgba(239, 68, 68, 0.14);
+  --accent-purple: #8B5CF6;
+  --accent-purple-dim: rgba(139, 92, 246, 0.14);
+  --accent-blue: #7da6ff;
+  --accent-blue-dim: rgba(125, 166, 255, 0.14);
+  --accent-pink: #EC4899;
+
+  --surface-elev: 0 0 20px rgba(0, 212, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --surface-elev-strong: 0 0 30px rgba(0, 212, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 @layer base {
@@ -103,11 +198,14 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-color: var(--background);
+    min-height: 100vh;
+  }
+  .dark body {
     background-image:
       radial-gradient(circle at top right, rgba(0, 212, 255, 0.16), transparent 24%),
       radial-gradient(circle at top left, rgba(139, 92, 246, 0.12), transparent 22%),
       linear-gradient(180deg, #0D1117 0%, #07090F 45%, #050810 100%);
-    min-height: 100vh;
   }
   html {
     @apply font-sans;
@@ -115,43 +213,108 @@
 }
 
 @layer utilities {
+  /* Theme-aware surface — replaces the legacy hardcoded glass-surface */
   .glass-surface {
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: var(--surface-elev);
+  }
+  .dark .glass-surface {
     background: linear-gradient(180deg, #0D1117 0%, #0B0F14 100%);
     border: 1px solid rgba(0, 212, 255, 0.2);
-    box-shadow:
-      0 0 20px rgba(0, 212, 255, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 
   .cc-card {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: var(--surface-elev);
+  }
+  .dark .cc-card {
     background-color: #111827;
     border: 1px solid rgba(0, 212, 255, 0.2);
-    box-shadow:
-      0 0 20px rgba(0, 212, 255, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  /* Lavender top-bar gradient (Rwasem signature) */
+  .rwasem-topbar {
+    background: linear-gradient(135deg, var(--topbar-gradient-from) 0%, var(--topbar-gradient-to) 100%);
   }
 
   .panel-grid {
     background-image:
-      linear-gradient(rgba(30, 42, 58, 0.4) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(30, 42, 58, 0.4) 1px, transparent 1px);
+      linear-gradient(rgba(91, 91, 235, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(91, 91, 235, 0.08) 1px, transparent 1px);
     background-size: 22px 22px;
   }
+  .dark .panel-grid {
+    background-image:
+      linear-gradient(rgba(30, 42, 58, 0.4) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30, 42, 58, 0.4) 1px, transparent 1px);
+  }
+
+  /* Soft elevated card (Rwasem kanban-card style) */
+  .rwasem-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--surface-elev);
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+  }
+  .rwasem-card:hover {
+    box-shadow: var(--surface-elev-strong);
+  }
+
+  /* Colored category dot — pair with bg utility per category */
+  .cat-dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 9999px;
+    margin-inline-end: 0.4rem;
+    vertical-align: middle;
+  }
+
+  /* Theme-aware soft surfaces — replaces legacy bg-white/[0.0X] patterns
+     that were only readable on dark backgrounds. Both themes get a faint
+     tinted surface that sits above the page bg. */
+  .bg-soft-1 { background-color: rgba(80, 72, 201, 0.04); }
+  .bg-soft-2 { background-color: rgba(80, 72, 201, 0.07); }
+  .bg-soft-3 { background-color: rgba(80, 72, 201, 0.10); }
+  .hover\:bg-soft-2:hover { background-color: rgba(80, 72, 201, 0.07); }
+  .hover\:bg-soft-3:hover { background-color: rgba(80, 72, 201, 0.10); }
+  .border-soft { border-color: rgba(80, 72, 201, 0.12); }
+  .border-soft-2 { border-color: rgba(80, 72, 201, 0.20); }
+
+  .dark .bg-soft-1 { background-color: rgba(255, 255, 255, 0.03); }
+  .dark .bg-soft-2 { background-color: rgba(255, 255, 255, 0.06); }
+  .dark .bg-soft-3 { background-color: rgba(255, 255, 255, 0.10); }
+  .dark .hover\:bg-soft-2:hover { background-color: rgba(255, 255, 255, 0.06); }
+  .dark .hover\:bg-soft-3:hover { background-color: rgba(255, 255, 255, 0.10); }
+  .dark .border-soft { border-color: rgba(255, 255, 255, 0.06); }
+  .dark .border-soft-2 { border-color: rgba(255, 255, 255, 0.10); }
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — theme-aware */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #07090F;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(30, 42, 58, 0.8);
+  background: rgba(80, 72, 201, 0.25);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(80, 72, 201, 0.45);
+}
+.dark ::-webkit-scrollbar-track {
+  background: #07090F;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(30, 42, 58, 0.8);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(30, 42, 58, 1);
 }
 

@@ -27,7 +27,7 @@ export function CardListSkeleton({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-2">
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex items-center gap-3 rounded-xl border border-white/5 bg-card p-4">
+        <div key={i} className="flex items-center gap-3 rounded-xl border border-soft bg-card p-4">
           <Skeleton className="size-9 rounded-full" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-3.5 w-1/3" />
@@ -42,14 +42,14 @@ export function CardListSkeleton({ rows = 5 }: { rows?: number }) {
 
 export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: number }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/5 bg-card">
-      <div className="grid border-b border-white/5 bg-white/[0.02] p-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+    <div className="overflow-hidden rounded-2xl border border-soft bg-card">
+      <div className="grid border-b border-soft bg-soft-1 p-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {Array.from({ length: cols }).map((_, i) => (
           <Skeleton key={i} className="h-3 w-3/4" />
         ))}
       </div>
       {Array.from({ length: rows }).map((_, r) => (
-        <div key={r} className="grid border-b border-white/[0.03] p-3 last:border-0" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+        <div key={r} className="grid border-b border-soft p-3 last:border-0" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {Array.from({ length: cols }).map((_, c) => (
             <Skeleton key={c} className="h-3.5 w-[80%]" />
           ))}

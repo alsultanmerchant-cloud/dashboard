@@ -234,6 +234,12 @@ export async function POST(req: Request) {
     if (!session) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
+    if (!session.isOwner) {
+      return new Response(
+        JSON.stringify({ error: "المساعد الذكي متاح للمالك فقط" }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
 
     const { messages } = await req.json();
     const orgId = session.orgId;

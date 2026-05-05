@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import type { AppNotification } from "@/types";
 import { Button } from "@/components/ui/button";
 import { X, CheckCheck } from "lucide-react";
@@ -10,17 +11,6 @@ interface NotificationPanelProps {
   onClose: () => void;
   onMarkAllRead: () => void;
   onClearAll: () => void;
-}
-
-function timeAgo(timestamp: string): string {
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "الآن";
-  if (minutes < 60) return `منذ ${minutes} دقيقة`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `منذ ${hours} ساعة`;
-  const days = Math.floor(hours / 24);
-  return `منذ ${days} يوم`;
 }
 
 // Route notification clicks by entity_type / section slug.
@@ -42,7 +32,20 @@ export function NotificationPanel({
   onClearAll,
 }: NotificationPanelProps) {
   const router = useRouter();
+  const t = useTranslations("Notifications");
+  const tCommon = useTranslations("Common");
   const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  function timeAgo(timestamp: string): string {
+    const diff = Date.now() - new Date(timestamp).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return t("now");
+    if (minutes < 60) return t("minutesAgo", { n: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t("hoursAgo", { n: hours });
+    const days = Math.floor(hours / 24);
+    return t("daysAgo", { n: days });
+  }
 
   return (
     <>
@@ -56,7 +59,7 @@ export function NotificationPanel({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-bold text-foreground">الإشعارات</h3>
+            <h3 className="text-sm font-bold text-foreground">{t("title")}</h3>
             {unreadCount > 0 && (
               <span className="bg-cc-red text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                 {unreadCount}
@@ -66,9 +69,9 @@ export function NotificationPanel({
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="text-xs gap-1 text-muted-foreground" onClick={onMarkAllRead}>
               <CheckCheck className="w-3.5 h-3.5" />
-              قراء الكل
+              {t("markAllRead")}
             </Button>
-            <Button variant="ghost" size="icon-xs" onClick={onClose}>
+            <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label={tCommon("close")}>
               <X className="w-4 h-4" />
             </Button>
           </div>
@@ -78,7 +81,7 @@ export function NotificationPanel({
         <div className="flex-1 overflow-y-auto">
           {notifications.length === 0 ? (
             <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-              لا توجد إشعارات
+              {t("empty")}
             </div>
           ) : (
             notifications.map((n) => (
@@ -89,7 +92,7 @@ export function NotificationPanel({
                   if (path) router.push(path);
                   onClose();
                 }}
-                className={`w-full text-right px-4 py-3 border-b border-border/50 hover:bg-white/[0.03] transition-colors ${
+                className={`w-full text-start px-4 py-3 border-b border-border/50 hover:bg-soft-2 transition-colors ${
                   !n.isRead ? "bg-cyan/[0.03]" : ""
                 }`}
               >
@@ -114,7 +117,7 @@ export function NotificationPanel({
         {notifications.length > 0 && (
           <div className="px-4 py-2.5 border-t border-border">
             <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={onClearAll}>
-              مسح الكل
+              {t("clearAll")}
             </Button>
           </div>
         )}

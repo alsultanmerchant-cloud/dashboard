@@ -85,7 +85,7 @@ export function FollowersPanel({
           {followers.map((f) => (
             <li
               key={f.user_id}
-              className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.02] py-1 ps-1 pe-2"
+              className="flex items-center gap-2 rounded-full border border-soft-2 bg-soft-1 py-1 ps-1 pe-2"
             >
               <Avatar size="sm">
                 {f.avatar_url ? <AvatarImage src={f.avatar_url} alt="" /> : null}
@@ -126,7 +126,7 @@ export function FollowersPanel({
               <select
                 value={pickedUserId}
                 onChange={(e) => setPickedUserId(e.target.value)}
-                className="rounded-lg border border-white/[0.08] bg-card px-2 py-1 text-xs"
+                className="rounded-lg border border-soft-2 bg-card px-2 py-1 text-xs"
               >
                 <option value="">اختر زميلاً…</option>
                 {candidates.map((c) => (

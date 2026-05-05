@@ -159,9 +159,9 @@ export function FollowUpLogButton({ entityType, entityId, entityName }: FollowUp
 
   function formatDateTime(iso: string) {
     const d = new Date(iso);
-    return d.toLocaleDateString("ar-SA", { day: "numeric", month: "short", year: "numeric" }) +
+    return d.toLocaleDateString("ar-SA-u-nu-latn", { day: "numeric", month: "short", year: "numeric" }) +
       " — " +
-      d.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+      d.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
   }
 
   /* Render note text with highlighted mentions */

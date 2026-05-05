@@ -14,7 +14,7 @@ export function DataTableShell({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-white/[0.06] bg-card",
+        "overflow-hidden rounded-2xl border border-soft bg-card",
         "shadow-[0_0_20px_rgba(0,212,255,0.04),inset_0_1px_0_rgba(255,255,255,0.04)]",
         className,
       )}
@@ -40,7 +40,7 @@ export function DataTable({ className, ...props }: React.HTMLAttributes<HTMLTabl
 export function DataTableHead({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className={cn("bg-white/[0.02] text-[11px] uppercase tracking-wider text-muted-foreground", className)}
+      className={cn("bg-soft-1 text-[11px] uppercase tracking-wider text-muted-foreground", className)}
       {...props}
     />
   );
@@ -54,7 +54,7 @@ export function DataTableRow({ className, ...props }: React.HTMLAttributes<HTMLT
   return (
     <tr
       className={cn(
-        "border-t border-white/[0.04] transition-colors hover:bg-white/[0.02]",
+        "border-t border-soft transition-colors hover:bg-soft-1",
         className,
       )}
       {...props}

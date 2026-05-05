@@ -138,7 +138,7 @@ function SlotRow({
           onValueChange={(v) => commit(v === "" ? null : v)}
           disabled={pending}
         >
-          <SelectTrigger className="flex-1 bg-card/50 border-white/10 text-xs">
+          <SelectTrigger className="flex-1 bg-card/50 border-soft-2 text-xs">
             <SelectValue placeholder="غير معيّن" />
           </SelectTrigger>
           <SelectContent>
@@ -154,7 +154,7 @@ function SlotRow({
           <button
             type="button"
             onClick={() => commit(null)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground"
             aria-label="إخلاء"
             title="إخلاء"
           >

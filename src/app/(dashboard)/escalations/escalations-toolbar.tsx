@@ -26,7 +26,7 @@ export function EscalationsToolbar({ activeKind }: { activeKind: string | null }
               "rounded-full border px-3 py-1 text-xs transition-colors",
               isActive
                 ? "border-cyan bg-cyan/10 text-cyan"
-                : "border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground",
+                : "border-soft-2 text-muted-foreground hover:border-soft-2 hover:text-foreground",
             )}
           >
             {k.label}

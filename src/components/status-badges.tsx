@@ -32,7 +32,7 @@ const tones = {
   blue: "border-cc-blue/30 bg-blue-dim text-cc-blue",
   purple: "border-cc-purple/30 bg-purple-dim text-cc-purple",
   pink: "border-pink/30 bg-pink/15 text-pink",
-  muted: "border-white/10 bg-white/[0.04] text-muted-foreground",
+  muted: "border-soft-2 bg-soft-1 text-muted-foreground",
 } as const;
 
 function Dot({ tone }: { tone: keyof typeof tones }) {

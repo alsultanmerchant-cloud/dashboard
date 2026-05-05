@@ -194,16 +194,16 @@ export const TASK_STAGE_LABELS_EN: Record<TaskStage, string> = {
 };
 
 // Tailwind tokens for stage chips and column headers.
-// Picked to read on the dark "command-center" surface.
+// Tuned for Sky Light light surfaces (Rwasem-style).
 export const TASK_STAGE_TONES: Record<TaskStage, string> = {
-  new: "bg-slate-500/15 text-slate-300 border-slate-500/30",
-  in_progress: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  manager_review: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-  specialist_review: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  ready_to_send: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
-  sent_to_client: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
-  client_changes: "bg-orange-500/15 text-orange-300 border-orange-500/30",
-  done: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  new: "bg-slate-100 text-slate-700 border-slate-200",
+  in_progress: "bg-blue-50 text-blue-700 border-blue-200",
+  manager_review: "bg-violet-50 text-violet-700 border-violet-200",
+  specialist_review: "bg-amber-50 text-amber-700 border-amber-200",
+  ready_to_send: "bg-cyan-50 text-cyan-700 border-cyan-200",
+  sent_to_client: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  client_changes: "bg-orange-50 text-orange-700 border-orange-200",
+  done: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
 // Sky Light role colors per the manual (Specialist=yellow, Manager=blue, Agent=green, AM=red).

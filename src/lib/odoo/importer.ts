@@ -8,14 +8,21 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { OdooClient } from "./client";
 import {
   OdooEmployee,
+  OdooMany2one,
   OdooPartner,
   OdooProject,
+  OdooProjectCategory,
   OdooTask,
   OdooTaskStage,
   mapStageName,
 } from "./types";
 
 const SOURCE = "odoo";
+// Fallback client used when an Odoo project has no partner_id set.
+// projects.client_id is NOT NULL, so we need a placeholder to keep
+// projects-without-partner from being silently dropped.
+const UNASSIGNED_CLIENT_NAME = "عميل غير محدد";
+const UNASSIGNED_CLIENT_EXTERNAL_ID = -1;
 
 export interface ImportContext {
   organizationId: string;
@@ -24,7 +31,13 @@ export interface ImportContext {
   employeeIdMap: Map<number, string>;
   clientIdMap: Map<number, string>;
   projectIdMap: Map<number, string>;
+  serviceIdMap: Map<number, string>;
   stageNameById: Map<number, string>;
+  unassignedClientId: string | null;
+  /** Maps Odoo res.users.id → Supabase employee_profiles.id via hr.employee.user_id. */
+  odooUserToEmployee: Map<number, string>;
+  /** Counter for inserted task_assignee rows (default-slot 'agent'). */
+  assigneeCount: number;
 }
 
 export interface ImportSummary {
@@ -32,6 +45,8 @@ export interface ImportSummary {
   clients: number;
   projects: number;
   tasks: number;
+  taskAssignees: number;
+  services: number;
   errors: string[];
 }
 
@@ -50,30 +65,48 @@ function nullable<T>(v: T | false | undefined): T | null {
 }
 
 async function importEmployees(ctx: ImportContext): Promise<number> {
-  const employees = await ctx.odoo.searchRead<OdooEmployee>(
-    "hr.employee",
-    [["active", "=", true]],
-    [
-      "id",
-      "name",
-      "work_email",
-      "work_phone",
-      "job_title",
-      "department_id",
-      "parent_id",
-    ],
-    { limit: 1000 },
+  // Sky Light's Odoo has very few hr.employee rows but 112 res.users.
+  // Tasks reference users by res.users.id in their user_ids M2M, so we MUST
+  // import from res.users (not hr.employee) to resolve task assignees.
+  // share=false excludes portal/customer accounts.
+  type OdooUser = {
+    id: number;
+    name: string;
+    login: string | false;
+    active: boolean;
+    share: boolean;
+    partner_id: OdooMany2one;
+  };
+  const users = await ctx.odoo.searchRead<OdooUser>(
+    "res.users",
+    [["active", "=", true], ["share", "=", false]],
+    ["id", "name", "login", "active", "share", "partner_id"],
+    { limit: 500 },
   );
 
-  for (const emp of employees) {
+  // Pull partner phone/mobile in one batch so we can hydrate emp.phone.
+  const partnerIds = users.map((u) => u.partner_id?.[0]).filter((x): x is number => Boolean(x));
+  type OdooUserPartner = { id: number; phone: string | false; mobile: string | false; function: string | false };
+  const partners = partnerIds.length
+    ? await ctx.odoo.searchRead<OdooUserPartner>(
+        "res.partner",
+        [["id", "in", partnerIds]],
+        ["id", "phone", "mobile", "function"],
+        { limit: 1000 },
+      )
+    : [];
+  const partnerMap = new Map(partners.map((p) => [p.id, p]));
+
+  for (const u of users) {
+    const partner = u.partner_id ? partnerMap.get(u.partner_id[0]) : undefined;
     const row = {
       organization_id: ctx.organizationId,
       external_source: SOURCE,
-      external_id: emp.id,
-      full_name: emp.name,
-      email: nullable(emp.work_email),
-      phone: nullable(emp.work_phone),
-      job_title: nullable(emp.job_title),
+      external_id: u.id,
+      full_name: u.name,
+      email: nullable(u.login),
+      phone: nullable(partner?.phone) ?? nullable(partner?.mobile),
+      job_title: nullable(partner?.function),
       employment_status: "active",
     };
     const { data, error } = await supabaseAdmin
@@ -83,23 +116,77 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
       })
       .select("id")
       .single();
-    if (error) throw new Error(`employee ${emp.id}: ${error.message}`);
-    ctx.employeeIdMap.set(emp.id, data.id);
+    if (error) throw new Error(`user ${u.id} (${u.name}): ${error.message}`);
+    ctx.employeeIdMap.set(u.id, data.id);
+    // res.users.id is the same id used in task.user_ids — direct mapping.
+    ctx.odooUserToEmployee.set(u.id, data.id);
   }
 
-  // Second pass: wire up manager_employee_id now that every employee has a uuid.
-  for (const emp of employees) {
-    if (!emp.parent_id) continue;
-    const managerUuid = ctx.employeeIdMap.get(emp.parent_id[0]);
-    const selfUuid = ctx.employeeIdMap.get(emp.id);
-    if (!managerUuid || !selfUuid) continue;
-    await supabaseAdmin
-      .from("employee_profiles")
-      .update({ manager_employee_id: managerUuid })
-      .eq("id", selfUuid);
+  return users.length;
+}
+
+async function ensureUnassignedClient(ctx: ImportContext): Promise<string> {
+  if (ctx.unassignedClientId) return ctx.unassignedClientId;
+  const { data, error } = await supabaseAdmin
+    .from("clients")
+    .upsert({
+      organization_id: ctx.organizationId,
+      external_source: SOURCE,
+      external_id: UNASSIGNED_CLIENT_EXTERNAL_ID,
+      name: UNASSIGNED_CLIENT_NAME,
+      status: "active",
+    }, { onConflict: "organization_id,external_source,external_id" })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(`unassigned client: ${error?.message}`);
+  ctx.unassignedClientId = data.id;
+  return data.id;
+}
+
+async function importServices(ctx: ImportContext): Promise<number> {
+  // Sky Light's "service categories" live in Odoo's project.category model
+  // (added by aptuem_project_default_task). Mirror them into services so
+  // each task can carry a service_id colored chip on the kanban card.
+  const cats = await ctx.odoo.searchRead<OdooProjectCategory>(
+    "project.category",
+    [["active", "=", true]],
+    ["id", "name", "active", "color"],
+    { limit: 200 },
+  );
+
+  for (const c of cats) {
+    // Slug from name: strip emoji + non-alphanumerics, lowercase, dashes.
+    // Always append -{odooId} so we never collide with an existing slug
+    // (the seed already created social-media-management, seo, media-buying;
+    // Odoo's 14 service categories include "🟢Media Buying" which would
+    // map to the same slug). The id suffix guarantees uniqueness without
+    // depending on a deduping pass.
+    const stripped = c.name
+      .replace(/[\p{Emoji}\p{Extended_Pictographic}]/gu, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9؀-ۿ]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const slug = `${stripped || "cat"}-${c.id}`;
+
+    const row = {
+      organization_id: ctx.organizationId,
+      external_source: SOURCE,
+      external_id: c.id,
+      name: c.name,
+      slug,
+      is_active: true,
+    };
+    const { data, error } = await supabaseAdmin
+      .from("services")
+      .upsert(row, { onConflict: "organization_id,external_source,external_id" })
+      .select("id")
+      .single();
+    if (error) throw new Error(`service ${c.id} (${c.name}): ${error.message}`);
+    ctx.serviceIdMap.set(c.id, data.id);
   }
 
-  return employees.length;
+  return cats.length;
 }
 
 async function importClients(ctx: ImportContext): Promise<number> {
@@ -158,9 +245,16 @@ async function importProjects(ctx: ImportContext): Promise<number> {
 
   let imported = 0;
   for (const p of projects) {
-    if (!p.partner_id) continue; // dashboard requires client_id
-    const clientUuid = ctx.clientIdMap.get(p.partner_id[0]);
-    if (!clientUuid) continue;
+    // Resolve client: real partner if linked, else fall back to a placeholder
+    // "Unassigned Client" so the project still imports. This catches Sky Light
+    // projects that exist in Odoo without partner_id (common in their data).
+    let clientUuid: string | undefined;
+    if (p.partner_id) {
+      clientUuid = ctx.clientIdMap.get(p.partner_id[0]);
+    }
+    if (!clientUuid) {
+      clientUuid = await ensureUnassignedClient(ctx);
+    }
 
     const accountManagerUuid =
       p.user_id && ctx.employeeIdMap.get(p.user_id[0])
@@ -220,6 +314,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       "name",
       "project_id",
       "stage_id",
+      "user_ids",
       "date_deadline",
       "create_date",
       "date_end",
@@ -228,6 +323,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       "progress_percentage",
       "expected_progress",
       "progress_slip",
+      "category_id",
     ],
     { limit: 5000 },
   );
@@ -241,11 +337,15 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     const stageName = t.stage_id ? ctx.stageNameById.get(t.stage_id[0]) : "New";
     const stage = mapStageName(stageName);
 
+    const serviceUuid =
+      t.category_id ? ctx.serviceIdMap.get(t.category_id[0]) ?? null : null;
+
     const row = {
       organization_id: ctx.organizationId,
       external_source: SOURCE,
       external_id: t.id,
       project_id: projectUuid,
+      service_id: serviceUuid,
       title: t.name,
       description: nullable(t.description),
       stage,
@@ -257,12 +357,50 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       priority: t.priority === "1" ? "high" : "medium",
       completed_at: stage === "done" ? nullable(t.date_end) : null,
     };
-    const { error } = await supabaseAdmin
+    const { data: taskRow, error } = await supabaseAdmin
       .from("tasks")
-      .upsert(row, {
-        onConflict: "organization_id,external_source,external_id",
-      });
-    if (error) throw new Error(`task ${t.id}: ${error.message}`);
+      .upsert(row, { onConflict: "organization_id,external_source,external_id" })
+      .select("id")
+      .single();
+    if (error || !taskRow) throw new Error(`task ${t.id}: ${error?.message}`);
+
+    // task_assignees: insert each user as 'agent' role (best-guess default).
+    // Owner can re-slot via dashboard. We delete the existing 'agent' rows
+    // for this task before reinserting so re-imports don't pile up duplicates.
+    const userIds = Array.isArray(t.user_ids) ? t.user_ids : [];
+    if (userIds.length > 0) {
+      const employeeIds = userIds
+        .map((uid) => ctx.odooUserToEmployee.get(uid))
+        .filter((x): x is string => Boolean(x));
+
+      // Wipe prior 'agent' rows for this task (keep specialist/manager/AM
+      // assignments the owner may have set in the dashboard).
+      await supabaseAdmin
+        .from("task_assignees")
+        .delete()
+        .eq("task_id", taskRow.id)
+        .eq("role_type", "agent");
+
+      if (employeeIds.length > 0) {
+        const assigneeRows = employeeIds.map((eid) => ({
+          organization_id: ctx.organizationId,
+          task_id: taskRow.id,
+          employee_id: eid,
+          role_type: "agent" as const,
+        }));
+        const { error: assignError } = await supabaseAdmin
+          .from("task_assignees")
+          .insert(assigneeRows);
+        if (assignError) {
+          // Don't fail the whole import on a single assignee conflict —
+          // log + continue.
+          console.warn(`task ${t.id} assignees: ${assignError.message}`);
+        } else {
+          ctx.assigneeCount += assigneeRows.length;
+        }
+      }
+    }
+
     imported++;
   }
 
@@ -280,7 +418,11 @@ export async function runImport(
     employeeIdMap: new Map(),
     clientIdMap: new Map(),
     projectIdMap: new Map(),
+    serviceIdMap: new Map(),
     stageNameById: new Map(),
+    unassignedClientId: null,
+    odooUserToEmployee: new Map(),
+    assigneeCount: 0,
   };
 
   const summary: ImportSummary = {
@@ -288,6 +430,8 @@ export async function runImport(
     clients: 0,
     projects: 0,
     tasks: 0,
+    taskAssignees: 0,
+    services: 0,
     errors: [],
   };
 
@@ -305,12 +449,18 @@ export async function runImport(
     summary.errors.push(`clients: ${(e as Error).message}`);
   }
   try {
+    summary.services = await importServices(ctx);
+  } catch (e) {
+    summary.errors.push(`services: ${(e as Error).message}`);
+  }
+  try {
     summary.projects = await importProjects(ctx);
   } catch (e) {
     summary.errors.push(`projects: ${(e as Error).message}`);
   }
   try {
     summary.tasks = await importTasks(ctx);
+    summary.taskAssignees = ctx.assigneeCount;
   } catch (e) {
     summary.errors.push(`tasks: ${(e as Error).message}`);
   }
@@ -323,6 +473,7 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
     { name: "employee_profiles", map: ctx.employeeIdMap },
     { name: "clients", map: ctx.clientIdMap },
     { name: "projects", map: ctx.projectIdMap },
+    { name: "services", map: ctx.serviceIdMap },
   ] as const;
   for (const { name, map } of tables) {
     const { data } = await supabaseAdmin
@@ -334,4 +485,13 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
       if (row.external_id != null) map.set(Number(row.external_id), row.id);
     }
   }
+  // Hydrate the unassigned-client placeholder if it already exists.
+  const { data: unassigned } = await supabaseAdmin
+    .from("clients")
+    .select("id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE)
+    .eq("external_id", UNASSIGNED_CLIENT_EXTERNAL_ID)
+    .maybeSingle();
+  if (unassigned) ctx.unassignedClientId = unassigned.id;
 }

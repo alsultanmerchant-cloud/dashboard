@@ -69,7 +69,7 @@ const BUCKETS: BucketDef[] = [
     description: "مهام موعد رفعها بعد أكثر من أسبوع",
     tone: "default",
     icon: <CalendarDays className="size-5" />,
-    rowAccent: "border-r-2 border-white/10",
+    rowAccent: "border-r-2 border-soft-2",
     emptyText: "لا توجد مهام مجدولة لاحقًا.",
   },
 ];
@@ -186,7 +186,7 @@ function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }
         title={def.label}
         description={def.description}
         actions={
-          <span className="inline-flex h-6 items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          <span className="inline-flex h-6 items-center rounded-full border border-soft-2 bg-soft-2 px-2.5 text-[11px] font-medium tabular-nums text-muted-foreground">
             {rows.length}
           </span>
         }
@@ -207,7 +207,7 @@ function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }
               {hidden > 0 && (
                 <Link
                   href={`/uploads?bucket=${def.key}`}
-                  className="flex items-center justify-center gap-1.5 border-t border-white/[0.05] px-4 py-3 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim/30"
+                  className="flex items-center justify-center gap-1.5 border-t border-soft px-4 py-3 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim/30"
                 >
                   عرض الكل ({rows.length})
                   <ArrowRight className="size-3.5 icon-flip-rtl" />
@@ -273,7 +273,7 @@ function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
   const isToday = row.days_delta === 0;
 
   return (
-    <li className={cn("group/row flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-white/[0.02] sm:flex-row sm:items-center sm:gap-4", accent)}>
+    <li className={cn("group/row flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-soft-1 sm:flex-row sm:items-center sm:gap-4", accent)}>
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <Link
@@ -323,7 +323,7 @@ function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
             "inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium",
             isOverdue && "border-cc-red/30 bg-red-dim text-cc-red",
             isToday && "border-amber/30 bg-amber-dim text-amber",
-            !isOverdue && !isToday && "border-white/10 bg-white/[0.04] text-muted-foreground",
+            !isOverdue && !isToday && "border-soft-2 bg-soft-2 text-muted-foreground",
           )}
         >
           {formatDelta(row.days_delta)}
@@ -333,7 +333,7 @@ function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
       <Link
         href={`/tasks/${row.id}`}
         aria-label="فتح المهمة"
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-soft-2 hover:text-foreground"
       >
         <ChevronLeft className="size-3.5 icon-flip-rtl" />
       </Link>

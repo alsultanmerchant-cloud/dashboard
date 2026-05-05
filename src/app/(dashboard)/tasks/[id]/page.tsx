@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Calendar, Briefcase, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask } from "@/lib/data/tasks";
 import { listEmployees } from "@/lib/data/employees";
-import { getTaskActivityFeed } from "@/lib/data/task-activity";
+import { getTaskActivityFeed, odooMessagesToActivity } from "@/lib/data/task-activity";
+import { listLiveTaskMessages } from "@/lib/odoo/live";
 import {
   listTaskFollowers,
   listFollowerCandidates,
@@ -16,15 +16,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@/components/ui/tabs";
-import {
-  TaskStageBadge, PriorityBadge, ServiceBadge,
-} from "@/components/status-badges";
+import type { TaskStage } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
 import { CommentComposer } from "../comment-composer";
 import { TaskRolePanel } from "../task-role-panel";
 import { CommentsFeed } from "./comments-feed";
 import { FollowersPanel } from "./followers-panel";
 import { StageHistoryTimeline } from "./stage-history-timeline";
+import { StageStepper } from "./stage-stepper";
+import { TaskFormCard } from "./task-form-card";
+import { TaskFollowToggle } from "./follow-toggle";
+import { RecordPagination } from "./record-pagination";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
@@ -39,14 +41,43 @@ export default async function TaskDetailPage({
   const { id } = await params;
   const session = await requirePagePermission("tasks.view");
 
-  const [task, employees, activity, followers, stageHistory] = await Promise.all([
-    getTask(session.orgId, id),
-    listEmployees(session.orgId),
-    getTaskActivityFeed(session.orgId, id),
-    listTaskFollowers(session.orgId, id),
-    listTaskStageHistory(session.orgId, id),
-  ]);
+  const [task, employees, supabaseActivity, followers, stageHistory] =
+    await Promise.all([
+      getTask(session.orgId, id),
+      listEmployees(session.orgId),
+      getTaskActivityFeed(session.orgId, id),
+      listTaskFollowers(session.orgId, id),
+      listTaskStageHistory(session.orgId, id),
+    ]);
   if (!task) notFound();
+
+  // If the task is mirrored from Odoo (Rwasem), pull its mail.message chatter
+  // live and merge it into the activity feed. This is what shows up under
+  // "Send message" / "Log note" in the Odoo task form. Failure is non-fatal —
+  // we degrade to the Supabase-only feed.
+  const odooExternalId = (() => {
+    const src = (task as { external_source?: string | null }).external_source;
+    const ext = (task as { external_id?: string | null }).external_id;
+    if (src !== "odoo" || !ext) return null;
+    const n = parseInt(ext, 10);
+    return Number.isFinite(n) ? n : null;
+  })();
+  let odooActivity: ReturnType<typeof odooMessagesToActivity> = [];
+  if (odooExternalId) {
+    try {
+      const msgs = await listLiveTaskMessages(odooExternalId);
+      console.log(
+        `[task-detail] Odoo task ${odooExternalId} → ${msgs.length} messages`,
+      );
+      odooActivity = odooMessagesToActivity(msgs);
+    } catch (e) {
+      console.error("[task-detail] Odoo chatter fetch failed", e);
+    }
+  }
+  const activity = [...supabaseActivity, ...odooActivity].sort(
+    (a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
 
   // Followers picker excludes anyone already following.
   const followerCandidates = await listFollowerCandidates(
@@ -63,6 +94,38 @@ export default async function TaskDetailPage({
     .limit(1);
   const hasOpenException = (openExc ?? []).length > 0;
   const canOpenException = hasPermission(session, "exception.open");
+
+  // Record pagination — prev/next within the same project, ordered by
+  // created_at. Mirrors Odoo's "16 / 107" form-view pager. Cheap query:
+  // we only fetch ids, not full task rows.
+  const projectIdRaw = (task as { project_id?: string | null }).project_id ?? null;
+  let recordPager: {
+    position: number;
+    total: number;
+    prevId: string | null;
+    nextId: string | null;
+  } | null = null;
+  if (projectIdRaw) {
+    const { data: siblings } = await supabaseAdmin
+      .from("tasks")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("project_id", projectIdRaw)
+      .order("created_at", { ascending: true });
+    if (siblings && siblings.length > 0) {
+      const idx = siblings.findIndex((r) => r.id === task.id);
+      if (idx >= 0) {
+        recordPager = {
+          position: idx + 1,
+          total: siblings.length,
+          prevId: idx > 0 ? siblings[idx - 1].id : null,
+          nextId: idx < siblings.length - 1 ? siblings[idx + 1].id : null,
+        };
+      }
+    }
+  }
+
+  const isFollowing = followers.some((f) => f.user_id === session.userId);
 
   // Permission to add/remove followers: same shape as the server action
   // (creator OR view_all OR manage_followers). The action is the
@@ -133,7 +196,25 @@ export default async function TaskDetailPage({
           { label: "المهام", href: "/tasks" },
           { label: task.title },
         ]}
-        actions={<TaskStatusSelect taskId={task.id} currentStatus={task.status} />}
+        actions={
+          <div className="flex items-center gap-2">
+            {recordPager && (
+              <RecordPagination
+                position={recordPager.position}
+                total={recordPager.total}
+                prevId={recordPager.prevId}
+                nextId={recordPager.nextId}
+                basePath="/tasks"
+              />
+            )}
+            <TaskFollowToggle
+              taskId={task.id}
+              currentUserId={session.userId}
+              isFollowing={isFollowing}
+            />
+            <TaskStatusSelect taskId={task.id} currentStatus={task.status} />
+          </div>
+        }
       />
 
       {(hasOpenException || canOpenException) && (
@@ -163,52 +244,43 @@ export default async function TaskDetailPage({
         </Card>
       )}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-4 space-y-1">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">المرحلة</p>
-            <TaskStageBadge stage={task.stage} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 space-y-1">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">الأولوية</p>
-            <PriorityBadge priority={task.priority} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 space-y-1">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">الموعد النهائي</p>
-            <p className={cn("text-base font-semibold tabular-nums", overdue && "text-cc-red")} dir="ltr">
-              {deadline ?? "—"}
-            </p>
-            {delayDays != null && delayDays > 0 && (
-              <p className="text-[11px] text-cc-red">متأخرة بـ {delayDays} يوم</p>
-            )}
-            {task.completed_at && (
-              <p className="text-[11px] text-cc-green">اكتملت {formatArabicDateTime(task.completed_at)}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 space-y-1">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">المشروع</p>
-            <Link href={`/projects/${project?.id}`} className="flex items-center gap-1.5 text-sm font-medium hover:text-cyan transition-colors">
-              <Briefcase className="size-3.5" />
-              {project?.name ?? "—"}
-            </Link>
-            {client?.name && <p className="text-[11px] text-muted-foreground truncate">{client.name}</p>}
-          </CardContent>
-        </Card>
+      <div className="mb-6">
+        <StageStepper
+          taskId={task.id}
+          currentStage={task.stage as TaskStage}
+          stageEnteredAt={task.stage_entered_at ?? null}
+        />
       </div>
 
-      {service && (
-        <div className="mb-6 flex items-center gap-2 text-xs text-muted-foreground">
-          <Calendar className="size-3.5" />
-          <span>الخدمة:</span>
-          <ServiceBadge slug={service.slug} name={service.name} />
-        </div>
-      )}
+      <div className="mb-6">
+        <TaskFormCard
+          task={{
+            priority: task.priority,
+            planned_date: task.planned_date ?? null,
+            due_date: task.due_date ?? null,
+            completed_at: task.completed_at ?? null,
+            allocated_time_minutes:
+              (task as { allocated_time_minutes?: number | null }).allocated_time_minutes ?? null,
+            progress_percent:
+              (task as { progress_percent?: number | string | null }).progress_percent ?? null,
+            expected_progress_percent:
+              (task as { expected_progress_percent?: number | string | null }).expected_progress_percent ?? null,
+            progress_slip_percent:
+              (task as { progress_slip_percent?: number | string | null }).progress_slip_percent ?? null,
+            delay_days: storedDelay,
+            hold_reason: (task as { hold_reason?: string | null }).hold_reason ?? null,
+            hold_since: (task as { hold_since?: string | null }).hold_since ?? null,
+          }}
+          project={project ? { id: project.id, name: project.name } : null}
+          client={client ? { id: client.id, name: client.name } : null}
+          service={service ? { id: service.id, slug: service.slug, name: service.name } : null}
+          computedDelayDays={delayDays}
+          overdue={overdue}
+          formattedCompletedAt={
+            task.completed_at ? formatArabicDateTime(task.completed_at) : null
+          }
+        />
+      </div>
 
       <SectionTitle
         title="فريق المهمة"
@@ -234,7 +306,7 @@ export default async function TaskDetailPage({
       </Card>
 
       <Tabs defaultValue="activity" className="mt-2">
-        <TabsList variant="line">
+        <TabsList>
           <TabsTrigger value="activity">سجل النشاط</TabsTrigger>
           <TabsTrigger value="description">الوصف</TabsTrigger>
           <TabsTrigger value="history">تاريخ المراحل</TabsTrigger>

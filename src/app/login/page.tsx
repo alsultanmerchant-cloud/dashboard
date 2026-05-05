@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useTranslations("Login");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,7 +24,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+      setError(t("invalidCredentials"));
       setLoading(false);
       return;
     }
@@ -32,7 +34,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#07090F] flex items-center justify-center px-4" dir="rtl">
+    // No `dir` here — the root <html> handles it based on locale.
+    <div className="min-h-screen bg-[#07090F] flex items-center justify-center px-4">
       {/* Background effects */}
       <div
         className="fixed inset-0 pointer-events-none"
@@ -48,8 +51,8 @@ export default function LoginPage() {
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan/30 to-[#8B5CF6]/30 ring-1 ring-white/10 mb-4">
             <span className="text-lg font-extrabold tracking-[0.2em] text-[#00D4FF]">CC</span>
           </div>
-          <h1 className="text-2xl font-extrabold text-[#F1F5F9]">لوحة التحكم</h1>
-          <p className="text-sm text-[#94A3B8] mt-1">تسجيل الدخول إلى لوحة التحكم</p>
+          <h1 className="text-2xl font-extrabold text-[#F1F5F9]">{t("appTitle")}</h1>
+          <p className="text-sm text-[#94A3B8] mt-1">{t("subtitle")}</p>
         </div>
 
         {/* Login card */}
@@ -63,7 +66,7 @@ export default function LoginPage() {
           }}
         >
           <div className="space-y-2">
-            <label className="text-xs text-[#94A3B8]">البريد الإلكتروني</label>
+            <label className="text-xs text-[#94A3B8]">{t("email")}</label>
             <input
               type="email"
               name="email"
@@ -75,7 +78,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-[#94A3B8]">كلمة المرور</label>
+            <label className="text-xs text-[#94A3B8]">{t("password")}</label>
             <input
               type="password"
               name="password"
@@ -97,12 +100,12 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full rounded-xl bg-[#00D4FF] hover:bg-[#00D4FF]/90 text-[#07090F] font-bold py-3 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+            {loading ? t("submitting") : t("submit")}
           </button>
         </form>
 
         <p className="text-center text-[10px] text-[#94A3B8]/50 mt-6">
-          لوحة التحكم &copy; {new Date().getFullYear()}
+          {t("footer")} &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>

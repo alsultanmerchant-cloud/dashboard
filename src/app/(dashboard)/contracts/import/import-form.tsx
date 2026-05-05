@@ -175,7 +175,7 @@ export function ImportForm() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-muted-foreground">
-                <tr className="border-b border-white/[0.06]">
+                <tr className="border-b border-soft">
                   <th className="text-start font-medium py-2 pe-3">العميل</th>
                   <th className="text-start font-medium py-2 pe-3">المسؤول</th>
                   <th className="text-start font-medium py-2 pe-3">النوع</th>
@@ -193,8 +193,8 @@ export function ImportForm() {
                       {c.accountManagerName ?? "—"}
                     </td>
                     <td className="py-2 pe-3 text-muted-foreground">{c.contractTypeKey ?? c.contractTypeRaw ?? "—"}</td>
-                    <td className="py-2 pe-3 tabular-nums">{c.totalValue.toLocaleString("ar-SA")}</td>
-                    <td className="py-2 pe-3 tabular-nums">{c.paidValue.toLocaleString("ar-SA")}</td>
+                    <td className="py-2 pe-3 tabular-nums">{c.totalValue.toLocaleString("ar-SA-u-nu-latn")}</td>
+                    <td className="py-2 pe-3 tabular-nums">{c.paidValue.toLocaleString("ar-SA-u-nu-latn")}</td>
                     <td className="py-2 pe-3 text-muted-foreground" dir="ltr">{c.startDate ?? "—"}</td>
                     <td className="py-2 pe-3 text-muted-foreground">{c.status}</td>
                   </tr>
@@ -242,7 +242,7 @@ function Stat({
   const accent =
     tone === "info" ? "border-cc-blue/30 bg-blue-dim/30 text-cc-blue" :
     tone === "success" ? "border-cc-green/30 bg-green-dim/30 text-cc-green" :
-    "border-white/[0.08] bg-card/60 text-muted-foreground";
+    "border-soft-2 bg-card/60 text-muted-foreground";
   return (
     <div className={`rounded-xl border p-3 ${accent}`}>
       <p className="text-[11px] uppercase tracking-wider opacity-80">{label}</p>

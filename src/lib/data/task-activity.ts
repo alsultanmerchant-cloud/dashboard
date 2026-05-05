@@ -43,7 +43,139 @@ export type TaskActivity =
       role_type: RoleType;
       from_employee: { id: string; full_name: string } | null;
       to_employee: { id: string; full_name: string } | null;
+    }
+  | {
+      kind: "task_created";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      initial_stage: Stage;
+    }
+  | {
+      kind: "odoo_message";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      body_html: string;
+      attachments: { id: number; name: string; mimetype: string; url: string | null }[];
+    }
+  | {
+      // Stage transition surfaced from Odoo's mail.tracking.value rows. We use
+      // `from`/`to` as raw labels (Odoo stores stage names in the local
+      // language, e.g. "Manager Review" / "مراجعة المدير"). Treated as a
+      // first-class activity item so the chronological feed — and any AI
+      // summarization that consumes it — recognizes a stage move at this
+      // timestamp regardless of source.
+      kind: "odoo_stage_change";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      from_label: string | null;
+      to_label: string;
+    }
+  | {
+      kind: "odoo_field_change";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      field: string;
+      from_label: string | null;
+      to_label: string | null;
     };
+
+type OdooMessageInput = {
+  id: number;
+  body: string;
+  authorName: string | null;
+  date: string;
+  messageType?: string;
+  tracking?: {
+    field: string;
+    fieldName?: string | null;
+    from: string | null;
+    to: string | null;
+  }[];
+  attachments?: { id: number; name: string; mimetype: string; url: string | null }[];
+};
+
+// Detect a stage transition by the technical field name (locale-stable),
+// falling back to the localized human label.
+const STAGE_FIELD_NAMES = new Set(["stage_id", "stage"]);
+const STAGE_FIELD_LABELS = new Set(["Stage", "المرحلة", "حالة"]);
+function isStageTrackingField(t: {
+  field: string;
+  fieldName?: string | null;
+}): boolean {
+  if (t.fieldName && STAGE_FIELD_NAMES.has(t.fieldName)) return true;
+  return STAGE_FIELD_LABELS.has(t.field);
+}
+
+function odooDateToIso(d: string): string {
+  return d.includes("T") ? d : d.replace(" ", "T") + "Z";
+}
+
+// Adapter: convert Odoo `mail.message` rows into TaskActivity items so they
+// can be merged into the same chronological feed as our Supabase comments.
+//
+// **Stage switches are first-class activity items.** Odoo's stage moves
+// arrive on system messages (message_type='notification') as a
+// `tracking_value` whose `field` is "Stage". We split each such message into:
+//   • `odoo_stage_change`  — for the stage move (always emitted when the
+//     tracking field is a stage field)
+//   • `odoo_field_change`  — for any other tracked field on the same message
+//   • `odoo_message`       — for the human body, IF non-empty
+//
+// This means the feed (and any downstream AI assistant reading it) sees a
+// distinct event at the moment of every stage transition, the same way the
+// Supabase-backed `stage_change` event surfaces for native moves.
+export function odooMessagesToActivity(
+  messages: OdooMessageInput[],
+): TaskActivity[] {
+  const out: TaskActivity[] = [];
+  for (const m of messages) {
+    const created_at = odooDateToIso(m.date);
+    const actor = m.authorName ? { name: m.authorName, avatar: null } : null;
+    const tracking = m.tracking ?? [];
+    const attachments = m.attachments ?? [];
+
+    for (const t of tracking) {
+      const stage = isStageTrackingField(t);
+      if (stage && t.to) {
+        out.push({
+          kind: "odoo_stage_change",
+          id: `odoo-stage:${m.id}:${t.fieldName ?? t.field}:${t.to}`,
+          created_at,
+          actor,
+          from_label: t.from,
+          to_label: t.to,
+        });
+      } else if (!stage) {
+        out.push({
+          kind: "odoo_field_change",
+          id: `odoo-field:${m.id}:${t.fieldName ?? t.field}`,
+          created_at,
+          actor,
+          field: t.field || t.fieldName || "—",
+          from_label: t.from,
+          to_label: t.to,
+        });
+      }
+    }
+
+    const bodyText = (m.body ?? "").replace(/<[^>]+>/g, "").trim();
+    if (bodyText.length > 0 || attachments.length > 0) {
+      out.push({
+        kind: "odoo_message",
+        id: `odoo:${m.id}`,
+        created_at,
+        actor,
+        body_html: m.body,
+        attachments,
+      });
+    }
+  }
+  return out;
+}
 
 export async function getTaskActivityFeed(
   orgId: string,
@@ -164,9 +296,18 @@ export async function getTaskActivityFeed(
   }
 
   for (const h of stageHistory) {
-    // Skip the synthetic "creation" row (no from_stage) — it's redundant noise
-    // in the feed; the task creation itself is implicit.
-    if (h.from_stage === null) continue;
+    if (h.from_stage === null) {
+      // Creation row — render as a "task_created" event so the timeline
+      // isn't empty for tasks that have never been moved.
+      items.push({
+        kind: "task_created",
+        id: h.id,
+        created_at: h.entered_at,
+        actor: h.moved_by ? profileByUser.get(h.moved_by) ?? null : null,
+        initial_stage: h.to_stage,
+      });
+      continue;
+    }
     items.push({
       kind: "stage_change",
       id: h.id,

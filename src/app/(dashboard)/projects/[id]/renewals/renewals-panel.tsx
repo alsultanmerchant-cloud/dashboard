@@ -75,7 +75,7 @@ export function RenewalsPanel({
                 defaultValue={cycleLengthMonths ?? ""}
                 disabled={!canManage}
                 placeholder="مثال: 1، 3، 6"
-                className="w-full h-9 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 text-sm tabular-nums disabled:opacity-50"
+                className="w-full h-9 rounded-lg border border-soft-2 bg-soft-1 px-3 text-sm tabular-nums disabled:opacity-50"
               />
             </label>
             <label className="block">
@@ -87,7 +87,7 @@ export function RenewalsPanel({
                 name="next_renewal_date"
                 defaultValue={nextRenewalDate ?? ""}
                 disabled={!canManage}
-                className="w-full h-9 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 text-sm disabled:opacity-50"
+                className="w-full h-9 rounded-lg border border-soft-2 bg-soft-1 px-3 text-sm disabled:opacity-50"
               />
             </label>
             <div className="flex items-end">

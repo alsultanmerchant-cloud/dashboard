@@ -47,7 +47,7 @@ export function StageHistoryTimeline({
   }
 
   return (
-    <ol className="relative space-y-4 ms-3 border-s border-white/10 ps-4">
+    <ol className="relative space-y-4 ms-3 border-s border-soft-2 ps-4">
       {rows.map((row) => {
         const duration = formatDuration(row.duration_seconds);
 

@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { intlLocale } from "@/lib/utils-format";
 
 interface PaginationProps {
   total: number;
@@ -14,8 +16,6 @@ interface PaginationProps {
   className?: string;
 }
 
-const numAr = (n: number) => new Intl.NumberFormat("ar-EG").format(n);
-
 export function Pagination({
   total,
   pageSize,
@@ -25,6 +25,11 @@ export function Pagination({
 }: PaginationProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const locale = useLocale();
+  const t = useTranslations("Pagination");
+
+  // Always Latin digits per app-wide rule, with grouping appropriate to locale.
+  const fmt = (n: number) => new Intl.NumberFormat(intlLocale(locale)).format(n);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   if (totalPages <= 1) return null;
@@ -58,23 +63,25 @@ export function Pagination({
 
   return (
     <nav
-      aria-label="Pagination"
+      aria-label={t("ariaLabel")}
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.06] bg-card/60 px-3 py-2.5 text-xs",
+        "flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5 text-xs",
         className,
       )}
     >
       <span className="text-muted-foreground tabular-nums">
-        {numAr(from)}–{numAr(to)} من {numAr(total)}
+        {t("range", { from: fmt(from), to: fmt(to), total: fmt(total) })}
       </span>
 
       <div className="flex items-center gap-1">
         <PageLink
           href={buildHref(currentPage - 1)}
           disabled={currentPage <= 1}
-          aria-label="السابق"
+          aria-label={t("previous")}
         >
-          <ChevronRight className="size-3.5" />
+          {/* RTL: chevron points right (visually toward "previous"). LTR: flip. */}
+          <ChevronRight className="size-3.5 ltr:hidden" />
+          <ChevronLeft className="size-3.5 rtl:hidden" />
         </PageLink>
 
         {pages.map((p, i) =>
@@ -90,10 +97,10 @@ export function Pagination({
               key={p}
               href={buildHref(p)}
               active={p === currentPage}
-              aria-label={`صفحة ${numAr(p)}`}
+              aria-label={t("pageAria", { n: fmt(p) })}
               aria-current={p === currentPage ? "page" : undefined}
             >
-              {numAr(p)}
+              {fmt(p)}
             </PageLink>
           ),
         )}
@@ -101,9 +108,10 @@ export function Pagination({
         <PageLink
           href={buildHref(currentPage + 1)}
           disabled={currentPage >= totalPages}
-          aria-label="التالي"
+          aria-label={t("next")}
         >
-          <ChevronLeft className="size-3.5" />
+          <ChevronLeft className="size-3.5 ltr:hidden" />
+          <ChevronRight className="size-3.5 rtl:hidden" />
         </PageLink>
       </div>
     </nav>
@@ -129,7 +137,7 @@ function PageLink({
       <span
         className={cn(
           base,
-          "border-white/[0.04] bg-white/[0.02] text-muted-foreground/40 cursor-not-allowed",
+          "border-soft bg-soft-1 text-muted-foreground/40 cursor-not-allowed",
         )}
         aria-disabled="true"
         {...rest}
@@ -146,7 +154,7 @@ function PageLink({
         base,
         active
           ? "border-cyan/30 bg-cyan-dim text-cyan"
-          : "border-white/[0.06] bg-white/[0.02] text-muted-foreground hover:text-foreground hover:border-white/[0.12]",
+          : "border-soft bg-soft-1 text-muted-foreground hover:text-foreground hover:border-soft-2",
       )}
       {...rest}
     >

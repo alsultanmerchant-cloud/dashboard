@@ -5,7 +5,7 @@ export function formatMoney(value: number): string {
   if (value >= 1_000) {
     return `${(value / 1_000).toFixed(0)}K ر.س`;
   }
-  return `${value.toLocaleString()} ر.س`;
+  return `${value.toLocaleString("en-US")} ر.س`;
 }
 
 export function formatMoneyFull(value: number): string {

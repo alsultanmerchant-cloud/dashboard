@@ -17,7 +17,7 @@ type Service = { id: string; name: string; slug: string; description: string | n
 type Option = { id: string; label: string };
 
 const URGENCY_OPTIONS: { value: "low" | "normal" | "high" | "critical"; label: string; tone: string }[] = [
-  { value: "low", label: "منخفض", tone: "border-white/10 bg-white/[0.04] text-muted-foreground" },
+  { value: "low", label: "منخفض", tone: "border-soft-2 bg-soft-2 text-muted-foreground" },
   { value: "normal", label: "عادي", tone: "border-cc-blue/30 bg-blue-dim text-cc-blue" },
   { value: "high", label: "عالٍ", tone: "border-amber/30 bg-amber-dim text-amber" },
   { value: "critical", label: "حرج", tone: "border-cc-red/30 bg-red-dim text-cc-red" },
@@ -117,7 +117,7 @@ export function HandoverForm({
                     "rounded-2xl border p-4 text-start transition-all relative",
                     active
                       ? "border-cyan/40 bg-cyan-dim text-cyan shadow-[0_0_20px_rgba(0,212,255,0.12)]"
-                      : "border-white/[0.06] bg-card text-muted-foreground hover:text-foreground hover:border-white/15",
+                      : "border-soft bg-card text-muted-foreground hover:text-foreground hover:border-soft-2",
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -177,7 +177,7 @@ export function HandoverForm({
                     onClick={() => setUrgency(u.value)}
                     className={cn(
                       "rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
-                      active ? u.tone : "border-white/[0.06] bg-card text-muted-foreground hover:text-foreground",
+                      active ? u.tone : "border-soft bg-card text-muted-foreground hover:text-foreground",
                     )}
                   >
                     {u.label}

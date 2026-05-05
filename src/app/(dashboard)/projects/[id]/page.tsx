@@ -240,7 +240,7 @@ export default async function ProjectDetailPage({
                 const e = Array.isArray(m.employee) ? m.employee[0] : m.employee;
                 if (!e) return null;
                 return (
-                  <li key={m.id} className="flex items-center gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] p-2.5">
+                  <li key={m.id} className="flex items-center gap-3 rounded-xl border border-soft bg-soft-1 p-2.5">
                     <Avatar size="sm">
                       <AvatarFallback>{e.full_name[0]}</AvatarFallback>
                     </Avatar>

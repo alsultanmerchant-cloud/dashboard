@@ -108,7 +108,7 @@ export function DashboardShell({
           <div className="min-h-screen bg-background panel-grid">
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-            <div className="lg:mr-[268px] min-h-screen">
+            <div className="lg:rtl:mr-[80px] lg:ltr:ml-[80px] min-h-screen">
               <Topbar
                 unreadCount={unreadCount}
                 onBellClick={() => setNotifOpen((p) => !p)}

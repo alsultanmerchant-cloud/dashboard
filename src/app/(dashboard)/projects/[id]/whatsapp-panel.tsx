@@ -159,13 +159,13 @@ function GroupCard({
               value={name}
               onChange={(e) => setName(e.target.value)}
               dir="auto"
-              className="flex-1 rounded-lg border border-white/10 bg-card/60 px-2.5 py-1.5 text-sm focus:border-cyan/40 focus:outline-none"
+              className="flex-1 rounded-lg border border-soft-2 bg-card/60 px-2.5 py-1.5 text-sm focus:border-cyan/40 focus:outline-none"
               placeholder={initial.kind === "client" ? "إدارة نشاط | اسم العميل" : "اسم العميل"}
             />
             <button
               type="button"
               onClick={() => copy(name, "الاسم")}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground"
               aria-label="نسخ"
               title="نسخ"
             >
@@ -183,7 +183,7 @@ function GroupCard({
               value={invite}
               onChange={(e) => setInvite(e.target.value)}
               dir="ltr"
-              className="flex-1 rounded-lg border border-white/10 bg-card/60 px-2.5 py-1.5 text-xs focus:border-cyan/40 focus:outline-none"
+              className="flex-1 rounded-lg border border-soft-2 bg-card/60 px-2.5 py-1.5 text-xs focus:border-cyan/40 focus:outline-none"
               placeholder="https://chat.whatsapp.com/…"
             />
             {invite && (
@@ -191,7 +191,7 @@ function GroupCard({
                 href={invite}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground"
                 aria-label="فتح"
                 title="فتح"
               >

@@ -27,11 +27,11 @@ export function MonthSelector({ monthIso }: { monthIso: string }) {
   }
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-xl border border-white/[0.08] bg-card/60 px-1.5 py-1">
+    <div className="inline-flex items-center gap-1 rounded-xl border border-soft-2 bg-card/60 px-1.5 py-1">
       <button
         type="button"
         onClick={() => go(shiftMonth(monthIso, -1))}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
         aria-label="الشهر السابق"
       >
         <ChevronRight className="size-4" />
@@ -43,7 +43,7 @@ export function MonthSelector({ monthIso }: { monthIso: string }) {
       <button
         type="button"
         onClick={() => go(shiftMonth(monthIso, 1))}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
         aria-label="الشهر التالي"
       >
         <ChevronLeft className="size-4" />

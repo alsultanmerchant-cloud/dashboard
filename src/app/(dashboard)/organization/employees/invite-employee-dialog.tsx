@@ -164,7 +164,7 @@ export function InviteEmployeeDialog({
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>البريد</Label>
-              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-2.5 font-mono text-sm" dir="ltr">
+              <div className="rounded-lg border border-soft-2 bg-soft-2 p-2.5 font-mono text-sm" dir="ltr">
                 {creds?.email}
               </div>
             </div>

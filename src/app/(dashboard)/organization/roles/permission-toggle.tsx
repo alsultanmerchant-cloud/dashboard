@@ -61,7 +61,7 @@ export function PermissionToggle({
           ? highlight
             ? "bg-cyan-dim text-cyan ring-1 ring-cyan/30"
             : "bg-green-dim text-cc-green hover:bg-green-dim/80"
-          : "bg-white/[0.03] text-muted-foreground/40 hover:bg-white/[0.06] hover:text-muted-foreground",
+          : "bg-soft-2 text-muted-foreground/40 hover:bg-soft-2 hover:text-muted-foreground",
         pending && "opacity-60 cursor-wait",
         error && "ring-1 ring-cc-red",
       )}

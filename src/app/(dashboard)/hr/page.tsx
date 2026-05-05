@@ -143,7 +143,7 @@ export default async function HrPage({
                         <div className="w-32 shrink-0 text-xs">
                           {LEAVE_TYPE_LABEL[t]}
                         </div>
-                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/[0.04]">
+                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-soft-2">
                           <div
                             className="absolute inset-y-0 right-0 bg-cc-purple/60"
                             style={{ width: `${pct}%` }}

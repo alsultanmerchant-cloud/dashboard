@@ -8,6 +8,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Search, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Kbd } from "@/components/kbd";
@@ -27,34 +28,27 @@ type Command = {
   isCreate?: boolean;
 };
 
-const QUICK_CREATE: Command[] = [
-  { id: "create-project", label: "مشروع جديد", group: "إنشاء سريع", href: "/projects/new", perm: "projects.manage", isCreate: true, keywords: "project new add" },
-  { id: "create-handover", label: "تسليم جديد من المبيعات", group: "إنشاء سريع", href: "/handover", perm: "handover.create", isCreate: true, keywords: "handover sales" },
-  { id: "create-template", label: "قالب مهمة جديد", group: "إنشاء سريع", href: "/task-templates", perm: "templates.manage", isCreate: true, keywords: "template task" },
-  { id: "create-category", label: "تصنيف خدمة جديد", group: "إنشاء سريع", href: "/service-categories", perm: "category.manage_templates", isCreate: true, keywords: "category service" },
-];
+type QuickCreateSeed = {
+  id: string;
+  labelKey: string;
+  href: string;
+  perm: string;
+  keywords: string;
+};
 
-function navItemsAsCommands(): Command[] {
-  const out: Command[] = [];
-  for (const g of NAV_GROUPS) {
-    for (const item of g.items as NavItem[]) {
-      if (item.comingSoon) continue;
-      out.push({
-        id: `nav-${item.href}`,
-        label: item.label,
-        group: g.label,
-        href: item.href,
-        perm: item.perm,
-        icon: item.icon,
-      });
-    }
-  }
-  return out;
-}
+const QUICK_CREATE_SEEDS: QuickCreateSeed[] = [
+  { id: "create-project", labelKey: "createProject", href: "/projects/new", perm: "projects.manage", keywords: "project new add" },
+  { id: "create-handover", labelKey: "createHandover", href: "/handover", perm: "handover.create", keywords: "handover sales" },
+  { id: "create-template", labelKey: "createTemplate", href: "/task-templates", perm: "templates.manage", keywords: "template task" },
+  { id: "create-category", labelKey: "createCategory", href: "/service-categories", perm: "category.manage_templates", keywords: "category service" },
+];
 
 export function CommandPaletteProvider() {
   const router = useRouter();
   const { hasPermission, user } = useAuth();
+  const tPalette = useTranslations("CommandPalette");
+  const tNav = useTranslations("Nav");
+  const tGroups = useTranslations("NavGroups");
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIdx, setActiveIdx] = React.useState(0);
@@ -82,10 +76,33 @@ export function CommandPaletteProvider() {
   }, [open]);
 
   const allCommands = React.useMemo(() => {
-    const navCmds = navItemsAsCommands();
+    const groupName = tPalette("quickCreateGroup");
+    const quickCreate: Command[] = QUICK_CREATE_SEEDS.map((s) => ({
+      id: s.id,
+      label: tPalette(s.labelKey),
+      group: groupName,
+      href: s.href,
+      perm: s.perm,
+      isCreate: true,
+      keywords: s.keywords,
+    }));
+    const navCmds: Command[] = [];
+    for (const g of NAV_GROUPS) {
+      for (const item of g.items as NavItem[]) {
+        if (item.comingSoon) continue;
+        navCmds.push({
+          id: `nav-${item.href}`,
+          label: tNav(item.labelKey),
+          group: tGroups(g.labelKey),
+          href: item.href,
+          perm: item.perm,
+          icon: item.icon,
+        });
+      }
+    }
     const allowed = (c: Command) => !c.perm || (user?.isOwner ?? false) || hasPermission(c.perm);
-    return [...QUICK_CREATE, ...navCmds].filter(allowed);
-  }, [user, hasPermission]);
+    return [...quickCreate, ...navCmds].filter(allowed);
+  }, [user, hasPermission, tPalette, tNav, tGroups]);
 
   const filtered = React.useMemo(() => {
     if (!query.trim()) return allCommands;
@@ -134,27 +151,25 @@ export function CommandPaletteProvider() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-md rounded-2xl border-cyan/15 bg-card p-0">
-        <div className="border-b border-white/5 p-3">
-          <DialogTitle className="sr-only">لوحة الأوامر</DialogTitle>
-          <DialogDescription className="sr-only">
-            ابحث في النظام أو اكتب أمرًا. اضغط Enter لفتح، Esc للإغلاق.
-          </DialogDescription>
+        <div className="border-b border-soft p-3">
+          <DialogTitle className="sr-only">{tPalette("title")}</DialogTitle>
+          <DialogDescription className="sr-only">{tPalette("description")}</DialogDescription>
           <div className="relative">
-            <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute rtl:right-3 ltr:left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="ابحث أو اكتب أمرًا…"
-              className="h-10 border-0 bg-transparent pe-9 text-base shadow-none focus-visible:ring-0"
+              placeholder={tPalette("placeholder")}
+              className="h-10 border-0 bg-transparent rtl:pe-9 ltr:ps-9 text-base shadow-none focus-visible:ring-0"
             />
           </div>
         </div>
         <div ref={listRef} className="max-h-80 overflow-y-auto p-2">
           {flat.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-              لا توجد نتائج
+              {tPalette("noResults")}
             </p>
           ) : (
             groups.map(([groupLabel, items]) => (
@@ -175,12 +190,12 @@ export function CommandPaletteProvider() {
                           onMouseEnter={() => setActiveIdx(flatIdx)}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm text-start transition-colors",
-                            active ? "bg-cyan/10 text-foreground" : "text-foreground/90 hover:bg-white/[0.04]",
+                            active ? "bg-primary/10 text-foreground" : "text-foreground/90 hover:bg-soft-2",
                           )}
                         >
                           <span className={cn(
                             "flex size-7 items-center justify-center rounded-lg",
-                            c.isCreate ? "bg-cyan/15 text-cyan" : "bg-white/[0.04] text-muted-foreground",
+                            c.isCreate ? "bg-primary/15 text-primary" : "bg-soft-2 text-muted-foreground",
                           )}>
                             <Icon className="size-3.5" />
                           </span>
@@ -197,14 +212,14 @@ export function CommandPaletteProvider() {
             ))
           )}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-white/5 px-3 py-2 text-[11px] text-muted-foreground">
-          <span>{flat.length} نتيجة</span>
+        <div className="flex items-center justify-between gap-2 border-t border-soft px-3 py-2 text-[11px] text-muted-foreground">
+          <span>{tPalette("results", { count: flat.length })}</span>
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>
-            <span className="ms-1">تنقل</span>
+            <span className="ms-1">{tPalette("navigate")}</span>
             <Kbd>↵</Kbd>
-            <span className="ms-1">فتح</span>
+            <span className="ms-1">{tPalette("open")}</span>
             <Kbd>Esc</Kbd>
           </span>
         </div>
@@ -214,6 +229,7 @@ export function CommandPaletteProvider() {
 }
 
 export function CommandPaletteTrigger({ className }: { className?: string }) {
+  const t = useTranslations("Topbar");
   const [isMac, setIsMac] = React.useState(true);
   React.useEffect(() => {
     setIsMac(/Mac|iPhone|iPad/i.test(navigator.platform));
@@ -229,11 +245,11 @@ export function CommandPaletteTrigger({ className }: { className?: string }) {
       onClick={trigger}
       className={
         className ??
-        "inline-flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+        "inline-flex items-center gap-2 rounded-xl border border-soft bg-soft-1 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-soft-2 hover:text-foreground"
       }
     >
       <Search className="size-3.5" />
-      <span>ابحث في النظام…</span>
+      <span>{t("search")}</span>
       <span className="ms-2 flex items-center gap-1">
         <Kbd>{isMac ? "⌘" : "Ctrl"}</Kbd>
         <Kbd>K</Kbd>
@@ -243,11 +259,12 @@ export function CommandPaletteTrigger({ className }: { className?: string }) {
 }
 
 /**
- * Visible "+جديد" trigger in the topbar that opens the palette pre-filtered
+ * Visible "+New" trigger in the topbar that opens the palette pre-filtered
  * to quick-create actions (we just open the palette with no query — the
  * Quick Create group renders first by ordering).
  */
 export function QuickCreateTrigger({ className }: { className?: string }) {
+  const t = useTranslations("Topbar");
   const trigger = () => {
     window.dispatchEvent(new Event("command-palette:open"));
   };
@@ -259,11 +276,11 @@ export function QuickCreateTrigger({ className }: { className?: string }) {
         className ??
         "inline-flex items-center gap-1.5 rounded-xl border border-cyan/30 bg-cyan/10 px-3 py-1.5 text-xs font-medium text-cyan transition-colors hover:bg-cyan/15"
       }
-      aria-label="إنشاء جديد"
-      title="إنشاء جديد (Cmd+K)"
+      aria-label={t("createAria")}
+      title={t("createTooltip")}
     >
       <Plus className="size-3.5" />
-      <span>جديد</span>
+      <span>{t("create")}</span>
     </button>
   );
 }

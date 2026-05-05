@@ -102,7 +102,7 @@ export function StatCard({ value, label, color, progress, icon, subtext, muted, 
         )}
       </div>
       {progress !== undefined && (
-        <div className="mt-4 w-full h-1.5 bg-white/[0.05] rounded-full overflow-hidden relative z-10">
+        <div className="mt-4 w-full h-1.5 bg-soft-1 rounded-full overflow-hidden relative z-10">
           <div
             className={cn("h-full rounded-full transition-all", c.bar)}
             style={{ width: `${Math.min(100, progress)}%` }}

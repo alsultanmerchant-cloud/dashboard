@@ -106,7 +106,7 @@ export default async function OdooTaskDetailPage({
               {task.assigneeNames.map((name, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5"
+                  className="flex items-center gap-2 rounded-lg border border-soft bg-soft-2 px-3 py-1.5"
                 >
                   <div className="flex size-6 items-center justify-center rounded-full bg-cyan-dim text-[11px] font-semibold text-cyan">
                     {name[0]}
@@ -152,7 +152,7 @@ export default async function OdooTaskDetailPage({
                 <CardContent className="p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <div className="flex size-7 items-center justify-center rounded-full bg-white/[0.06] text-[11px] font-semibold">
+                      <div className="flex size-7 items-center justify-center rounded-full bg-soft-2 text-[11px] font-semibold">
                         {msg.authorName?.[0] ?? <User className="size-3" />}
                       </div>
                       <span className="text-sm font-medium">{msg.authorName ?? "مجهول"}</span>

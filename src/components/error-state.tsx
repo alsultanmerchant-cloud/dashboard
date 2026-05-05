@@ -1,8 +1,8 @@
 "use client";
 
 import { AlertTriangle, RefreshCcw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { copy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 
 export function ErrorState({
@@ -16,6 +16,7 @@ export function ErrorState({
   onRetry?: () => void;
   className?: string;
 }) {
+  const t = useTranslations("Errors");
   return (
     <div
       className={cn(
@@ -26,14 +27,14 @@ export function ErrorState({
       <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-red-dim text-cc-red ring-1 ring-cc-red/20">
         <AlertTriangle className="size-6" />
       </div>
-      <h3 className="text-base font-semibold text-foreground">{title ?? copy.errors.boundaryTitle}</h3>
+      <h3 className="text-base font-semibold text-foreground">{title ?? t("boundaryTitle")}</h3>
       <p className="mt-1.5 max-w-sm text-sm text-muted-foreground leading-relaxed">
-        {description ?? copy.errors.boundaryDescription}
+        {description ?? t("boundaryDescription")}
       </p>
       {onRetry && (
         <Button variant="outline" onClick={onRetry} className="mt-5">
           <RefreshCcw className="size-4" />
-          {copy.actions.retry}
+          {t("retry")}
         </Button>
       )}
     </div>

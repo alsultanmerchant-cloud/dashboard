@@ -67,7 +67,7 @@ export function TaskExceptionBadge({
                 <select
                   name="kind"
                   required
-                  className="w-full rounded-md border border-white/10 bg-transparent px-3 py-2 text-sm"
+                  className="w-full rounded-md border border-soft-2 bg-transparent px-3 py-2 text-sm"
                   defaultValue="client"
                 >
                   {KINDS.map((k) => (

@@ -116,7 +116,7 @@ export default async function EmployeesPage({
                   <DataTableCell>
                     <Link
                       href={`/organization/employees/odoo/${e.odooId}`}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.06] hover:text-foreground transition-colors"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
                       aria-label="فتح"
                     >
                       <ChevronLeft className="size-3.5 icon-flip-rtl" />
