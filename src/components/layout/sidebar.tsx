@@ -61,7 +61,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           "w-[252px]",
           // RTL pins to the right edge; LTR to the left.
           "rtl:right-3 ltr:left-3",
-          open ? "translate-x-0" : "rtl:translate-x-[268px] ltr:-translate-x-[268px] lg:translate-x-0",
+          open
+            ? "translate-x-0"
+            : "rtl:translate-x-[268px] ltr:-translate-x-[268px] lg:rtl:translate-x-0 lg:ltr:translate-x-0",
           "lg:w-16",
           expanded && "lg:!w-[252px]",
         )}
