@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createMiddlewareClient } from "@/lib/supabase/middleware";
 
 // `/dev/*` is a development-only design-system / preview namespace.
+// `/api/cron/*` is hit by Supabase pg_cron + secret header — must skip auth.
 // Kept public so we can demo primitives without touching auth/RBAC.
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev", "/api/cron"];
 
 export async function middleware(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request);
