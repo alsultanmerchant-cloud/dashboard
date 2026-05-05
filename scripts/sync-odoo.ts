@@ -24,6 +24,7 @@ console.log(`  tags:            ${summary.tags}`);
 console.log(`  projects:        ${summary.projects}`);
 console.log(`  tasks:           ${summary.tasks}`);
 console.log(`  task assignees:  ${summary.taskAssignees}`);
+console.log(`  task comments:   ${summary.taskComments}`);
 if (summary.errors.length) {
   console.log("[odoo-sync] errors:");
   for (const e of summary.errors) console.log(`  - ${e}`);

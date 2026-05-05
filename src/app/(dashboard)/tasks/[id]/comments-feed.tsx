@@ -5,11 +5,36 @@
 //   - note         → chronological feed (with stage/assignee events)
 
 import { Pin, RefreshCw } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import DOMPurify from "isomorphic-dompurify";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatArabicDateTime } from "@/lib/utils-format";
 import { TaskActivityFeed } from "../task-activity-feed";
 import type { TaskActivity } from "@/lib/data/task-activity";
+
+// Odoo chatter bodies are HTML (links, paragraphs, line breaks). Local
+// dashboard comments are plain text. Render HTML when we detect tags;
+// fall back to plain text with preserved whitespace otherwise.
+function CommentBody({ body }: { body: string }) {
+  const looksHtml = /<\/?(p|a|br|div|span|ul|ol|li|h[1-6]|img|strong|em|b|i)\b/i.test(body);
+  if (!looksHtml) {
+    return (
+      <p className="mt-1 text-sm whitespace-pre-wrap leading-relaxed break-words">
+        {body}
+      </p>
+    );
+  }
+  const safe = DOMPurify.sanitize(body, {
+    ALLOWED_TAGS: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr"],
+    ALLOWED_ATTR: ["href","target","rel","title"],
+  });
+  return (
+    <div
+      className="mt-1 text-sm leading-relaxed break-words [&_a]:text-primary [&_a]:underline [&_p]:mt-2 [&_p:first-child]:mt-0"
+      dangerouslySetInnerHTML={{ __html: safe }}
+    />
+  );
+}
 
 type NoteItem = Extract<TaskActivity, { kind: "note" }>;
 
@@ -82,6 +107,9 @@ function CommentRow({ item }: { item: NoteItem }) {
   return (
     <div className="flex items-start gap-3">
       <Avatar size="sm">
+        {item.actor?.avatar && (
+          <AvatarImage src={item.actor.avatar} alt={item.actor.name} />
+        )}
         <AvatarFallback>{item.actor?.name?.[0] ?? "·"}</AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
@@ -91,9 +119,7 @@ function CommentRow({ item }: { item: NoteItem }) {
             {formatArabicDateTime(item.created_at)}
           </p>
         </div>
-        <p className="mt-1 text-sm whitespace-pre-wrap leading-relaxed break-words">
-          {item.body}
-        </p>
+        <CommentBody body={item.body} />
       </div>
     </div>
   );

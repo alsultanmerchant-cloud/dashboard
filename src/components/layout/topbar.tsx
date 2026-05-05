@@ -66,7 +66,7 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
 
   return (
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
-      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between rounded-[20px] sm:rounded-[26px] px-3 sm:px-5 py-3 gap-3 shadow-[var(--surface-elev)] dark:shadow-none">
+      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between rounded-[20px] sm:rounded-[26px] px-3 sm:px-5 py-3 gap-3 shadow-[var(--surface-elev)] dark:shadow-none lg:rtl:pr-24 lg:ltr:pl-24">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <Button
             variant="ghost"

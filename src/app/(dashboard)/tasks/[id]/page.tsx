@@ -3,8 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask } from "@/lib/data/tasks";
 import { listEmployees } from "@/lib/data/employees";
-import { getTaskActivityFeed, odooMessagesToActivity } from "@/lib/data/task-activity";
-import { listLiveTaskMessages } from "@/lib/odoo/live";
+import { getTaskActivityFeed } from "@/lib/data/task-activity";
 import {
   listTaskFollowers,
   listFollowerCandidates,
@@ -21,6 +20,7 @@ import { TaskStatusSelect } from "../task-status-select";
 import { CommentComposer } from "../comment-composer";
 import { TaskRolePanel } from "../task-role-panel";
 import { CommentsFeed } from "./comments-feed";
+import { TaskDescription } from "./task-description";
 import { FollowersPanel } from "./followers-panel";
 import { StageHistoryTimeline } from "./stage-history-timeline";
 import { StageStepper } from "./stage-stepper";
@@ -51,30 +51,11 @@ export default async function TaskDetailPage({
     ]);
   if (!task) notFound();
 
-  // If the task is mirrored from Odoo (Rwasem), pull its mail.message chatter
-  // live and merge it into the activity feed. This is what shows up under
-  // "Send message" / "Log note" in the Odoo task form. Failure is non-fatal —
-  // we degrade to the Supabase-only feed.
-  const odooExternalId = (() => {
-    const src = (task as { external_source?: string | null }).external_source;
-    const ext = (task as { external_id?: string | null }).external_id;
-    if (src !== "odoo" || !ext) return null;
-    const n = parseInt(ext, 10);
-    return Number.isFinite(n) ? n : null;
-  })();
-  let odooActivity: ReturnType<typeof odooMessagesToActivity> = [];
-  if (odooExternalId) {
-    try {
-      const msgs = await listLiveTaskMessages(odooExternalId);
-      console.log(
-        `[task-detail] Odoo task ${odooExternalId} → ${msgs.length} messages`,
-      );
-      odooActivity = odooMessagesToActivity(msgs);
-    } catch (e) {
-      console.error("[task-detail] Odoo chatter fetch failed", e);
-    }
-  }
-  const activity = [...supabaseActivity, ...odooActivity].sort(
+  // Odoo chatter is now mirrored into task_comments by the hourly sync, so
+  // the supabaseActivity feed already includes it. The legacy live fetch
+  // (listLiveTaskMessages + odooMessagesToActivity) is intentionally NOT
+  // called here — keeping it would double-display every comment.
+  const activity = supabaseActivity.sort(
     (a, b) =>
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
@@ -325,10 +306,8 @@ export default async function TaskDetailPage({
 
         <TabsContent value="description">
           <Card>
-            <CardContent className="p-4 text-sm leading-relaxed whitespace-pre-wrap">
-              {task.description?.trim() || (
-                <span className="text-muted-foreground">لا يوجد وصف لهذه المهمة.</span>
-              )}
+            <CardContent className="p-4">
+              <TaskDescription html={task.description ?? null} />
             </CardContent>
           </Card>
         </TabsContent>

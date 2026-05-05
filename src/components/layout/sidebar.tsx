@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -23,13 +22,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const tCommon = useTranslations("Common");
   const tNav = useTranslations("Nav");
   const tGroups = useTranslations("NavGroups");
-  const [hovered, setHovered] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const expanded = hovered || pinned;
+  const expanded = !!open;
 
   const collapseSidebar = () => {
-    setHovered(false);
-    setPinned(false);
     onClose?.();
   };
 
@@ -58,20 +53,21 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       )}
 
       <aside
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
         data-expanded={expanded}
         className={cn(
-          "fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform] duration-300 ease-in-out",
+          "fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform,padding,background-color,border-color,box-shadow] duration-300 ease-in-out",
           "bg-sidebar text-sidebar-foreground border border-sidebar-border shadow-[var(--surface-elev)]",
           "w-[252px]",
           // RTL pins to the right edge; LTR to the left.
-          "rtl:right-3 ltr:left-3",
+          "rtl:right-4 lg:rtl:right-6 ltr:left-4 lg:ltr:left-6",
           open
             ? "translate-x-0"
             : "rtl:translate-x-[268px] ltr:-translate-x-[268px] lg:rtl:translate-x-0 lg:ltr:translate-x-0",
-          "lg:w-16",
+          "lg:w-[72px] lg:hover:w-[252px]",
+          !expanded &&
+            "lg:top-3 lg:bottom-auto lg:h-[60px] lg:rounded-[24px] lg:border-transparent lg:bg-transparent lg:shadow-none lg:hover:bottom-3 lg:hover:h-auto lg:hover:border-sidebar-border lg:hover:bg-sidebar lg:hover:shadow-[var(--surface-elev)]",
           expanded && "lg:!w-[252px]",
+          "lg:group/sidebar",
         )}
       >
         {/* Logo + org */}
@@ -83,8 +79,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div
               className={cn(
                 "flex-1 min-w-0 transition-opacity duration-200",
-                "lg:opacity-0",
-                expanded && "lg:opacity-100",
+                "lg:opacity-0 lg:pointer-events-none lg:group-hover/sidebar:opacity-100 lg:group-hover/sidebar:pointer-events-auto",
+                expanded && "lg:opacity-100 lg:pointer-events-auto",
               )}
             >
               <h1 className="text-[1.05rem] font-extrabold text-sidebar-foreground whitespace-nowrap">
@@ -106,8 +102,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div
               className={cn(
                 "mt-3 flex items-center gap-2.5 rounded-xl bg-sidebar-accent border border-sidebar-border px-3 py-2 transition-opacity duration-200",
-                "lg:opacity-0",
-                expanded && "lg:opacity-100",
+                "lg:opacity-0 lg:pointer-events-none lg:group-hover/sidebar:opacity-100 lg:group-hover/sidebar:pointer-events-auto",
+                expanded && "lg:opacity-100 lg:pointer-events-auto",
               )}
             >
               <div className="w-7 h-7 rounded-lg bg-sidebar-primary/20 flex items-center justify-center text-sidebar-primary text-xs font-bold ring-1 ring-sidebar-border shrink-0">
@@ -123,7 +119,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </div>
 
         {/* Grouped nav */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 lg:px-2 pt-3 pb-2 space-y-3 scrollbar-hide">
+        <nav
+          className={cn(
+            "flex-1 overflow-y-auto overflow-x-hidden px-2 lg:px-2 pt-3 pb-2 space-y-3 scrollbar-hide",
+            "lg:opacity-0 lg:pointer-events-none lg:group-hover/sidebar:opacity-100 lg:group-hover/sidebar:pointer-events-auto transition-opacity duration-200",
+            expanded && "lg:opacity-100 lg:pointer-events-auto",
+          )}
+        >
           {NAV_GROUPS.map((group) => {
             const visibleItems = group.items.filter(isItemVisible);
             if (visibleItems.length === 0) return null;
@@ -133,7 +135,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 <div
                   className={cn(
                     "px-3 pb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/55 transition-opacity duration-200",
-                    "lg:opacity-0",
+                    "lg:opacity-0 lg:group-hover/sidebar:opacity-100",
                     expanded && "lg:opacity-100",
                   )}
                 >
@@ -173,7 +175,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           <span
                             className={cn(
                               "flex-1 truncate transition-opacity duration-200 whitespace-nowrap",
-                              "lg:opacity-0",
+                              "lg:opacity-0 lg:group-hover/sidebar:opacity-100",
                               expanded && "lg:opacity-100",
                             )}
                           >
@@ -183,7 +185,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                             <span
                               className={cn(
                                 "rounded-full bg-amber-dim px-1.5 py-0.5 text-[9px] font-medium text-amber tracking-tight transition-opacity duration-200",
-                                "lg:opacity-0",
+                                "lg:opacity-0 lg:group-hover/sidebar:opacity-100",
                                 expanded && "lg:opacity-100",
                               )}
                             >
@@ -204,13 +206,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div
           className={cn(
             "m-2 lg:m-2 mt-0 rounded-2xl border border-sidebar-border bg-sidebar-accent p-2.5 transition-all duration-200",
+            "lg:opacity-0 lg:pointer-events-none lg:group-hover/sidebar:opacity-100 lg:group-hover/sidebar:pointer-events-auto",
             !expanded && "lg:border-transparent lg:bg-transparent lg:p-0",
+            expanded && "lg:opacity-100 lg:pointer-events-auto",
           )}
         >
           <div
             className={cn(
               "mb-2.5 flex items-center justify-between gap-2 text-[10px] transition-opacity duration-200",
-              "lg:opacity-0",
+              "lg:opacity-0 lg:group-hover/sidebar:opacity-100",
               expanded && "lg:opacity-100",
             )}
           >
@@ -250,9 +254,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div
               className={cn(
                 "flex-1 min-w-0 transition-all duration-200",
-                "lg:w-0 lg:min-w-0 lg:overflow-hidden lg:opacity-0",
-                expanded && "lg:opacity-100",
-                expanded && "lg:w-auto lg:overflow-visible",
+                "lg:w-0 lg:min-w-0 lg:overflow-hidden lg:opacity-0 lg:group-hover/sidebar:w-auto lg:group-hover/sidebar:overflow-visible lg:group-hover/sidebar:opacity-100",
+                expanded && "lg:opacity-100 lg:w-auto lg:overflow-visible",
               )}
             >
               <p className="text-[13px] font-semibold text-sidebar-foreground truncate whitespace-nowrap">{user?.name || "..."}</p>
@@ -267,9 +270,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               title={tCommon("signOut")}
               className={cn(
                 "flex items-center justify-center w-7 h-7 rounded-lg bg-sidebar-accent hover:bg-cc-red/15 text-sidebar-foreground/75 hover:text-cc-red transition-all duration-200 shrink-0",
-                "lg:w-0 lg:opacity-0 lg:overflow-hidden lg:pointer-events-none",
-                expanded && "lg:opacity-100",
-                expanded && "lg:w-7 lg:pointer-events-auto",
+                "lg:w-0 lg:opacity-0 lg:overflow-hidden lg:pointer-events-none lg:group-hover/sidebar:w-7 lg:group-hover/sidebar:opacity-100 lg:group-hover/sidebar:pointer-events-auto",
+                expanded && "lg:opacity-100 lg:w-7 lg:pointer-events-auto",
               )}
             >
               <LogOut className="w-3.5 h-3.5" />

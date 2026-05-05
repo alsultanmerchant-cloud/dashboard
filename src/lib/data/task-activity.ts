@@ -185,7 +185,7 @@ export async function getTaskActivityFeed(
   const [commentsRes, stageHistoryRes, auditRes] = await Promise.all([
     supabaseAdmin
       .from("task_comments")
-      .select("id, body, is_internal, created_at, author_user_id, kind")
+      .select("id, body, is_internal, created_at, author_user_id, kind, external_author_name, external_author_avatar_url")
       .eq("organization_id", orgId)
       .eq("task_id", taskId),
     supabaseAdmin
@@ -283,11 +283,18 @@ export async function getTaskActivityFeed(
   const items: TaskActivity[] = [];
 
   for (const c of comments) {
+    // Odoo-imported notes have no author_user_id — fall back to the synced
+    // external author fields so the feed shows the partner name + avatar.
+    const localActor = c.author_user_id ? profileByUser.get(c.author_user_id) : null;
+    const actor = localActor
+      ?? (c.external_author_name
+        ? { name: c.external_author_name, avatar: c.external_author_avatar_url ?? null }
+        : null);
     items.push({
       kind: "note",
       id: c.id,
       created_at: c.created_at,
-      actor: profileByUser.get(c.author_user_id) ?? null,
+      actor: actor ?? null,
       body: c.body,
       mentions: mentionsByComment.get(c.id) ?? [],
       is_internal: c.is_internal,

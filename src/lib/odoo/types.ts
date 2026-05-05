@@ -51,6 +51,7 @@ export interface OdooProject {
   // From the rwasem_project_task_progress addon — may be absent on vanilla Odoo.
   total_progress?: number;
   // From aptuem_project_default_task — services bought (M2M to project.category).
+  // These render as chips on the Rwasem project kanban card.
   category_ids?: OdooMany2many;
   // Rwasem custom fields:
   store_name?: string | false;
@@ -59,6 +60,8 @@ export interface OdooProject {
   color?: number;
   is_favorite?: boolean;
   tag_ids?: OdooMany2many;
+  // Members shown as avatars in the kanban card footer.
+  favorite_user_ids?: OdooMany2many;
   last_update_status?: string | false;
   last_update_color?: number | false;
 }

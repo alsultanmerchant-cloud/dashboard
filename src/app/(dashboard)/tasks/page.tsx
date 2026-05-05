@@ -1,4 +1,5 @@
-import { ListTodo } from "lucide-react";
+import Link from "next/link";
+import { Briefcase, ListTodo } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
@@ -17,15 +18,7 @@ const OPEN_STAGES = [
   "client_changes",
 ] as const;
 
-const STAGE_FILTERS = [
-  { key: "open", label: "مفتوحة" },
-  { key: "all", label: "كل المهام" },
-  { key: "overdue", label: "متأخرة" },
-  { key: "done", label: "مكتملة" },
-  { key: "mine", label: "مهامي" },
-] as const;
-
-type FilterKey = (typeof STAGE_FILTERS)[number]["key"];
+type FilterKey = "open" | "all" | "overdue" | "done" | "mine";
 
 export default async function TasksPage({
   searchParams,
@@ -73,6 +66,20 @@ export default async function TasksPage({
     resolvedProjectId = data?.id;
   }
 
+  const canViewProjectInfo =
+    session.isOwner || session.permissions.has("projects.view");
+
+  let projectInfo: { id: string; name: string } | null = null;
+  if (resolvedProjectId && canViewProjectInfo) {
+    const { data } = await supabaseAdmin
+      .from("projects")
+      .select("id, name")
+      .eq("organization_id", session.orgId)
+      .eq("id", resolvedProjectId)
+      .maybeSingle();
+    projectInfo = data;
+  }
+
   const tasks = await loadTasksForGlobalView(session.orgId, {
     stage: stageFilter,
     overdue: filterKey === "overdue",
@@ -107,6 +114,15 @@ export default async function TasksPage({
       {/* Top toolbar — Rwasem-style smart search bar (Filters / Group By /
           Favorites in a single dropdown) on the right, view switcher on the left. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
+        {projectInfo && (
+          <Link
+            href={`/projects/${projectInfo.id}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Briefcase className="size-4" />
+            معلومات المشروع
+          </Link>
+        )}
         <SmartSearchBar
           initialQuery={search ?? ""}
           filterKey={filterKey}

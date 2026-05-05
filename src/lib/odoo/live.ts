@@ -10,6 +10,8 @@ export interface LiveProject {
   clientName: string | null;
   managerId: number | null;
   managerName: string | null;
+  /** Optional: avatar URL when sourced from Supabase (Odoo XML-RPC path leaves null). */
+  managerAvatarUrl?: string | null;
   startDate: string | null;
   endDate: string | null;
   taskCount: number;
@@ -28,11 +30,14 @@ export interface LiveProject {
   storeName: string | null;
   accountManagerId: number | null;
   accountManagerName: string | null;
+  accountManagerAvatarUrl?: string | null;
   target: "on_target" | "off_target" | "out" | "sales_deposit" | "renewed" | null;
   stageId: number | null;
   stageName: string | null;
   // Display fields derived from partner
   siteAddress: string | null;
+  /** Members (Odoo favorite_user_ids), shown as overlapping avatars in card footer. */
+  members?: { name: string; avatarUrl: string | null }[];
 }
 
 export interface LiveClient {

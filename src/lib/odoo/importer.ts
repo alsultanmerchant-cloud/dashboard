@@ -51,6 +51,7 @@ export interface ImportSummary {
   services: number;
   tags: number;
   tagAssignments: number;
+  taskComments: number;
   errors: string[];
 }
 
@@ -101,6 +102,9 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
     : [];
   const partnerMap = new Map(partners.map((p) => [p.id, p]));
 
+  // Build avatar URL from the Odoo instance host. The /web/image/ route is
+  // public for users (no auth needed) so the dashboard can <img> it directly.
+  const odooBase = process.env.ODOO_URL?.replace(/\/+$/, "") ?? "";
   for (const u of users) {
     const partner = u.partner_id ? partnerMap.get(u.partner_id[0]) : undefined;
     const row = {
@@ -111,6 +115,7 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
       email: nullable(u.login),
       phone: nullable(partner?.phone) ?? nullable(partner?.mobile),
       job_title: nullable(partner?.function),
+      avatar_url: odooBase ? `${odooBase}/web/image/res.users/${u.id}/avatar_1` : null,
       employment_status: "active",
     };
     const { data, error } = await supabaseAdmin
@@ -265,6 +270,8 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "color",
       "is_favorite",
       "tag_ids",
+      "category_ids",
+      "favorite_user_ids",
       "last_update_status",
       "last_update_color",
     ],
@@ -331,10 +338,80 @@ async function importProjects(ctx: ImportContext): Promise<number> {
     const tagIds = Array.isArray(p.tag_ids) ? p.tag_ids : [];
     await syncProjectTagAssignments(ctx, data.id, tagIds);
 
+    // Category (service) assignments — these render as chips on the card.
+    const categoryIds = Array.isArray(p.category_ids) ? p.category_ids : [];
+    await syncProjectServiceLinks(ctx, data.id, categoryIds);
+
+    // Members (favorite_user_ids) — render as overlapping avatars in card footer.
+    const memberUserIds = Array.isArray(p.favorite_user_ids) ? p.favorite_user_ids : [];
+    await syncProjectMembers(ctx, data.id, memberUserIds);
+
     imported++;
   }
 
   return imported;
+}
+
+async function syncProjectMembers(
+  ctx: ImportContext,
+  projectUuid: string,
+  odooUserIds: number[],
+): Promise<number> {
+  // Replace the project's member set in one shot.
+  await supabaseAdmin
+    .from("project_members")
+    .delete()
+    .eq("project_id", projectUuid);
+
+  const employeeUuids = odooUserIds
+    .map((uid) => ctx.odooUserToEmployee.get(uid) ?? ctx.employeeIdMap.get(uid))
+    .filter((x): x is string => Boolean(x));
+  if (employeeUuids.length === 0) return 0;
+
+  // Dedup in case Odoo returns the same user twice (defensive).
+  const unique = Array.from(new Set(employeeUuids));
+  const rows = unique.map((eid) => ({
+    organization_id: ctx.organizationId,
+    project_id: projectUuid,
+    employee_id: eid,
+    role_label: "member",
+  }));
+  const { error } = await supabaseAdmin.from("project_members").insert(rows);
+  if (error) {
+    console.warn(`project ${projectUuid} members: ${error.message}`);
+    return 0;
+  }
+  return rows.length;
+}
+
+async function syncProjectServiceLinks(
+  ctx: ImportContext,
+  projectUuid: string,
+  odooCategoryIds: number[],
+): Promise<number> {
+  // Replace the project's service set in one shot.
+  await supabaseAdmin
+    .from("project_services")
+    .delete()
+    .eq("project_id", projectUuid);
+
+  const serviceUuids = odooCategoryIds
+    .map((cid) => ctx.serviceIdMap.get(cid))
+    .filter((x): x is string => Boolean(x));
+  if (serviceUuids.length === 0) return 0;
+
+  const rows = serviceUuids.map((sid) => ({
+    organization_id: ctx.organizationId,
+    project_id: projectUuid,
+    service_id: sid,
+    status: "active",
+  }));
+  const { error } = await supabaseAdmin.from("project_services").insert(rows);
+  if (error) {
+    console.warn(`project ${projectUuid} services: ${error.message}`);
+    return 0;
+  }
+  return rows.length;
 }
 
 async function importProjectTags(ctx: ImportContext): Promise<number> {
@@ -513,6 +590,117 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   return imported;
 }
 
+// Mirror Odoo task chatter (mail.message) into task_comments so notes are
+// searchable and cached locally. Idempotent on (org, external_source, external_id).
+async function importTaskComments(ctx: ImportContext): Promise<number> {
+  // Build Odoo task id → Supabase task uuid map by hydrating from the DB.
+  const { data: taskRows } = await supabaseAdmin
+    .from("tasks")
+    .select("id, external_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE);
+  const taskUuidByOdooId = new Map<number, string>();
+  for (const r of taskRows ?? []) {
+    if (r.external_id != null) {
+      const n = Number(r.external_id);
+      if (Number.isFinite(n)) taskUuidByOdooId.set(n, r.id as string);
+    }
+  }
+  if (taskUuidByOdooId.size === 0) return 0;
+
+  const odooTaskIds = Array.from(taskUuidByOdooId.keys());
+  const odooBase = process.env.ODOO_URL?.replace(/\/+$/, "") ?? "";
+
+  // Batch-fetch in chunks (Odoo IN-clause is fine up to a few thousand).
+  const CHUNK = 500;
+  let imported = 0;
+  type OdooMessage = {
+    id: number;
+    res_id: number;
+    body: string | false;
+    author_id: OdooMany2one;
+    date: string | false;
+    message_type: string;
+    subtype_id: OdooMany2one;
+  };
+  for (let i = 0; i < odooTaskIds.length; i += CHUNK) {
+    const slice = odooTaskIds.slice(i, i + CHUNK);
+    const messages = await ctx.odoo.searchRead<OdooMessage>(
+      "mail.message",
+      [
+        ["model", "=", "project.task"],
+        ["res_id", "in", slice],
+        // Only user-authored content. Skip purely automated stage notifications;
+        // the dashboard already tracks stage_history natively.
+        ["message_type", "in", ["comment", "email"]],
+      ],
+      ["id", "res_id", "body", "author_id", "date", "message_type", "subtype_id"],
+      { limit: 5000, order: "date asc" },
+    );
+
+    if (messages.length === 0) continue;
+
+    // Resolve subtypes once: 'mail.mt_note' = is_internal=true (log note),
+    // others = customer-facing comment.
+    const subtypeIds = Array.from(
+      new Set(
+        messages
+          .map((m) => (Array.isArray(m.subtype_id) ? (m.subtype_id[0] as number) : null))
+          .filter((x): x is number => Boolean(x)),
+      ),
+    );
+    const internalSubtypeIds = new Set<number>();
+    if (subtypeIds.length > 0) {
+      const subs = await ctx.odoo.searchRead<{ id: number; internal: boolean }>(
+        "mail.message.subtype",
+        [["id", "in", subtypeIds]],
+        ["id", "internal"],
+      );
+      for (const s of subs) if (s.internal) internalSubtypeIds.add(s.id);
+    }
+
+    const rows = messages
+      .map((m) => {
+        const taskUuid = taskUuidByOdooId.get(m.res_id);
+        if (!taskUuid) return null;
+        const body = typeof m.body === "string" ? m.body.trim() : "";
+        if (!body) return null;
+        const author = Array.isArray(m.author_id) ? m.author_id : null;
+        const subtypeId = Array.isArray(m.subtype_id) ? (m.subtype_id[0] as number) : null;
+        return {
+          organization_id: ctx.organizationId,
+          task_id: taskUuid,
+          external_source: SOURCE,
+          external_id: String(m.id),
+          author_user_id: null,
+          external_author_name: author ? String(author[1]) : null,
+          external_author_avatar_url: author && odooBase
+            ? `${odooBase}/web/image/res.partner/${author[0]}/avatar_1`
+            : null,
+          body,
+          is_internal: subtypeId ? internalSubtypeIds.has(subtypeId) : true,
+          kind: "note" as const,
+          created_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
+          updated_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    if (rows.length === 0) continue;
+
+    const { error } = await supabaseAdmin
+      .from("task_comments")
+      .upsert(rows, { onConflict: "organization_id,external_source,external_id" });
+    if (error) {
+      console.warn(`task_comments chunk @${i}: ${error.message}`);
+    } else {
+      imported += rows.length;
+    }
+  }
+
+  return imported;
+}
+
 export async function runImport(
   odoo: OdooClient,
   organizationSlug: string,
@@ -541,6 +729,7 @@ export async function runImport(
     services: 0,
     tags: 0,
     tagAssignments: 0,
+    taskComments: 0,
     errors: [],
   };
 
@@ -578,6 +767,11 @@ export async function runImport(
     summary.taskAssignees = ctx.assigneeCount;
   } catch (e) {
     summary.errors.push(`tasks: ${(e as Error).message}`);
+  }
+  try {
+    summary.taskComments = await importTaskComments(ctx);
+  } catch (e) {
+    summary.errors.push(`task_comments: ${(e as Error).message}`);
   }
 
   return summary;

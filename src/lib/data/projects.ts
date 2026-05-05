@@ -31,8 +31,8 @@ type ProjectRow = {
   end_date: string | null;
   external_id: string | null;
   client: { id: string; name: string; address: string | null; external_id: string | null } | null;
-  project_manager: { id: string; full_name: string; external_id: string | null } | null;
-  account_manager: { id: string; full_name: string; external_id: string | null } | null;
+  project_manager: { id: string; full_name: string; external_id: string | null; avatar_url: string | null } | null;
+  account_manager: { id: string; full_name: string; external_id: string | null; avatar_url: string | null } | null;
 };
 
 function externalToOdooId(ext: string | null | undefined): number {
@@ -66,8 +66,8 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
         last_update_status, last_update_color,
         start_date, end_date, external_id,
         client:clients ( id, name, address, external_id ),
-        project_manager:employee_profiles!projects_project_manager_employee_id_fkey ( id, full_name, external_id ),
-        account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name, external_id )
+        project_manager:employee_profiles!projects_project_manager_employee_id_fkey ( id, full_name, external_id, avatar_url ),
+        account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name, external_id, avatar_url )
       `,
       { count: "exact" },
     )
@@ -94,18 +94,25 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   }
 
   const projectIds = rows.map((r) => r.id);
-  const [countsRes, assignRes] = await Promise.all([
+  const [countsRes, servicesRes, membersRes] = await Promise.all([
     supabaseAdmin
       .from("project_task_counts")
       .select("project_id, task_count, open_task_count, closed_task_count")
       .in("project_id", projectIds),
+    // Project chips come from category_ids in Odoo, mirrored as project_services.
     supabaseAdmin
-      .from("project_tag_assignments")
-      .select(`project_id, tag:project_tags ( id, name, external_id )`)
+      .from("project_services")
+      .select(`project_id, service:services ( id, name, external_id )`)
+      .in("project_id", projectIds),
+    // Project members (Odoo favorite_user_ids) — render as overlapping avatars.
+    supabaseAdmin
+      .from("project_members")
+      .select(`project_id, employee:employee_profiles ( id, full_name, avatar_url )`)
       .in("project_id", projectIds),
   ]);
   if (countsRes.error) throw countsRes.error;
-  if (assignRes.error) throw assignRes.error;
+  if (servicesRes.error) throw servicesRes.error;
+  if (membersRes.error) throw membersRes.error;
 
   const countsByProject = new Map<string, { task: number; open: number; closed: number }>();
   for (const c of countsRes.data ?? []) {
@@ -117,15 +124,26 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   }
 
   const tagsByProject = new Map<string, { ids: number[]; names: string[] }>();
-  for (const row of (assignRes.data ?? []) as unknown as Array<{
+  for (const row of (servicesRes.data ?? []) as unknown as Array<{
     project_id: string;
-    tag: { id: string; name: string; external_id: string | null } | null;
+    service: { id: string; name: string; external_id: string | null } | null;
   }>) {
-    if (!row.tag) continue;
+    if (!row.service) continue;
     const slot = tagsByProject.get(row.project_id) ?? { ids: [], names: [] };
-    slot.ids.push(externalToOdooId(row.tag.external_id));
-    slot.names.push(row.tag.name);
+    slot.ids.push(externalToOdooId(row.service.external_id));
+    slot.names.push(row.service.name);
     tagsByProject.set(row.project_id, slot);
+  }
+
+  const membersByProject = new Map<string, { name: string; avatarUrl: string | null }[]>();
+  for (const row of (membersRes.data ?? []) as unknown as Array<{
+    project_id: string;
+    employee: { id: string; full_name: string; avatar_url: string | null } | null;
+  }>) {
+    if (!row.employee) continue;
+    const slot = membersByProject.get(row.project_id) ?? [];
+    slot.push({ name: row.employee.full_name, avatarUrl: row.employee.avatar_url });
+    membersByProject.set(row.project_id, slot);
   }
 
   const mapped: LiveProject[] = rows.map((r) => {
@@ -139,6 +157,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       clientName: r.client?.name ?? null,
       managerId: r.project_manager ? externalToOdooId(r.project_manager.external_id) || null : null,
       managerName: r.project_manager?.full_name ?? null,
+      managerAvatarUrl: r.project_manager?.avatar_url ?? null,
       startDate: r.start_date,
       endDate: r.end_date,
       taskCount: counts.task,
@@ -155,10 +174,12 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       storeName: r.store_name,
       accountManagerId: r.account_manager ? externalToOdooId(r.account_manager.external_id) || null : null,
       accountManagerName: r.account_manager?.full_name ?? null,
+      accountManagerAvatarUrl: r.account_manager?.avatar_url ?? null,
       target: safeTarget(r.target),
       stageId: null,
       stageName: null,
       siteAddress: r.client?.address ?? null,
+      members: membersByProject.get(r.id) ?? [],
     };
   });
 

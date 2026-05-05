@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Star, MoreVertical, User, Hash, Timer, Clock, ArrowRight } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { formatArabicShortDate } from "@/lib/utils-format";
 
@@ -193,22 +193,16 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           </div>
         </div>
 
-        {/* Tag chips (services) */}
+        {/* Service category chips — names already include the emoji prefix
+            (e.g. "🟢Renewal Media Buying") so no extra color dot needed. */}
         {p.tagNames.length > 0 && (
           <ul className="mt-2 flex flex-wrap gap-1">
             {p.tagNames.map((name, idx) => (
               <li
                 key={`${name}-${idx}`}
-                className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-foreground"
+                className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-foreground"
               >
-                <span
-                  aria-hidden
-                  className="inline-block size-2 rounded-full"
-                  style={{
-                    backgroundColor: odooColor((idx % 11) + 1),
-                  }}
-                />
-                <span className="max-w-[14ch] truncate">{name}</span>
+                <span className="max-w-[18ch] truncate">{name}</span>
               </li>
             ))}
           </ul>
@@ -269,16 +263,45 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           </span>
           <Timer className="size-3.5 text-muted-foreground" aria-hidden />
           <div className="flex items-center gap-1.5">
-            {p.managerName && (
-              <Avatar size="sm" className="size-6">
-                <AvatarFallback
-                  className="text-[10px]"
-                  style={{ backgroundColor: stripe, color: "#fff" }}
-                >
-                  {p.managerName.trim()[0] ?? "?"}
-                </AvatarFallback>
-              </Avatar>
-            )}
+            {/* Member avatars (Odoo favorite_user_ids). Falls back to PM-only
+                when no members are synced. Caps at 3 visible + "+N" overflow. */}
+            {(() => {
+              const members = (p.members && p.members.length > 0)
+                ? p.members
+                : p.managerName
+                  ? [{ name: p.managerName, avatarUrl: p.managerAvatarUrl ?? null }]
+                  : [];
+              const visible = members.slice(0, 3);
+              const overflow = Math.max(0, members.length - visible.length);
+              return (
+                <div className="flex items-center">
+                  {visible.map((m, i) => (
+                    <Avatar
+                      key={`${m.name}-${i}`}
+                      size="sm"
+                      className={cn("size-6 ring-2 ring-card", i > 0 && "-ms-2")}
+                      title={m.name}
+                    >
+                      {m.avatarUrl && <AvatarImage src={m.avatarUrl} alt={m.name} />}
+                      <AvatarFallback
+                        className="text-[10px]"
+                        style={{ backgroundColor: odooColor((p.color + i) || 11), color: "#fff" }}
+                      >
+                        {m.name.trim()[0] ?? "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {overflow > 0 && (
+                    <span
+                      className="-ms-2 inline-flex size-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold ring-2 ring-card"
+                      title={`+${overflow}`}
+                    >
+                      +{overflow}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
             <span
               aria-hidden
               className={cn(
