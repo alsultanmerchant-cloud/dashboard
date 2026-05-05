@@ -113,27 +113,28 @@ export function DashboardShell({
                 unreadCount={unreadCount}
                 onBellClick={() => setNotifOpen((p) => !p)}
                 onMenuClick={() => setSidebarOpen(true)}
+                notificationPanel={
+                  notifOpen ? (
+                    <NotificationPanel
+                      notifications={notifications}
+                      onClose={() => setNotifOpen(false)}
+                      onMarkAllRead={() =>
+                        setNotifications((prev) =>
+                          prev.map((n) => ({ ...n, isRead: true })),
+                        )
+                      }
+                      onClearAll={() => {
+                        setNotifications([]);
+                        setNotifOpen(false);
+                      }}
+                    />
+                  ) : null
+                }
               />
               <main className="px-4 sm:px-6 pb-12 pt-8">
                 {children}
               </main>
             </div>
-
-            {notifOpen && (
-              <NotificationPanel
-                notifications={notifications}
-                onClose={() => setNotifOpen(false)}
-                onMarkAllRead={() =>
-                  setNotifications((prev) =>
-                    prev.map((n) => ({ ...n, isRead: true })),
-                  )
-                }
-                onClearAll={() => {
-                  setNotifications([]);
-                  setNotifOpen(false);
-                }}
-              />
-            )}
 
             {!isAgentPage && (
               <AIChatFAB onClick={() => router.push("/agent")} />

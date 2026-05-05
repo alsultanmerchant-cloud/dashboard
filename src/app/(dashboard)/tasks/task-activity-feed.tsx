@@ -8,6 +8,7 @@
 //   - notes: card with avatar + body, @mentions highlighted, URLs linkified
 
 import Link from "next/link";
+import DOMPurify from "isomorphic-dompurify";
 import {
   ArrowLeftRight,
   GitCompareArrows,
@@ -16,7 +17,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   TASK_STAGE_LABELS,
@@ -105,6 +106,9 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <Avatar size="sm">
+            {item.actor?.avatar && (
+              <AvatarImage src={item.actor.avatar} alt={item.actor.name} />
+            )}
             <AvatarFallback>{item.actor?.name?.[0] ?? "·"}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
@@ -127,9 +131,22 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
                 {formatArabicDateTime(item.created_at)}
               </p>
             </div>
-            <p className="mt-1.5 text-sm whitespace-pre-wrap leading-relaxed break-words">
-              {renderNoteBody(item.body)}
-            </p>
+            {/* Odoo chatter bodies are HTML; locally-typed notes are plain text. */}
+            {/<\/?(p|a|br|div|span|ul|ol|li|h[1-6]|img|strong|em|b|i)\b/i.test(item.body) ? (
+              <div
+                className="mt-1.5 text-sm leading-relaxed break-words [&_a]:text-cyan [&_a]:underline [&_p]:mt-2 [&_p:first-child]:mt-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:ms-5 [&_ol]:ms-5"
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(item.body, {
+                    ALLOWED_TAGS: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr","img"],
+                    ALLOWED_ATTR: ["href","target","rel","title","src","alt"],
+                  }),
+                }}
+              />
+            ) : (
+              <p className="mt-1.5 text-sm whitespace-pre-wrap leading-relaxed break-words">
+                {renderNoteBody(item.body)}
+              </p>
+            )}
             {item.mentions.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {item.mentions.map((m) => (

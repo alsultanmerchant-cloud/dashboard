@@ -61,7 +61,7 @@ export default async function TasksPage({
       .select("id")
       .eq("organization_id", session.orgId)
       .eq("external_source", "odoo")
-      .eq("external_id", Number(sp.odooProjectId))
+      .eq("external_id", sp.odooProjectId)
       .maybeSingle();
     resolvedProjectId = data?.id;
   }

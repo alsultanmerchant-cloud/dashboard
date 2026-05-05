@@ -15,13 +15,19 @@ interface TopbarProps {
   unreadCount?: number;
   onBellClick?: () => void;
   onMenuClick?: () => void;
+  notificationPanel?: React.ReactNode;
 }
 
 // Slim, single-row top bar. The legacy day/week/month + month-name pills
 // were removed per owner feedback — the main page should breathe more.
 // Time filtering, when needed, will live inline on each page (e.g. /tasks
 // already has filter chips in its own toolbar).
-export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProps) {
+export function Topbar({
+  unreadCount = 0,
+  onBellClick,
+  onMenuClick,
+  notificationPanel,
+}: TopbarProps) {
   const pathname = usePathname();
   const locale = useLocale();
   const tTitles = useTranslations("PageTitles");
@@ -123,14 +129,17 @@ export function Topbar({ unreadCount = 0, onBellClick, onMenuClick }: TopbarProp
 
           <ThemeToggle className={iconChip} />
 
-          <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
-            <Bell className="w-4 h-4 text-amber" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -left-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
-                {unreadCount}
-              </span>
-            )}
-          </Button>
+          <div className="relative shrink-0">
+            <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
+              <Bell className="w-4 h-4 text-amber" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -left-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
+                  {unreadCount}
+                </span>
+              )}
+            </Button>
+            {notificationPanel}
+          </div>
         </div>
       </div>
     </div>

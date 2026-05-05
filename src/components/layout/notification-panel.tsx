@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { AppNotification } from "@/types";
@@ -35,9 +36,15 @@ export function NotificationPanel({
   const t = useTranslations("Notifications");
   const tCommon = useTranslations("Common");
   const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const [nowTs, setNowTs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   function timeAgo(timestamp: string): string {
-    const diff = Date.now() - new Date(timestamp).getTime();
+    const diff = nowTs - new Date(timestamp).getTime();
     const minutes = Math.floor(diff / 60000);
     if (minutes < 1) return t("now");
     if (minutes < 60) return t("minutesAgo", { n: minutes });
@@ -55,7 +62,7 @@ export function NotificationPanel({
         onClick={onClose}
       />
 
-      <div className="fixed z-50 top-16 left-3 right-3 sm:left-auto sm:right-auto sm:start-6 w-auto sm:w-96 max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200">
+      <div className="fixed z-50 top-16 left-3 right-3 w-auto max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200 sm:absolute sm:top-[calc(100%+12px)] sm:w-96 ltr:sm:right-0 ltr:sm:left-auto rtl:sm:left-0 rtl:sm:right-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
