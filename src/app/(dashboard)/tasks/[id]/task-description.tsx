@@ -1,6 +1,6 @@
 "use client";
 
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 
 // Renders a task description that may be HTML (Odoo chatter / rich-text editor)
 // or plain text. Odoo's editor outputs <p>, <a href>, <br>, <ul>, etc — we
@@ -14,12 +14,12 @@ export function TaskDescription({ html }: { html: string | null | undefined }) {
   if (!looksHtml) {
     return <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{value}</p>;
   }
-  const safe = DOMPurify.sanitize(value, {
-    ALLOWED_TAGS: [
+  const safe = sanitizeHtml(value, {
+    allowedTags: [
       "p","a","br","div","span","ul","ol","li","strong","em","b","i",
       "h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr","table","thead","tbody","tr","td","th","img",
     ],
-    ALLOWED_ATTR: ["href","target","rel","title","src","alt"],
+    allowedAttributes: { "*": ["title"], a: ["href","target","rel"], img: ["src","alt"] },
   });
   return (
     <div

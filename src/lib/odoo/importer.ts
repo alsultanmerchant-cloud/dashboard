@@ -518,27 +518,48 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   const projectOdooIds = Array.from(ctx.projectIdMap.keys());
   if (projectOdooIds.length === 0) return 0;
 
-  const tasks = await ctx.odoo.searchRead<OdooTask>(
-    "project.task",
-    [["project_id", "in", projectOdooIds]],
-    [
-      "id",
-      "name",
-      "project_id",
-      "stage_id",
-      "user_ids",
-      "date_deadline",
-      "create_date",
-      "date_end",
-      "description",
-      "priority",
-      "progress_percentage",
-      "expected_progress",
-      "progress_slip",
-      "category_id",
-    ],
-    { limit: 5000 },
-  );
+  // Batch the project filter to keep each RPC well under Odoo's read timeout.
+  // A single `project_id IN (76 ids)` request was returning >2 MB and timing
+  // out on the Rwasem instance.
+  const TASK_FIELDS = [
+    "id",
+    "name",
+    "project_id",
+    "stage_id",
+    "user_ids",
+    "date_deadline",
+    "create_date",
+    "date_end",
+    "description",
+    "priority",
+    "progress_percentage",
+    "expected_progress",
+    "progress_slip",
+    "category_id",
+  ];
+  const PROJECTS_PER_BATCH = 10;
+  const tasks: OdooTask[] = [];
+  for (let i = 0; i < projectOdooIds.length; i += PROJECTS_PER_BATCH) {
+    const slice = projectOdooIds.slice(i, i + PROJECTS_PER_BATCH);
+    try {
+      const rows = await ctx.odoo.searchRead<OdooTask>(
+        "project.task",
+        [["project_id", "in", slice]],
+        TASK_FIELDS,
+        { limit: 2000 },
+      );
+      tasks.push(...rows);
+      console.log(
+        `[odoo-import] tasks batch ${Math.min(i + PROJECTS_PER_BATCH, projectOdooIds.length)}/${projectOdooIds.length} → ${rows.length} rows`,
+      );
+    } catch (err) {
+      // Don't abort the whole sync on a single timed-out batch — log and skip.
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[odoo-import] tasks batch ${i}-${i + PROJECTS_PER_BATCH} skipped: ${msg}`,
+      );
+    }
+  }
 
   let imported = 0;
   for (const t of tasks) {

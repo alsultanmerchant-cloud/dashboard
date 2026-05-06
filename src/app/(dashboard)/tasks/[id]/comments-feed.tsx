@@ -5,7 +5,7 @@
 //   - note         → chronological feed (with stage/assignee events)
 
 import { Pin, RefreshCw } from "lucide-react";
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatArabicDateTime } from "@/lib/utils-format";
@@ -24,9 +24,9 @@ function CommentBody({ body }: { body: string }) {
       </p>
     );
   }
-  const safe = DOMPurify.sanitize(body, {
-    ALLOWED_TAGS: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr"],
-    ALLOWED_ATTR: ["href","target","rel","title"],
+  const safe = sanitizeHtml(body, {
+    allowedTags: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr"],
+    allowedAttributes: { "*": ["title"], a: ["href","target","rel"] },
   });
   return (
     <div

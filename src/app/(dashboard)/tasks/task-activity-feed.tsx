@@ -8,7 +8,7 @@
 //   - notes: card with avatar + body, @mentions highlighted, URLs linkified
 
 import Link from "next/link";
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import {
   ArrowLeftRight,
   GitCompareArrows,
@@ -136,9 +136,9 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
               <div
                 className="mt-1.5 text-sm leading-relaxed break-words [&_a]:text-cyan [&_a]:underline [&_p]:mt-2 [&_p:first-child]:mt-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:ms-5 [&_ol]:ms-5"
                 dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(item.body, {
-                    ALLOWED_TAGS: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr","img"],
-                    ALLOWED_ATTR: ["href","target","rel","title","src","alt"],
+                  __html: sanitizeHtml(item.body, {
+                    allowedTags: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr","img"],
+                    allowedAttributes: { "*": ["title"], a: ["href","target","rel"], img: ["src","alt"] },
                   }),
                 }}
               />
