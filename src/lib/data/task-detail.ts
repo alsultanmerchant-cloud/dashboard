@@ -80,6 +80,155 @@ export type TaskFollower = {
   inherited?: boolean;
 };
 
+// ============================================================================
+// Task activity timeline — structured (not HTML) for the AI agent.
+//
+// Combines:
+//   • task_stage_history (local stage moves with durations)
+//   • task_comments tracking events (Odoo Stage/Priority/Assignees/Title/...
+//     changes that the chatter sync mirrored from mail.tracking.value)
+//   • task_comments user notes (from chatter sync OR locally typed)
+// ============================================================================
+
+export type TaskTimelineEvent =
+  | {
+      kind: "stage_change";
+      at: string;
+      from_stage: string | null;
+      to_stage: string;
+      by_name: string | null;
+      duration_seconds: number | null;
+      source: "local";
+    }
+  | {
+      kind: "tracking";
+      at: string;
+      field: string;
+      old_value: string;
+      new_value: string;
+      by_name: string | null;
+      source: "odoo";
+    }
+  | {
+      kind: "note";
+      at: string;
+      author_name: string | null;
+      body_text: string;
+      is_internal: boolean;
+      source: "local" | "odoo";
+    };
+
+// Pulls all activity for one task from Supabase tables (no Odoo round-trip).
+// Used by the agent's getTaskTimeline tool so it can surface stage/priority/
+// assignee transitions with dates instead of just user notes.
+export async function getTaskTimeline(
+  orgId: string,
+  taskId: string,
+): Promise<TaskTimelineEvent[]> {
+  const [historyRes, commentsRes] = await Promise.all([
+    supabaseAdmin
+      .from("task_stage_history")
+      .select("from_stage, to_stage, entered_at, duration_seconds, moved_by")
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId),
+    supabaseAdmin
+      .from("task_comments")
+      .select(
+        "body, is_internal, created_at, author_user_id, external_source, external_author_name",
+      )
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId),
+  ]);
+
+  // Resolve local moved_by user_ids → display names.
+  const movedByIds = Array.from(
+    new Set(
+      (historyRes.data ?? [])
+        .map((r) => r.moved_by)
+        .filter((u): u is string => typeof u === "string"),
+    ),
+  );
+  const localAuthorIds = Array.from(
+    new Set(
+      (commentsRes.data ?? [])
+        .map((c) => c.author_user_id)
+        .filter((u): u is string => typeof u === "string"),
+    ),
+  );
+  const allUserIds = Array.from(new Set([...movedByIds, ...localAuthorIds]));
+  const nameByUserId = new Map<string, string>();
+  if (allUserIds.length > 0) {
+    const { data: emps } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("user_id, full_name")
+      .eq("organization_id", orgId)
+      .in("user_id", allUserIds);
+    for (const e of emps ?? []) {
+      if (e.user_id) nameByUserId.set(e.user_id, e.full_name);
+    }
+  }
+
+  const events: TaskTimelineEvent[] = [];
+
+  for (const r of historyRes.data ?? []) {
+    events.push({
+      kind: "stage_change",
+      at: r.entered_at,
+      from_stage: (r.from_stage as string | null) ?? null,
+      to_stage: r.to_stage as string,
+      by_name: r.moved_by ? (nameByUserId.get(r.moved_by) ?? null) : null,
+      duration_seconds: r.duration_seconds,
+      source: "local",
+    });
+  }
+
+  // Tracking events have a known body shape:
+  //   <p><strong>{field}:</strong> <span class="text-muted-foreground">{old}</span> → <span class="text-cyan font-medium">{new}</span></p>
+  // Each <p> = one transition. One mail.message can carry several.
+  const TRACKING_LINE_RE =
+    /<p><strong>([^<:]+):<\/strong>\s*<span[^>]*>([^<]*)<\/span>\s*→\s*<span[^>]*>([^<]*)<\/span><\/p>/g;
+  const HTML_TAG_RE = /<[^>]+>/g;
+  for (const c of commentsRes.data ?? []) {
+    const body = (c.body ?? "") as string;
+    const isTracking = body.startsWith("<p><strong>");
+    if (isTracking) {
+      const matches = Array.from(body.matchAll(TRACKING_LINE_RE));
+      for (const m of matches) {
+        events.push({
+          kind: "tracking",
+          at: c.created_at as string,
+          field: m[1].trim(),
+          old_value: m[2].trim(),
+          new_value: m[3].trim(),
+          by_name:
+            c.author_user_id != null
+              ? (nameByUserId.get(c.author_user_id as string) ?? null)
+              : ((c.external_author_name as string | null) ?? null),
+          source: "odoo",
+        });
+      }
+    } else {
+      // Strip HTML to plain text for the AI.
+      const text = body.replace(HTML_TAG_RE, " ").replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      events.push({
+        kind: "note",
+        at: c.created_at as string,
+        author_name:
+          c.author_user_id != null
+            ? (nameByUserId.get(c.author_user_id as string) ?? null)
+            : ((c.external_author_name as string | null) ?? null),
+        body_text: text,
+        is_internal: Boolean(c.is_internal),
+        source: c.external_source === "odoo" ? "odoo" : "local",
+      });
+    }
+  }
+
+  events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  return events;
+}
+
 /** Inherited followers — anyone listed as a member of the project the task
  *  belongs to. We surface these in the followers UI so Sky Light's
  *  Odoo-imported tasks aren't visually empty: the project's

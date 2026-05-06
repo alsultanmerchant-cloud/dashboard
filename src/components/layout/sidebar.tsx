@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { X, LogOut } from "lucide-react";
+import { X, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -25,10 +25,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const tGroups = useTranslations("NavGroups");
   const expanded = !!open;
   const [desktopHovered, setDesktopHovered] = useState(false);
-  const desktopExpanded = expanded || desktopHovered;
+  const [desktopPinned, setDesktopPinned] = useState(false);
+  const desktopExpanded = expanded || desktopPinned || desktopHovered;
 
   const collapseSidebar = () => {
     onClose?.();
+  };
+
+  const toggleDesktopPinned = () => {
+    setDesktopPinned((value) => !value);
   };
 
   const isItemVisible = (item: NavItem) => {
@@ -59,6 +64,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         onMouseEnter={() => setDesktopHovered(true)}
         onMouseLeave={() => setDesktopHovered(false)}
         data-expanded={expanded}
+        data-desktop-pinned={desktopPinned}
         className={cn(
           "fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform,padding,background-color,border-color,box-shadow] duration-300 ease-in-out",
           "bg-sidebar text-sidebar-foreground border border-sidebar-border shadow-[var(--surface-elev)]",
@@ -76,8 +82,30 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           expanded && "lg:!w-[252px]",
         )}
       >
+        <button
+          type="button"
+          onClick={toggleDesktopPinned}
+          aria-label={desktopExpanded ? "Collapse sidebar" : "Expand sidebar"}
+          title={desktopExpanded ? "Collapse sidebar" : "Expand sidebar"}
+          className={cn(
+            "hidden lg:flex absolute top-4 z-10 h-9 w-9 items-center justify-center rounded-xl border border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 shadow-[var(--surface-elev)] transition-all duration-200 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+            "rtl:left-3 ltr:right-3",
+            desktopExpanded
+              ? "opacity-100"
+              : "opacity-100 ring-1 ring-white/12",
+          )}
+        >
+          {desktopExpanded ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+        </button>
+
         {/* Logo + org */}
-        <div className={cn("px-2.5 lg:px-3 pt-4 pb-3 border-b border-sidebar-border", !expanded && "lg:px-2")}>
+        <div
+          className={cn(
+            "px-2.5 lg:px-3 pt-4 pb-3 border-b border-sidebar-border",
+            !expanded && "lg:px-2",
+            !desktopExpanded && "lg:border-transparent",
+          )}
+        >
           <div className={cn("flex items-start gap-3", !expanded && "lg:justify-center lg:gap-0")}>
             <div
               className={cn(
@@ -96,27 +124,31 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <X className="w-4 h-4" />
             </button>
           </div>
-          {activeOrg && (
-            <div
-              className={cn(
-                "mt-3 flex items-center gap-2.5 rounded-xl bg-sidebar-accent border border-sidebar-border px-3 py-2 transition-opacity duration-200",
-                desktopExpanded
-                  ? "lg:opacity-100 lg:pointer-events-auto"
-                  : "lg:opacity-0 lg:pointer-events-none",
-              )}
-            >
-                <img
-                src="https://skylightad.com/wp-content/uploads/elementor/thumbs/logo-1080-qz82xj5nel49tz0etciq6bxtjqy8yu6tnelutr5wx4.png"
-                alt="Sky Light"
-                className="size-8 object-contain rounded-lg p-1"
-                />
-              <div className="flex-1 text-start min-w-0">
-                <p className="text-xs font-semibold text-sidebar-foreground truncate">{activeOrg.nameAr}</p>
-                <p className="text-[10px] text-sidebar-foreground/65">{tApp("demoOrg")}</p>
-              </div>
-              <span className="size-1.5 rounded-full bg-cc-green animate-pulse" aria-hidden />
+          <div
+            className={cn(
+              "mt-3 flex items-center gap-2.5 rounded-xl bg-sidebar-accent border border-sidebar-border px-3 py-2 transition-opacity duration-200",
+              desktopExpanded
+                ? "lg:opacity-100 lg:pointer-events-auto"
+                : "lg:opacity-0 lg:pointer-events-none",
+            )}
+          >
+            <img
+              src="https://skylightad.com/wp-content/uploads/elementor/thumbs/logo-1080-qz82xj5nel49tz0etciq6bxtjqy8yu6tnelutr5wx4.png"
+              alt="Sky Light"
+              className="size-8 object-contain rounded-lg p-1"
+              loading="eager"
+              decoding="async"
+            />
+            <div className="flex-1 text-start min-w-0">
+              <p className="text-xs font-semibold text-sidebar-foreground truncate">
+                {activeOrg?.nameAr ?? tApp("title")}
+              </p>
+              <p className="text-[10px] text-sidebar-foreground/65">
+                {activeOrg ? tApp("demoOrg") : "Sky Light"}
+              </p>
             </div>
-          )}
+            <span className="size-1.5 rounded-full bg-cc-green animate-pulse" aria-hidden />
+          </div>
         </div>
 
         {/* Grouped nav */}
