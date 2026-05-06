@@ -100,6 +100,10 @@ export default async function TasksPage({
     priority: t.priority,
     progress_percent: t.progress_percent,
     expected_progress_percent: t.expected_progress_percent,
+    progress_slip_percent: t.progress_slip_percent,
+    allocated_time_minutes: t.allocated_time_minutes,
+    delay_days: t.delay_days,
+    completed_at: t.completed_at,
     service: t.service,
     project: {
       id: t.project_id,

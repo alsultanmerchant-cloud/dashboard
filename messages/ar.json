@@ -339,10 +339,10 @@
   },
   "NavGroups": {
     "dashboard": "لوحة التحكم",
-    "sales": "المبيعات",
-    "clientsProjects": "العملاء والمشاريع",
-    "commercial": "تجاري",
-    "operations": "العمليات",
+    "aiWorkspace": "الذكاء والمساعدة",
+    "projectDelivery": "إدارة المشاريع والتنفيذ",
+    "commercialOps": "التسليم والعقود",
+    "agencyOps": "المتابعة والرقابة",
     "organization": "المنظمة",
     "administration": "الإدارة"
   },
@@ -369,6 +369,21 @@
     "reports": "التقارير",
     "settings": "الإعدادات",
     "featureFlags": "المفاتيح المميّزة"
+  },
+  "ProjectCard": {
+    "storeName": "اسم المتجر",
+    "startDate": "تاريخ البدء",
+    "endDate": "تاريخ الانتهاء",
+    "site": "الموقع",
+    "cost": "التكلفة",
+    "projectManager": "مدير المشروع",
+    "accountManager": "مدير الحساب",
+    "client": "العميل",
+    "ref": "المرجع",
+    "tasks": "المهام",
+    "completePercent": "مكتمل {percent}%",
+    "noAddress": "لا يوجد عنوان",
+    "noCosts": "لا توجد تكاليف"
   },
   "PageTitles": {
     "dashboardTitle": "لوحة التحكم",

@@ -199,19 +199,48 @@ async function importServices(ctx: ImportContext): Promise<number> {
 }
 
 async function importClients(ctx: ImportContext): Promise<number> {
-  // Customers only — Odoo flags them with customer_rank > 0.
-  const partners = await ctx.odoo.searchRead<OdooPartner>(
-    "res.partner",
-    [
-      ["customer_rank", ">", 0],
-      ["is_company", "=", true],
-    ],
-    [
-      "id", "name", "email", "phone", "mobile", "website", "comment",
-      "street", "street2", "city",
-    ],
-    { limit: 2000 },
+  // Two-step: only import partners that are actually referenced by a
+  // project. Pulling all `customer_rank > 0` partners is too slow on the
+  // Rwasem instance (>5k rows including individual contacts) and most
+  // aren't customers we care about.
+  console.log("[odoo-import] resolving project partners…");
+  const projectStubs = await ctx.odoo.searchRead<{ id: number; partner_id: OdooMany2one }>(
+    "project.project",
+    [["active", "=", true]],
+    ["id", "partner_id"],
+    { limit: 1000 },
   );
+  const partnerIds = Array.from(
+    new Set(
+      projectStubs
+        .map((p) => (p.partner_id ? p.partner_id[0] : null))
+        .filter((x): x is number => Boolean(x)),
+    ),
+  );
+  console.log(
+    `[odoo-import] ${projectStubs.length} projects → ${partnerIds.length} unique partners`,
+  );
+  if (partnerIds.length === 0) return 0;
+
+  // Batch the partner read so a single RPC doesn't time out.
+  const BATCH = 200;
+  const partners: OdooPartner[] = [];
+  for (let i = 0; i < partnerIds.length; i += BATCH) {
+    const slice = partnerIds.slice(i, i + BATCH);
+    const rows = await ctx.odoo.searchRead<OdooPartner>(
+      "res.partner",
+      [["id", "in", slice]],
+      [
+        "id", "name", "email", "phone", "mobile", "website", "comment",
+        "street", "street2", "city",
+      ],
+      { limit: BATCH },
+    );
+    partners.push(...rows);
+    console.log(
+      `[odoo-import] partners batch ${Math.min(i + BATCH, partnerIds.length)}/${partnerIds.length}`,
+    );
+  }
 
   for (const p of partners) {
     const addressParts = [p.street, p.street2, p.city]

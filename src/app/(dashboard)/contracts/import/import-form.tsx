@@ -55,7 +55,7 @@ export function ImportForm() {
                   accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   required
                   onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
-                  className="block w-full text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-dim file:px-3 file:py-2 file:text-cyan file:font-medium hover:file:bg-cyan-dim/80 file:cursor-pointer cursor-pointer"
+                  className="block w-full text-sm text-foreground file:mx-3 file:rounded-lg file:border-0 file:bg-cyan-dim file:px-3 file:py-2 file:text-cyan file:font-medium hover:file:bg-cyan-dim/80 file:cursor-pointer cursor-pointer"
                 />
               </div>
               {fileName && (

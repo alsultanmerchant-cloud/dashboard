@@ -4,7 +4,7 @@
 // Drag tasks between stage columns. Drop calls moveTaskStageAction;
 // the DB trigger writes a task_stage_history row + flips completed_at.
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -19,14 +19,13 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Loader2, Calendar, Clock, Hash, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { Loader2, Calendar, Clock, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TASK_STAGES,
   TASK_STAGE_LABELS,
   TASK_STAGE_TONES,
   TASK_ROLE_TYPES,
-  TASK_ROLE_LABELS,
   type TaskStage,
   type TaskRoleType,
 } from "@/lib/labels";
@@ -64,22 +63,7 @@ function prevStage(s: TaskStage): TaskStage | null {
   return TASK_STAGES[i - 1];
 }
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { moveTaskStageAction } from "../../tasks/_actions";
-
-// Sky Light role dot color (matches TASK_ROLE_TONES — kept inline for the
-// solid-fill avatar / placeholder dot variant).
-const ROLE_DOT_FILL: Record<TaskRoleType, string> = {
-  specialist: "bg-amber-400",
-  manager: "bg-blue-400",
-  agent: "bg-emerald-400",
-  account_manager: "bg-rose-400",
-};
-const ROLE_DOT_RING: Record<TaskRoleType, string> = {
-  specialist: "ring-amber-400/50",
-  manager: "ring-blue-400/50",
-  agent: "ring-emerald-400/50",
-  account_manager: "ring-rose-400/50",
-};
+import { moveTaskStageAction, quickCreateTaskAction } from "../../tasks/_actions";
 
 // -------- types ----------------------------------------------------------
 
@@ -93,6 +77,10 @@ export type BoardTask = {
   priority: string;
   progress_percent: number | null;
   expected_progress_percent: number | null;
+  progress_slip_percent?: number | null;
+  allocated_time_minutes?: number | null;
+  delay_days?: number | null;
+  completed_at?: string | null;
   service: { id: string; name: string; slug: string } | null;
   // Optional project name — set when board is cross-project (global /tasks view)
   // so the card can show "Project · Client" under the task title like Odoo.
@@ -201,65 +189,76 @@ function TaskCard({
   const hasAssignee = TASK_ROLE_TYPES.some((r) => task.role_slots[r]);
   const svcColor = task.service ? serviceColor(task.service.slug) : null;
 
+  // Index in the 8-stage Rwasem sequence — drives the bottom progress dots.
+  const stageIndex = TASK_STAGES.indexOf(task.stage);
+  // Up to 3 distinct assignees collapsed to an overlap stack.
+  const assigneeList = TASK_ROLE_TYPES
+    .map((r) => task.role_slots[r])
+    .filter((e): e is NonNullable<typeof e> => Boolean(e))
+    .reduce<NonNullable<(typeof task.role_slots)[TaskRoleType]>[]>((acc, e) => {
+      if (!acc.find((x) => x.id === e.id)) acc.push(e);
+      return acc;
+    }, []);
+
   return (
     <div
       className={cn(
-        "group/card rounded-lg border bg-card p-2.5 shadow-sm transition-colors",
+        "group/card relative overflow-hidden rounded-lg border bg-card p-2.5 ps-3 shadow-sm transition-colors",
         dragging
           ? "border-primary/40 shadow-lg ring-1 ring-primary/30 cursor-grabbing"
           : "border-border hover:border-primary/30 cursor-grab",
       )}
       title={task.title}
     >
-      {/* ── Row 1: REF · Project · Client · لـ X يوم · محدد ── */}
-      <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground/80 leading-none">
-        <span className="tabular-nums font-mono shrink-0">{ref}</span>
-        {task.project && (
-          <>
-            <span aria-hidden className="opacity-40">·</span>
-            <span className="truncate min-w-0">
-              {task.project.name}
-              {task.project.client_name && (
-                <span className="opacity-60"> - {task.project.client_name}</span>
-              )}
+      {/* Left service stripe (Rwasem cards inherit the service tag color) */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 start-0 w-1"
+        style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
+      />
+
+      {/* ── Row 1: stacked meta to avoid clipped inline content ── */}
+      <div className="mb-1 space-y-1 text-[11px] text-muted-foreground/80">
+        <div className="flex items-start justify-between gap-2 leading-none">
+          <span className="tabular-nums font-mono shrink-0">{ref}</span>
+          {hasAssignee && (
+            <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
+              محدد
             </span>
-          </>
+          )}
+        </div>
+        {task.project && (
+          <div className="leading-relaxed break-words">
+            <span>{task.project.name}</span>
+            {task.project.client_name && (
+              <span className="opacity-60"> - {task.project.client_name}</span>
+            )}
+          </div>
         )}
         {dl && dl.tone === "future" && (
-          <>
-            <span aria-hidden className="opacity-40">·</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground/60">{dl.label}</span>
-          </>
-        )}
-        {hasAssignee && (
-          <span className="ms-auto shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
-            محدد
-          </span>
+          <div className="tabular-nums text-muted-foreground/60">{dl.label}</div>
         )}
       </div>
 
       {/* ── Row 2: Task title ── */}
       <Link
         href={`/tasks/${task.id}`}
-        className="block text-[13px] font-bold leading-snug text-foreground hover:text-primary transition-colors line-clamp-2"
+        className="block break-words text-[13px] font-bold leading-snug text-foreground transition-colors hover:text-primary"
         onClick={(e) => e.stopPropagation()}
       >
         {task.title}
       </Link>
 
       {/* ── Row 3: service badge · overdue badge · Behind % ── */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      <div className="mt-1.5 flex flex-col items-start gap-1">
         {task.service && (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] text-foreground"
+            className="inline-flex max-w-full items-center rounded-full bg-muted/60 px-2.5 py-1 text-[10px] text-foreground"
             title={task.service.name}
           >
-            <span
-              aria-hidden
-              className="inline-block size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
-            />
-            <span className="max-w-[14ch] truncate">{task.service.name}</span>
+            <span className="break-words whitespace-normal leading-none">
+              {task.service.name}
+            </span>
           </span>
         )}
         {dl && dl.tone !== "future" && (
@@ -285,6 +284,50 @@ function TaskCard({
           </span>
         )}
       </div>
+
+      {/* ── Row 3.5: one-column detail rows so card data never compresses ── */}
+      <dl className="mt-1.5 space-y-1 text-[10px] leading-snug">
+        {(task.due_date || task.planned_date) && (
+          <div className="space-y-0.5">
+            <dt className="text-muted-foreground/80">الموعد النهائي:</dt>
+            <dd className="break-words tabular-nums text-foreground/80" dir="ltr">
+              {(task.due_date ?? task.planned_date ?? "").slice(0, 10)}
+            </dd>
+          </div>
+        )}
+        {task.completed_at && (
+          <div className="space-y-0.5">
+            <dt className="text-muted-foreground/80">تاريخ الإنجاز:</dt>
+            <dd className="break-words tabular-nums text-emerald-700 dark:text-emerald-300" dir="ltr">
+              {task.completed_at.slice(0, 10)}
+            </dd>
+          </div>
+        )}
+        {task.allocated_time_minutes != null && task.allocated_time_minutes > 0 && (
+          <div className="space-y-0.5">
+            <dt className="text-muted-foreground/80">الوقت المخصص:</dt>
+            <dd className="break-words tabular-nums text-foreground/80">
+              {task.allocated_time_minutes >= 60
+                ? `${(task.allocated_time_minutes / 60).toFixed(1)} س`
+                : `${task.allocated_time_minutes} د`}
+            </dd>
+          </div>
+        )}
+        {task.delay_days != null && task.delay_days > 0 && (
+          <div className="space-y-0.5">
+            <dt className="text-muted-foreground/80">أيام التأخير:</dt>
+            <dd className="break-words font-semibold tabular-nums text-red-600 dark:text-red-400">
+              {task.delay_days}
+            </dd>
+          </div>
+        )}
+        {expected != null && expected > 0 && (
+          <div className="space-y-0.5">
+            <dt className="text-muted-foreground/80">التقدم المتوقع:</dt>
+            <dd className="break-words tabular-nums text-foreground/80">{expected.toFixed(1)}%</dd>
+          </div>
+        )}
+      </dl>
 
       {/* ── Row 4: progress bar (only when meaningful) ── */}
       {(progress > 0 || (expected != null && expected > 0)) && (
@@ -319,40 +362,60 @@ function TaskCard({
         </div>
       )}
 
-      {/* ── Row 5 (footer): duration · assignee dots | star · ← → ── */}
+      {/* ── Row 5: stage progression strip (Odoo-style 8-step dots) ── */}
+      <div
+        className="mt-2 flex items-center gap-1"
+        title={`المرحلة: ${TASK_STAGE_LABELS[task.stage]} (${stageIndex + 1}/${TASK_STAGES.length})`}
+      >
+        {TASK_STAGES.map((s, i) => (
+          <span
+            key={s}
+            aria-hidden
+            className={cn(
+              "h-1 flex-1 rounded-full transition-colors",
+              i < stageIndex
+                ? "bg-primary/50"
+                : i === stageIndex
+                  ? "bg-primary"
+                  : "bg-muted",
+            )}
+          />
+        ))}
+      </div>
+
+      {/* ── Row 6 (footer): duration | star · ← → · avatar stack ── */}
       <div className="mt-2 flex items-center justify-between gap-1.5">
-        {/* left: stage duration · role dots */}
+        {/* left: stage duration */}
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-0.5 tabular-nums" title="مدة في المرحلة">
             <Clock className="size-3" />
             {stageDuration}
           </span>
-          {/* Role-slot dots (filled = assigned, faded = empty) */}
-          <div className="flex items-center gap-0.5">
-            {TASK_ROLE_TYPES.map((role) => {
-              const e = task.role_slots[role];
-              return e ? (
-                <Avatar
-                  key={role}
-                  size="sm"
-                  className={cn("size-5 ring-1 ring-card", ROLE_DOT_RING[role])}
-                  title={`${TASK_ROLE_LABELS[role]}: ${e.full_name}`}
-                >
-                  <AvatarFallback className="text-[8px]">{e.full_name[0]}</AvatarFallback>
-                </Avatar>
-              ) : (
-                <span
-                  key={role}
-                  className={cn("inline-block size-1.5 rounded-full opacity-20", ROLE_DOT_FILL[role])}
-                  title={`${TASK_ROLE_LABELS[role]}: غير معيّن`}
-                />
-              );
-            })}
-          </div>
         </div>
 
-        {/* right: priority star · prev ← · next → */}
-        <div className="flex items-center gap-1">
+        {/* right: avatar stack · priority · prev ← · next → */}
+        <div className="flex items-center gap-1.5">
+          {assigneeList.length > 0 && (
+            <div className="flex -space-x-1.5 -space-x-reverse">
+              {assigneeList.slice(0, 3).map((e) => (
+                <Avatar
+                  key={e.id}
+                  size="sm"
+                  className="size-6 ring-2 ring-card"
+                  title={e.full_name}
+                >
+                  <AvatarFallback className="bg-primary/20 text-[9px] text-primary">
+                    {e.full_name[0]}
+                  </AvatarFallback>
+                </Avatar>
+              ))}
+              {assigneeList.length > 3 && (
+                <span className="grid size-6 place-items-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground ring-2 ring-card">
+                  +{assigneeList.length - 3}
+                </span>
+              )}
+            </div>
+          )}
           <PriorityStar priority={task.priority} />
           {prv && onRetreat && (
             <button
@@ -424,6 +487,7 @@ function StageColumn({
   onRetreat,
   folded,
   onToggleFold,
+  onQuickCreate,
 }: {
   stage: TaskStage;
   tasks: BoardTask[];
@@ -432,10 +496,28 @@ function StageColumn({
   onRetreat?: (taskId: string, prev: TaskStage) => void;
   folded: boolean;
   onToggleFold: () => void;
+  /** Optional: enables the Rwasem "+ add task" footer per column. */
+  onQuickCreate?: (stage: TaskStage, title: string) => Promise<void> | void;
 }) {
   // Stable wrapper for dnd-kit — always a <div> so the droppable ref doesn't
   // remount when the user folds/unfolds the column.
   const { setNodeRef, isOver } = useDroppable({ id: `stage:${stage}` });
+
+  const [draft, setDraft] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  async function submit() {
+    if (!onQuickCreate) return;
+    const t = draft.trim();
+    if (!t || creating) return;
+    setCreating(true);
+    try {
+      await onQuickCreate(stage, t);
+      setDraft("");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   return (
     <div
@@ -503,12 +585,30 @@ function StageColumn({
                 onRetreat={onRetreat ? (prev) => onRetreat(t.id, prev) : undefined}
               />
             ))}
-            {tasks.length === 0 && (
+            {tasks.length === 0 && !onQuickCreate && (
               <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[11px] text-muted-foreground">
                 {isMoving ? "…" : "—"}
               </div>
             )}
           </div>
+          {onQuickCreate && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submit();
+              }}
+              className="border-t border-border p-2"
+            >
+              <input
+                type="text"
+                value={draft}
+                disabled={creating}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="+ مهمة جديدة"
+                className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+              />
+            </form>
+          )}
         </>
       )}
     </div>
@@ -573,9 +673,12 @@ function ProjectColumn({
 export function TaskBoard({
   tasks: initialTasks,
   groupBy = "stage",
+  projectId,
 }: {
   tasks: BoardTask[];
   groupBy?: "stage" | "project";
+  /** Optional: when set, each non-folded column shows a Rwasem-style quick-add input. */
+  projectId?: string;
 }) {
   const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
@@ -583,13 +686,14 @@ export function TaskBoard({
   const [pending, start] = useTransition();
   // Folded columns — Rwasem defaults "done" to folded; user can unfold and
   // the choice is mirrored to localStorage.
-  const [folded, setFolded] = useState<Set<TaskStage>>(() => new Set(["done"]));
-  useEffect(() => {
+  const [folded, setFolded] = useState<Set<TaskStage>>(() => {
+    if (typeof window === "undefined") return new Set(["done"]);
     try {
-      const raw = localStorage.getItem("rwasem.kanban.folded");
-      if (raw) setFolded(new Set(JSON.parse(raw) as TaskStage[]));
+      const raw = window.localStorage.getItem("rwasem.kanban.folded");
+      if (raw) return new Set(JSON.parse(raw) as TaskStage[]);
     } catch {}
-  }, []);
+    return new Set(["done"]);
+  });
   function toggleFold(s: TaskStage) {
     setFolded((curr) => {
       const next = new Set(curr);
@@ -734,6 +838,23 @@ export function TaskBoard({
               onRetreat={moveTask}
               folded={folded.has(s)}
               onToggleFold={() => toggleFold(s)}
+              onQuickCreate={
+                projectId
+                  ? async (stage, title) => {
+                      const res = await quickCreateTaskAction({
+                        projectId,
+                        stage,
+                        title,
+                      });
+                      if ("error" in res) {
+                        toast.error(res.error);
+                      } else {
+                        toast.success("تم إنشاء المهمة");
+                        router.refresh();
+                      }
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import {
   Sparkles, RefreshCw, AlertTriangle, Lightbulb,
   TrendingUp, TrendingDown, Minus, ShieldAlert, Clock,
@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { InsightsResult } from "@/app/api/insights/route";
+import type { InsightsResult, StoredInsightRun } from "@/lib/ai-insights-schema";
 
 // ── tone maps ────────────────────────────────────────────────────────────────
 
@@ -103,35 +103,38 @@ function AnalysisSkeleton() {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export function AiAnalysisPanel() {
-  const [data, setData] = useState<InsightsResult | null>(null);
+export function AiAnalysisPanel({
+  initialInsight = null,
+}: {
+  initialInsight?: StoredInsightRun | null;
+}) {
+  const [data, setData] = useState<InsightsResult | null>(initialInsight?.result ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    initialInsight?.completedAt ? new Date(initialInsight.completedAt) : null,
+  );
+  const [model, setModel] = useState<string | null>(initialInsight?.model ?? null);
 
   const fetchInsights = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/insights");
+      const res = await fetch("/api/insights", { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `خطأ ${res.status}`);
       }
-      const json: InsightsResult = await res.json();
-      setData(json);
-      setLastUpdated(new Date());
+      const json: { current: StoredInsightRun | null } = await res.json();
+      setData(json.current?.result ?? null);
+      setLastUpdated(json.current?.completedAt ? new Date(json.current.completedAt) : new Date());
+      setModel(json.current?.model ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "فشل تحميل الرؤى");
     } finally {
       setLoading(false);
     }
   }, []);
-
-  // auto-fetch on mount
-  useEffect(() => {
-    fetchInsights();
-  }, [fetchInsights]);
 
   const health = data ? HEALTH_CONFIG[data.overallHealth] : null;
 
@@ -150,12 +153,17 @@ export function AiAnalysisPanel() {
                 ? "يحلل البيانات…"
                 : lastUpdated
                   ? `آخر تحديث: ${lastUpdated.toLocaleTimeString("ar-SA-u-nu-latn", { hour: "2-digit", minute: "2-digit" })}`
-                  : "لم يتم التحليل بعد"}
+                  : "لا يوجد تحليل محفوظ بعد"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {model && !loading && (
+            <Badge variant="secondary" className="hidden sm:inline-flex text-[10px]">
+              {model}
+            </Badge>
+          )}
           {health && !loading && (
             <span className={cn("text-[11px] font-medium px-2.5 py-1 rounded-full border", health.cls)}>
               {health.label}
@@ -169,7 +177,7 @@ export function AiAnalysisPanel() {
             className="gap-2 h-8 text-xs"
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-            {loading ? "جارٍ التحليل…" : "تحديث التحليل"}
+            {loading ? "جارٍ التحليل…" : data ? "تحديث التحليل" : "تشغيل أول تحليل"}
           </Button>
         </div>
       </div>
@@ -185,6 +193,26 @@ export function AiAnalysisPanel() {
             </div>
             <Button variant="ghost" size="sm" onClick={fetchInsights} className="mr-auto text-xs h-7">
               إعادة المحاولة
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!data && !loading && !error && (
+        <Card className="border-dashed border-soft">
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-dim text-cyan">
+              <Sparkles className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">لا يوجد تحليل محفوظ بعد</p>
+              <p className="text-xs text-muted-foreground">
+                شغّل التحليل عند الحاجة وسيُحفَظ في قاعدة البيانات لتراجعه لاحقًا.
+              </p>
+            </div>
+            <Button onClick={fetchInsights} disabled={loading} size="sm" className="gap-2">
+              <Sparkles className="size-4" />
+              تشغيل أول تحليل
             </Button>
           </CardContent>
         </Card>

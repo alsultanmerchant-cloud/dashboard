@@ -16,7 +16,8 @@ export async function listTasks(orgId: string, filters: TaskFilters = {}) {
     .from("tasks")
     .select(`
       id, title, status, stage, stage_entered_at, planned_date,
-      progress_percent, expected_progress_percent,
+      progress_percent, expected_progress_percent, progress_slip_percent,
+      allocated_time_minutes, delay_days,
       priority, due_date, completed_at, created_at, project_id,
       project:projects ( id, name, client:clients ( name ) ),
       service:services ( id, name, slug ),

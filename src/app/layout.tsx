@@ -46,7 +46,11 @@ export default async function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
       </head>
-      <body className={`${tajawal.variable} ${inter.variable} antialiased`}>
+      <body
+        className={`${tajawal.variable} ${inter.variable} antialiased ${
+          locale === "ar" ? "font-[var(--font-tajawal)]" : "font-[var(--font-inter)]"
+        }`}
+      >
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider defaultTheme="light">
             {children}
@@ -56,7 +60,12 @@ export default async function RootLayout({
               closeButton
               dir={dir}
               toastOptions={{
-                style: { fontFamily: "var(--font-tajawal), sans-serif" },
+                style: {
+                  fontFamily:
+                    locale === "ar"
+                      ? "var(--font-tajawal), sans-serif"
+                      : "var(--font-inter), sans-serif",
+                },
               }}
             />
           </ThemeProvider>

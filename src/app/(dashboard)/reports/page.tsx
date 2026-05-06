@@ -126,7 +126,7 @@ export default async function ReportsPage() {
                   </Link>
                   <span className="text-sm font-bold tabular-nums">
                     {d.pct === null ? "—" : `${d.pct}%`}
-                    <span className="text-xs text-muted-foreground mr-1.5"> / {d.total} مهمة</span>
+                    <span className="text-xs text-muted-foreground mx-1.5"> / {d.total} مهمة</span>
                   </span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
@@ -200,7 +200,7 @@ export default async function ReportsPage() {
                     <span className="text-sm font-medium">{row.fullName}</span>
                     <span className="text-sm tabular-nums">
                       <span className="font-bold">{row.closedCount}</span>
-                      <span className="text-xs text-muted-foreground mr-1.5"> · {row.utilizationPct}%</span>
+                      <span className="text-xs text-muted-foreground mx-1.5"> · {row.utilizationPct}%</span>
                     </span>
                   </div>
                   <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">

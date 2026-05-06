@@ -29,18 +29,20 @@ export default async function ProjectsPage() {
 
       {/* Analytics overview */}
       {total > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4">
           <MetricCard
             label="إجمالي المشاريع"
             value={totals.projects}
             icon={<Briefcase className="size-5" />}
             tone="default"
+            size="compact"
           />
           <MetricCard
             label="إجمالي المهام"
             value={totals.tasks}
             icon={<ListTodo className="size-5" />}
             tone="info"
+            size="compact"
           />
           <MetricCard
             label="متوسط المهام"
@@ -48,6 +50,7 @@ export default async function ProjectsPage() {
             hint="لكل مشروع"
             icon={<CheckCircle2 className="size-5" />}
             tone="success"
+            size="compact"
           />
           <MetricCard
             label="مشاريع بمدير"
@@ -55,6 +58,7 @@ export default async function ProjectsPage() {
             hint={`${totals.projects - totals.withManager} بدون مدير`}
             icon={<AlertTriangle className="size-5" />}
             tone={totals.withManager === totals.projects ? "success" : "warning"}
+            size="compact"
           />
         </div>
       )}

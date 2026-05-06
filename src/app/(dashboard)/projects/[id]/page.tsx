@@ -124,29 +124,33 @@ export default async function ProjectDetailPage({
         </Card>
       )}
 
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-6">
+      <div className="mb-6 grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <MetricCard
           label="إجمالي المهام"
           value={summary.total}
           icon={<ListTodo className="size-5" />}
+          className="p-3"
         />
         <MetricCard
           label="قيد التنفيذ"
           value={summary.in_progress}
           tone="info"
           icon={<Briefcase className="size-5" />}
+          className="p-3"
         />
         <MetricCard
           label="قيد المراجعة"
           value={summary.manager_review + summary.specialist_review}
           tone="warning"
           icon={<ListTodo className="size-5" />}
+          className="p-3"
         />
         <MetricCard
           label="مع العميل"
           value={summary.ready_to_send + summary.sent_to_client + summary.client_changes}
           tone="info"
           icon={<ListTodo className="size-5" />}
+          className="p-3"
         />
       </div>
 

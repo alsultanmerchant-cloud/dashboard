@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import type { InsightsResult, StoredInsightRun } from "@/lib/ai-insights-schema";
 
 export type ProjectHealth = {
   id: string;
@@ -58,6 +59,41 @@ export type InsightSummary = {
   completedThisWeek: number;
   pendingHandovers: number;
 };
+
+type InsightRunRow = {
+  id: string;
+  status: "running" | "ready" | "failed";
+  model: string | null;
+  created_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+  result_json: InsightsResult | null;
+};
+
+export async function getCurrentStoredInsight(orgId: string): Promise<StoredInsightRun | null> {
+  const { data } = await supabaseAdmin
+    .from("ai_insight_runs")
+    .select("id, status, model, created_at, completed_at, error_message, result_json")
+    .eq("organization_id", orgId)
+    .eq("status", "ready")
+    .eq("is_current", true)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const row = data as InsightRunRow | null;
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    status: row.status,
+    model: row.model,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+    errorMessage: row.error_message,
+    result: row.result_json,
+  };
+}
 
 export async function getInsightSummary(orgId: string): Promise<InsightSummary> {
   const today = new Date().toISOString().slice(0, 10);

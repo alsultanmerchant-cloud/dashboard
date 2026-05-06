@@ -257,7 +257,7 @@ export function FollowUpLogButton({ entityType, entityId, entityName }: FollowUp
                   size="sm"
                   className="bg-cyan hover:bg-cyan/80 text-background"
                 >
-                  <Send className="w-4 h-4 ml-1" />
+                  <Send className="w-4 h-4 mx-3" />
                   {saving ? "..." : "إضافة"}
                 </Button>
                 <button

@@ -78,3 +78,31 @@ export function isOverdue(dueDate: string | null | undefined): boolean {
   if (!dueDate) return false;
   return new Date(dueDate) < new Date(new Date().setHours(0, 0, 0, 0));
 }
+
+// Deterministic colored-initials avatar for users with no `avatar_url`.
+// Uses ui-avatars.com so the image is identical across reloads + sessions
+// for the same name. Picks a stable hue from the name's char codes so two
+// people with the same first letter still get distinct backgrounds.
+const UI_AVATAR_PALETTE = [
+  "5241c3", "3597d3", "2a9d8f", "28a745", "dfb700",
+  "f4a261", "e63946", "9b59b6", "5b8a72", "264653",
+];
+export function avatarUrlFor(
+  name: string | null | undefined,
+  existing?: string | null,
+): string | null {
+  if (existing) return existing;
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return null;
+  let h = 0;
+  for (let i = 0; i < trimmed.length; i++) h = (h * 31 + trimmed.charCodeAt(i)) >>> 0;
+  const bg = UI_AVATAR_PALETTE[h % UI_AVATAR_PALETTE.length];
+  // size=64 keeps the bytes small; bold=true matches Odoo's avatar style.
+  const url = new URL("https://ui-avatars.com/api/");
+  url.searchParams.set("name", trimmed);
+  url.searchParams.set("background", bg);
+  url.searchParams.set("color", "fff");
+  url.searchParams.set("bold", "true");
+  url.searchParams.set("size", "64");
+  return url.toString();
+}

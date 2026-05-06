@@ -4,7 +4,7 @@
 export const LOCALES = ["ar", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-export const DEFAULT_LOCALE: Locale = "ar";
+export const DEFAULT_LOCALE: Locale = "en";
 export const LOCALE_COOKIE = "rwasem-locale";
 
 export function isLocale(value: string | undefined | null): value is Locale {

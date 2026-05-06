@@ -35,6 +35,7 @@ export interface MetricCardProps {
   href?: string;
   trend?: { value: string; direction: "up" | "down" | "flat" };
   className?: string;
+  size?: "default" | "compact";
 }
 
 export function MetricCard({
@@ -46,11 +47,14 @@ export function MetricCard({
   href,
   trend,
   className,
+  size = "default",
 }: MetricCardProps) {
   const inner = (
     <div
       className={cn(
-        "group/metric relative rounded-2xl border border-cyan/[0.18] bg-card p-4 transition-all duration-200",
+        "group/metric relative rounded-2xl border border-cyan/[0.18] bg-card transition-all duration-200",
+        size === "default" && "p-4",
+        size === "compact" && "p-3",
         "shadow-[0_0_20px_rgba(0,212,255,0.05),inset_0_1px_0_rgba(255,255,255,0.04)]",
         href && "cursor-pointer",
         href && toneGlow[tone],
@@ -59,14 +63,32 @@ export function MetricCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          <div
+            className={cn(
+              "font-medium uppercase tracking-[0.12em] text-muted-foreground",
+              size === "default" && "text-[11px]",
+              size === "compact" && "text-[10px]",
+            )}
+          >
             {label}
           </div>
-          <div className="mt-2 text-3xl font-bold tabular-nums text-foreground leading-none">
+          <div
+            className={cn(
+              "font-bold tabular-nums text-foreground leading-none",
+              size === "default" && "mt-2 text-3xl",
+              size === "compact" && "mt-1.5 text-2xl",
+            )}
+          >
             {value}
           </div>
           {(hint || trend) && (
-            <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div
+              className={cn(
+                "flex items-center gap-2 text-muted-foreground",
+                size === "default" && "mt-2 text-[11px]",
+                size === "compact" && "mt-1.5 text-[10px]",
+              )}
+            >
               {trend && (
                 <span
                   className={cn(
@@ -86,7 +108,9 @@ export function MetricCard({
         {icon && (
           <div
             className={cn(
-              "flex size-10 items-center justify-center rounded-xl border ring-1 ring-white/5",
+              "flex items-center justify-center border ring-1 ring-white/5",
+              size === "default" && "size-10 rounded-xl",
+              size === "compact" && "size-8 rounded-lg",
               toneAccent[tone],
             )}
           >

@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState, useActionState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Check, CalendarClock, Users, Eye, AlertCircle } from "lucide-react";
+import {
+  Loader2, Check, CalendarClock, Users, Eye, AlertCircle,
+  ChevronLeft, ChevronRight, User as UserIcon, Briefcase, ClipboardList,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +16,14 @@ import { cn } from "@/lib/utils";
 import { expandTemplates, type GeneratedTask, type TemplateInput } from "@/lib/projects/offsets";
 import { createProjectAction, type ProjectFormState } from "../_actions";
 import type { TemplateWithItems } from "@/lib/data/service-categories";
+
+type WizardStep = 1 | 2 | 3;
+
+const STEPS: { id: WizardStep; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 1, label: "العميل", icon: UserIcon },
+  { id: 2, label: "الخدمات", icon: Briefcase },
+  { id: 3, label: "الجدولة والمراجعة", icon: ClipboardList },
+];
 
 type Option = { id: string; label: string };
 
@@ -41,14 +52,25 @@ export function NewProjectForm({
   templates: TemplateWithItems[];
 }) {
   const router = useRouter();
+  const [step, setStep] = useState<WizardStep>(1);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [splits, setSplits] = useState<SplitState>({});
   const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [generateTasks, setGenerateTasks] = useState(true);
+  // Mirrored form values so the wizard can validate per-step transitions.
+  const [clientId, setClientId] = useState<string>("");
+  const [name, setName] = useState<string>("");
   const [state, formAction, pending] = useActionState<ProjectFormState | undefined, FormData>(
     createProjectAction,
     undefined,
   );
+
+  // Per-step gating for the Next button.
+  const canAdvance: Record<WizardStep, boolean> = {
+    1: clientId.length > 0 && name.trim().length > 0,
+    2: selectedServices.size > 0,
+    3: true,
+  };
 
   useEffect(() => {
     if (state?.ok) {
@@ -125,26 +147,78 @@ export function NewProjectForm({
     }));
   }, [selectedServices, splits]);
 
+  const selectedClient = clients.find((c) => c.id === clientId);
+
   return (
     <form action={formAction} className="grid gap-4 lg:grid-cols-2">
-      {/* Left: form */}
-      <div className="space-y-3">
-        <Card>
-          <CardContent className="p-4 space-y-3">
-            {Array.from(selectedServices).map((id) => (
-              <input key={id} type="hidden" name="service_ids" value={id} />
-            ))}
-            <input
-              type="hidden"
-              name="service_week_splits"
-              value={JSON.stringify(splitsForForm)}
-            />
-            <input type="hidden" name="generate_tasks" value={generateTasks ? "true" : "false"} />
+      {/* Hidden form payload — always present so the server action sees the
+          full set of fields regardless of which step is currently visible. */}
+      {Array.from(selectedServices).map((id) => (
+        <input key={id} type="hidden" name="service_ids" value={id} />
+      ))}
+      <input
+        type="hidden"
+        name="service_week_splits"
+        value={JSON.stringify(splitsForForm)}
+      />
+      <input type="hidden" name="generate_tasks" value={generateTasks ? "true" : "false"} />
 
-            <div className="grid sm:grid-cols-2 gap-3">
+      {/* Left: stepper + step bodies */}
+      <div className="space-y-3">
+        {/* Rwasem-style stepper */}
+        <Card>
+          <CardContent className="flex items-stretch gap-1 p-2">
+            {STEPS.map((s, i) => {
+              const active = step === s.id;
+              const done = step > s.id;
+              const Icon = s.icon;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setStep(s.id)}
+                  disabled={!done && !active && !canAdvance[(s.id - 1) as WizardStep]}
+                  className={cn(
+                    "flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-[12px] font-medium transition-colors",
+                    active
+                      ? "bg-primary/15 text-primary"
+                      : done
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+                        : "bg-muted/40 text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-bold",
+                      active && "bg-primary text-primary-foreground",
+                      done && "bg-emerald-500 text-white",
+                      !active && !done && "bg-muted-foreground/30 text-foreground/70",
+                    )}
+                  >
+                    {done ? <Check className="size-3" /> : i + 1}
+                  </span>
+                  <Icon className="size-3.5 shrink-0" />
+                  <span className="truncate">{s.label}</span>
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        {/* Step 1 — Customer */}
+        <div className={cn(step === 1 ? "block" : "hidden")}>
+          <Card>
+            <CardContent className="space-y-3 p-4">
               <div className="space-y-1.5">
                 <Label htmlFor="proj_client">العميل *</Label>
-                <select id="proj_client" name="client_id" required defaultValue="" className={SELECT_CLASS}>
+                <select
+                  id="proj_client"
+                  name="client_id"
+                  required
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className={SELECT_CLASS}
+                >
                   <option value="" disabled>اختر العميل</option>
                   {clients.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
                 </select>
@@ -152,56 +226,39 @@ export function NewProjectForm({
                   <p className="text-xs text-cc-red">{state.fieldErrors.client_id}</p>
                 )}
               </div>
+
               <div className="space-y-1.5">
                 <Label htmlFor="name">اسم المشروع *</Label>
-                <Input id="name" name="name" required placeholder="مثال: حملة رمضان 1447" />
+                <Input
+                  id="name"
+                  name="name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="مثال: حملة رمضان 1447"
+                />
                 {state?.fieldErrors?.name && (
                   <p className="text-xs text-cc-red">{state.fieldErrors.name}</p>
                 )}
               </div>
-            </div>
 
-            <div className="grid sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="start_date">تاريخ البدء</Label>
-                <Input
-                  id="start_date" name="start_date" type="date" dir="ltr"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                <Label htmlFor="description">وصف المشروع</Label>
+                <Textarea
+                  id="description"
+                  name="description"
+                  rows={3}
+                  placeholder="ملخص قصير عن المشروع…"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="end_date">تاريخ الانتهاء</Label>
-                <Input id="end_date" name="end_date" type="date" dir="ltr" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="proj_priority">الأولوية</Label>
-                <select id="proj_priority" name="priority" defaultValue="medium" className={SELECT_CLASS}>
-                  <option value="low">منخفضة</option>
-                  <option value="medium">متوسطة</option>
-                  <option value="high">عالية</option>
-                  <option value="urgent">عاجلة</option>
-                </select>
-              </div>
-            </div>
+            </CardContent>
+          </Card>
+        </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="proj_am">مدير الحساب</Label>
-              <select id="proj_am" name="account_manager_employee_id" defaultValue="" className={SELECT_CLASS}>
-                <option value="">— اختياري — يمكن تعيينه لاحقًا</option>
-                {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="description">وصف المشروع</Label>
-              <Textarea id="description" name="description" rows={2} placeholder="ملخص قصير عن المشروع…" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4 space-y-3">
+        {/* Step 2 — Services */}
+        <div className={cn(step === 2 ? "block" : "hidden")}>
+          <Card>
+            <CardContent className="space-y-3 p-4">
             <div className="flex items-center justify-between">
               <Label className="m-0">الخدمات المتفق عليها</Label>
               <span className="text-[11px] text-muted-foreground">
@@ -279,25 +336,108 @@ export function NewProjectForm({
             })}
           </CardContent>
         </Card>
+        </div>{/* /Step 2 */}
 
-        <label className="flex items-center gap-2 rounded-xl border border-cyan/15 bg-cyan-dim/40 px-3 py-2.5 text-xs text-foreground cursor-pointer">
-          <input
-            type="checkbox"
-            checked={generateTasks}
-            onChange={(e) => setGenerateTasks(e.target.checked)}
-            className="size-3.5 accent-cyan"
-          />
-          توليد المهام تلقائيًا من قوالب الخدمات المحددة
-        </label>
+        {/* Step 3 — Schedule, ownership, review */}
+        <div className={cn(step === 3 ? "block space-y-3" : "hidden")}>
+          <Card>
+            <CardContent className="space-y-3 p-4">
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="start_date">تاريخ البدء</Label>
+                  <Input
+                    id="start_date" name="start_date" type="date" dir="ltr"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="end_date">تاريخ الانتهاء</Label>
+                  <Input id="end_date" name="end_date" type="date" dir="ltr" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="proj_priority">الأولوية</Label>
+                  <select id="proj_priority" name="priority" defaultValue="medium" className={SELECT_CLASS}>
+                    <option value="low">منخفضة</option>
+                    <option value="medium">متوسطة</option>
+                    <option value="high">عالية</option>
+                    <option value="urgent">عاجلة</option>
+                  </select>
+                </div>
+              </div>
 
-        <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="outline" onClick={() => router.push("/projects")}>
-            إلغاء
+              <div className="space-y-1.5">
+                <Label htmlFor="proj_am">مدير الحساب</Label>
+                <select id="proj_am" name="account_manager_employee_id" defaultValue="" className={SELECT_CLASS}>
+                  <option value="">— اختياري — يمكن تعيينه لاحقًا</option>
+                  {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
+                </select>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-cyan/15 bg-cyan-dim/40 px-3 py-2.5 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={generateTasks}
+                  onChange={(e) => setGenerateTasks(e.target.checked)}
+                  className="size-3.5 accent-cyan"
+                />
+                توليد المهام تلقائيًا من قوالب الخدمات المحددة
+              </label>
+            </CardContent>
+          </Card>
+
+          {/* Review summary */}
+          <Card>
+            <CardContent className="space-y-2 p-4 text-[12px]">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">مراجعة سريعة</p>
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">العميل:</dt>
+                <dd className="font-medium">{selectedClient?.label ?? "—"}</dd>
+                <dt className="text-muted-foreground">اسم المشروع:</dt>
+                <dd className="font-medium">{name || "—"}</dd>
+                <dt className="text-muted-foreground">عدد الخدمات:</dt>
+                <dd className="font-medium tabular-nums">{selectedServices.size}</dd>
+                <dt className="text-muted-foreground">المهام المتوقعة:</dt>
+                <dd className="font-medium tabular-nums">{preview.length}</dd>
+                <dt className="text-muted-foreground">تاريخ البدء:</dt>
+                <dd className="font-medium tabular-nums" dir="ltr">{startDate || "—"}</dd>
+              </dl>
+            </CardContent>
+          </Card>
+        </div>{/* /Step 3 */}
+
+        {/* Wizard navigation */}
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (step === 1) router.push("/projects");
+              else setStep((step - 1) as WizardStep);
+            }}
+          >
+            {step === 1 ? "إلغاء" : (
+              <>
+                <ChevronRight className="size-4 icon-flip-rtl" />
+                السابق
+              </>
+            )}
           </Button>
-          <Button type="submit" disabled={pending || selectedServices.size === 0}>
-            {pending && <Loader2 className="size-4 animate-spin" />}
-            إنشاء المشروع
-          </Button>
+          {step < 3 ? (
+            <Button
+              type="button"
+              disabled={!canAdvance[step]}
+              onClick={() => setStep((step + 1) as WizardStep)}
+            >
+              التالي
+              <ChevronLeft className="size-4 icon-flip-rtl" />
+            </Button>
+          ) : (
+            <Button type="submit" disabled={pending || selectedServices.size === 0}>
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              إنشاء المشروع
+            </Button>
+          )}
         </div>
       </div>
 
@@ -326,7 +466,7 @@ export function NewProjectForm({
               </div>
             </div>
           ) : (
-            <ul className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+            <ul className="space-y-2 max-h-[60vh] overflow-y-auto px-1">
               {preview.map((t, i) => (
                 <li
                   key={`${t.templateItemId ?? "x"}-${i}`}

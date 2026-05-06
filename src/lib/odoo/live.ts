@@ -38,6 +38,10 @@ export interface LiveProject {
   siteAddress: string | null;
   /** Members (Odoo favorite_user_ids), shown as overlapping avatars in card footer. */
   members?: { name: string; avatarUrl: string | null }[];
+  /** Rwasem specialist roles — only populated by getLiveProject for the detail view. */
+  seoSpecialistName?: string | null;
+  mediaSpecialistName?: string | null;
+  socialSpecialistName?: string | null;
 }
 
 export interface LiveClient {
@@ -1335,6 +1339,7 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
       // Rwasem custom fields. stage_id intentionally omitted — gated by
       // the technical group "Use Stages on Project" the API user lacks.
       "store_name", "account_manager_id", "target",
+      "seo_specialist_id", "media_specialist_id", "social_specialist_id",
     ],
   );
   if (!rows.length) return null;
@@ -1342,6 +1347,9 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
   const partner = m2o(r.partner_id);
   const user = m2o(r.user_id);
   const accountManager = m2o(r.account_manager_id);
+  const seoSpec = m2o(r.seo_specialist_id);
+  const mediaSpec = m2o(r.media_specialist_id);
+  const socialSpec = m2o(r.social_specialist_id);
   const tagIds = ((r.tag_ids as number[] | undefined) ?? []).map(Number);
 
   // Resolve tag names + partner address in parallel.
@@ -1407,6 +1415,9 @@ export async function getLiveProject(odooId: number): Promise<LiveProjectDetail 
     stageId: null,
     stageName: null,
     siteAddress,
+    seoSpecialistName: seoSpec?.[1] ?? null,
+    mediaSpecialistName: mediaSpec?.[1] ?? null,
+    socialSpecialistName: socialSpec?.[1] ?? null,
   };
 
   const tasks = await listLiveTasks({ projectOdooId: odooId, limit: 1000 });

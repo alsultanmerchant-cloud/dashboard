@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { TopbarProvider } from "@/components/layout/topbar-context";
+import { ModuleTabs } from "@/components/layout/module-tabs";
 import { NotificationPanel } from "@/components/layout/notification-panel";
 import { AIChatFAB } from "@/components/ai/ai-chat-fab";
 import { CommandPaletteProvider } from "@/components/command-palette";
@@ -131,7 +132,8 @@ export function DashboardShell({
                   ) : null
                 }
               />
-              <main className="px-4 sm:px-6 pb-12 pt-8">
+              <ModuleTabs />
+              <main className="px-4 sm:px-6 pb-12 pt-4">
                 {children}
               </main>
             </div>

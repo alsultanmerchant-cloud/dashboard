@@ -54,6 +54,66 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent, createNotification } from "@/lib/audit";
 import { extractMentions, resolveMentions } from "@/lib/workflows/mentions";
 
+/**
+ * Quick-create a task in a specific stage (Rwasem kanban "+" button).
+ * Bare-minimum fields: title, project, stage. Owner/admin/manager bypass
+ * the stage-transition trigger because we INSERT (not UPDATE), so any
+ * stage is accepted at creation time.
+ */
+export async function quickCreateTaskAction(input: {
+  projectId: string;
+  stage: string;
+  title: string;
+}): Promise<{ ok: true; id: string } | { error: string }> {
+  let session;
+  try {
+    session = await requirePermission("tasks.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const title = input.title.trim();
+  if (!title) return { error: "العنوان مطلوب" };
+  if (title.length > 200) return { error: "العنوان طويل" };
+
+  // Verify the project belongs to the caller's org (defence-in-depth; RLS
+  // also enforces this).
+  const { data: proj } = await supabaseAdmin
+    .from("projects")
+    .select("id")
+    .eq("organization_id", session.orgId)
+    .eq("id", input.projectId)
+    .maybeSingle();
+  if (!proj) return { error: "المشروع غير موجود" };
+
+  const { data: created, error } = await supabaseAdmin
+    .from("tasks")
+    .insert({
+      organization_id: session.orgId,
+      project_id: input.projectId,
+      title,
+      stage: input.stage as TaskStageEnum,
+      status: "todo",
+      priority: "medium",
+      created_by: session.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !created) return { error: error?.message ?? "تعذر الإنشاء" };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.create",
+    entityType: "task",
+    entityId: created.id,
+    metadata: { stage: input.stage, project_id: input.projectId },
+  });
+
+  revalidatePath(`/projects/${input.projectId}`);
+  revalidatePath("/tasks");
+  return { ok: true, id: created.id };
+}
+
 export async function updateTaskStatusAction(input: {
   taskId: string;
   status: string;

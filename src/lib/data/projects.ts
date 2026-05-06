@@ -15,6 +15,11 @@ export interface ListProjectsPagedOpts {
   page?: number;
   pageSize?: number;
   search?: string;
+  // Rwasem-style filter flags. Each maps to a chip the user toggles in the
+  // search bar's filter dropdown.
+  onlyWithCategories?: boolean;
+  onlyFavorites?: boolean;
+  onlyWithManager?: boolean;
 }
 
 type ProjectRow = {
@@ -76,11 +81,29 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     .range(from, to);
 
   if (search) {
-    // Match project name, store_name, or client name. Embedded-table filters
-    // use the dotted form: "client.name.ilike.%term%".
-    q = q.or(
-      `name.ilike.%${search}%,store_name.ilike.%${search}%,client.name.ilike.%${search}%`,
-    );
+    // Match project name OR store_name. Filtering embedded client.name in a
+    // top-level .or() isn't supported by PostgREST, so we keep search to the
+    // projects table itself; client search is a separate UX if needed.
+    const escaped = search.replace(/[%,()]/g, " ").trim();
+    q = q.or(`name.ilike.%${escaped}%,store_name.ilike.%${escaped}%`);
+  }
+
+  if (opts.onlyFavorites) q = q.eq("is_favorite", true);
+  if (opts.onlyWithManager) q = q.not("project_manager_employee_id", "is", null);
+  if (opts.onlyWithCategories) {
+    // Sub-filter via project_services join. Postgrest doesn't support EXISTS
+    // directly, so we resolve project_ids upfront and constrain the main query.
+    const { data: idsRows, error: idsErr } = await supabaseAdmin
+      .from("project_services")
+      .select("project_id")
+      .eq("organization_id", opts.organizationId);
+    if (idsErr) throw idsErr;
+    const ids = [...new Set((idsRows ?? []).map((r) => r.project_id as string))];
+    if (ids.length === 0) {
+      const empty = await aggregateProjectTotals(opts.organizationId);
+      return { rows: [], total: 0, page, pageSize, totals: empty };
+    }
+    q = q.in("id", ids);
   }
 
   const { data: projectRows, count, error } = await q;

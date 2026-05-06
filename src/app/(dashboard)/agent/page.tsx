@@ -240,7 +240,7 @@ export default function AgentPage() {
               >
                 <span className="flex-1 truncate">{conv.title}</span>
                 <Trash2
-                  className="mr-1 h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-50 hover:!opacity-100"
+                  className="mx-1 h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-50 hover:!opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
                     setConversations((prev) => prev.filter((c) => c.id !== conv.id));
@@ -650,7 +650,7 @@ function MessageContent({ content }: { content: string }) {
       elements.push(<hr key={i} className="border-border my-3" />);
     } else if (line.match(/^[-*]\s/)) {
       elements.push(
-        <div key={i} className="flex gap-2 my-0.5 pr-2">
+        <div key={i} className="flex gap-2 my-0.5 px-2">
           <span className="text-cyan mt-1">•</span>
           <span>{formatInline(line.slice(2))}</span>
         </div>
@@ -658,7 +658,7 @@ function MessageContent({ content }: { content: string }) {
     } else if (line.match(/^\d+\.\s/)) {
       const match = line.match(/^(\d+)\.\s(.*)/)!;
       elements.push(
-        <div key={i} className="flex gap-2 my-0.5 pr-2">
+        <div key={i} className="flex gap-2 my-0.5 px-2">
           <span className="text-cyan font-bold min-w-[1.2rem]">{match[1]}.</span>
           <span>{formatInline(match[2])}</span>
         </div>

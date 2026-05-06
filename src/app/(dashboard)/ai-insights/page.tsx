@@ -12,6 +12,7 @@ import {
   getOverdueTasksList,
   getBlockedTasksList,
   getPendingHandovers,
+  getCurrentStoredInsight,
 } from "@/lib/data/ai-insights";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -58,7 +59,7 @@ export default async function AiInsightsPage() {
   const session = await requireSession();
   const orgId = session.orgId;
 
-  const [summary, projects, team, overdue, blocked, handovers, feed] = await Promise.all([
+  const [summary, projects, team, overdue, blocked, handovers, feed, currentInsight] = await Promise.all([
     getInsightSummary(orgId),
     getProjectHealth(orgId),
     getTeamLoad(orgId),
@@ -66,6 +67,7 @@ export default async function AiInsightsPage() {
     getBlockedTasksList(orgId, 6),
     getPendingHandovers(orgId, 5),
     getActivityFeed(orgId, 15),
+    getCurrentStoredInsight(orgId),
   ]);
 
   return (
@@ -130,9 +132,9 @@ export default async function AiInsightsPage() {
       <div>
         <SectionTitle
           title="التحليل الذكي"
-          description="Gemini يقرأ بيانات الوكالة ويقدم رؤى وتوصيات حقيقية"
+          description="تحليل محفوظ يُحدَّث فقط عند طلبك ثم يبقى متاحًا للمراجعة لاحقًا"
         />
-        <AiAnalysisPanel />
+        <AiAnalysisPanel initialInsight={currentInsight} />
       </div>
 
       {/* ── alerts row: overdue + blocked + handovers ── */}

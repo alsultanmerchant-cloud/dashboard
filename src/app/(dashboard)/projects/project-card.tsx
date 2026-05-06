@@ -7,28 +7,28 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Star, MoreVertical, User, Hash, Timer, Clock, ArrowRight } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Star, MoreVertical, User, Hash, Timer } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { formatArabicShortDate } from "@/lib/utils-format";
 
-// Mirror Odoo's US-format display in the date-range header (10/23/2025).
-function formatOdooDate(iso: string | null): string | null {
+// Rwasem prints datetimes as `MM/DD/YYYY HH:MM:SS`. Source values are
+// either a date (`YYYY-MM-DD`) or a full ISO timestamp; both are normalised
+// here so the Start/End rows match Odoo's display exactly.
+function formatOdooDateTime(iso: string | null): string | null {
   if (!iso) return null;
-  const d = iso.slice(0, 10).split("-");
-  if (d.length !== 3) return iso;
-  return `${d[1]}/${d[2]}/${d[0]}`;
+  // Detect "YYYY-MM-DD" (no time component).
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const [datePart, timePartRaw] = iso.split(/[T\s]/);
+  const dseg = datePart.split("-");
+  if (dseg.length !== 3) return iso;
+  const dateStr = `${dseg[1]}/${dseg[2]}/${dseg[0]}`;
+  if (dateOnly || !timePartRaw) return dateStr;
+  // Strip timezone / fractional seconds → "HH:MM:SS".
+  const timeStr = timePartRaw.replace(/[Z+\-].*$/, "").slice(0, 8);
+  return `${dateStr} ${timeStr}`;
 }
-
-// Rwasem `target` selection → Arabic label + tone.
-const TARGET_LABEL: Record<NonNullable<LiveProject["target"]>, { label: string; tone: string }> = {
-  on_target: { label: "On Target", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
-  off_target: { label: "Off Target", tone: "bg-red-500/15 text-red-700 dark:text-red-300" },
-  out: { label: "Out", tone: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300" },
-  sales_deposit: { label: "Sales Deposit", tone: "bg-blue-500/15 text-blue-700 dark:text-blue-300" },
-  renewed: { label: "Renewed", tone: "bg-violet-500/15 text-violet-700 dark:text-violet-300" },
-};
 
 // Odoo color index → CSS color (matches Odoo's stage/tag palette).
 const ODOO_COLORS = [
@@ -50,6 +50,15 @@ function odooColor(i: number): string {
   return ODOO_COLORS[i % ODOO_COLORS.length] ?? ODOO_COLORS[0];
 }
 
+function splitTagMarker(name: string): { marker: string | null; label: string } {
+  const match = name.match(/^([\p{Emoji_Presentation}\p{Extended_Pictographic}]+)\s*(.*)$/u);
+  if (!match) return { marker: null, label: name };
+  return {
+    marker: match[1] ?? null,
+    label: match[2] || name,
+  };
+}
+
 // Progress: closed/total. If we have no tasks at all show 0.
 function progressOf(p: LiveProject): number {
   if (p.taskCount <= 0) return 0;
@@ -58,6 +67,7 @@ function progressOf(p: LiveProject): number {
 
 export function ProjectCard({ project: p }: { project: LiveProject }) {
   const router = useRouter();
+  const t = useTranslations("ProjectCard");
   const progress = progressOf(p);
   const stripe = odooColor(p.color || 11);
   const href = `/tasks?odooProjectId=${p.odooId}`;
@@ -133,53 +143,6 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           </div>
         )}
 
-        {/* Date range header (Odoo-style: 10/23/2025 → 05/04/2026) */}
-        {(p.startDate || p.endDate) && (
-          <div
-            className="mt-1 flex items-center gap-1.5 ps-6 text-[11px] tabular-nums text-muted-foreground"
-            dir="ltr"
-          >
-            <Clock className="size-3" />
-            <span>{formatOdooDate(p.startDate) ?? "—"}</span>
-            <ArrowRight className="size-3 shrink-0" />
-            <span>{formatOdooDate(p.endDate) ?? "—"}</span>
-          </div>
-        )}
-
-        {/* Stage / status / target badges (e.g. "Extra Focus", "On Track") */}
-        {(p.stageName || p.lastUpdateStatus || p.target) && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1 ps-6">
-            {p.stageName && (
-              <span className="inline-flex items-center rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                {p.stageName}
-              </span>
-            )}
-            {!p.stageName && p.lastUpdateStatus && (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                  p.lastUpdateStatus === "on_track" && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-                  p.lastUpdateStatus === "at_risk" && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-                  p.lastUpdateStatus === "off_track" && "bg-red-500/15 text-red-700 dark:text-red-300",
-                  p.lastUpdateStatus === "done" && "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300",
-                )}
-              >
-                {p.lastUpdateStatus.replace(/_/g, " ")}
-              </span>
-            )}
-            {p.target && (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                  TARGET_LABEL[p.target].tone,
-                )}
-              >
-                {TARGET_LABEL[p.target].label}
-              </span>
-            )}
-          </div>
-        )}
-
         {/* Progress */}
         <div className="mt-2.5">
           <div className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -189,67 +152,69 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             />
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
-            {progress}% Complete
+            {t("completePercent", { percent: progress })}
           </div>
         </div>
 
         {/* Service category chips — names already include the emoji prefix
             (e.g. "🟢Renewal Media Buying") so no extra color dot needed. */}
         {p.tagNames.length > 0 && (
-          <ul className="mt-2 flex flex-wrap gap-1">
-            {p.tagNames.map((name, idx) => (
-              <li
-                key={`${name}-${idx}`}
-                className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-foreground"
-              >
-                <span className="max-w-[18ch] truncate">{name}</span>
-              </li>
-            ))}
+          <ul className="mt-2 flex flex-col items-start gap-1">
+            {p.tagNames.map((name, idx) => {
+              const { marker, label } = splitTagMarker(name);
+              return (
+                <li
+                  key={`${name}-${idx}`}
+                  className="max-w-full rounded-md bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-foreground"
+                >
+                  <span className="inline-flex items-start gap-1.5 whitespace-normal break-words">
+                    {marker ? <span className="shrink-0 leading-none">{marker}</span> : null}
+                    <span>{label}</span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
 
         {/* Key/value detail rows — Rwasem field grid (mirrors Odoo overview) */}
         <dl className="mt-2.5 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[12px]">
           <>
-            <dt className="font-bold text-foreground">Store Name:</dt>
+            <dt className="font-bold text-foreground">{t("storeName")}:</dt>
             <dd className="truncate text-foreground/80">
               {p.storeName ?? p.clientName ?? "—"}
             </dd>
           </>
-          {p.startDate && (
-            <>
-              <dt className="font-bold text-foreground">Start:</dt>
-              <dd className="tabular-nums text-foreground/80" dir="ltr">
-                {formatArabicShortDate(p.startDate)}
-              </dd>
-            </>
-          )}
-          {p.endDate && (
-            <>
-              <dt className="font-bold text-foreground">End:</dt>
-              <dd className="tabular-nums text-foreground/80" dir="ltr">
-                {formatArabicShortDate(p.endDate)}
-              </dd>
-            </>
-          )}
           <>
-            <dt className="font-bold text-foreground">Site:</dt>
-            <dd className="truncate text-muted-foreground">
-              {p.siteAddress ?? "No address specified"}
+            <dt className="font-bold text-foreground">{t("startDate")}:</dt>
+            <dd className="tabular-nums text-foreground/80" dir="ltr">
+              {formatOdooDateTime(p.startDate) ?? "—"}
             </dd>
           </>
           <>
-            <dt className="font-bold text-foreground">Cost:</dt>
-            <dd className="truncate text-muted-foreground">No costs</dd>
+            <dt className="font-bold text-foreground">{t("endDate")}:</dt>
+            <dd className="tabular-nums text-foreground/80" dir="ltr">
+              {formatOdooDateTime(p.endDate) ?? "—"}
+            </dd>
           </>
           <>
-            <dt className="font-bold text-foreground">Project Manager:</dt>
+            <dt className="font-bold text-foreground">{t("site")}:</dt>
+            <dd className="truncate text-muted-foreground">
+              {p.siteAddress ?? t("noAddress")}
+            </dd>
+          </>
+          <>
+            <dt className="font-bold text-foreground">{t("cost")}:</dt>
+            <dd className="truncate text-muted-foreground">{t("noCosts")}</dd>
+          </>
+          <>
+            <dt className="font-bold text-foreground">{t("projectManager")}:</dt>
             <dd className="truncate text-foreground/80">
               {p.managerName ?? "—"}
             </dd>
           </>
           <>
-            <dt className="font-bold text-foreground">Account Manager:</dt>
+            <dt className="font-bold text-foreground">{t("accountManager")}:</dt>
             <dd className="truncate text-foreground/80">
               {p.accountManagerName ?? "—"}
             </dd>

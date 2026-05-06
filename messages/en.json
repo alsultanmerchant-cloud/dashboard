@@ -339,10 +339,10 @@
   },
   "NavGroups": {
     "dashboard": "Dashboard",
-    "sales": "Sales",
-    "clientsProjects": "Clients & Projects",
-    "commercial": "Commercial",
-    "operations": "Operations",
+    "aiWorkspace": "AI Workspace",
+    "projectDelivery": "Project Delivery",
+    "commercialOps": "Handovers & Contracts",
+    "agencyOps": "Monitoring & Control",
     "organization": "Organization",
     "administration": "Administration"
   },
@@ -369,6 +369,21 @@
     "reports": "Reports",
     "settings": "Settings",
     "featureFlags": "Feature flags"
+  },
+  "ProjectCard": {
+    "storeName": "Store Name",
+    "startDate": "Start",
+    "endDate": "End",
+    "site": "Site",
+    "cost": "Cost",
+    "projectManager": "Project Manager",
+    "accountManager": "Account Manager",
+    "client": "Customer",
+    "ref": "Reference",
+    "tasks": "Tasks",
+    "completePercent": "{percent}% Complete",
+    "noAddress": "No address specified",
+    "noCosts": "No costs"
   },
   "PageTitles": {
     "dashboardTitle": "Overview",

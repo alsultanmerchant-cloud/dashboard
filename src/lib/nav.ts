@@ -6,7 +6,6 @@
 
 import {
   Home,
-  LayoutDashboard,
   CalendarClock,
   Bell,
   Sparkles,
@@ -48,45 +47,40 @@ export type NavGroup = {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    labelKey: "dashboard",
+    labelKey: "aiWorkspace",
     items: [
       // Routes server-side to the role's home page (specialist→/uploads,
       // AM→/am/<id>/dashboard, head/admin/owner→/dashboard, etc).
-      { labelKey: "myDashboard", href: "/", icon: Home },
-      { labelKey: "uploadsToday", href: "/uploads", icon: CalendarClock, perm: "tasks.view" },
-      { labelKey: "overview", href: "/dashboard", icon: LayoutDashboard },
-      { labelKey: "notifications", href: "/notifications", icon: Bell },
-      { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles },
       { labelKey: "aiAgent", href: "/agent", icon: Bot },
+      { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles },
+      { labelKey: "myDashboard", href: "/", icon: Home },
+      { labelKey: "notifications", href: "/notifications", icon: Bell },
     ],
   },
   {
-    labelKey: "sales",
+    labelKey: "projectDelivery",
     items: [
-      { labelKey: "salesHandover", href: "/handover", icon: Send, perm: "handover.create" },
-    ],
-  },
-  {
-    labelKey: "clientsProjects",
-    items: [
-      { labelKey: "clients", href: "/clients", icon: Building2, perm: "clients.view" },
       { labelKey: "projects", href: "/projects", icon: Briefcase, perm: "projects.view" },
       { labelKey: "tasks", href: "/tasks", icon: ListTodo, perm: "tasks.view" },
+      { labelKey: "uploadsToday", href: "/uploads", icon: CalendarClock, perm: "tasks.view" },
+      { labelKey: "clients", href: "/clients", icon: Building2, perm: "clients.view" },
       { labelKey: "taskTemplates", href: "/task-templates", icon: ClipboardList, perm: "templates.manage" },
       { labelKey: "serviceCategories", href: "/service-categories", icon: ListTree, perm: "category.manage_templates" },
     ],
   },
   {
-    labelKey: "commercial",
+    labelKey: "commercialOps",
     items: [
+      { labelKey: "salesHandover", href: "/handover", icon: Send, perm: "handover.create" },
       { labelKey: "contracts", href: "/contracts", icon: FileSignature, perm: "contract.view" },
     ],
   },
   {
-    labelKey: "operations",
+    labelKey: "agencyOps",
     items: [
       { labelKey: "escalations", href: "/escalations", icon: ShieldAlert, perm: "escalation.view_own" },
       { labelKey: "governance", href: "/governance", icon: Shield, perm: "governance.view" },
+      { labelKey: "reports", href: "/reports", icon: BarChart3, perm: "reports.view" },
     ],
   },
   {
@@ -101,7 +95,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: "administration",
     items: [
-      { labelKey: "reports", href: "/reports", icon: BarChart3, perm: "reports.view" },
       { labelKey: "settings", href: "/settings", icon: Settings, perm: "settings.manage" },
       { labelKey: "featureFlags", href: "/settings/feature-flags", icon: Flag, perm: "feature_flag.manage" },
     ],

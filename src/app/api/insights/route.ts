@@ -1,58 +1,48 @@
 import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { z } from "zod";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { InsightsSchema, type InsightsResult, type StoredInsightRun } from "@/lib/ai-insights-schema";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
+const INSIGHT_MODEL = "gemini-3-flash-preview";
 
-const InsightsSchema = z.object({
-  executiveSummary: z
-    .string()
-    .describe("فقرة تلخيصية شاملة للحالة الراهنة بأسلوب مدير تنفيذي، 3-4 جمل، بالعربية"),
-  overallHealth: z
-    .enum(["excellent", "good", "concerning", "critical"])
-    .describe("التقييم العام الشامل للوكالة"),
-  alerts: z
-    .array(
-      z.object({
-        level: z.enum(["critical", "warning", "info"]),
-        title: z.string().describe("عنوان قصير للتنبيه"),
-        body: z.string().describe("شرح موجز مع أرقام محددة من البيانات"),
-        action: z.string().describe("الإجراء المقترح (جملة واحدة)"),
-      }),
-    )
-    .describe("تنبيهات تحتاج اهتمامًا فوريًا — حرجة أو تحذيرية أو معلوماتية"),
-  recommendations: z
-    .array(
-      z.object({
-        priority: z.enum(["urgent", "important", "suggestion"]),
-        title: z.string().describe("عنوان الاقتراح"),
-        body: z.string().describe("شرح تفصيلي مع تبرير مبني على البيانات"),
-        estimatedImpact: z.string().describe("الأثر المتوقع على الأداء"),
-      }),
-    )
-    .describe("توصيات عملية مرتبة حسب الأولوية"),
-  patterns: z
-    .array(
-      z.object({
-        title: z.string().describe("اسم النمط"),
-        body: z.string().describe("وصف النمط المكتشف من البيانات مع شواهد رقمية"),
-        type: z.enum(["positive", "negative", "neutral"]),
-      }),
-    )
-    .describe("أنماط مكتشفة في سير العمل"),
-  teamInsights: z
-    .array(
-      z.object({
-        observation: z.string().describe("ملاحظة متعلقة بالفريق أو قسم أو موظف بعينه"),
-        recommendation: z.string().describe("توصية محددة"),
-      }),
-    )
-    .describe("رؤى تتعلق بأداء الفريق وتوزيع الأعمال"),
-});
+type InsightRunRow = {
+  id: string;
+  status: "running" | "ready" | "failed";
+  model: string | null;
+  created_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+  result_json: InsightsResult | null;
+};
 
-export type InsightsResult = z.infer<typeof InsightsSchema>;
+function rowToStoredInsight(row: InsightRunRow): StoredInsightRun {
+  return {
+    id: row.id,
+    status: row.status,
+    model: row.model,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+    errorMessage: row.error_message,
+    result: row.result_json,
+  };
+}
+
+async function getCurrentStoredInsight(orgId: string): Promise<StoredInsightRun | null> {
+  const { data } = await supabaseAdmin
+    .from("ai_insight_runs")
+    .select("id, status, model, created_at, completed_at, error_message, result_json")
+    .eq("organization_id", orgId)
+    .eq("status", "ready")
+    .eq("is_current", true)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const row = data as InsightRunRow | null;
+  return row ? rowToStoredInsight(row) : null;
+}
 
 async function buildAnalysisSnapshot(orgId: string): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
@@ -117,52 +107,61 @@ async function buildAnalysisSnapshot(orgId: string): Promise<string> {
       .limit(50),
   ]);
 
-  // compute team load
   const buckets = new Map<string, { name: string; title: string; open: number; overdue: number; done: number }>();
   for (const row of teamLoad.data ?? []) {
     const emp = Array.isArray(row.employee) ? row.employee[0] : row.employee;
     const task = Array.isArray(row.task) ? row.task[0] : row.task;
     if (!emp || !task) continue;
-    if (!buckets.has(emp.id)) buckets.set(emp.id, { name: emp.full_name, title: emp.job_title ?? "—", open: 0, overdue: 0, done: 0 });
-    const b = buckets.get(emp.id)!;
-    if (task.status === "done") b.done++;
+    if (!buckets.has(emp.id)) {
+      buckets.set(emp.id, {
+        name: emp.full_name,
+        title: emp.job_title ?? "—",
+        open: 0,
+        overdue: 0,
+        done: 0,
+      });
+    }
+    const bucket = buckets.get(emp.id)!;
+    if (task.status === "done") bucket.done += 1;
     else if (["todo", "in_progress", "review", "blocked"].includes(task.status)) {
-      b.open++;
-      if (task.due_date && task.due_date < today) b.overdue++;
+      bucket.open += 1;
+      if (task.due_date && task.due_date < today) bucket.overdue += 1;
     }
   }
+
   const teamRows = Array.from(buckets.values())
     .sort((a, b) => b.open - a.open)
     .slice(0, 10)
-    .map((m) => `  - ${m.name}: ${m.open} مفتوحة, ${m.overdue} متأخرة, ${m.done} منجزة`)
+    .map((member) => `  - ${member.name}: ${member.open} مفتوحة, ${member.overdue} متأخرة, ${member.done} منجزة`)
     .join("\n");
 
-  // event tally
   const eventTally: Record<string, number> = {};
-  for (const e of recentEvents.data ?? []) eventTally[e.event_type] = (eventTally[e.event_type] ?? 0) + 1;
+  for (const event of recentEvents.data ?? []) {
+    eventTally[event.event_type] = (eventTally[event.event_type] ?? 0) + 1;
+  }
   const eventLines = Object.entries(eventTally)
     .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `  - ${k}: ${v}`)
+    .map(([eventType, count]) => `  - ${eventType}: ${count}`)
     .join("\n");
 
   const overdueLines = (overdueTasks.data ?? [])
-    .map((t) => {
-      const proj = Array.isArray(t.project) ? t.project[0] : t.project;
-      const client = proj && (Array.isArray(proj.client) ? proj.client[0] : proj.client);
-      const days = Math.floor((Date.now() - new Date(t.due_date).getTime()) / 86400000);
-      return `  - "${t.title}" [${t.priority}] متأخرة ${days} يوم — ${proj?.name ?? "—"} / ${client?.name ?? "—"}`;
+    .map((task) => {
+      const project = Array.isArray(task.project) ? task.project[0] : task.project;
+      const client = project && (Array.isArray(project.client) ? project.client[0] : project.client);
+      const days = Math.floor((Date.now() - new Date(task.due_date).getTime()) / 86400000);
+      return `  - "${task.title}" [${task.priority}] متأخرة ${days} يوم — ${project?.name ?? "—"} / ${client?.name ?? "—"}`;
     })
     .join("\n") || "  (لا توجد مهام متأخرة)";
 
   const blockedLines = (blockedTasks.data ?? [])
-    .map((t) => {
-      const proj = Array.isArray(t.project) ? t.project[0] : t.project;
-      return `  - "${t.title}" [${t.priority}] — ${proj?.name ?? "—"}`;
+    .map((task) => {
+      const project = Array.isArray(task.project) ? task.project[0] : task.project;
+      return `  - "${task.title}" [${task.priority}] — ${project?.name ?? "—"}`;
     })
     .join("\n") || "  (لا توجد مهام متوقفة)";
 
   const handoverLines = (handovers.data ?? [])
-    .map((h) => `  - ${h.client_name} [${h.urgency_level}] — ${h.status}`)
+    .map((handover) => `  - ${handover.client_name} [${handover.urgency_level}] — ${handover.status}`)
     .join("\n") || "  (لا توجد تسليمات معلقة)";
 
   return `## لقطة تحليلية شاملة لوكالة رواسم — ${new Date().toLocaleDateString("ar-SA-u-nu-latn")}
@@ -199,12 +198,49 @@ ${eventLines || "  (لا يوجد أحداث)"}
 export async function GET() {
   try {
     const session = await getServerSession();
-    if (!session) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    if (!session) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    }
 
+    const current = await getCurrentStoredInsight(session.orgId);
+    return Response.json({ current });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: err instanceof Error ? err.message : "فشل تحميل آخر تحليل" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
+}
+
+export async function POST() {
+  let runId: string | null = null;
+
+  try {
+    const session = await getServerSession();
+    if (!session) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    }
+
+    const { data: inserted, error: insertError } = await supabaseAdmin
+      .from("ai_insight_runs")
+      .insert({
+        organization_id: session.orgId,
+        requested_by: session.userId,
+        status: "running",
+        model: INSIGHT_MODEL,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !inserted?.id) {
+      throw new Error(insertError?.message ?? "تعذّر إنشاء سجل التحليل");
+    }
+
+    runId = inserted.id;
     const snapshot = await buildAnalysisSnapshot(session.orgId);
 
     const { object } = await generateObject({
-      model: google("gemini-3-flash-preview"),
+      model: google(INSIGHT_MODEL),
       schema: InsightsSchema,
       prompt: `أنت مستشار عمليات خبير لوكالات التسويق. حلّل البيانات التالية وقدّم رؤى عملية دقيقة ومبنية على الأرقام الفعلية. كن مباشرًا وتحليليًا لا تشجيعيًا.
 
@@ -218,9 +254,44 @@ ${snapshot}
 5. اللغة: العربية الفصحى الواضحة`,
     });
 
-    return Response.json(object);
+    await supabaseAdmin
+      .from("ai_insight_runs")
+      .update({ is_current: false })
+      .eq("organization_id", session.orgId)
+      .eq("is_current", true);
+
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("ai_insight_runs")
+      .update({
+        status: "ready",
+        snapshot_text: snapshot,
+        result_json: object,
+        completed_at: new Date().toISOString(),
+        is_current: true,
+        error_message: null,
+      })
+      .eq("id", runId)
+      .select("id, status, model, created_at, completed_at, error_message, result_json")
+      .single();
+
+    if (updateError || !updated) {
+      throw new Error(updateError?.message ?? "تعذّر حفظ نتيجة التحليل");
+    }
+
+    return Response.json({ current: rowToStoredInsight(updated as InsightRunRow) });
   } catch (err) {
-    console.error("Insights generation error:", err);
+    if (runId) {
+      await supabaseAdmin
+        .from("ai_insight_runs")
+        .update({
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          error_message: err instanceof Error ? err.message : "فشل توليد الرؤى",
+          is_current: false,
+        })
+        .eq("id", runId);
+    }
+
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : "فشل توليد الرؤى" }),
       { status: 500, headers: { "Content-Type": "application/json" } },

@@ -43,6 +43,15 @@ function toListRow(t: RawTask): ListTaskRow | null {
     };
   }
 
+  // Extra Rwasem fields surfaced in the Odoo task overview (allocated time,
+  // delay days, completion date, computed progress slip).
+  const tx = t as RawTask & {
+    progress_slip_percent?: number | null;
+    allocated_time_minutes?: number | null;
+    delay_days?: number | null;
+    completed_at?: string | null;
+  };
+
   return {
     id: t.id,
     title: t.title,
@@ -53,6 +62,10 @@ function toListRow(t: RawTask): ListTaskRow | null {
     priority: t.priority,
     progress_percent: t.progress_percent,
     expected_progress_percent: t.expected_progress_percent,
+    progress_slip_percent: tx.progress_slip_percent ?? null,
+    allocated_time_minutes: tx.allocated_time_minutes ?? null,
+    delay_days: tx.delay_days ?? null,
+    completed_at: tx.completed_at ?? null,
     service: service
       ? { id: service.id, name: service.name, slug: service.slug }
       : null,

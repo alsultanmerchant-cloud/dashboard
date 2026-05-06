@@ -200,7 +200,7 @@ export default async function ContractDetailPage({
                       <div className="min-w-0">
                         <p className="text-sm font-medium">
                           {formatCurrency(Number(i.expected_amount || 0))}
-                          <span className="text-xs text-muted-foreground mr-2">
+                          <span className="text-xs text-muted-foreground mx-2">
                             متوقَّع {formatArabicShortDate(i.expected_date)}
                           </span>
                         </p>
