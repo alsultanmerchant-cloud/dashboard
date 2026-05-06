@@ -301,6 +301,7 @@ export default async function TaskDetailPage({
             hasRequirements={activity.some(
               (a) => a.kind === "note" && a.comment_kind === "requirements",
             )}
+            floating
           />
         </TabsContent>
 
