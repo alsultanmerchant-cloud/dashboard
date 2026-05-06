@@ -22,6 +22,8 @@ export type FollowerRow = {
   avatar_url: string | null;
   job_title: string | null;
   added_at: string;
+  /** Inherited from the project (project_members). Read-only on the task. */
+  inherited?: boolean;
 };
 
 export type FollowerCandidate = {
@@ -85,14 +87,24 @@ export function FollowersPanel({
           {followers.map((f) => (
             <li
               key={f.user_id}
-              className="flex items-center gap-2 rounded-full border border-soft-2 bg-soft-1 py-1 ps-1 pe-2"
+              className={
+                f.inherited
+                  ? "flex items-center gap-2 rounded-full border border-cyan/30 bg-cyan-dim/40 py-1 ps-1 pe-2"
+                  : "flex items-center gap-2 rounded-full border border-soft-2 bg-soft-1 py-1 ps-1 pe-2"
+              }
+              title={f.inherited ? "متابع موروث من المشروع" : undefined}
             >
               <Avatar size="sm">
                 {f.avatar_url ? <AvatarImage src={f.avatar_url} alt="" /> : null}
                 <AvatarFallback>{f.full_name[0]}</AvatarFallback>
               </Avatar>
               <span className="text-xs font-medium">{f.full_name}</span>
-              {canManage && (
+              {f.inherited && (
+                <span className="rounded-full bg-cyan/20 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+                  من المشروع
+                </span>
+              )}
+              {canManage && !f.inherited && (
                 <button
                   type="button"
                   onClick={() => remove(f.user_id)}

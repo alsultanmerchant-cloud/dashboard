@@ -73,7 +73,63 @@ export type TaskFollower = {
   job_title: string | null;
   added_at: string;
   added_by_user_id: string | null;
+  /** True when this follower is inherited from the project (project_members)
+   *  rather than added explicitly to the task. Inherited rows can't be
+   *  removed from the task — they're shown read-only.
+   */
+  inherited?: boolean;
 };
+
+/** Inherited followers — anyone listed as a member of the project the task
+ *  belongs to. We surface these in the followers UI so Sky Light's
+ *  Odoo-imported tasks aren't visually empty: the project's
+ *  favorite_user_ids (sync target = project_members) become the task's
+ *  default follower set.
+ */
+export async function listInheritedProjectFollowers(
+  orgId: string,
+  projectId: string,
+): Promise<TaskFollower[]> {
+  const { data, error } = await supabaseAdmin
+    .from("project_members")
+    .select(
+      `created_at,
+       employee:employee_profiles ( id, user_id, full_name, avatar_url, job_title )`,
+    )
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId);
+  if (error) throw error;
+
+  const rows: TaskFollower[] = [];
+  for (const r of (data ?? []) as unknown as Array<{
+    created_at: string;
+    employee:
+      | {
+          id: string;
+          user_id: string | null;
+          full_name: string;
+          avatar_url: string | null;
+          job_title: string | null;
+        }
+      | { id: string; user_id: string | null; full_name: string; avatar_url: string | null; job_title: string | null }[]
+      | null;
+  }>) {
+    const emp = Array.isArray(r.employee) ? r.employee[0] : r.employee;
+    if (!emp) continue;
+    rows.push({
+      // Use auth user_id when available, else fall back to employee_profile id
+      // so the UI key is stable even for Odoo employees without auth records.
+      user_id: emp.user_id ?? emp.id,
+      full_name: emp.full_name,
+      avatar_url: emp.avatar_url ?? null,
+      job_title: emp.job_title ?? null,
+      added_at: r.created_at,
+      added_by_user_id: null,
+      inherited: true,
+    });
+  }
+  return rows;
+}
 
 export async function listTaskFollowers(
   orgId: string,

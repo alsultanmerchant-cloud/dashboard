@@ -518,6 +518,20 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   const projectOdooIds = Array.from(ctx.projectIdMap.keys());
   if (projectOdooIds.length === 0) return 0;
 
+  // Project UUID → AM employee UUID map. Used to auto-assign each task's
+  // account_manager slot from the project's AM (matches Sky Light's owner
+  // system MD: tasks inherit the project's AM unless overridden).
+  const { data: projectAMs } = await supabaseAdmin
+    .from("projects")
+    .select("id, account_manager_employee_id")
+    .eq("organization_id", ctx.organizationId);
+  const amByProject = new Map<string, string>();
+  for (const p of projectAMs ?? []) {
+    if (p.account_manager_employee_id) {
+      amByProject.set(p.id as string, p.account_manager_employee_id as string);
+    }
+  }
+
   // Batch the project filter to keep each RPC well under Odoo's read timeout.
   // A single `project_id IN (76 ids)` request was returning >2 MB and timing
   // out on the Rwasem instance.
@@ -630,6 +644,34 @@ async function importTasks(ctx: ImportContext): Promise<number> {
           console.warn(`task ${t.id} assignees: ${assignError.message}`);
         } else {
           ctx.assigneeCount += assigneeRows.length;
+        }
+      }
+    }
+
+    // Auto-assign account_manager slot from the project's AM. Only do this
+    // when no AM assignee already exists, so dashboard users can override.
+    const amEmployeeId = amByProject.get(projectUuid);
+    if (amEmployeeId) {
+      const { data: existingAM } = await supabaseAdmin
+        .from("task_assignees")
+        .select("id")
+        .eq("task_id", taskRow.id)
+        .eq("role_type", "account_manager")
+        .limit(1)
+        .maybeSingle();
+      if (!existingAM) {
+        const { error: amErr } = await supabaseAdmin
+          .from("task_assignees")
+          .insert({
+            organization_id: ctx.organizationId,
+            task_id: taskRow.id,
+            employee_id: amEmployeeId,
+            role_type: "account_manager" as const,
+          });
+        if (amErr) {
+          console.warn(`task ${t.id} AM auto-assign: ${amErr.message}`);
+        } else {
+          ctx.assigneeCount += 1;
         }
       }
     }

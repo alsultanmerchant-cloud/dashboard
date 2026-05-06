@@ -8,6 +8,7 @@ import {
   listTaskFollowers,
   listFollowerCandidates,
   listTaskStageHistory,
+  listInheritedProjectFollowers,
 } from "@/lib/data/task-detail";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -60,10 +61,25 @@ export default async function TaskDetailPage({
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
 
-  // Followers picker excludes anyone already following.
+  // Inherited project followers (project_members ← Odoo favorite_user_ids).
+  // Surfaced read-only so Odoo-imported tasks aren't visually empty.
+  const projectIdForFollowers = (task as { project_id?: string | null }).project_id ?? null;
+  const inheritedFollowers = projectIdForFollowers
+    ? await listInheritedProjectFollowers(session.orgId, projectIdForFollowers)
+    : [];
+
+  // Merge: explicit task followers first, then any inherited not already
+  // present (dedup by user_id).
+  const explicitUserIds = new Set(followers.map((f) => f.user_id));
+  const mergedFollowers = [
+    ...followers,
+    ...inheritedFollowers.filter((i) => !explicitUserIds.has(i.user_id)),
+  ];
+
+  // Followers picker excludes anyone already following (explicit or inherited).
   const followerCandidates = await listFollowerCandidates(
     session.orgId,
-    followers.map((f) => f.user_id),
+    mergedFollowers.map((f) => f.user_id),
   );
 
   // T5: detect any open exception on this task (read-only side query).
@@ -106,6 +122,8 @@ export default async function TaskDetailPage({
     }
   }
 
+  // Only count EXPLICIT followers for the follow-toggle state (inherited
+  // project members can't be unfollowed at the task level).
   const isFollowing = followers.some((f) => f.user_id === session.userId);
 
   // Permission to add/remove followers: same shape as the server action
@@ -279,7 +297,7 @@ export default async function TaskDetailPage({
         <CardContent className="p-4">
           <FollowersPanel
             taskId={task.id}
-            followers={followers}
+            followers={mergedFollowers}
             candidates={followerCandidates}
             canManage={canManageFollowers}
           />

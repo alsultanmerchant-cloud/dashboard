@@ -20,7 +20,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { assignTaskRoleAction } from "./_actions";
 
@@ -88,7 +88,15 @@ function SlotRow({
   const filtered = employees.filter(
     (e) => e.department_kind != null && allowedKinds.includes(e.department_kind),
   );
-  const options = filtered.length > 0 ? filtered : employees;
+  let options = filtered.length > 0 ? filtered : employees;
+  // CRITICAL: Radix Select shows the raw `value` (the UUID) when no matching
+  // SelectItem exists. Many Odoo-imported employees lack a department_kind
+  // (or are in a non-execution dept) so they get filtered out — but they
+  // can still be CURRENTLY assigned to this slot. Always include the
+  // currently-assigned employee so the trigger renders their name.
+  if (current && !options.some((o) => o.id === current.id)) {
+    options = [current, ...options];
+  }
 
   function commit(employeeId: string | null) {
     start(async () => {
@@ -113,16 +121,17 @@ function SlotRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-xl border bg-card/40 p-3",
+        // TASK_ROLE_TONES provides solid bg + text colors per role.
+        "flex items-center gap-3 rounded-xl border p-3",
         TASK_ROLE_TONES[role],
       )}
     >
       <div className="flex min-w-24 flex-col">
-        <span className="text-[11px] uppercase tracking-wider opacity-80">
+        <span className="text-[11px] uppercase tracking-wider font-semibold">
           {TASK_ROLE_LABELS[role]}
         </span>
         {current && (
-          <span className="text-[10px] opacity-70 truncate">
+          <span className="text-[10px] opacity-90 truncate">
             {current.job_title ?? ""}
           </span>
         )}
@@ -130,6 +139,9 @@ function SlotRow({
       <div className="flex flex-1 items-center gap-2">
         {current && (
           <Avatar size="sm">
+            {current.avatar_url && (
+              <AvatarImage src={current.avatar_url} alt={current.full_name} />
+            )}
             <AvatarFallback>{current.full_name[0]}</AvatarFallback>
           </Avatar>
         )}
@@ -138,8 +150,15 @@ function SlotRow({
           onValueChange={(v) => commit(v === "" ? null : v)}
           disabled={pending}
         >
-          <SelectTrigger className="flex-1 bg-card/50 border-soft-2 text-xs">
-            <SelectValue placeholder="غير معيّن" />
+          <SelectTrigger className="flex-1 bg-white/90 dark:bg-black/30 border-soft-2 text-xs text-foreground">
+            {/* Explicit fallback: if Radix can't resolve `value` to a child
+                SelectItem (stale data, async edge), render the current name
+                directly so the user never sees a raw UUID. */}
+            {current ? (
+              <span className="truncate">{current.full_name}</span>
+            ) : (
+              <SelectValue placeholder="غير معيّن" />
+            )}
           </SelectTrigger>
           <SelectContent>
             {options.map((e) => (

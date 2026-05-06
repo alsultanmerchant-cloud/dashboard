@@ -222,11 +222,16 @@ export const TASK_ROLE_LABELS: Record<TaskRoleType, string> = {
   account_manager: "مدير الحساب",
 };
 
+// Solid backgrounds (no /opacity) so role slots read clearly in both themes.
 export const TASK_ROLE_TONES: Record<TaskRoleType, string> = {
-  specialist: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  manager: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  agent: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  account_manager: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+  specialist:
+    "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/60 dark:text-amber-50 dark:border-amber-700",
+  manager:
+    "bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-900/60 dark:text-blue-50 dark:border-blue-700",
+  agent:
+    "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-50 dark:border-emerald-700",
+  account_manager:
+    "bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-900/60 dark:text-rose-50 dark:border-rose-700",
 };
 
 // Sky Light org structure (PDF). Used to filter task role pickers and
