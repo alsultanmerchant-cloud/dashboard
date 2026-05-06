@@ -301,6 +301,12 @@ export default async function TaskDetailPage({
             hasRequirements={activity.some(
               (a) => a.kind === "note" && a.comment_kind === "requirements",
             )}
+            mentionable={employeeOptions.map((e) => ({
+              id: e.id,
+              name: e.full_name,
+              jobTitle: e.job_title,
+              avatarUrl: e.avatar_url,
+            }))}
             floating
           />
         </TabsContent>

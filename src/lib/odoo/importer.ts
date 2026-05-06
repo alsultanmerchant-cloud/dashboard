@@ -672,6 +672,29 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
     date: string | false;
     message_type: string;
     subtype_id: OdooMany2one;
+    tracking_value_ids: number[] | false;
+  };
+  type OdooTrackingValue = {
+    id: number;
+    mail_message_id: OdooMany2one;
+    field_id: OdooMany2one;
+    old_value_char: string | false;
+    new_value_char: string | false;
+    old_value_text: string | false;
+    new_value_text: string | false;
+    old_value_integer: number | false;
+    new_value_integer: number | false;
+    old_value_float: number | false;
+    new_value_float: number | false;
+  };
+  const trackVal = (
+    c: string | false, t: string | false, i: number | false, f: number | false,
+  ): string => {
+    if (typeof c === "string" && c) return c;
+    if (typeof t === "string" && t) return t;
+    if (typeof i === "number") return String(i);
+    if (typeof f === "number") return String(f);
+    return "—";
   };
   for (let i = 0; i < odooTaskIds.length; i += CHUNK) {
     const slice = odooTaskIds.slice(i, i + CHUNK);
@@ -680,11 +703,14 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
       [
         ["model", "=", "project.task"],
         ["res_id", "in", slice],
-        // Only user-authored content. Skip purely automated stage notifications;
-        // the dashboard already tracks stage_history natively.
-        ["message_type", "in", ["comment", "email"]],
+        // Pull comments/emails AND notifications (which carry stage/priority/
+        // assignee tracking changes via tracking_value_ids).
+        ["message_type", "in", ["comment", "email", "notification"]],
       ],
-      ["id", "res_id", "body", "author_id", "date", "message_type", "subtype_id"],
+      [
+        "id", "res_id", "body", "author_id", "date", "message_type",
+        "subtype_id", "tracking_value_ids",
+      ],
       { limit: 5000, order: "date asc" },
     );
 
@@ -709,15 +735,59 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
       for (const s of subs) if (s.internal) internalSubtypeIds.add(s.id);
     }
 
+    // Tracking values + field labels (for notifications).
+    const trackingValueIds = Array.from(
+      new Set(
+        messages.flatMap((m) =>
+          Array.isArray(m.tracking_value_ids) ? m.tracking_value_ids : [],
+        ),
+      ),
+    );
+    const tvByMessage = new Map<number, OdooTrackingValue[]>();
+    const fieldLabelById = new Map<number, string>();
+    if (trackingValueIds.length > 0) {
+      const tvs = await ctx.odoo.searchRead<OdooTrackingValue>(
+        "mail.tracking.value",
+        [["id", "in", trackingValueIds]],
+        [
+          "id", "mail_message_id", "field_id",
+          "old_value_char", "new_value_char",
+          "old_value_text", "new_value_text",
+          "old_value_integer", "new_value_integer",
+          "old_value_float", "new_value_float",
+        ],
+      );
+      for (const tv of tvs) {
+        const mid = Array.isArray(tv.mail_message_id) ? (tv.mail_message_id[0] as number) : null;
+        if (!mid) continue;
+        const arr = tvByMessage.get(mid) ?? [];
+        arr.push(tv);
+        tvByMessage.set(mid, arr);
+      }
+      const fieldIds = Array.from(
+        new Set(
+          tvs
+            .map((t) => (Array.isArray(t.field_id) ? (t.field_id[0] as number) : null))
+            .filter((x): x is number => Boolean(x)),
+        ),
+      );
+      if (fieldIds.length > 0) {
+        const fields = await ctx.odoo.searchRead<{ id: number; field_description: string }>(
+          "ir.model.fields",
+          [["id", "in", fieldIds]],
+          ["id", "field_description"],
+        );
+        for (const f of fields) fieldLabelById.set(f.id, f.field_description);
+      }
+    }
+
     const rows = messages
       .map((m) => {
         const taskUuid = taskUuidByOdooId.get(m.res_id);
         if (!taskUuid) return null;
-        const body = typeof m.body === "string" ? m.body.trim() : "";
-        if (!body) return null;
         const author = Array.isArray(m.author_id) ? m.author_id : null;
         const subtypeId = Array.isArray(m.subtype_id) ? (m.subtype_id[0] as number) : null;
-        return {
+        const baseRow = {
           organization_id: ctx.organizationId,
           task_id: taskUuid,
           external_source: SOURCE,
@@ -727,12 +797,32 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
           external_author_avatar_url: author && odooBase
             ? `${odooBase}/web/image/res.partner/${author[0]}/avatar_1`
             : null,
-          body,
           is_internal: subtypeId ? internalSubtypeIds.has(subtypeId) : true,
           kind: "note" as const,
           created_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
           updated_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
         };
+
+        if (m.message_type === "notification") {
+          const tvs = tvByMessage.get(m.id) ?? [];
+          if (tvs.length === 0) return null;
+          const lines = tvs.map((tv) => {
+            const fid = Array.isArray(tv.field_id) ? (tv.field_id[0] as number) : null;
+            const label = (fid && fieldLabelById.get(fid)) || "Field";
+            const oldV = trackVal(
+              tv.old_value_char, tv.old_value_text, tv.old_value_integer, tv.old_value_float,
+            );
+            const newV = trackVal(
+              tv.new_value_char, tv.new_value_text, tv.new_value_integer, tv.new_value_float,
+            );
+            return `<p><strong>${label}:</strong> <span class="text-muted-foreground">${oldV}</span> → <span class="text-cyan font-medium">${newV}</span></p>`;
+          });
+          return { ...baseRow, body: lines.join("") };
+        }
+
+        const body = typeof m.body === "string" ? m.body.trim() : "";
+        if (!body) return null;
+        return { ...baseRow, body };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
 

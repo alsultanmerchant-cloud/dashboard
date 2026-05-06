@@ -100,7 +100,44 @@ export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
 
 // ------- note -----------------------------------------------------------
 
+// Tracking events synthesised by the importer always start with this exact
+// prefix. They render as compact inline rows (no card, no internal/client
+// pill) so they stay visually distinct from real user notes.
+const TRACKING_EVENT_PREFIX = "<p><strong>";
+
 function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
+  const isTrackingEvent = item.body.startsWith(TRACKING_EVENT_PREFIX);
+
+  if (isTrackingEvent) {
+    return (
+      <div className="flex items-start gap-3 px-1 py-1">
+        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-soft-2 bg-card text-muted-foreground">
+          <ArrowLeftRight className="size-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+            <span className="font-medium text-muted-foreground">
+              {item.actor?.name ?? "النظام"}
+            </span>
+            <span className="text-[11px] text-muted-foreground/70">
+              {formatArabicDateTime(item.created_at)}
+            </span>
+          </div>
+          <div
+            className="mt-0.5 text-xs leading-relaxed break-words [&_p]:m-0 [&_strong]:font-medium [&_strong]:text-foreground"
+            dangerouslySetInnerHTML={{
+              __html: sanitizeHtml(item.body, {
+                allowedTags: ["p","a","br","span","strong","em","b","i"],
+                allowedAttributes: { "*": ["title","class"], a: ["href","target","rel"] },
+                allowedClasses: { "*": ["text-cyan","text-muted-foreground","font-medium"] },
+              }),
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Card>
       <CardContent className="p-4">
@@ -138,7 +175,8 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
                 dangerouslySetInnerHTML={{
                   __html: sanitizeHtml(item.body, {
                     allowedTags: ["p","a","br","div","span","ul","ol","li","strong","em","b","i","h1","h2","h3","h4","h5","h6","blockquote","code","pre","hr","img"],
-                    allowedAttributes: { "*": ["title"], a: ["href","target","rel"], img: ["src","alt"] },
+                    allowedAttributes: { "*": ["title","class"], a: ["href","target","rel"], img: ["src","alt"] },
+                    allowedClasses: { "*": ["text-cyan","text-muted-foreground","font-medium"] },
                   }),
                 }}
               />
