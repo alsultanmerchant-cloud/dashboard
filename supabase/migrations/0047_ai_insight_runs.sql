@@ -28,17 +28,17 @@ create policy "ai_insight_runs_select_org"
 on public.ai_insight_runs
 for select
 to authenticated
-using (organization_id = public.current_org_id());
+using (public.has_org_access(organization_id));
 
 create policy "ai_insight_runs_insert_org"
 on public.ai_insight_runs
 for insert
 to authenticated
-with check (organization_id = public.current_org_id());
+with check (public.has_org_access(organization_id));
 
 create policy "ai_insight_runs_update_org"
 on public.ai_insight_runs
 for update
 to authenticated
-using (organization_id = public.current_org_id())
-with check (organization_id = public.current_org_id());
+using (public.has_org_access(organization_id))
+with check (public.has_org_access(organization_id));
