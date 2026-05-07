@@ -20,6 +20,7 @@ import { GanttChart } from "lucide-react";
 import { TaskBoard, type BoardTask } from "./task-board";
 import { BulkReassignDialog } from "./bulk-reassign-dialog";
 import { listEmployees } from "@/lib/data/employees";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { listServiceCategories } from "@/lib/data/service-categories";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
@@ -38,14 +39,28 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks, waGroups, renewalCycles, allEmployees, allCategories] = await Promise.all([
+  const [summary, tasks, waGroups, renewalCycles, allEmployees, allCategories, followersRes] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     listTasks(session.orgId, { projectId: project.id }),
     listProjectWhatsAppGroups(session.orgId, project.id),
     listProjectRenewalCycles(session.orgId, project.id),
     listEmployees(session.orgId),
     listServiceCategories(session.orgId),
+    supabaseAdmin
+      .from("project_followers")
+      .select("employee:employee_profiles ( id, full_name, avatar_url, job_title )")
+      .eq("organization_id", session.orgId)
+      .eq("project_id", project.id),
   ]);
+  type FollowerRow = {
+    employee:
+      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }
+      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }[]
+      | null;
+  };
+  const projectFollowers = ((followersRes.data ?? []) as FollowerRow[])
+    .map((r) => (Array.isArray(r.employee) ? r.employee[0] : r.employee))
+    .filter((e): e is NonNullable<typeof e> => e !== null);
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
   const canManageRenewal =
     session.isOwner || session.permissions.has("renewal.manage");
@@ -329,6 +344,42 @@ export default async function ProjectDetailPage({
                 );
               })}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <SectionTitle
+        title={`متابعون (${projectFollowers.length})`}
+        description="المُورَّدون من Odoo (`mail.followers`) — يستلمون التنبيهات على المشروع."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          {projectFollowers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">لا يوجد متابعون.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {projectFollowers.map((e) => (
+                <div
+                  key={e.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 px-2 py-1 text-xs text-foreground"
+                  title={e.job_title ?? e.full_name}
+                >
+                  {e.avatar_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={e.avatar_url}
+                      alt={e.full_name}
+                      className="size-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
+                      {e.full_name.slice(0, 1)}
+                    </span>
+                  )}
+                  <span>{e.full_name}</span>
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>

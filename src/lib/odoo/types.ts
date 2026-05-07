@@ -64,6 +64,10 @@ export interface OdooProject {
   favorite_user_ids?: OdooMany2many;
   last_update_status?: string | false;
   last_update_color?: number | false;
+  // ks_gantt_view_project — Sky Light fills these on every project even
+  // when the standard date_start/date are blank (only 8/75 in live Odoo).
+  ks_project_start?: OdooDatetime;
+  ks_project_end?: OdooDatetime;
   // rwasem_project_category_enhancements
   site_address?: string | false;
   site_address_display?: string | false;

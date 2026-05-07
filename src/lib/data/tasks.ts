@@ -157,28 +157,52 @@ export async function getTask(orgId: string, id: string) {
 }
 
 export async function listTaskComments(orgId: string, taskId: string) {
+  // Comments come from two sources:
+  //   1. Local users (author_user_id = auth.users.id) — resolve via employee_profiles.
+  //   2. Odoo chatter (author_user_id is null, external_author_name/avatar set
+  //      because the original author is a res.partner with no auth.users row).
+  // The migration 0046 made author_user_id nullable for exactly this case.
   const { data, error } = await supabaseAdmin
     .from("task_comments")
-    .select("id, body, is_internal, created_at, author_user_id")
+    .select(
+      "id, body, is_internal, kind, created_at, author_user_id, external_author_name, external_author_avatar_url",
+    )
     .eq("organization_id", orgId)
     .eq("task_id", taskId)
     .order("created_at", { ascending: true });
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
-  const authorIds = Array.from(new Set(data.map((c) => c.author_user_id)));
-  const { data: emps } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("user_id, full_name, avatar_url")
-    .eq("organization_id", orgId)
-    .in("user_id", authorIds);
+  const authorIds = Array.from(
+    new Set(
+      data
+        .map((c) => c.author_user_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  );
   const map = new Map<string, { full_name: string; avatar_url: string | null }>();
-  for (const e of emps ?? []) {
-    if (e.user_id) map.set(e.user_id, { full_name: e.full_name, avatar_url: e.avatar_url });
+  if (authorIds.length > 0) {
+    const { data: emps } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("user_id, full_name, avatar_url")
+      .eq("organization_id", orgId)
+      .in("user_id", authorIds);
+    for (const e of emps ?? []) {
+      if (e.user_id)
+        map.set(e.user_id, {
+          full_name: e.full_name,
+          avatar_url: e.avatar_url,
+        });
+    }
   }
-  return data.map((c) => ({
-    ...c,
-    author_name: map.get(c.author_user_id)?.full_name ?? "موظف",
-    author_avatar: map.get(c.author_user_id)?.avatar_url ?? null,
-  }));
+  return data.map((c) => {
+    const local = c.author_user_id ? map.get(c.author_user_id) : null;
+    return {
+      ...c,
+      author_name:
+        local?.full_name ?? c.external_author_name ?? "موظف",
+      author_avatar:
+        local?.avatar_url ?? c.external_author_avatar_url ?? null,
+    };
+  });
 }

@@ -306,6 +306,41 @@ export default async function TaskDetailPage({
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
+  // Odoo's user_ids m2m maps every collaborator on a task. Our 4-role panel
+  // only shows one employee per role, so the remaining assignees were
+  // invisible. Build a deduped, role-agnostic "all assignees" list so every
+  // user originally on the task shows up.
+  const allAssignees = (() => {
+    const seen = new Set<string>();
+    const out: {
+      id: string;
+      full_name: string;
+      job_title: string | null;
+      avatar_url: string | null;
+      role_types: TaskRoleType[];
+    }[] = [];
+    for (const ta of task.task_assignees ?? []) {
+      const e = Array.isArray(ta.employee) ? ta.employee[0] : ta.employee;
+      if (!e) continue;
+      if (seen.has(e.id)) {
+        const existing = out.find((x) => x.id === e.id)!;
+        if (!existing.role_types.includes(ta.role_type as TaskRoleType)) {
+          existing.role_types.push(ta.role_type as TaskRoleType);
+        }
+        continue;
+      }
+      seen.add(e.id);
+      out.push({
+        id: e.id,
+        full_name: e.full_name,
+        job_title: e.job_title ?? null,
+        avatar_url: e.avatar_url ?? null,
+        role_types: [ta.role_type as TaskRoleType],
+      });
+    }
+    return out;
+  })();
+
   const employeeOptions = employees
     .filter((e) => e.employment_status === "active")
     .map((e) => {
@@ -541,9 +576,47 @@ export default async function TaskDetailPage({
         title="فريق المهمة"
         description="عيِّن المتخصص والمدير والمنفذ ومدير الحساب — كل خانة تحدِّد من يُحرِّك المهمة في مرحلتها."
       />
-      <div className="mb-6">
+      <div className="mb-4">
         <TaskRolePanel taskId={task.id} slots={roleSlots} employees={employeeOptions} />
       </div>
+
+      {allAssignees.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-muted-foreground">
+                كل المشاركين في المهمة ({allAssignees.length})
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                المُورَّدون من Odoo (`user_ids`) — الكل ضمن دور المنفذ افتراضيًا
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {allAssignees.map((a) => (
+                <div
+                  key={a.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 px-2 py-1 text-xs text-foreground"
+                  title={a.job_title ?? a.full_name}
+                >
+                  {a.avatar_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={a.avatar_url}
+                      alt={a.full_name}
+                      className="size-5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
+                      {a.full_name.slice(0, 1)}
+                    </span>
+                  )}
+                  <span>{a.full_name}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <SectionTitle
         title="متابعون"

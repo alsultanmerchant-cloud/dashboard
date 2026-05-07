@@ -315,6 +315,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "total_progress",
       "document_count",
       "has_active_category",
+      // Sky Light fills these in on every project; date_start/date are mostly blank.
+      "ks_project_start",
+      "ks_project_end",
     ],
     { limit: 1000 },
   );
@@ -353,8 +356,19 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       client_id: clientUuid,
       project_manager_employee_id: projectManagerUuid,
       account_manager_employee_id: accountManagerUuid,
-      start_date: nullable(p.date_start),
-      end_date: nullable(p.date),
+      // Date fields: Sky Light uses ks_project_start/end (Ksolves Gantt
+      // addon) as their primary contract dates. date_start/date are
+      // filled on only 8/75 active projects. Prefer the ks_* values when
+      // present, fall back to the standard fields. ks_* are datetimes —
+      // slice to YYYY-MM-DD for our `date` column.
+      start_date:
+        (typeof p.ks_project_start === "string" && p.ks_project_start
+          ? p.ks_project_start.slice(0, 10)
+          : null) ?? nullable(p.date_start),
+      end_date:
+        (typeof p.ks_project_end === "string" && p.ks_project_end
+          ? p.ks_project_end.slice(0, 10)
+          : null) ?? nullable(p.date),
       description: nullable(p.description),
       status: "active",
       priority: "medium",

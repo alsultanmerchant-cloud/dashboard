@@ -1704,6 +1704,65 @@ export type Database = {
           },
         ]
       }
+      project_followers: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          employee_id: string
+          external_id: string | null
+          external_source: string | null
+          organization_id: string
+          project_id: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          employee_id: string
+          external_id?: string | null
+          external_source?: string | null
+          organization_id: string
+          project_id: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          employee_id?: string
+          external_id?: string | null
+          external_source?: string | null
+          organization_id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_followers_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_followers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_followers_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_followers_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_members: {
         Row: {
           created_at: string
