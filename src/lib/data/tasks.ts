@@ -7,19 +7,41 @@ export type TaskFilters = {
   priority?: string[];
   projectId?: string;
   overdue?: boolean;
+  // True → only tasks with planned_date == today.
+  dueToday?: boolean;
+  // True → only tasks where progress_slip_percent > 5 (behind schedule).
+  behindSchedule?: boolean;
+  // True → only tasks with delay_days > 3 (critical SLA breach).
+  criticalDelay?: boolean;
   assignedToEmployeeId?: string;
   search?: string;
 };
 
 export async function listTasks(orgId: string, filters: TaskFilters = {}) {
+  const search = filters.search?.trim();
+  let matchingProjectIds: string[] = [];
+  if (search) {
+    const escaped = search.replace(/[%,()]/g, " ").trim();
+    if (escaped) {
+      const { data: projectMatches, error: projectErr } = await supabaseAdmin
+        .from("projects")
+        .select("id")
+        .eq("organization_id", orgId)
+        .or(`name.ilike.%${escaped}%,store_name.ilike.%${escaped}%`)
+        .limit(30);
+      if (projectErr) throw projectErr;
+      matchingProjectIds = (projectMatches ?? []).map((row) => row.id as string);
+    }
+  }
+
   let q = supabaseAdmin
     .from("tasks")
     .select(`
       id, title, status, stage, stage_entered_at, planned_date,
       progress_percent, expected_progress_percent, progress_slip_percent,
-      allocated_time_minutes, delay_days,
+      allocated_time_minutes, delay_days, task_code,
       priority, due_date, completed_at, created_at, project_id,
-      project:projects ( id, name, client:clients ( name ) ),
+      project:projects ( id, name, project_code, client:clients ( name ) ),
       service:services ( id, name, slug ),
       task_assignees ( role_type, employee:employee_profiles ( id, full_name, avatar_url ) )
     `)
@@ -32,10 +54,49 @@ export async function listTasks(orgId: string, filters: TaskFilters = {}) {
   if (filters.priority?.length) q = q.in("priority", filters.priority);
   if (filters.projectId) q = q.eq("project_id", filters.projectId);
   if (filters.overdue) {
-    const today = new Date().toISOString().slice(0, 10);
-    q = q.neq("stage", "done").lt("planned_date", today);
+    q = q.eq("is_overdue", true);
   }
-  if (filters.search) q = q.ilike("title", `%${filters.search}%`);
+  if (filters.dueToday) {
+    const today = new Date().toISOString().slice(0, 10);
+    q = q.neq("stage", "done").eq("planned_date", today);
+  }
+  if (filters.behindSchedule) {
+    q = q.neq("stage", "done").gt("progress_slip_percent", 5);
+  }
+  if (filters.criticalDelay) {
+    q = q.neq("stage", "done").gt("delay_days", 3);
+  }
+  if (search) {
+    const escaped = search.replace(/[%,()]/g, " ").trim();
+    // FTS over tasks.search_tsv (title + description, arabic config).
+    // Run as a separate query so we can OR its IDs with the project-name
+    // match below — PostgREST `.or()` can't safely embed a tsquery string.
+    let ftsTaskIds: string[] = [];
+    if (escaped) {
+      const { data: ftsRows, error: ftsErr } = await supabaseAdmin
+        .from("tasks")
+        .select("id")
+        .eq("organization_id", orgId)
+        .textSearch("search_tsv", escaped, { config: "arabic", type: "websearch" })
+        .limit(500);
+      if (ftsErr) throw ftsErr;
+      ftsTaskIds = (ftsRows ?? []).map((r) => r.id as string);
+    }
+    const idClauses: string[] = [];
+    if (ftsTaskIds.length) idClauses.push(`id.in.(${ftsTaskIds.join(",")})`);
+    if (matchingProjectIds.length) {
+      idClauses.push(`project_id.in.(${matchingProjectIds.join(",")})`);
+    }
+    if (idClauses.length === 0) {
+      // Nothing matched — short-circuit. Filter on a guaranteed-empty id set.
+      q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+    } else if (idClauses.length === 1) {
+      const [field, rest] = idClauses[0].split(".in.");
+      q = q.in(field, rest.slice(1, -1).split(","));
+    } else {
+      q = q.or(idClauses.join(","));
+    }
+  }
 
   const { data, error } = await q;
   if (error) throw error;
@@ -50,6 +111,33 @@ export async function listTasks(orgId: string, filters: TaskFilters = {}) {
     );
   }
   return result;
+}
+
+export async function listTaskSearchSuggestions(orgId: string, query: string) {
+  const search = query.trim();
+  if (!search) return [];
+
+  const escaped = search.replace(/[%,()]/g, " ").trim();
+  if (!escaped) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("projects")
+    .select("id, name, store_name, client:clients(name)")
+    .eq("organization_id", orgId)
+    .or(`name.ilike.%${escaped}%,store_name.ilike.%${escaped}%`)
+    .order("name", { ascending: true })
+    .limit(8);
+  if (error) throw error;
+
+  return (data ?? []).map((row) => {
+    const client = Array.isArray(row.client) ? row.client[0] : row.client;
+    return {
+      id: row.id as string,
+      projectName: row.name as string,
+      storeName: (row.store_name as string | null) ?? null,
+      clientName: client?.name ?? null,
+    };
+  });
 }
 
 export async function getTask(orgId: string, id: string) {

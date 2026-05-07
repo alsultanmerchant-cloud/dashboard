@@ -8,12 +8,37 @@ import { ProjectsList } from "./projects-list";
 
 const PAGE_SIZE = 25;
 
-export default async function ProjectsPage() {
+function toEnabled(value: string | string[] | undefined) {
+  return value === "1" || value === "true";
+}
+
+function toStr(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
   const session = await requirePagePermission("projects.view");
   const { rows: projects, total, totals } = await listProjectsPaged({
     organizationId: session.orgId,
     page: 1,
     pageSize: PAGE_SIZE,
+    search: typeof sp.q === "string" ? sp.q : "",
+    onlyWithCategories: toEnabled(sp.onlyWithCategories),
+    onlyFavorites: toEnabled(sp.onlyFavorites),
+    onlyWithManager: toEnabled(sp.onlyWithManager),
+    onlyMine: toEnabled(sp.onlyMine),
+    onlyUnassigned: toEnabled(sp.onlyUnassigned),
+    archived: toEnabled(sp.archived),
+    startDateFrom: toStr(sp.startDateFrom),
+    startDateTo: toStr(sp.startDateTo),
+    endDateFrom: toStr(sp.endDateFrom),
+    endDateTo: toStr(sp.endDateTo),
+    currentEmployeeId: session.employeeId,
   });
 
   const avgTasksPerProject = totals.projects
@@ -71,6 +96,20 @@ export default async function ProjectsPage() {
         />
       ) : (
         <ProjectsList
+          key={JSON.stringify({
+            q: typeof sp.q === "string" ? sp.q : "",
+            onlyWithCategories: toEnabled(sp.onlyWithCategories),
+            onlyFavorites: toEnabled(sp.onlyFavorites),
+            onlyWithManager: toEnabled(sp.onlyWithManager),
+            onlyMine: toEnabled(sp.onlyMine),
+            onlyUnassigned: toEnabled(sp.onlyUnassigned),
+            archived: toEnabled(sp.archived),
+            startDateFrom: toStr(sp.startDateFrom),
+            startDateTo: toStr(sp.startDateTo),
+            endDateFrom: toStr(sp.endDateFrom),
+            endDateTo: toStr(sp.endDateTo),
+            groupBy: toStr(sp.groupBy),
+          })}
           initial={projects}
           initialTotal={total}
           pageSize={PAGE_SIZE}

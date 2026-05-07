@@ -64,6 +64,17 @@ export interface OdooProject {
   favorite_user_ids?: OdooMany2many;
   last_update_status?: string | false;
   last_update_color?: number | false;
+  // rwasem_project_category_enhancements
+  site_address?: string | false;
+  site_address_display?: string | false;
+  site_latitude?: number | false;
+  site_longitude?: number | false;
+  financial_info?: string | false;
+  has_active_category?: boolean;
+  // rwasem_project_task_progress
+  // (already declared above as total_progress)
+  // rwasem_document_management_project
+  document_count?: number;
 }
 
 export interface OdooProjectTag {
@@ -102,6 +113,24 @@ export interface OdooTask {
   progress_slip?: number;
   // Custom category from aptuem_project_default_task — the service category.
   category_id?: OdooMany2one;
+  // rwasem_project_category_enhancements / project_customization
+  date_assign?: OdooDate;
+  date_start?: OdooDate;
+  duration_days?: number;
+  // eg_task_stage_duration
+  current_stage_duration?: string | false;
+  working_days_open?: number;
+  working_days_close?: number;
+  duration_tracking?: Record<string, number> | false;
+  // project_customization
+  actual_done_date?: OdooDatetime;
+  delay_days?: number;
+  is_overdue?: boolean;
+  design_count?: number;
+  // rwasem_document_management_project
+  document_count?: number;
+  // Odoo core
+  email_cc?: string | false;
 }
 
 // Map Odoo stage names → dashboard task_stage enum.

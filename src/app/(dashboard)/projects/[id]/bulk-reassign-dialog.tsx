@@ -1,0 +1,234 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { Loader2, Users } from "lucide-react";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
+  DialogTitle, DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { bulkReassignAction } from "./_bulk_actions";
+
+type EmployeeOption = { id: string; full_name: string; user_id: string | null; job_title: string | null };
+type CategoryOption = { id: string; name: string };
+
+const SELECT_CLASS =
+  "h-9 rounded-md border bg-background px-2 text-sm w-full";
+
+const ROLE_LABELS: Record<string, string> = {
+  specialist: "متخصص",
+  manager: "مدير",
+  agent: "منفذ",
+  account_manager: "مدير حساب",
+};
+
+export function BulkReassignDialog({
+  projectId,
+  categories,
+  employees,
+}: {
+  projectId: string;
+  categories: CategoryOption[];
+  employees: EmployeeOption[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [target, setTarget] = useState<"assignees" | "followers">("assignees");
+  const [role, setRole] = useState<"specialist" | "manager" | "agent" | "account_manager">("agent");
+  const [mode, setMode] = useState<"add" | "replace" | "clear">("add");
+  const [categoryIds, setCategoryIds] = useState<Set<string>>(new Set());
+  const [actorIds, setActorIds] = useState<Set<string>>(new Set());
+
+  const toggleCat = (id: string) =>
+    setCategoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleActor = (id: string) =>
+    setActorIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const onSubmit = () =>
+    start(async () => {
+      // For followers, the action expects auth user_ids; map employee → user_id.
+      const ids =
+        target === "followers"
+          ? Array.from(actorIds)
+              .map((eid) => employees.find((e) => e.id === eid)?.user_id)
+              .filter((u): u is string => !!u)
+          : Array.from(actorIds);
+
+      const res = await bulkReassignAction({
+        projectId,
+        categoryIds: Array.from(categoryIds),
+        target,
+        role: target === "assignees" ? role : undefined,
+        mode,
+        actorIds: ids,
+      });
+      if ("error" in res) return toast.error(res.error);
+      toast.success(
+        `أُحدِّثت ${res.tasks_affected} مهمة (${res.rows_changed} تعديل)`,
+      );
+      setOpen(false);
+      setActorIds(new Set());
+      setCategoryIds(new Set());
+      router.refresh();
+    });
+
+  const allowSubmit =
+    !pending &&
+    (mode === "clear" || actorIds.size > 0) &&
+    (target === "followers" || role);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Users className="ml-1 size-3.5" />
+          تعديل جماعي
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>تعديل جماعي للمكلَّفين/المتابعين</DialogTitle>
+          <DialogDescription>
+            يطبَّق التعديل على كل مهام المشروع، أو على مهام التصنيفات المحددة فقط.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">الهدف</label>
+              <select
+                value={target}
+                onChange={(e) => setTarget(e.target.value as typeof target)}
+                disabled={pending}
+                className={SELECT_CLASS}
+              >
+                <option value="assignees">المكلَّفون</option>
+                <option value="followers">المتابعون</option>
+              </select>
+            </div>
+            {target === "assignees" && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">الدور</label>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as typeof role)}
+                  disabled={pending}
+                  className={SELECT_CLASS}
+                >
+                  {Object.entries(ROLE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">الإجراء</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+                disabled={pending}
+                className={SELECT_CLASS}
+              >
+                <option value="add">إضافة</option>
+                <option value="replace">استبدال (مسح ثم إضافة)</option>
+                <option value="clear">مسح فقط</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              تصنيفات الخدمات (اختياري — اتركها فارغة لتطبيق على كل المهام)
+            </label>
+            <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-md border bg-muted/20 p-2">
+              {categories.length === 0 ? (
+                <span className="text-xs text-muted-foreground">لا توجد تصنيفات</span>
+              ) : (
+                categories.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggleCat(c.id)}
+                    className={
+                      "rounded-full border px-2 py-0.5 text-xs transition-colors " +
+                      (categoryIds.has(c.id)
+                        ? "border-cyan/60 bg-cyan/15 text-cyan"
+                        : "border-border bg-background hover:bg-muted/40")
+                    }
+                  >
+                    {c.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          {mode !== "clear" && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                {target === "followers" ? "المتابعون" : "الموظفون"}
+              </label>
+              <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-md border bg-muted/20 p-2 sm:grid-cols-2">
+                {employees.map((e) => {
+                  const disabled = target === "followers" && !e.user_id;
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => toggleActor(e.id)}
+                      className={
+                        "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-start text-xs transition-colors " +
+                        (actorIds.has(e.id)
+                          ? "border-cyan/60 bg-cyan/15"
+                          : "border-border bg-background hover:bg-muted/40") +
+                        (disabled ? " opacity-40 cursor-not-allowed" : "")
+                      }
+                      title={disabled ? "هذا الموظف بدون حساب مستخدم" : ""}
+                    >
+                      <span className="truncate">
+                        <span className="font-medium">{e.full_name}</span>
+                        {e.job_title && (
+                          <span className="ms-1 text-[10px] text-muted-foreground">
+                            · {e.job_title}
+                          </span>
+                        )}
+                      </span>
+                      {actorIds.has(e.id) && <span className="text-cyan">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            إلغاء
+          </Button>
+          <Button onClick={onSubmit} disabled={!allowSubmit}>
+            {pending && <Loader2 className="ml-1 size-3.5 animate-spin" />}
+            تنفيذ
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

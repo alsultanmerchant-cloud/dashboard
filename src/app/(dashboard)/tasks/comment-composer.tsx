@@ -465,7 +465,7 @@ export function CommentComposer({
         style={{ height: composerHeight ? composerHeight + 24 : 280 }}
       />
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
-        <div className="w-full max-w-4xl">
+        <div className="mx-auto w-full max-w-6xl">
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-background via-background/85 to-transparent" />
           <div className="pointer-events-auto relative">{composerCard}</div>
         </div>

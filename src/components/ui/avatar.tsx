@@ -1,38 +1,90 @@
 "use client"
 
 import * as React from "react"
-import { Avatar as AvatarPrimitive } from "@base-ui/react/avatar"
 
 import { cn } from "@/lib/utils"
+
+type AvatarStatus = "idle" | "loaded" | "error"
+
+const AvatarStatusContext = React.createContext<{
+  status: AvatarStatus
+  setStatus: React.Dispatch<React.SetStateAction<AvatarStatus>>
+} | null>(null)
 
 function Avatar({
   className,
   size = "default",
   ...props
-}: AvatarPrimitive.Root.Props & {
+}: React.ComponentProps<"span"> & {
   size?: "default" | "sm" | "lg"
 }) {
+  const [status, setStatus] = React.useState<AvatarStatus>("idle")
+
   return (
-    <AvatarPrimitive.Root
+    <AvatarStatusContext.Provider value={{ status, setStatus }}>
+      <span
       data-slot="avatar"
       data-size={size}
       className={cn(
-        "group/avatar relative flex size-8 shrink-0 rounded-full select-none after:absolute after:inset-0 after:rounded-full after:border after:border-border after:mix-blend-darken data-[size=lg]:size-10 data-[size=sm]:size-6 dark:after:mix-blend-lighten",
+        "group/avatar relative inline-flex size-8 shrink-0 overflow-hidden rounded-full select-none after:absolute after:inset-0 after:rounded-full after:border after:border-border after:mix-blend-darken data-[size=lg]:size-10 data-[size=sm]:size-6 dark:after:mix-blend-lighten",
         className
       )}
       {...props}
-    />
+      />
+    </AvatarStatusContext.Provider>
   )
 }
 
-function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
+function AvatarImage({
+  className,
+  onLoad,
+  onError,
+  src,
+  alt = "",
+  ...props
+}: React.ComponentProps<"img">) {
+  const context = React.useContext(AvatarStatusContext)
+  const imageRef = React.useRef<HTMLImageElement | null>(null)
+
+  React.useEffect(() => {
+    if (!context) return
+    if (!src) {
+      context.setStatus("error")
+      return
+    }
+
+    const img = imageRef.current
+    if (img?.complete) {
+      context.setStatus(img.naturalWidth > 0 ? "loaded" : "error")
+      return
+    }
+
+    context.setStatus("idle")
+  }, [context, src])
+
   return (
-    <AvatarPrimitive.Image
+    // We intentionally use a plain img here because this primitive needs
+    // immediate, hydration-safe load/error state for tiny user avatars.
+    // next/image adds optimization overhead without meaningful benefit.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      ref={imageRef}
       data-slot="avatar-image"
       className={cn(
-        "aspect-square size-full rounded-full object-cover",
+        "absolute inset-0 aspect-square size-full rounded-full object-cover transition-opacity",
+        context?.status === "loaded" ? "opacity-100" : "opacity-0",
         className
       )}
+      src={src}
+      alt={alt}
+      onLoad={(event) => {
+        context?.setStatus("loaded")
+        onLoad?.(event)
+      }}
+      onError={(event) => {
+        context?.setStatus("error")
+        onError?.(event)
+      }}
       {...props}
     />
   )
@@ -41,12 +93,15 @@ function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
 function AvatarFallback({
   className,
   ...props
-}: AvatarPrimitive.Fallback.Props) {
+}: React.ComponentProps<"span">) {
+  const context = React.useContext(AvatarStatusContext)
+
   return (
-    <AvatarPrimitive.Fallback
+    <span
       data-slot="avatar-fallback"
       className={cn(
-        "flex size-full items-center justify-center rounded-full bg-muted text-sm text-muted-foreground group-data-[size=sm]/avatar:text-xs",
+        "absolute inset-0 flex size-full items-center justify-center rounded-full bg-muted text-sm text-muted-foreground group-data-[size=sm]/avatar:text-xs",
+        context?.status === "loaded" && "opacity-0",
         className
       )}
       {...props}

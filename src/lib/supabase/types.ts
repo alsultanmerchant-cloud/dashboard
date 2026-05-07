@@ -179,12 +179,13 @@ export type Database = {
       }
       clients: {
         Row: {
+          address: string | null
           company_website: string | null
           contact_name: string | null
           created_at: string
           created_by: string | null
           email: string | null
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
           id: string
           name: string
@@ -196,12 +197,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          address?: string | null
           company_website?: string | null
           contact_name?: string | null
           created_at?: string
           created_by?: string | null
           email?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           id?: string
           name: string
@@ -213,12 +215,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          address?: string | null
           company_website?: string | null
           contact_name?: string | null
           created_at?: string
           created_by?: string | null
           email?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           id?: string
           name?: string
@@ -332,7 +335,9 @@ export type Database = {
       contracts: {
         Row: {
           account_manager_id: string | null
+          account_manager_name: string | null
           client_id: string
+          contract_status_label: string | null
           contract_type_id: string | null
           created_at: string
           duration_months: number | null
@@ -343,6 +348,7 @@ export type Database = {
           notes: string | null
           organization_id: string
           package_id: string | null
+          package_name: string | null
           paid_value: number
           project_id: string | null
           start_date: string
@@ -354,7 +360,9 @@ export type Database = {
         }
         Insert: {
           account_manager_id?: string | null
+          account_manager_name?: string | null
           client_id: string
+          contract_status_label?: string | null
           contract_type_id?: string | null
           created_at?: string
           duration_months?: number | null
@@ -365,6 +373,7 @@ export type Database = {
           notes?: string | null
           organization_id: string
           package_id?: string | null
+          package_name?: string | null
           paid_value?: number
           project_id?: string | null
           start_date: string
@@ -376,7 +385,9 @@ export type Database = {
         }
         Update: {
           account_manager_id?: string | null
+          account_manager_name?: string | null
           client_id?: string
+          contract_status_label?: string | null
           contract_type_id?: string | null
           created_at?: string
           duration_months?: number | null
@@ -387,6 +398,7 @@ export type Database = {
           notes?: string | null
           organization_id?: string
           package_id?: string | null
+          package_name?: string | null
           paid_value?: number
           project_id?: string | null
           start_date?: string
@@ -431,6 +443,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "packages"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contracts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
           },
           {
             foreignKeyName: "contracts_project_id_fkey"
@@ -573,7 +592,7 @@ export type Database = {
           department_id: string | null
           email: string | null
           employment_status: string
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
           full_name: string
           id: string
@@ -591,7 +610,7 @@ export type Database = {
           department_id?: string | null
           email?: string | null
           employment_status?: string
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           full_name: string
           id?: string
@@ -609,7 +628,7 @@ export type Database = {
           department_id?: string | null
           email?: string | null
           employment_status?: string
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           full_name?: string
           id?: string
@@ -749,6 +768,27 @@ export type Database = {
             referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "escalations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "escalations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "escalations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
         ]
       }
       exceptions: {
@@ -811,6 +851,91 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exceptions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "exceptions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "exceptions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          category: Database["public"]["Enums"]["expense_category"]
+          created_at: string
+          created_by: string | null
+          description: string | null
+          expense_date: string
+          id: string
+          organization_id: string
+          project_id: string | null
+          updated_at: string
+          vendor: string | null
+        }
+        Insert: {
+          amount: number
+          category: Database["public"]["Enums"]["expense_category"]
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          expense_date: string
+          id?: string
+          organization_id: string
+          project_id?: string | null
+          updated_at?: string
+          vendor?: string | null
+        }
+        Update: {
+          amount?: number
+          category?: Database["public"]["Enums"]["expense_category"]
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          expense_date?: string
+          id?: string
+          organization_id?: string
+          project_id?: string | null
+          updated_at?: string
+          vendor?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "expenses_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
@@ -885,6 +1010,13 @@ export type Database = {
             foreignKeyName: "governance_violations_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "governance_violations_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },
@@ -900,6 +1032,65 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      holidays: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          holiday_date: string
+          id: string
+          name: string
+          organization_id: string
+          recurring: boolean
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          holiday_date: string
+          id?: string
+          name: string
+          organization_id: string
+          recurring?: boolean
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          holiday_date?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          recurring?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "holidays_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -954,6 +1145,157 @@ export type Database = {
           },
           {
             foreignKeyName: "installments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          assigned_to_employee_id: string | null
+          contact_name: string | null
+          converted_client_id: string | null
+          created_at: string
+          created_by: string | null
+          email: string | null
+          estimated_value: number
+          id: string
+          name: string
+          next_step_at: string | null
+          notes: string | null
+          organization_id: string
+          phone: string | null
+          source: string | null
+          status: Database["public"]["Enums"]["lead_status"]
+          updated_at: string
+        }
+        Insert: {
+          assigned_to_employee_id?: string | null
+          contact_name?: string | null
+          converted_client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          estimated_value?: number
+          id?: string
+          name: string
+          next_step_at?: string | null
+          notes?: string | null
+          organization_id: string
+          phone?: string | null
+          source?: string | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          updated_at?: string
+        }
+        Update: {
+          assigned_to_employee_id?: string | null
+          contact_name?: string | null
+          converted_client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          estimated_value?: number
+          id?: string
+          name?: string
+          next_step_at?: string | null
+          notes?: string | null
+          organization_id?: string
+          phone?: string | null
+          source?: string | null
+          status?: Database["public"]["Enums"]["lead_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_assigned_to_employee_id_fkey"
+            columns: ["assigned_to_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_converted_client_id_fkey"
+            columns: ["converted_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leaves: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          days: number
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          employee_profile_id: string | null
+          employee_user_id: string
+          end_date: string
+          id: string
+          leave_type: Database["public"]["Enums"]["leave_type"]
+          organization_id: string
+          reason: string | null
+          start_date: string
+          status: Database["public"]["Enums"]["leave_status"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          days: number
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          employee_profile_id?: string | null
+          employee_user_id: string
+          end_date: string
+          id?: string
+          leave_type?: Database["public"]["Enums"]["leave_type"]
+          organization_id: string
+          reason?: string | null
+          start_date: string
+          status?: Database["public"]["Enums"]["leave_status"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          days?: number
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          employee_profile_id?: string | null
+          employee_user_id?: string
+          end_date?: string
+          id?: string
+          leave_type?: Database["public"]["Enums"]["leave_type"]
+          organization_id?: string
+          reason?: string | null
+          start_date?: string
+          status?: Database["public"]["Enums"]["leave_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leaves_employee_profile_id_fkey"
+            columns: ["employee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leaves_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -1090,6 +1432,32 @@ export type Database = {
           },
         ]
       }
+      org_project_counters: {
+        Row: {
+          last_seq: number
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          last_seq?: number
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          last_seq?: number
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_project_counters_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -1199,6 +1567,143 @@ export type Database = {
         }
         Relationships: []
       }
+      project_attachments: {
+        Row: {
+          created_at: string
+          external_id: string | null
+          external_source: string | null
+          filename: string
+          id: string
+          mimetype: string | null
+          organization_id: string
+          project_id: string
+          size_bytes: number | null
+          source_url: string | null
+          storage_path: string | null
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          filename: string
+          id?: string
+          mimetype?: string | null
+          organization_id: string
+          project_id: string
+          size_bytes?: number | null
+          source_url?: string | null
+          storage_path?: string | null
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          filename?: string
+          id?: string
+          mimetype?: string | null
+          organization_id?: string
+          project_id?: string
+          size_bytes?: number | null
+          source_url?: string | null
+          storage_path?: string | null
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_attachments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_attachments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_attachments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_comments: {
+        Row: {
+          author_user_id: string | null
+          body: string
+          created_at: string
+          external_author_avatar_url: string | null
+          external_author_name: string | null
+          external_id: string | null
+          external_source: string | null
+          id: string
+          is_internal: boolean
+          kind: string
+          organization_id: string
+          project_id: string
+          updated_at: string
+        }
+        Insert: {
+          author_user_id?: string | null
+          body: string
+          created_at?: string
+          external_author_avatar_url?: string | null
+          external_author_name?: string | null
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          is_internal?: boolean
+          kind?: string
+          organization_id: string
+          project_id: string
+          updated_at?: string
+        }
+        Update: {
+          author_user_id?: string | null
+          body?: string
+          created_at?: string
+          external_author_avatar_url?: string | null
+          external_author_name?: string | null
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          is_internal?: boolean
+          kind?: string
+          organization_id?: string
+          project_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_comments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_comments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_comments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_members: {
         Row: {
           created_at: string
@@ -1238,6 +1743,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_members_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
           },
           {
             foreignKeyName: "project_members_project_id_fkey"
@@ -1301,6 +1813,13 @@ export type Database = {
             foreignKeyName: "project_services_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_services_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },
@@ -1313,68 +1832,222 @@ export type Database = {
           },
         ]
       }
+      project_tag_assignments: {
+        Row: {
+          created_at: string
+          organization_id: string
+          project_id: string
+          tag_id: string
+        }
+        Insert: {
+          created_at?: string
+          organization_id: string
+          project_id: string
+          tag_id: string
+        }
+        Update: {
+          created_at?: string
+          organization_id?: string
+          project_id?: string
+          tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_tag_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_tag_assignments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_tag_assignments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_tag_assignments_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "project_tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_tags: {
+        Row: {
+          color: number
+          created_at: string
+          external_id: string | null
+          external_source: string | null
+          id: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          color?: number
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          color?: number
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_tags_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           account_manager_employee_id: string | null
           client_id: string
+          color: number
           created_at: string
           created_by: string | null
           cycle_length_months: number | null
           description: string | null
+          document_count: number
           end_date: string | null
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
+          financial_info: string | null
+          gantt_prefs: Json
+          has_active_category: boolean
           held_at: string | null
           hold_reason: string | null
           id: string
+          is_favorite: boolean
+          last_update_color: number | null
+          last_update_status: string | null
+          media_specialist_id: string | null
           name: string
           next_renewal_date: string | null
           organization_id: string
           priority: string
+          project_code: string | null
+          project_manager_employee_id: string | null
+          seo_specialist_id: string | null
+          site_address: string | null
+          site_address_display: string | null
+          site_latitude: number | null
+          site_longitude: number | null
+          social_specialist_id: string | null
           start_date: string | null
           status: string
+          store_name: string | null
+          target: string | null
+          task_seq: number
+          total_progress: number
           updated_at: string
         }
         Insert: {
           account_manager_employee_id?: string | null
           client_id: string
+          color?: number
           created_at?: string
           created_by?: string | null
           cycle_length_months?: number | null
           description?: string | null
+          document_count?: number
           end_date?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
+          financial_info?: string | null
+          gantt_prefs?: Json
+          has_active_category?: boolean
           held_at?: string | null
           hold_reason?: string | null
           id?: string
+          is_favorite?: boolean
+          last_update_color?: number | null
+          last_update_status?: string | null
+          media_specialist_id?: string | null
           name: string
           next_renewal_date?: string | null
           organization_id: string
           priority?: string
+          project_code?: string | null
+          project_manager_employee_id?: string | null
+          seo_specialist_id?: string | null
+          site_address?: string | null
+          site_address_display?: string | null
+          site_latitude?: number | null
+          site_longitude?: number | null
+          social_specialist_id?: string | null
           start_date?: string | null
           status?: string
+          store_name?: string | null
+          target?: string | null
+          task_seq?: number
+          total_progress?: number
           updated_at?: string
         }
         Update: {
           account_manager_employee_id?: string | null
           client_id?: string
+          color?: number
           created_at?: string
           created_by?: string | null
           cycle_length_months?: number | null
           description?: string | null
+          document_count?: number
           end_date?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
+          financial_info?: string | null
+          gantt_prefs?: Json
+          has_active_category?: boolean
           held_at?: string | null
           hold_reason?: string | null
           id?: string
+          is_favorite?: boolean
+          last_update_color?: number | null
+          last_update_status?: string | null
+          media_specialist_id?: string | null
           name?: string
           next_renewal_date?: string | null
           organization_id?: string
           priority?: string
+          project_code?: string | null
+          project_manager_employee_id?: string | null
+          seo_specialist_id?: string | null
+          site_address?: string | null
+          site_address_display?: string | null
+          site_latitude?: number | null
+          site_longitude?: number | null
+          social_specialist_id?: string | null
           start_date?: string | null
           status?: string
+          store_name?: string | null
+          target?: string | null
+          task_seq?: number
+          total_progress?: number
           updated_at?: string
         }
         Relationships: [
@@ -1393,10 +2066,38 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "projects_media_specialist_id_fkey"
+            columns: ["media_specialist_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "projects_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_project_manager_employee_id_fkey"
+            columns: ["project_manager_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_seo_specialist_id_fkey"
+            columns: ["seo_specialist_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_social_specialist_id_fkey"
+            columns: ["social_specialist_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1430,6 +2131,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "renewal_cycles_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
           {
             foreignKeyName: "renewal_cycles_project_id_fkey"
             columns: ["project_id"]
@@ -1597,6 +2305,13 @@ export type Database = {
             foreignKeyName: "sales_handover_forms_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "sales_handover_forms_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },
@@ -1607,7 +2322,7 @@ export type Database = {
           color: string | null
           created_at: string
           description: string | null
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
           id: string
           is_active: boolean
@@ -1623,7 +2338,7 @@ export type Database = {
           color?: string | null
           created_at?: string
           description?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           id?: string
           is_active?: boolean
@@ -1639,7 +2354,7 @@ export type Database = {
           color?: string | null
           created_at?: string
           description?: string | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           id?: string
           is_active?: boolean
@@ -1674,6 +2389,8 @@ export type Database = {
           default_department_id: string | null
           default_specialist_employee_id: string | null
           description: string | null
+          external_id: string | null
+          external_source: string | null
           id: string
           is_active: boolean
           name: string
@@ -1686,6 +2403,8 @@ export type Database = {
           default_department_id?: string | null
           default_specialist_employee_id?: string | null
           description?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_active?: boolean
           name: string
@@ -1698,6 +2417,8 @@ export type Database = {
           default_department_id?: string | null
           default_specialist_employee_id?: string | null
           description?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_active?: boolean
           name?: string
@@ -1817,6 +2538,187 @@ export type Database = {
           },
         ]
       }
+      task_activities: {
+        Row: {
+          activity_type: Database["public"]["Enums"]["task_activity_type"]
+          assignee_id: string | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          due_date: string | null
+          id: string
+          last_due_notification: string | null
+          organization_id: string
+          summary: string
+          task_id: string
+          updated_at: string
+        }
+        Insert: {
+          activity_type?: Database["public"]["Enums"]["task_activity_type"]
+          assignee_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_date?: string | null
+          id?: string
+          last_due_notification?: string | null
+          organization_id: string
+          summary: string
+          task_id: string
+          updated_at?: string
+        }
+        Update: {
+          activity_type?: Database["public"]["Enums"]["task_activity_type"]
+          assignee_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_date?: string | null
+          id?: string
+          last_due_notification?: string | null
+          organization_id?: string
+          summary?: string
+          task_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_activities_assignee_id_fkey"
+            columns: ["assignee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_activities_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      task_approval_history: {
+        Row: {
+          action: string
+          actor_employee_id: string | null
+          actor_user_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          stage: Database["public"]["Enums"]["task_stage"]
+          task_id: string
+        }
+        Insert: {
+          action: string
+          actor_employee_id?: string | null
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          stage: Database["public"]["Enums"]["task_stage"]
+          task_id: string
+        }
+        Update: {
+          action?: string
+          actor_employee_id?: string | null
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          stage?: Database["public"]["Enums"]["task_stage"]
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_approval_history_actor_employee_id_fkey"
+            columns: ["actor_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
       task_assignees: {
         Row: {
           assigned_by: string | null
@@ -1874,13 +2776,136 @@ export type Database = {
             referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      task_attachments: {
+        Row: {
+          created_at: string
+          external_id: string | null
+          external_source: string | null
+          filename: string
+          id: string
+          mimetype: string | null
+          organization_id: string
+          size_bytes: number | null
+          source_url: string | null
+          storage_path: string | null
+          task_comment_id: string | null
+          task_id: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          filename: string
+          id?: string
+          mimetype?: string | null
+          organization_id: string
+          size_bytes?: number | null
+          source_url?: string | null
+          storage_path?: string | null
+          task_comment_id?: string | null
+          task_id: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          external_id?: string | null
+          external_source?: string | null
+          filename?: string
+          id?: string
+          mimetype?: string | null
+          organization_id?: string
+          size_bytes?: number | null
+          source_url?: string | null
+          storage_path?: string | null
+          task_comment_id?: string | null
+          task_id?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_attachments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_comment_id_fkey"
+            columns: ["task_comment_id"]
+            isOneToOne: false
+            referencedRelation: "task_comments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
         ]
       }
       task_comments: {
         Row: {
-          author_user_id: string
+          author_user_id: string | null
           body: string
           created_at: string
+          external_author_avatar_url: string | null
+          external_author_name: string | null
+          external_id: string | null
+          external_source: string | null
           id: string
           is_internal: boolean
           kind: Database["public"]["Enums"]["task_comment_kind"]
@@ -1889,9 +2914,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          author_user_id: string
+          author_user_id?: string | null
           body: string
           created_at?: string
+          external_author_avatar_url?: string | null
+          external_author_name?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_internal?: boolean
           kind?: Database["public"]["Enums"]["task_comment_kind"]
@@ -1900,9 +2929,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          author_user_id?: string
+          author_user_id?: string | null
           body?: string
           created_at?: string
+          external_author_avatar_url?: string | null
+          external_author_name?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_internal?: boolean
           kind?: Database["public"]["Enums"]["task_comment_kind"]
@@ -1931,6 +2964,142 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      task_delegations: {
+        Row: {
+          assigned_executor_at: string | null
+          brief: string | null
+          closed_at: string | null
+          created_at: string
+          delegated_at: string
+          delegatee_employee_id: string
+          delegator_employee_id: string
+          executor_employee_id: string | null
+          id: string
+          organization_id: string
+          returned_at: string | null
+          status: string
+          task_id: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_executor_at?: string | null
+          brief?: string | null
+          closed_at?: string | null
+          created_at?: string
+          delegated_at?: string
+          delegatee_employee_id: string
+          delegator_employee_id: string
+          executor_employee_id?: string | null
+          id?: string
+          organization_id: string
+          returned_at?: string | null
+          status?: string
+          task_id: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_executor_at?: string | null
+          brief?: string | null
+          closed_at?: string | null
+          created_at?: string
+          delegated_at?: string
+          delegatee_employee_id?: string
+          delegator_employee_id?: string
+          executor_employee_id?: string | null
+          id?: string
+          organization_id?: string
+          returned_at?: string | null
+          status?: string
+          task_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_delegations_delegatee_employee_id_fkey"
+            columns: ["delegatee_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_delegator_employee_id_fkey"
+            columns: ["delegator_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_executor_employee_id_fkey"
+            columns: ["executor_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
           },
         ]
       }
@@ -1967,6 +3136,138 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
+      task_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dependency_type: Database["public"]["Enums"]["task_dependency_type"]
+          id: string
+          lag_days: number
+          organization_id: string
+          source_task_id: string
+          target_task_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dependency_type?: Database["public"]["Enums"]["task_dependency_type"]
+          id?: string
+          lag_days?: number
+          organization_id: string
+          source_task_id: string
+          target_task_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dependency_type?: Database["public"]["Enums"]["task_dependency_type"]
+          id?: string
+          lag_days?: number
+          organization_id?: string
+          source_task_id?: string
+          target_task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
           },
         ]
       }
@@ -2078,20 +3379,45 @@ export type Database = {
             referencedRelation: "tasks_with_metrics"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
         ]
       }
       task_template_items: {
         Row: {
+          code: string | null
           created_at: string
           default_department_id: string | null
           default_role_key: string | null
           description: string | null
           duration_days: number
+          external_id: string | null
+          external_source: string | null
           id: string
           offset_days_from_project_start: number
           order_index: number
           organization_id: string
           priority: string
+          requires_approval: boolean
           task_template_id: string
           title: string
           updated_at: string
@@ -2099,16 +3425,20 @@ export type Database = {
           week_index: number | null
         }
         Insert: {
+          code?: string | null
           created_at?: string
           default_department_id?: string | null
           default_role_key?: string | null
           description?: string | null
           duration_days?: number
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           offset_days_from_project_start?: number
           order_index?: number
           organization_id: string
           priority?: string
+          requires_approval?: boolean
           task_template_id: string
           title: string
           updated_at?: string
@@ -2116,16 +3446,20 @@ export type Database = {
           week_index?: number | null
         }
         Update: {
+          code?: string | null
           created_at?: string
           default_department_id?: string | null
           default_role_key?: string | null
           description?: string | null
           duration_days?: number
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           offset_days_from_project_start?: number
           order_index?: number
           organization_id?: string
           priority?: string
+          requires_approval?: boolean
           task_template_id?: string
           title?: string
           updated_at?: string
@@ -2156,6 +3490,74 @@ export type Database = {
           },
         ]
       }
+      task_template_links: {
+        Row: {
+          created_at: string
+          dependency_type: Database["public"]["Enums"]["task_dependency_type"]
+          external_id: string | null
+          external_source: string | null
+          id: string
+          lag_days: number
+          organization_id: string
+          source_item_id: string
+          target_item_id: string
+          task_template_id: string
+        }
+        Insert: {
+          created_at?: string
+          dependency_type?: Database["public"]["Enums"]["task_dependency_type"]
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          lag_days?: number
+          organization_id: string
+          source_item_id: string
+          target_item_id: string
+          task_template_id: string
+        }
+        Update: {
+          created_at?: string
+          dependency_type?: Database["public"]["Enums"]["task_dependency_type"]
+          external_id?: string | null
+          external_source?: string | null
+          id?: string
+          lag_days?: number
+          organization_id?: string
+          source_item_id?: string
+          target_item_id?: string
+          task_template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_template_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_template_links_source_item_id_fkey"
+            columns: ["source_item_id"]
+            isOneToOne: false
+            referencedRelation: "task_template_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_template_links_target_item_id_fkey"
+            columns: ["target_item_id"]
+            isOneToOne: false
+            referencedRelation: "task_template_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_template_links_task_template_id_fkey"
+            columns: ["task_template_id"]
+            isOneToOne: false
+            referencedRelation: "task_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_templates: {
         Row: {
           category_id: string | null
@@ -2166,6 +3568,8 @@ export type Database = {
           default_owner_position: string | null
           depends_on_template_id: string | null
           description: string | null
+          external_id: string | null
+          external_source: string | null
           id: string
           is_active: boolean
           name: string
@@ -2186,6 +3590,8 @@ export type Database = {
           default_owner_position?: string | null
           depends_on_template_id?: string | null
           description?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_active?: boolean
           name: string
@@ -2206,6 +3612,8 @@ export type Database = {
           default_owner_position?: string | null
           depends_on_template_id?: string | null
           description?: string | null
+          external_id?: string | null
+          external_source?: string | null
           id?: string
           is_active?: boolean
           name?: string
@@ -2248,95 +3656,260 @@ export type Database = {
           },
         ]
       }
+      task_timesheets: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          employee_id: string
+          hours: number
+          id: string
+          organization_id: string
+          spent_on: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          employee_id: string
+          hours: number
+          id?: string
+          organization_id: string
+          spent_on?: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          employee_id?: string
+          hours?: number
+          id?: string
+          organization_id?: string
+          spent_on?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_timesheets_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
+          actual_done_date: string | null
           allocated_time_minutes: number | null
+          approval_decided_at: string | null
+          approval_decided_by: string | null
+          approval_requested_at: string | null
+          approval_required: boolean
+          approval_status: Database["public"]["Enums"]["task_approval_status"]
+          code_seq: number | null
           completed_at: string | null
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          date_assign: string | null
+          date_end: string | null
           delay_days: number | null
           description: string | null
+          design_count: number
+          document_count: number
           due_date: string | null
+          duration_days: number | null
+          duration_tracking: Json | null
+          email_cc: string | null
           expected_progress_percent: number
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
+          first_approver_id: string | null
           hold_reason: string | null
           hold_since: string | null
           id: string
+          is_overdue: boolean
+          last_overdue_notification: string | null
           organization_id: string
+          parent_task_id: string | null
           planned_date: string | null
           priority: string
           progress_percent: number
           progress_slip_percent: number
           project_id: string
+          search_tsv: unknown
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          start_date: string | null
+          state: Database["public"]["Enums"]["task_state"]
           status: string
+          task_code: string | null
           title: string
           updated_at: string
+          working_days_close: number | null
+          working_days_open: number | null
         }
         Insert: {
+          actual_done_date?: string | null
           allocated_time_minutes?: number | null
+          approval_decided_at?: string | null
+          approval_decided_by?: string | null
+          approval_requested_at?: string | null
+          approval_required?: boolean
+          approval_status?: Database["public"]["Enums"]["task_approval_status"]
+          code_seq?: number | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          date_assign?: string | null
+          date_end?: string | null
           delay_days?: number | null
           description?: string | null
+          design_count?: number
+          document_count?: number
           due_date?: string | null
+          duration_days?: number | null
+          duration_tracking?: Json | null
+          email_cc?: string | null
           expected_progress_percent?: number
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
+          first_approver_id?: string | null
           hold_reason?: string | null
           hold_since?: string | null
           id?: string
+          is_overdue?: boolean
+          last_overdue_notification?: string | null
           organization_id: string
+          parent_task_id?: string | null
           planned_date?: string | null
           priority?: string
           progress_percent?: number
           progress_slip_percent?: number
           project_id: string
+          search_tsv?: unknown
           service_id?: string | null
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
+          start_date?: string | null
+          state?: Database["public"]["Enums"]["task_state"]
           status?: string
+          task_code?: string | null
           title: string
           updated_at?: string
+          working_days_close?: number | null
+          working_days_open?: number | null
         }
         Update: {
+          actual_done_date?: string | null
           allocated_time_minutes?: number | null
+          approval_decided_at?: string | null
+          approval_decided_by?: string | null
+          approval_requested_at?: string | null
+          approval_required?: boolean
+          approval_status?: Database["public"]["Enums"]["task_approval_status"]
+          code_seq?: number | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          date_assign?: string | null
+          date_end?: string | null
           delay_days?: number | null
           description?: string | null
+          design_count?: number
+          document_count?: number
           due_date?: string | null
+          duration_days?: number | null
+          duration_tracking?: Json | null
+          email_cc?: string | null
           expected_progress_percent?: number
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
+          first_approver_id?: string | null
           hold_reason?: string | null
           hold_since?: string | null
           id?: string
+          is_overdue?: boolean
+          last_overdue_notification?: string | null
           organization_id?: string
+          parent_task_id?: string | null
           planned_date?: string | null
           priority?: string
           progress_percent?: number
           progress_slip_percent?: number
           project_id?: string
+          search_tsv?: unknown
           service_id?: string | null
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
+          start_date?: string | null
+          state?: Database["public"]["Enums"]["task_state"]
           status?: string
+          task_code?: string | null
           title?: string
           updated_at?: string
+          working_days_close?: number | null
+          working_days_open?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tasks_approval_decided_by_fkey"
+            columns: ["approval_decided_by"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tasks_created_from_template_item_id_fkey"
             columns: ["created_from_template_item_id"]
@@ -2345,11 +3918,60 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "tasks_first_approver_id_fkey"
+            columns: ["first_approver_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tasks_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
           },
           {
             foreignKeyName: "tasks_project_id_fkey"
@@ -2402,6 +4024,47 @@ export type Database = {
             columns: ["role_id"]
             isOneToOne: false
             referencedRelation: "roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_task_filters: {
+        Row: {
+          created_at: string
+          definition: Json
+          id: string
+          is_default: boolean
+          name: string
+          organization_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          definition?: Json
+          id?: string
+          is_default?: boolean
+          name: string
+          organization_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          definition?: Json
+          id?: string
+          is_default?: boolean
+          name?: string
+          organization_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_task_filters_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -2551,10 +4214,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+          {
             foreignKeyName: "wa_outbox_template_id_fkey"
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "wa_message_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      weekly_digest_runs: {
+        Row: {
+          generated_at: string
+          id: string
+          iso_week: number
+          iso_year: number
+          organization_id: string
+          payload: Json
+          recipient_count: number
+        }
+        Insert: {
+          generated_at?: string
+          id?: string
+          iso_week: number
+          iso_year: number
+          organization_id: string
+          payload?: Json
+          recipient_count?: number
+        }
+        Update: {
+          generated_at?: string
+          id?: string
+          iso_week?: number
+          iso_year?: number
+          organization_id?: string
+          payload?: Json
+          recipient_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weekly_digest_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -2611,6 +4333,13 @@ export type Database = {
             foreignKeyName: "whatsapp_groups_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "whatsapp_groups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },
@@ -2618,6 +4347,15 @@ export type Database = {
       }
     }
     Views: {
+      project_task_counts: {
+        Row: {
+          closed_task_count: number | null
+          open_task_count: number | null
+          project_id: string | null
+          task_count: number | null
+        }
+        Relationships: []
+      }
       tasks_with_metrics: {
         Row: {
           allocated_time_minutes: number | null
@@ -2630,7 +4368,7 @@ export type Database = {
           description: string | null
           due_date: string | null
           expected_progress_percent: number | null
-          external_id: number | null
+          external_id: string | null
           external_source: string | null
           hold_reason: string | null
           hold_since: string | null
@@ -2660,7 +4398,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           hold_reason?: string | null
           hold_since?: string | null
@@ -2690,7 +4428,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           expected_progress_percent?: number | null
-          external_id?: number | null
+          external_id?: string | null
           external_source?: string | null
           hold_reason?: string | null
           hold_since?: string | null
@@ -2728,6 +4466,13 @@ export type Database = {
             foreignKeyName: "tasks_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
           },
@@ -2740,13 +4485,251 @@ export type Database = {
           },
         ]
       }
+      v_agent_productivity: {
+        Row: {
+          closed_count: number | null
+          median_minutes_per_stage_jsonb: Json | null
+          organization_id: string | null
+          user_id: string | null
+          week_start_date: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_assignees_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_on_time_delivery: {
+        Row: {
+          deadline_date: string | null
+          done_at: string | null
+          on_time_bool: boolean | null
+          organization_id: string | null
+          project_id: string | null
+          service_id: string | null
+          task_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_review_backlog: {
+        Row: {
+          business_minutes_in_stage: number | null
+          organization_id: string | null
+          project_id: string | null
+          service_id: string | null
+          stage: string | null
+          stage_entered_at: string | null
+          task_id: string | null
+        }
+        Insert: {
+          business_minutes_in_stage?: never
+          organization_id?: string | null
+          project_id?: string | null
+          service_id?: string | null
+          stage?: never
+          stage_entered_at?: string | null
+          task_id?: string | null
+        }
+        Update: {
+          business_minutes_in_stage?: never
+          organization_id?: string | null
+          project_id?: string | null
+          service_id?: string | null
+          stage?: never
+          stage_entered_at?: string | null
+          task_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_rework_per_task: {
+        Row: {
+          last_client_changes_entered_at: string | null
+          organization_id: string | null
+          project_id: string | null
+          rework_comment_count: number | null
+          task_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
+      _current_employee_in_org: { Args: { p_org: string }; Returns: string }
+      _next_project_code: { Args: { p_org: string }; Returns: string }
+      _next_task_code: {
+        Args: { p_project: string }
+        Returns: {
+          code: string
+          seq: number
+        }[]
+      }
+      add_working_days: {
+        Args: { p_anchor: string; p_days: number; p_org: string }
+        Returns: string
+      }
+      approve_task: {
+        Args: { p_notes?: string; p_task_id: string }
+        Returns: {
+          actual_done_date: string | null
+          allocated_time_minutes: number | null
+          approval_decided_at: string | null
+          approval_decided_by: string | null
+          approval_requested_at: string | null
+          approval_required: boolean
+          approval_status: Database["public"]["Enums"]["task_approval_status"]
+          code_seq: number | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          created_from_template_item_id: string | null
+          date_assign: string | null
+          date_end: string | null
+          delay_days: number | null
+          description: string | null
+          design_count: number
+          document_count: number
+          due_date: string | null
+          duration_days: number | null
+          duration_tracking: Json | null
+          email_cc: string | null
+          expected_progress_percent: number
+          external_id: string | null
+          external_source: string | null
+          first_approver_id: string | null
+          hold_reason: string | null
+          hold_since: string | null
+          id: string
+          is_overdue: boolean
+          last_overdue_notification: string | null
+          organization_id: string
+          parent_task_id: string | null
+          planned_date: string | null
+          priority: string
+          progress_percent: number
+          progress_slip_percent: number
+          project_id: string
+          search_tsv: unknown
+          service_id: string | null
+          sla_override_minutes: number | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at: string
+          start_date: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          status: string
+          task_code: string | null
+          title: string
+          updated_at: string
+          working_days_close: number | null
+          working_days_open: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       business_minutes_between: {
         Args: { p_end: string; p_start: string }
         Returns: number
       }
+      compute_task_delay_days: {
+        Args: {
+          p_completed: string
+          p_org: string
+          p_planned: string
+          p_stage: Database["public"]["Enums"]["task_stage"]
+        }
+        Returns: number
+      }
       current_user_organization_ids: { Args: never; Returns: string[] }
+      derive_task_state: {
+        Args: { p_stage: Database["public"]["Enums"]["task_stage"] }
+        Returns: Database["public"]["Enums"]["task_state"]
+      }
       enqueue_upload_deadline_reminders: {
         Args: never
         Returns: {
@@ -2758,9 +4741,214 @@ export type Database = {
       has_permission:
         | { Args: { perm_key: string }; Returns: boolean }
         | { Args: { perm_key: string; target_org: string }; Returns: boolean }
+      is_working_day: {
+        Args: { p_date: string; p_org: string }
+        Returns: boolean
+      }
+      notify_overdue_activities: { Args: never; Returns: number }
+      notify_overdue_tasks: { Args: never; Returns: number }
+      recalculate_project_task_dates: {
+        Args: { p_project: string }
+        Returns: number
+      }
+      recompute_task_delay_days: { Args: { p_org: string }; Returns: number }
       refresh_task_progress: { Args: never; Returns: number }
+      reject_task: {
+        Args: { p_notes?: string; p_task_id: string }
+        Returns: {
+          actual_done_date: string | null
+          allocated_time_minutes: number | null
+          approval_decided_at: string | null
+          approval_decided_by: string | null
+          approval_requested_at: string | null
+          approval_required: boolean
+          approval_status: Database["public"]["Enums"]["task_approval_status"]
+          code_seq: number | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          created_from_template_item_id: string | null
+          date_assign: string | null
+          date_end: string | null
+          delay_days: number | null
+          description: string | null
+          design_count: number
+          document_count: number
+          due_date: string | null
+          duration_days: number | null
+          duration_tracking: Json | null
+          email_cc: string | null
+          expected_progress_percent: number
+          external_id: string | null
+          external_source: string | null
+          first_approver_id: string | null
+          hold_reason: string | null
+          hold_since: string | null
+          id: string
+          is_overdue: boolean
+          last_overdue_notification: string | null
+          organization_id: string
+          parent_task_id: string | null
+          planned_date: string | null
+          priority: string
+          progress_percent: number
+          progress_slip_percent: number
+          project_id: string
+          search_tsv: unknown
+          service_id: string | null
+          sla_override_minutes: number | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at: string
+          start_date: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          status: string
+          task_code: string | null
+          title: string
+          updated_at: string
+          working_days_close: number | null
+          working_days_open: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      request_task_approval: {
+        Args: { p_approver_id?: string; p_notes?: string; p_task_id: string }
+        Returns: {
+          actual_done_date: string | null
+          allocated_time_minutes: number | null
+          approval_decided_at: string | null
+          approval_decided_by: string | null
+          approval_requested_at: string | null
+          approval_required: boolean
+          approval_status: Database["public"]["Enums"]["task_approval_status"]
+          code_seq: number | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          created_from_template_item_id: string | null
+          date_assign: string | null
+          date_end: string | null
+          delay_days: number | null
+          description: string | null
+          design_count: number
+          document_count: number
+          due_date: string | null
+          duration_days: number | null
+          duration_tracking: Json | null
+          email_cc: string | null
+          expected_progress_percent: number
+          external_id: string | null
+          external_source: string | null
+          first_approver_id: string | null
+          hold_reason: string | null
+          hold_since: string | null
+          id: string
+          is_overdue: boolean
+          last_overdue_notification: string | null
+          organization_id: string
+          parent_task_id: string | null
+          planned_date: string | null
+          priority: string
+          progress_percent: number
+          progress_slip_percent: number
+          project_id: string
+          search_tsv: unknown
+          service_id: string | null
+          sla_override_minutes: number | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at: string
+          start_date: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          status: string
+          task_code: string | null
+          title: string
+          updated_at: string
+          working_days_close: number | null
+          working_days_open: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reset_task_approval: {
+        Args: {
+          p_clear_requirement?: boolean
+          p_notes?: string
+          p_task_id: string
+        }
+        Returns: {
+          actual_done_date: string | null
+          allocated_time_minutes: number | null
+          approval_decided_at: string | null
+          approval_decided_by: string | null
+          approval_requested_at: string | null
+          approval_required: boolean
+          approval_status: Database["public"]["Enums"]["task_approval_status"]
+          code_seq: number | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          created_from_template_item_id: string | null
+          date_assign: string | null
+          date_end: string | null
+          delay_days: number | null
+          description: string | null
+          design_count: number
+          document_count: number
+          due_date: string | null
+          duration_days: number | null
+          duration_tracking: Json | null
+          email_cc: string | null
+          expected_progress_percent: number
+          external_id: string | null
+          external_source: string | null
+          first_approver_id: string | null
+          hold_reason: string | null
+          hold_since: string | null
+          id: string
+          is_overdue: boolean
+          last_overdue_notification: string | null
+          organization_id: string
+          parent_task_id: string | null
+          planned_date: string | null
+          priority: string
+          progress_percent: number
+          progress_slip_percent: number
+          project_id: string
+          search_tsv: unknown
+          service_id: string | null
+          sla_override_minutes: number | null
+          stage: Database["public"]["Enums"]["task_stage"]
+          stage_entered_at: string
+          start_date: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          status: string
+          task_code: string | null
+          title: string
+          updated_at: string
+          working_days_close: number | null
+          working_days_open: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       task_current_stage_seconds: {
         Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
+        Returns: number
+      }
+      working_days_between: {
+        Args: { p_from: string; p_org: string; p_to: string }
         Returns: number
       }
     }
@@ -2772,8 +4960,47 @@ export type Database = {
         | "supporting_section"
         | "quality_control"
         | "other"
+      expense_category:
+        | "salaries"
+        | "rent"
+        | "ads"
+        | "software"
+        | "equipment"
+        | "utilities"
+        | "marketing"
+        | "tax"
+        | "other"
+      lead_status:
+        | "new"
+        | "contacted"
+        | "qualified"
+        | "proposal"
+        | "won"
+        | "lost"
+      leave_status: "pending" | "approved" | "rejected" | "cancelled"
+      leave_type:
+        | "annual"
+        | "sick"
+        | "unpaid"
+        | "maternity"
+        | "paternity"
+        | "compassionate"
+        | "other"
+      task_activity_type: "call" | "email" | "review" | "upload" | "other"
+      task_approval_status: "not_required" | "pending" | "approved" | "rejected"
       task_comment_kind: "note" | "requirements" | "modification"
-      task_role_type: "specialist" | "manager" | "agent" | "account_manager"
+      task_dependency_type:
+        | "finish_to_start"
+        | "start_to_start"
+        | "finish_to_finish"
+        | "start_to_finish"
+      task_role_type:
+        | "specialist"
+        | "manager"
+        | "agent"
+        | "account_manager"
+        | "supporting_lead"
+        | "supporting_agent"
       task_stage:
         | "new"
         | "in_progress"
@@ -2783,6 +5010,11 @@ export type Database = {
         | "sent_to_client"
         | "client_changes"
         | "done"
+      task_state:
+        | "01_in_progress"
+        | "02_changes_requested"
+        | "03_approved"
+        | "04_waiting_normal"
       whatsapp_group_kind: "client" | "internal"
     }
     CompositeTypes: {
@@ -2919,8 +5151,45 @@ export const Constants = {
         "quality_control",
         "other",
       ],
+      expense_category: [
+        "salaries",
+        "rent",
+        "ads",
+        "software",
+        "equipment",
+        "utilities",
+        "marketing",
+        "tax",
+        "other",
+      ],
+      lead_status: ["new", "contacted", "qualified", "proposal", "won", "lost"],
+      leave_status: ["pending", "approved", "rejected", "cancelled"],
+      leave_type: [
+        "annual",
+        "sick",
+        "unpaid",
+        "maternity",
+        "paternity",
+        "compassionate",
+        "other",
+      ],
+      task_activity_type: ["call", "email", "review", "upload", "other"],
+      task_approval_status: ["not_required", "pending", "approved", "rejected"],
       task_comment_kind: ["note", "requirements", "modification"],
-      task_role_type: ["specialist", "manager", "agent", "account_manager"],
+      task_dependency_type: [
+        "finish_to_start",
+        "start_to_start",
+        "finish_to_finish",
+        "start_to_finish",
+      ],
+      task_role_type: [
+        "specialist",
+        "manager",
+        "agent",
+        "account_manager",
+        "supporting_lead",
+        "supporting_agent",
+      ],
       task_stage: [
         "new",
         "in_progress",
@@ -2931,8 +5200,13 @@ export const Constants = {
         "client_changes",
         "done",
       ],
+      task_state: [
+        "01_in_progress",
+        "02_changes_requested",
+        "03_approved",
+        "04_waiting_normal",
+      ],
       whatsapp_group_kind: ["client", "internal"],
     },
   },
 } as const
-

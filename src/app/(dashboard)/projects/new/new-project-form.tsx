@@ -374,6 +374,30 @@ export function NewProjectForm({
                 </select>
               </div>
 
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="proj_social">مسؤول السوشال</Label>
+                  <select id="proj_social" name="social_specialist_id" defaultValue="" className={SELECT_CLASS}>
+                    <option value="">—</option>
+                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="proj_media">مسؤول الميديا</Label>
+                  <select id="proj_media" name="media_specialist_id" defaultValue="" className={SELECT_CLASS}>
+                    <option value="">—</option>
+                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="proj_seo">مسؤول السيو</Label>
+                  <select id="proj_seo" name="seo_specialist_id" defaultValue="" className={SELECT_CLASS}>
+                    <option value="">—</option>
+                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
+                  </select>
+                </div>
+              </div>
+
               <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-cyan/15 bg-cyan-dim/40 px-3 py-2.5 text-xs text-foreground">
                 <input
                   type="checkbox"

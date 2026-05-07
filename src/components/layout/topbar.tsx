@@ -10,6 +10,8 @@ import { PAGE_TITLE_KEYS } from "@/lib/nav";
 import { CommandPaletteTrigger, QuickCreateTrigger } from "@/components/command-palette";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { intlLocale } from "@/lib/utils-format";
+import { SmartSearchBar } from "@/app/(dashboard)/tasks/smart-search-bar";
+import { ProjectsSearchBar } from "@/app/(dashboard)/projects/projects-search-bar";
 
 interface TopbarProps {
   unreadCount?: number;
@@ -42,6 +44,8 @@ export function Topbar({
   const title = pageMeta?.title ?? (meta ? tTitles(meta.titleKey) : tGroups("dashboard"));
   const subtitle = pageMeta?.subtitle ?? (meta?.subtitleKey ? tTitles(meta.subtitleKey) : tApp("title"));
   const showRefresh = pathname === "/dashboard" && !!onRefresh;
+  const showTaskSearch = pathname === "/tasks";
+  const showProjectSearch = pathname === "/projects";
   const formattedLastUpdated = lastUpdatedAt
     ? new Intl.DateTimeFormat(intlLocale(locale), {
         hour: "numeric",
@@ -112,7 +116,17 @@ export function Topbar({
 
           <div className="hidden md:flex items-center gap-2">
             <QuickCreateTrigger className={primaryCreateClass} />
-            <CommandPaletteTrigger className={searchTriggerClass} />
+            {showTaskSearch ? (
+              <div className="w-[min(42vw,34rem)]">
+                <SmartSearchBar variant="topbar" />
+              </div>
+            ) : showProjectSearch ? (
+              <div className="w-[min(42vw,34rem)]">
+                <ProjectsSearchBar />
+              </div>
+            ) : (
+              <CommandPaletteTrigger className={searchTriggerClass} />
+            )}
           </div>
           <div className="md:hidden">
             <QuickCreateTrigger className={primaryCreateClass} />

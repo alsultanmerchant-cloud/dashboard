@@ -25,6 +25,7 @@ type TaskFormData = {
   planned_date: string | null;
   due_date: string | null;
   completed_at: string | null;
+  actual_done_date: string | null;
   allocated_time_minutes: number | null;
   progress_percent: number | string | null;
   expected_progress_percent: number | string | null;
@@ -190,6 +191,13 @@ export function TaskFormCard({
                 </span>
               </Row>
             )}
+          {task.actual_done_date && (
+            <Row label="اليوم الفعلي للإنجاز">
+              <span className="text-cc-green tabular-nums" dir="ltr">
+                {task.actual_done_date}
+              </span>
+            </Row>
+          )}
           <Row label="تاريخ الإنجاز">
             {formattedCompletedAt ? (
               <span className="text-cc-green tabular-nums" dir="ltr">

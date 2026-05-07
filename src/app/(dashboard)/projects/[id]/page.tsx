@@ -15,7 +15,12 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatArabicShortDate } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
+import Link from "next/link";
+import { GanttChart } from "lucide-react";
 import { TaskBoard, type BoardTask } from "./task-board";
+import { BulkReassignDialog } from "./bulk-reassign-dialog";
+import { listEmployees } from "@/lib/data/employees";
+import { listServiceCategories } from "@/lib/data/service-categories";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
@@ -33,11 +38,13 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks, waGroups, renewalCycles] = await Promise.all([
+  const [summary, tasks, waGroups, renewalCycles, allEmployees, allCategories] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     listTasks(session.orgId, { projectId: project.id }),
     listProjectWhatsAppGroups(session.orgId, project.id),
     listProjectRenewalCycles(session.orgId, project.id),
+    listEmployees(session.orgId),
+    listServiceCategories(session.orgId),
   ]);
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
   const canManageRenewal =
@@ -45,6 +52,20 @@ export default async function ProjectDetailPage({
 
   const client = Array.isArray(project.client) ? project.client[0] : project.client;
   const am = Array.isArray(project.account_manager) ? project.account_manager[0] : project.account_manager;
+  const socialSp = Array.isArray((project as { social_specialist?: unknown }).social_specialist)
+    ? ((project as { social_specialist?: { id: string; full_name: string; job_title: string | null }[] }).social_specialist?.[0] ?? null)
+    : ((project as { social_specialist?: { id: string; full_name: string; job_title: string | null } | null }).social_specialist ?? null);
+  const mediaSp = Array.isArray((project as { media_specialist?: unknown }).media_specialist)
+    ? ((project as { media_specialist?: { id: string; full_name: string; job_title: string | null }[] }).media_specialist?.[0] ?? null)
+    : ((project as { media_specialist?: { id: string; full_name: string; job_title: string | null } | null }).media_specialist ?? null);
+  const seoSp = Array.isArray((project as { seo_specialist?: unknown }).seo_specialist)
+    ? ((project as { seo_specialist?: { id: string; full_name: string; job_title: string | null }[] }).seo_specialist?.[0] ?? null)
+    : ((project as { seo_specialist?: { id: string; full_name: string; job_title: string | null } | null }).seo_specialist ?? null);
+  const specialists: { label: string; emp: { full_name: string; job_title: string | null } | null }[] = [
+    { label: "السوشال", emp: socialSp },
+    { label: "الميديا", emp: mediaSp },
+    { label: "السيو", emp: seoSp },
+  ];
 
   const waRows: WhatsAppGroupRow[] = (["client", "internal"] as const).map(
     (kind) => {
@@ -68,7 +89,11 @@ export default async function ProjectDetailPage({
   return (
     <div>
       <PageHeader
-        title={project.name}
+        title={
+          ((project as { project_code?: string | null }).project_code
+            ? `${(project as { project_code?: string | null }).project_code} · `
+            : "") + project.name
+        }
         description={project.description ?? undefined}
         breadcrumbs={[{ label: "المشاريع", href: "/projects" }, { label: project.name }]}
         actions={
@@ -89,6 +114,29 @@ export default async function ProjectDetailPage({
             )}
             <PriorityBadge priority={project.priority} />
             <ProjectStatusBadge status={project.status} />
+            <Link
+              href={`/projects/${project.id}/gantt`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted/50 transition-colors"
+            >
+              <GanttChart className="size-3.5" />
+              مخطط جانت
+            </Link>
+            {session.permissions.has("tasks.manage") && (
+              <BulkReassignDialog
+                projectId={project.id}
+                categories={allCategories
+                  .filter((c) => c.is_active)
+                  .map((c) => ({ id: c.id, name: c.name_ar }))}
+                employees={allEmployees
+                  .filter((e) => e.employment_status === "active")
+                  .map((e) => ({
+                    id: e.id,
+                    full_name: e.full_name,
+                    user_id: e.user_id ?? null,
+                    job_title: e.job_title ?? null,
+                  }))}
+              />
+            )}
           </div>
         }
       />
@@ -206,6 +254,31 @@ export default async function ProjectDetailPage({
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="mb-8 grid gap-4 sm:grid-cols-3">
+        {specialists.map((s) => (
+          <Card key={s.label}>
+            <CardContent className="p-4 space-y-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <User className="size-4 text-cyan" /> مسؤول {s.label}
+              </h3>
+              {s.emp ? (
+                <div className="flex items-center gap-2.5">
+                  <Avatar size="sm">
+                    <AvatarFallback>{s.emp.full_name[0]}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{s.emp.full_name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{s.emp.job_title ?? ""}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">لم يُعيَّن بعد</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <SectionTitle title="الخدمات" />

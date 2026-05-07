@@ -106,8 +106,8 @@ export async function requirePagePermissionAny(perms: string[]): Promise<ServerS
  * operations PDF §9 + audit in this session). Used by `/` and the auth
  * callback so each role lands on the page they actually use.
  *
- * Owner / admin / head → /dashboard (CEO-style overview is built for them)
- * Account manager      → /am/<id>/dashboard (their book + monthly cycles)
+ * Temporary default    → /projects whenever the caller can view projects
+ * Account manager      → /am/<id>/dashboard when projects are unavailable
  * Specialist           → /uploads (upload-deadline queue per PDF §11)
  * Agent / team_lead    → /tasks (assigned-to-me list; agent queue page TBD)
  *
@@ -115,9 +115,7 @@ export async function requirePagePermissionAny(perms: string[]): Promise<ServerS
  * `requirePagePermission` because /dashboard requires only a session.
  */
 export function landingPathFor(session: ServerSession): string {
-  if (session.isOwner) return "/dashboard";
-  if (session.roleKeys.includes("admin")) return "/dashboard";
-  if (session.roleKeys.includes("manager")) return "/dashboard";
+  if (hasPermission(session, "projects.view")) return "/projects";
   if (session.roleKeys.includes("account_manager") && session.employeeId) {
     return `/am/${session.employeeId}/dashboard`;
   }

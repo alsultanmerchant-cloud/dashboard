@@ -13,7 +13,15 @@ import { getReportsOdooData } from "@/lib/odoo/live";
 import {
   getRenewalForecast90d, getLatestStoredDigest,
 } from "@/lib/data/reports";
+import {
+  getStageDwellAverages,
+  getSpecialistLoad,
+  getBehindScheduleBuckets,
+} from "@/lib/data/reports-extras";
 import { SummarizeWeekButton } from "./summarize-week-button";
+import { StageDwellChart } from "./stage-dwell-chart";
+import { SpecialistLoadChart } from "./specialist-load-chart";
+import { SlipHeatmapChart } from "./slip-heatmap-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +37,15 @@ export default async function ReportsPage() {
   // Reports KPIs come live from Odoo — single round-trip aggregator.
   // Renewals + weekly digest stay Supabase-native (those concepts don't
   // exist in Odoo).
-  const [reports, renewals, latestDigest] = await Promise.all([
-    getReportsOdooData(),
-    getRenewalForecast90d(session.orgId),
-    getLatestStoredDigest(session.orgId),
-  ]);
+  const [reports, renewals, latestDigest, stageDwell, specialistLoad, slipBuckets] =
+    await Promise.all([
+      getReportsOdooData(),
+      getRenewalForecast90d(session.orgId),
+      getLatestStoredDigest(session.orgId),
+      getStageDwellAverages(session.orgId),
+      getSpecialistLoad(session.orgId),
+      getBehindScheduleBuckets(session.orgId),
+    ]);
 
   const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
   const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
@@ -215,6 +227,51 @@ export default async function ReportsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Per-stage dwell time — Supabase-native, from task_stage_history. */}
+      <SectionTitle
+        title="متوسط البقاء في كل مرحلة"
+        description="بالأيام، محسوب من المقاطع المُغلقة في سجل المراحل"
+      />
+      {stageDwell.length === 0 ? (
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
+          لا بيانات بعد — يحتاج لمهام عبرت أكثر من مرحلة.
+        </p>
+      ) : (
+        <Card className="mb-8">
+          <CardContent className="p-4">
+            <StageDwellChart rows={stageDwell} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Specialist load — open tasks per agent + allocated hours. */}
+      <SectionTitle
+        title="حِمل المتخصصين الحالي"
+        description="عدد المهام المفتوحة لكل منفذ، مع مجموع الساعات المخصصة"
+      />
+      {specialistLoad.length === 0 ? (
+        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
+          لا توجد مهام مفتوحة مُسندة.
+        </p>
+      ) : (
+        <Card className="mb-8">
+          <CardContent className="p-4">
+            <SpecialistLoadChart rows={specialistLoad} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Behind-schedule heatmap — buckets by progress_slip_percent. */}
+      <SectionTitle
+        title="توزّع التأخّر الزمني"
+        description="المهام المفتوحة مصنّفة حسب نسبة الانحراف عن الجدول الزمني"
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <SlipHeatmapChart rows={slipBuckets} />
+        </CardContent>
+      </Card>
 
       {/* Renewal forecast (still Supabase-native) */}
       <SectionTitle

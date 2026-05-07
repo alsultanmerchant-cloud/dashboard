@@ -20,6 +20,19 @@ export interface ListProjectsPagedOpts {
   onlyWithCategories?: boolean;
   onlyFavorites?: boolean;
   onlyWithManager?: boolean;
+  /** "My Projects": current user is AM, PM, specialist, or member. */
+  onlyMine?: boolean;
+  /** No project_manager_employee_id AND no account_manager_employee_id. */
+  onlyUnassigned?: boolean;
+  /** Project on hold (held_at IS NOT NULL) or status='archived'. */
+  archived?: boolean;
+  /** ISO YYYY-MM-DD bounds. */
+  startDateFrom?: string;
+  startDateTo?: string;
+  endDateFrom?: string;
+  endDateTo?: string;
+  /** Employee id of the caller — required for onlyMine. */
+  currentEmployeeId?: string;
 }
 
 type ProjectRow = {
@@ -90,6 +103,46 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
 
   if (opts.onlyFavorites) q = q.eq("is_favorite", true);
   if (opts.onlyWithManager) q = q.not("project_manager_employee_id", "is", null);
+  if (opts.onlyUnassigned) {
+    q = q
+      .is("project_manager_employee_id", null)
+      .is("account_manager_employee_id", null);
+  }
+  if (opts.archived) {
+    // Sky Light flags HOLD via held_at (HOLD overlay) or status='archived'.
+    q = q.or("held_at.not.is.null,status.eq.archived");
+  } else {
+    // Default: hide archived from the main list (matches Odoo's "active=true"
+    // domain on the kanban).
+    q = q.neq("status", "archived");
+  }
+  if (opts.startDateFrom) q = q.gte("start_date", opts.startDateFrom);
+  if (opts.startDateTo) q = q.lte("start_date", opts.startDateTo);
+  if (opts.endDateFrom) q = q.gte("end_date", opts.endDateFrom);
+  if (opts.endDateTo) q = q.lte("end_date", opts.endDateTo);
+  if (opts.onlyMine && opts.currentEmployeeId) {
+    const me = opts.currentEmployeeId;
+    // Match if I'm AM, PM, any specialist, or in project_members.
+    const { data: memberRows } = await supabaseAdmin
+      .from("project_members")
+      .select("project_id")
+      .eq("organization_id", opts.organizationId)
+      .eq("employee_id", me);
+    const memberProjectIds = (memberRows ?? []).map(
+      (r) => r.project_id as string,
+    );
+    const orFilters = [
+      `account_manager_employee_id.eq.${me}`,
+      `project_manager_employee_id.eq.${me}`,
+      `social_specialist_id.eq.${me}`,
+      `media_specialist_id.eq.${me}`,
+      `seo_specialist_id.eq.${me}`,
+    ];
+    if (memberProjectIds.length > 0) {
+      orFilters.push(`id.in.(${memberProjectIds.join(",")})`);
+    }
+    q = q.or(orFilters.join(","));
+  }
   if (opts.onlyWithCategories) {
     // Sub-filter via project_services join. Postgrest doesn't support EXISTS
     // directly, so we resolve project_ids upfront and constrain the main query.
@@ -258,6 +311,9 @@ export async function getProject(orgId: string, id: string) {
       *,
       client:clients ( id, name, contact_name, phone, email ),
       account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name, job_title ),
+      social_specialist:employee_profiles!projects_social_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
+      media_specialist:employee_profiles!projects_media_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
+      seo_specialist:employee_profiles!projects_seo_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
       project_services ( id, status, service:services ( id, name, slug ) ),
       project_members ( id, role_label, employee:employee_profiles ( id, full_name, job_title, avatar_url ) )
     `)

@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
   // Logged in → redirect away from login
   if (user && pathname === "/login") {
     const dashUrl = request.nextUrl.clone();
-    dashUrl.pathname = "/dashboard";
+    dashUrl.pathname = "/";
     return NextResponse.redirect(dashUrl);
   }
 

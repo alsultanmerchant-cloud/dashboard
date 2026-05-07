@@ -4,13 +4,14 @@
 // upper-right view toggle. URL-encoded so deep links survive reload.
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { LayoutGrid, List, Calendar } from "lucide-react";
+import { LayoutGrid, List, Calendar, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const VIEWS = [
   { key: "kanban", label: "Kanban", icon: LayoutGrid },
   { key: "list", label: "قائمة", icon: List },
   { key: "calendar", label: "تقويم", icon: Calendar },
+  { key: "pivot", label: "محوري", icon: Table2 },
 ] as const;
 
 export function ViewSwitcher({ current }: { current: string }) {

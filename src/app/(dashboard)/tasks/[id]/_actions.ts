@@ -26,6 +26,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission, hasPermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { logAudit, logAiEvent, createNotification } from "@/lib/audit";
 
 const FollowerInputSchema = z.object({
@@ -321,6 +322,299 @@ export async function resumeTaskAction(input: {
     entityId: parsed.data.task_id,
     payload: {},
     importance: "normal",
+  });
+
+  revalidatePath(`/tasks/${parsed.data.task_id}`);
+  return { ok: true };
+}
+
+// =========================================================================
+// Approval gates (migration 0048).
+// Single-approver gate: when approval_required = true, forward stage moves
+// are blocked until approval_status = 'approved'.
+// =========================================================================
+
+const RequestApprovalSchema = z.object({
+  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  approver_employee_id: z.string().uuid().nullable().optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+const ApprovalDecisionSchema = z.object({
+  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+const ResetApprovalSchema = z.object({
+  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  clear_requirement: z.boolean().default(false),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+async function callTaskApprovalRpc(
+  fn: "request_task_approval" | "approve_task" | "reject_task" | "reset_task_approval",
+  args: Record<string, unknown>,
+): Promise<{ error: string | null }> {
+  // RPCs are SECURITY DEFINER but resolve auth.uid() — must call as the
+  // user (server client), not service role.
+  const supa = await createServerSupabaseClient();
+  const { error } = await supa.rpc(fn, args);
+  if (error) return { error: error.message };
+  return { error: null };
+}
+
+export async function requestTaskApprovalAction(input: {
+  taskId: string;
+  approverEmployeeId?: string | null;
+  notes?: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.view");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = RequestApprovalSchema.safeParse({
+    task_id: input.taskId,
+    approver_employee_id: input.approverEmployeeId ?? null,
+    notes: input.notes,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const task = await loadTaskOrError(parsed.data.task_id, session.orgId);
+  if (!task) return { error: "المهمة غير موجودة" };
+
+  const isCreator = task.created_by === session.userId;
+  const canManage =
+    isCreator ||
+    hasPermission(session, "tasks.manage") ||
+    hasPermission(session, "task.view_all");
+  if (!canManage) {
+    return { error: "لا تملك صلاحية طلب اعتماد على هذه المهمة" };
+  }
+
+  const { error } = await callTaskApprovalRpc("request_task_approval", {
+    p_task_id: parsed.data.task_id,
+    p_approver_id: parsed.data.approver_employee_id ?? null,
+    p_notes: parsed.data.notes ?? null,
+  });
+  if (error) return { error };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.approval_requested",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    metadata: { approver_employee_id: parsed.data.approver_employee_id ?? null },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "TASK_APPROVAL_REQUESTED",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    payload: { task_title: task.title },
+    importance: "normal",
+  });
+
+  if (parsed.data.approver_employee_id) {
+    const { data: approver } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id, user_id")
+      .eq("id", parsed.data.approver_employee_id)
+      .eq("organization_id", session.orgId)
+      .maybeSingle();
+    if (approver?.user_id) {
+      await createNotification({
+        organizationId: session.orgId,
+        recipientUserId: approver.user_id,
+        recipientEmployeeId: approver.id,
+        type: "TASK_APPROVAL",
+        title: `${session.fullName} طلب اعتمادًا على مهمة`,
+        body: task.title,
+        entityType: "task",
+        entityId: parsed.data.task_id,
+      });
+    }
+  }
+
+  revalidatePath(`/tasks/${parsed.data.task_id}`);
+  return { ok: true };
+}
+
+async function notifyCreatorOfDecision(
+  session: { orgId: string; userId: string; fullName: string },
+  task: { id: string; title: string; created_by: string | null },
+  decision: "approved" | "rejected",
+) {
+  if (!task.created_by) return;
+  const { data: creatorEmp } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, user_id")
+    .eq("user_id", task.created_by)
+    .eq("organization_id", session.orgId)
+    .maybeSingle();
+  await createNotification({
+    organizationId: session.orgId,
+    recipientUserId: task.created_by,
+    recipientEmployeeId: creatorEmp?.id ?? null,
+    type: "TASK_APPROVAL",
+    title:
+      decision === "approved"
+        ? `${session.fullName} اعتمد المهمة`
+        : `${session.fullName} رفض المهمة`,
+    body: task.title,
+    entityType: "task",
+    entityId: task.id,
+  });
+}
+
+export async function approveTaskAction(input: {
+  taskId: string;
+  notes?: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.view");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = ApprovalDecisionSchema.safeParse({
+    task_id: input.taskId,
+    notes: input.notes,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const task = await loadTaskOrError(parsed.data.task_id, session.orgId);
+  if (!task) return { error: "المهمة غير موجودة" };
+
+  const { error } = await callTaskApprovalRpc("approve_task", {
+    p_task_id: parsed.data.task_id,
+    p_notes: parsed.data.notes ?? null,
+  });
+  if (error) return { error };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.approved",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    metadata: { notes: parsed.data.notes ?? null },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "TASK_APPROVED",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    payload: { task_title: task.title },
+    importance: "high",
+  });
+  await notifyCreatorOfDecision(session, task, "approved");
+
+  revalidatePath(`/tasks/${parsed.data.task_id}`);
+  return { ok: true };
+}
+
+export async function rejectTaskAction(input: {
+  taskId: string;
+  notes?: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.view");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = ApprovalDecisionSchema.safeParse({
+    task_id: input.taskId,
+    notes: input.notes,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const task = await loadTaskOrError(parsed.data.task_id, session.orgId);
+  if (!task) return { error: "المهمة غير موجودة" };
+
+  const { error } = await callTaskApprovalRpc("reject_task", {
+    p_task_id: parsed.data.task_id,
+    p_notes: parsed.data.notes ?? null,
+  });
+  if (error) return { error };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.rejected",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    metadata: { notes: parsed.data.notes ?? null },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "TASK_REJECTED",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    payload: { task_title: task.title, notes: parsed.data.notes ?? null },
+    importance: "high",
+  });
+  await notifyCreatorOfDecision(session, task, "rejected");
+
+  revalidatePath(`/tasks/${parsed.data.task_id}`);
+  return { ok: true };
+}
+
+export async function resetTaskApprovalAction(input: {
+  taskId: string;
+  clearRequirement?: boolean;
+  notes?: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = ResetApprovalSchema.safeParse({
+    task_id: input.taskId,
+    clear_requirement: input.clearRequirement ?? false,
+    notes: input.notes,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const task = await loadTaskOrError(parsed.data.task_id, session.orgId);
+  if (!task) return { error: "المهمة غير موجودة" };
+
+  const { error } = await callTaskApprovalRpc("reset_task_approval", {
+    p_task_id: parsed.data.task_id,
+    p_clear_requirement: parsed.data.clear_requirement,
+    p_notes: parsed.data.notes ?? null,
+  });
+  if (error) return { error };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: parsed.data.clear_requirement
+      ? "task.approval_cleared"
+      : "task.approval_reset",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    metadata: {},
   });
 
   revalidatePath(`/tasks/${parsed.data.task_id}`);

@@ -39,6 +39,21 @@ export const ProjectCreateSchema = z.object({
     .optional()
     .nullable()
     .transform((v) => v || null),
+  social_specialist_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  media_specialist_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  seo_specialist_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
   service_ids: z.array(uuidLoose).default([]),
   generate_tasks: z.boolean().default(true),
   // Per-service overrides (T4 categories engine). Keyed by service_id.

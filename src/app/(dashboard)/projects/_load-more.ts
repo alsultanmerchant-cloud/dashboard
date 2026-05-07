@@ -8,6 +8,13 @@ export type ProjectFilters = {
   onlyWithCategories?: boolean;
   onlyFavorites?: boolean;
   onlyWithManager?: boolean;
+  onlyMine?: boolean;
+  onlyUnassigned?: boolean;
+  archived?: boolean;
+  startDateFrom?: string;
+  startDateTo?: string;
+  endDateFrom?: string;
+  endDateTo?: string;
 };
 
 export type LoadMoreResult = {
@@ -31,6 +38,14 @@ export async function loadMoreProjectsAction(
     onlyWithCategories: filters.onlyWithCategories,
     onlyFavorites: filters.onlyFavorites,
     onlyWithManager: filters.onlyWithManager,
+    onlyMine: filters.onlyMine,
+    onlyUnassigned: filters.onlyUnassigned,
+    archived: filters.archived,
+    startDateFrom: filters.startDateFrom,
+    startDateTo: filters.startDateTo,
+    endDateFrom: filters.endDateFrom,
+    endDateTo: filters.endDateTo,
+    currentEmployeeId: session.employeeId,
   });
   return {
     rows,

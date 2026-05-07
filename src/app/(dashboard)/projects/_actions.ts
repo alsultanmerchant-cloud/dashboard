@@ -53,6 +53,9 @@ export async function createProjectAction(
     start_date: formData.get("start_date"),
     end_date: formData.get("end_date"),
     account_manager_employee_id: formData.get("account_manager_employee_id"),
+    social_specialist_id: formData.get("social_specialist_id"),
+    media_specialist_id: formData.get("media_specialist_id"),
+    seo_specialist_id: formData.get("seo_specialist_id"),
     service_ids: serviceIds,
     generate_tasks: generateTasks,
     service_week_splits: serviceWeekSplits,
@@ -79,6 +82,9 @@ export async function createProjectAction(
       start_date: parsed.data.start_date,
       end_date: parsed.data.end_date,
       account_manager_employee_id: parsed.data.account_manager_employee_id,
+      social_specialist_id: parsed.data.social_specialist_id,
+      media_specialist_id: parsed.data.media_specialist_id,
+      seo_specialist_id: parsed.data.seo_specialist_id,
     })
     .select("id, name, start_date")
     .single();
@@ -177,6 +183,9 @@ export async function createProjectAction(
         }),
         projectStartDate: project.start_date ?? null,
         accountManagerEmployeeId: parsed.data.account_manager_employee_id,
+        socialSpecialistEmployeeId: parsed.data.social_specialist_id,
+        mediaSpecialistEmployeeId: parsed.data.media_specialist_id,
+        seoSpecialistEmployeeId: parsed.data.seo_specialist_id,
         createdByUserId: session.userId,
       });
       taskCount = result.count;

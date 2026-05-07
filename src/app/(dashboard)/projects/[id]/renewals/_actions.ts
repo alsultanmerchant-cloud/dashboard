@@ -53,6 +53,7 @@ export async function startRenewalCycleAction(
     .from("projects")
     .select(
       "id, organization_id, start_date, account_manager_employee_id, " +
+        "social_specialist_id, media_specialist_id, seo_specialist_id, " +
         "cycle_length_months, next_renewal_date",
     )
     .eq("id", parsed.data.project_id)
@@ -125,6 +126,9 @@ export async function startRenewalCycleAction(
       })),
       projectStartDate: startedAt,
       accountManagerEmployeeId: project.account_manager_employee_id,
+      socialSpecialistEmployeeId: (project as { social_specialist_id?: string | null }).social_specialist_id ?? null,
+      mediaSpecialistEmployeeId: (project as { media_specialist_id?: string | null }).media_specialist_id ?? null,
+      seoSpecialistEmployeeId: (project as { seo_specialist_id?: string | null }).seo_specialist_id ?? null,
       createdByUserId: session.userId,
     });
     taskCount = result.count;

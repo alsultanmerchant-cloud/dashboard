@@ -187,9 +187,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           onClick={collapseSidebar}
                           title={itemLabel}
                           className={cn(
-                            "group relative flex items-center gap-3 overflow-hidden rounded-xl px-2 py-2 text-[13px] transition-all duration-200",
+                            "group relative flex items-center gap-3 overflow-hidden rounded-xl px-2 py-2 text-[13px] font-semibold transition-all duration-200",
                             active
-                              ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.18)]"
+                              ? "bg-sidebar-primary text-sidebar-primary-foreground font-bold shadow-[0_4px_14px_rgba(0,0,0,0.18)]"
                               : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                           )}
                         >

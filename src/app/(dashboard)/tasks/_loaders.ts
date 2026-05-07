@@ -50,11 +50,13 @@ function toListRow(t: RawTask): ListTaskRow | null {
     allocated_time_minutes?: number | null;
     delay_days?: number | null;
     completed_at?: string | null;
+    task_code?: string | null;
   };
 
   return {
     id: t.id,
     title: t.title,
+    task_code: tx.task_code ?? null,
     stage: t.stage as TaskStage,
     stage_entered_at: t.stage_entered_at,
     planned_date: t.planned_date,

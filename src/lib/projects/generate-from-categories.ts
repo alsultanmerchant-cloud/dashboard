@@ -24,6 +24,11 @@ export async function generateTasksFromCategories(args: {
   }[];
   projectStartDate: string | null;
   accountManagerEmployeeId?: string | null;
+  // Project-level role slots (migration 0049). When set, they override the
+  // service-default specialist for matching service slugs.
+  socialSpecialistEmployeeId?: string | null;
+  mediaSpecialistEmployeeId?: string | null;
+  seoSpecialistEmployeeId?: string | null;
   createdByUserId?: string | null;
 }): Promise<{ count: number; error?: string }> {
   if (args.serviceSelections.length === 0) return { count: 0 };
@@ -66,12 +71,12 @@ export async function generateTasksFromCategories(args: {
   const generated = expandTemplates(expandInputs);
   if (generated.length === 0) return { count: 0 };
 
-  // Resolve specialists per-service (for the role_slot assignment), reusing
-  // the same logic as the existing handover engine.
+  // Resolve specialists per-service. Project-level slots (social / media /
+  // seo) win over service defaults when the service slug matches.
   const { data: services } = await supabaseAdmin
     .from("services")
     .select(
-      `id, default_specialist_employee_id,
+      `id, slug, default_specialist_employee_id,
        default_department:departments!services_default_department_id_fkey ( head_employee_id )`,
     )
     .eq("organization_id", args.organizationId)
@@ -79,7 +84,23 @@ export async function generateTasksFromCategories(args: {
   const specialistByServiceId = new Map<string, string>();
   for (const s of services ?? []) {
     const dept = Array.isArray(s.default_department) ? s.default_department[0] : s.default_department;
-    const specialist = s.default_specialist_employee_id ?? dept?.head_employee_id ?? null;
+    const slug = ((s as { slug?: string | null }).slug ?? "").toLowerCase();
+    let projectOverride: string | null = null;
+    if (
+      args.socialSpecialistEmployeeId &&
+      (slug.includes("social") || slug === "smm" || slug.includes("social-media"))
+    ) {
+      projectOverride = args.socialSpecialistEmployeeId;
+    } else if (
+      args.mediaSpecialistEmployeeId &&
+      (slug.includes("media-buying") || slug.includes("media_buying") || slug === "media")
+    ) {
+      projectOverride = args.mediaSpecialistEmployeeId;
+    } else if (args.seoSpecialistEmployeeId && slug.includes("seo")) {
+      projectOverride = args.seoSpecialistEmployeeId;
+    }
+    const specialist =
+      projectOverride ?? s.default_specialist_employee_id ?? dept?.head_employee_id ?? null;
     if (specialist) specialistByServiceId.set(s.id, specialist);
   }
 

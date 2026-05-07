@@ -30,22 +30,29 @@ const { data: org } = await supabaseAdmin
 if (!org) throw new Error(`org ${slug} not found`);
 const orgId = org.id as string;
 
-const { data: tasks } = await supabaseAdmin
-  .from("tasks")
-  .select("id, external_id")
-  .eq("organization_id", orgId)
-  .eq("external_source", "odoo");
 const map = new Map<number, string>();
-for (const t of tasks ?? []) {
-  if (t.external_id) {
-    const n = Number(t.external_id);
-    if (Number.isFinite(n)) map.set(n, t.id as string);
+const PAGE_SIZE = 1000;
+for (let off = 0; ; off += PAGE_SIZE) {
+  const { data: tasks, error } = await supabaseAdmin
+    .from("tasks")
+    .select("id, external_id")
+    .eq("organization_id", orgId)
+    .eq("external_source", "odoo")
+    .range(off, off + PAGE_SIZE - 1);
+  if (error) throw error;
+  if (!tasks || tasks.length === 0) break;
+  for (const t of tasks) {
+    if (t.external_id) {
+      const n = Number(t.external_id);
+      if (Number.isFinite(n)) map.set(n, t.id as string);
+    }
   }
+  if (tasks.length < PAGE_SIZE) break;
 }
 console.log(`[chatter] ${map.size} synced tasks to scan for chatter`);
 
 const ids = Array.from(map.keys());
-const CHUNK = 500;
+const CHUNK = 150;
 let importedComments = 0;
 let importedTracking = 0;
 
@@ -100,7 +107,7 @@ for (let i = 0; i < ids.length; i += CHUNK) {
       "id", "res_id", "body", "author_id", "date", "message_type",
       "subtype_id", "tracking_value_ids",
     ],
-    { limit: 5000, order: "date asc" },
+    { limit: 2000, order: "date asc" },
   );
   console.log(`[chatter] batch ${i / CHUNK + 1}: ${messages.length} messages`);
   if (messages.length === 0) continue;

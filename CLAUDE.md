@@ -26,7 +26,31 @@ The seeded organization slug is **`rawasm-demo`**. All UI assumes one org; the s
 Departments · Employees · Roles & Permissions · Services (Social Media · SEO · Media Buying) · Task Templates with default offsets · Audit logs · AI events foundation.
 
 ## Migrations
-Applied directly to the Supabase project via Management API. Source-of-truth files in `supabase/migrations/0001…0011`.
+Applied directly to the Supabase project via Management API. Source-of-truth files in `supabase/migrations/`. Pattern: apply via `mcp__supabase__apply_migration` first, then mirror identical SQL to `supabase/migrations/NNNN_<snake_name>.sql`. Idempotent (`if not exists`, `do $$ ... $$`, `or replace`). Triggers/RPCs use `security definer set search_path = public`. RLS read via `public.has_org_access(...)`, write via `public.has_permission(org, '<perm_key>')`.
+
+### Recent migrations (Sky Light parity)
+- **0048** Approval gates (enum `task_approval_status`, RPCs, `TaskApprovalPanel`)
+- **0049** Project specialist slots (social/media/seo on `projects`)
+- **0050** Human-readable codes (`projects.project_code` PRJ-007, `tasks.task_code` PRJ-007-014)
+- **0051** Task dependencies (FS/SS/FF/SF, cycle prevention, `recalculate_project_task_dates`, SVG Gantt at `/projects/[id]/gantt`)
+- **0052** Saved per-user filters + 3 hardcoded filters (Due Today / Behind Schedule / Critical Delay)
+- **0053** Daily overdue cron (`notify_overdue_tasks` 06:00 UTC)
+- **0054** 4-value `task_state` enum (derived from stage)
+- **0055** Saudi working calendar (`holidays`, `is_working_day`, `working_days_between`, `add_working_days`) — admin UI at `/settings/holidays`
+- **0056** Sub-tasks (`tasks.parent_task_id`) + `task_timesheets`
+- **0057** `tasks.delay_days` uses `working_days_between` via trigger
+- **0058** `tasks.is_overdue` trigger-maintained boolean (overnight refresh in 0053 cron)
+- **0059** `tasks.actual_done_date` (date) distinct from `completed_at` (timestamptz)
+- **0060** `task_activities` (mail.activity-style scheduled to-dos) + cron `notify_overdue_activities` 06:05 UTC
+- **0061** `tasks.search_tsv` tsvector (title + description, `arabic` config) + GIN index → `listTasks()` uses `websearch_to_tsquery`
+- **0062** `projects.gantt_prefs jsonb` — per-project Gantt rendering toggles
+
+## Key UI surfaces
+- `/tasks?view=<kanban|list|calendar|pivot>` — view-switcher; list view has cross-task bulk-ops toolbar (stage / priority / shift_deadline; per-task moves so DB transition guards fire)
+- `/tasks/[id]` — 7-tab form: سجل النشاط · الوصف · مهام فرعية · ربط المهام · السجل الزمني · أنشطة مجدولة · تاريخ المراحل. Header has smart-button stat pills (subtasks/links/hours/comments/activities) that scroll the matching tab into view.
+- `/projects/[id]/gantt` — SVG Gantt with two tabs: المخطط (chart) and الإعدادات (per-project toggles persisted to `projects.gantt_prefs`)
+- `/settings/holidays` — Saudi working calendar admin (writes auto-trigger `recompute_task_delay_days`)
+- `/reports` — Odoo-live KPIs + 3 Supabase-native recharts (stage dwell, specialist load, slip-bucket heatmap) + renewal forecast + weekly digest
 
 ## Odoo (Rwasem) integration
 The Skylight team runs on a customized Odoo 17 deployment (addons mirrored at `/Users/mahmoudmac/Documents/projects/skylight_addons-master`). The dashboard is the operator UI + AI layer on top of that system, not a replacement.

@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { Briefcase, ListTodo } from "lucide-react";
+import { Briefcase } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { TasksListView } from "./tasks-list-view";
+import { TasksCalendarView } from "./tasks-calendar-view";
+import { TasksPivotView } from "./tasks-pivot-view";
 import { ViewSwitcher } from "./view-switcher";
 import { loadTasksForGlobalView } from "./_loaders";
-import { SmartSearchBar } from "./smart-search-bar";
 
 const OPEN_STAGES = [
   "new",
@@ -18,7 +19,15 @@ const OPEN_STAGES = [
   "client_changes",
 ] as const;
 
-type FilterKey = "open" | "all" | "overdue" | "done" | "mine";
+type FilterKey =
+  | "open"
+  | "all"
+  | "overdue"
+  | "done"
+  | "mine"
+  | "due_today"
+  | "behind"
+  | "critical";
 
 export default async function TasksPage({
   searchParams,
@@ -37,8 +46,10 @@ export default async function TasksPage({
   const view = sp.view ?? "kanban";
   const filterKey = (sp.filter as FilterKey) ?? "open";
   const search = sp.q?.trim() || undefined;
-  const groupBy: "stage" | "project" =
-    sp.groupBy === "project" ? "project" : "stage";
+  const groupBy: "stage" | "project" | "priority" | "deadline" =
+    sp.groupBy === "project" || sp.groupBy === "priority" || sp.groupBy === "deadline"
+      ? sp.groupBy
+      : "stage";
 
   // In kanban view we always render all 8 stages, so the "open" stage filter
   // would just leave the "مكتملة" column permanently empty. Match Rwasem and
@@ -83,6 +94,9 @@ export default async function TasksPage({
   const tasks = await loadTasksForGlobalView(session.orgId, {
     stage: stageFilter,
     overdue: filterKey === "overdue",
+    dueToday: filterKey === "due_today",
+    behindSchedule: filterKey === "behind",
+    criticalDelay: filterKey === "critical",
     assignedToEmployeeId:
       filterKey === "mine" ? session.employeeId : undefined,
     projectId: resolvedProjectId,
@@ -127,13 +141,6 @@ export default async function TasksPage({
             معلومات المشروع
           </Link>
         )}
-        <SmartSearchBar
-          initialQuery={search ?? ""}
-          filterKey={filterKey}
-          view={view}
-          groupBy={groupBy}
-          totalCount={tasks.length}
-        />
         <ViewSwitcher current={view} />
       </div>
 
@@ -141,12 +148,8 @@ export default async function TasksPage({
       {view === "kanban" && (
         <TaskBoard tasks={boardTasks} groupBy={groupBy} />
       )}
-      {view === "calendar" && (
-        <div className="rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-          <ListTodo className="mx-auto mb-3 size-6" />
-          عرض التقويم قادم قريباً
-        </div>
-      )}
+      {view === "calendar" && <TasksCalendarView tasks={tasks} />}
+      {view === "pivot" && <TasksPivotView tasks={tasks} />}
     </div>
   );
 }

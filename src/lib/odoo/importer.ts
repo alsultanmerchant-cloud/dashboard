@@ -281,6 +281,9 @@ const ALLOWED_TARGETS = new Set([
 ]);
 
 async function importProjects(ctx: ImportContext): Promise<number> {
+  // Pull active projects (the kanban subset). Archived/deactivated projects
+  // are reconciled below by flipping their status to 'archived' so the
+  // dashboard list mirrors Odoo's "1-N / N" count.
   const projects = await ctx.odoo.searchRead<OdooProject>(
     "project.project",
     [["active", "=", true]],
@@ -303,6 +306,15 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "favorite_user_ids",
       "last_update_status",
       "last_update_color",
+      // gap-fill from migration 0070
+      "site_address",
+      "site_address_display",
+      "site_latitude",
+      "site_longitude",
+      "financial_info",
+      "total_progress",
+      "document_count",
+      "has_active_category",
     ],
     { limit: 1000 },
   );
@@ -352,6 +364,18 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       is_favorite: Boolean(p.is_favorite),
       last_update_status: nullable(p.last_update_status),
       last_update_color: typeof p.last_update_color === "number" ? p.last_update_color : null,
+      // 0070 fields
+      site_address: nullable(p.site_address),
+      site_address_display: nullable(p.site_address_display),
+      site_latitude: typeof p.site_latitude === "number" ? p.site_latitude : null,
+      site_longitude: typeof p.site_longitude === "number" ? p.site_longitude : null,
+      financial_info: nullable(p.financial_info),
+      total_progress: typeof p.total_progress === "number" ? p.total_progress : 0,
+      document_count: typeof p.document_count === "number" ? p.document_count : 0,
+      has_active_category: Boolean(p.has_active_category),
+      // Sky Light's Odoo prints project_code as "PRJ-" + lpad(odoo_id, 5, '0').
+      // We mirror the same format so screenshots line up between systems.
+      project_code: `PRJ-${String(p.id).padStart(5, "0")}`,
     };
     const { data, error } = await supabaseAdmin
       .from("projects")
@@ -376,6 +400,33 @@ async function importProjects(ctx: ImportContext): Promise<number> {
     await syncProjectMembers(ctx, data.id, memberUserIds);
 
     imported++;
+  }
+
+  // Archive any previously-imported project whose Odoo source has been
+  // deactivated since the last sync. This keeps Supabase counts aligned
+  // with Odoo's "active" kanban (Odoo flips active=false instead of deleting).
+  const liveActiveIds = new Set(projects.map((p) => String(p.id)));
+  const { data: priorRows } = await supabaseAdmin
+    .from("projects")
+    .select("id, external_id, status")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE);
+  const stale = (priorRows ?? []).filter(
+    (r) =>
+      r.external_id != null &&
+      !liveActiveIds.has(String(r.external_id)) &&
+      r.status !== "archived",
+  );
+  if (stale.length > 0) {
+    const { error: archErr } = await supabaseAdmin
+      .from("projects")
+      .update({ status: "archived" })
+      .in(
+        "id",
+        stale.map((r) => r.id as string),
+      );
+    if (archErr) console.warn(`archive stale projects: ${archErr.message}`);
+    else console.log(`[odoo-import] archived ${stale.length} stale projects`);
   }
 
   return imported;
@@ -550,6 +601,20 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     "expected_progress",
     "progress_slip",
     "category_id",
+    // 0069 gap-fill
+    "date_assign",
+    "date_start",
+    "duration_days",
+    "current_stage_duration",
+    "working_days_open",
+    "working_days_close",
+    "duration_tracking",
+    "actual_done_date",
+    "delay_days",
+    "is_overdue",
+    "design_count",
+    "document_count",
+    "email_cc",
   ];
   const PROJECTS_PER_BATCH = 10;
   const tasks: OdooTask[] = [];
@@ -603,6 +668,26 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       status: stage === "done" ? "done" : "in_progress",
       priority: t.priority === "1" ? "high" : "medium",
       completed_at: stage === "done" ? nullable(t.date_end) : null,
+      // 0069 fields. Note: actual_done_date is a `date` column in Supabase
+      // but Odoo gives a datetime — slice to YYYY-MM-DD.
+      date_assign: nullable(t.date_assign),
+      start_date: nullable(t.date_start),
+      duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
+      working_days_open: typeof t.working_days_open === "number" ? t.working_days_open : null,
+      working_days_close: typeof t.working_days_close === "number" ? t.working_days_close : null,
+      duration_tracking:
+        t.duration_tracking && typeof t.duration_tracking === "object"
+          ? t.duration_tracking
+          : null,
+      actual_done_date:
+        typeof t.actual_done_date === "string"
+          ? t.actual_done_date.slice(0, 10)
+          : null,
+      delay_days: typeof t.delay_days === "number" ? t.delay_days : null,
+      is_overdue: typeof t.is_overdue === "boolean" ? t.is_overdue : null,
+      design_count: typeof t.design_count === "number" ? t.design_count : 0,
+      document_count: typeof t.document_count === "number" ? t.document_count : 0,
+      email_cc: nullable(t.email_cc),
     };
     const { data: taskRow, error } = await supabaseAdmin
       .from("tasks")

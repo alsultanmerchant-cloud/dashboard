@@ -1,4 +1,5 @@
-import { Settings, Building2, User, Globe, Shield, Sparkles } from "lucide-react";
+import { Settings, Building2, User, Globe, Shield, Sparkles, CalendarOff, ChevronLeft } from "lucide-react";
+import Link from "next/link";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { listEmployees } from "@/lib/data/employees";
@@ -68,6 +69,27 @@ export default async function SettingsPage() {
       <Card className="mb-8">
         <CardContent className="p-5">
           <ProjectManagerPicker current={currentPM} employees={employeeOptions} />
+        </CardContent>
+      </Card>
+
+      <SectionTitle title="جدولة العمل" />
+      <Card className="mb-8">
+        <CardContent className="p-5">
+          <Link
+            href="/settings/holidays"
+            className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:bg-muted/40"
+          >
+            <span className="flex items-center gap-3">
+              <CalendarOff className="size-4 text-cyan" />
+              <span>
+                <span className="block text-sm font-medium">الإجازات الرسمية</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  أسبوع العمل: الأحد–الخميس. أضف العطل لتُحتسب في مخطط جانت وتذكيرات التسليم.
+                </span>
+              </span>
+            </span>
+            <ChevronLeft className="size-4 text-muted-foreground icon-flip-rtl" />
+          </Link>
         </CardContent>
       </Card>
 

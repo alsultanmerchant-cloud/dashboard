@@ -70,6 +70,7 @@ import { moveTaskStageAction, quickCreateTaskAction } from "../../tasks/_actions
 export type BoardTask = {
   id: string;
   title: string;
+  task_code?: string | null;
   stage: TaskStage;
   stage_entered_at: string;
   planned_date: string | null;
@@ -275,12 +276,20 @@ function TaskCard({
             {dl.label}
           </span>
         )}
-        {slip != null && slip > 0 && (
+        {slip != null && slip > 5 && (
           <span
             className="inline-flex items-center rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400 tabular-nums"
-            title="فرق التقدم"
+            title="انحراف التقدم"
           >
-            Behind: {Math.round(slip)}%
+            متأخر {Math.round(slip)}%
+          </span>
+        )}
+        {slip != null && slip < -2 && (
+          <span
+            className="inline-flex items-center rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums"
+            title="انحراف التقدم"
+          >
+            متقدم {Math.round(-slip)}%
           </span>
         )}
       </div>
@@ -668,6 +677,41 @@ function ProjectColumn({
   );
 }
 
+function BucketColumn({
+  title,
+  tasks,
+}: {
+  title: string;
+  tasks: BoardTask[];
+}) {
+  return (
+    <div className="flex w-72 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
+      <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
+        <div className="line-clamp-1 text-xs font-semibold">{title}</div>
+        <span className="tabular-nums text-xs text-muted-foreground">
+          {tasks.length}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
+        {tasks.map((t) => (
+          <Link
+            key={t.id}
+            href={`/tasks/${t.id}`}
+            className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
+          >
+            <TaskCard task={t} />
+          </Link>
+        ))}
+        {tasks.length === 0 && (
+          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
+            —
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // -------- board ----------------------------------------------------------
 
 export function TaskBoard({
@@ -676,7 +720,7 @@ export function TaskBoard({
   projectId,
 }: {
   tasks: BoardTask[];
-  groupBy?: "stage" | "project";
+  groupBy?: "stage" | "project" | "priority" | "deadline";
   /** Optional: when set, each non-folded column shows a Rwasem-style quick-add input. */
   projectId?: string;
 }) {
@@ -749,6 +793,74 @@ export function TaskBoard({
     return order.map((id) => byId.get(id)!);
   }, [tasks, groupBy]);
 
+  // Priority grouping: fixed column order urgent → high → medium → low. Any
+  // unknown priority value falls into a "بدون أولوية" bucket so we never lose
+  // tasks. Hidden when groupBy is something else.
+  const priorityColumns = useMemo(() => {
+    if (groupBy !== "priority") return [];
+    const order: Array<{ key: string; label: string }> = [
+      { key: "urgent", label: "عاجلة" },
+      { key: "high",   label: "عالية" },
+      { key: "medium", label: "متوسطة" },
+      { key: "low",    label: "منخفضة" },
+      { key: "__none__", label: "بدون أولوية" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    for (const t of tasks) {
+      const k = ["urgent", "high", "medium", "low"].includes(t.priority)
+        ? t.priority
+        : "__none__";
+      buckets.get(k)!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0 || c.id !== "__none__");
+  }, [tasks, groupBy]);
+
+  // Deadline grouping: bucket by planned_date (falls back to due_date) into
+  // متأخرة / اليوم / هذا الأسبوع / لاحقاً / غير محدد. "Done" tasks land in
+  // their own bucket so finished work doesn't pollute the active buckets.
+  const deadlineColumns = useMemo(() => {
+    if (groupBy !== "deadline") return [];
+    const order: Array<{ key: string; label: string }> = [
+      { key: "overdue", label: "متأخرة" },
+      { key: "today",   label: "اليوم" },
+      { key: "week",    label: "هذا الأسبوع" },
+      { key: "later",   label: "لاحقاً" },
+      { key: "none",    label: "غير محدد" },
+      { key: "done",    label: "مكتملة" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    for (const t of tasks) {
+      if (t.stage === "done") {
+        buckets.get("done")!.push(t);
+        continue;
+      }
+      const raw = t.planned_date ?? t.due_date;
+      if (!raw) {
+        buckets.get("none")!.push(t);
+        continue;
+      }
+      const d = new Date(raw);
+      d.setHours(0, 0, 0, 0);
+      if (Number.isNaN(d.getTime())) {
+        buckets.get("none")!.push(t);
+        continue;
+      }
+      if (d < today) buckets.get("overdue")!.push(t);
+      else if (d.getTime() === today.getTime()) buckets.get("today")!.push(t);
+      else if (d <= weekEnd) buckets.get("week")!.push(t);
+      else buckets.get("later")!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0);
+  }, [tasks, groupBy]);
+
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
 
   function handleDragStart(e: DragStartEvent) {
@@ -806,6 +918,22 @@ export function TaskBoard({
           />
         ))}
         {projectColumns.length === 0 && (
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+            لا توجد مهام لعرضها.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (groupBy === "priority" || groupBy === "deadline") {
+    const cols = groupBy === "priority" ? priorityColumns : deadlineColumns;
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {cols.map((col) => (
+          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+        ))}
+        {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
             لا توجد مهام لعرضها.
           </div>
