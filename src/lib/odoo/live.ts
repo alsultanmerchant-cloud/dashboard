@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { odooFromEnv } from "./client";
 import { mapStageName } from "./types";
 
@@ -874,105 +875,143 @@ export interface DashboardOdooMetrics {
   totalClients: number;
 }
 
-export const getDashboardOdooMetrics = cache(_getDashboardOdooMetrics);
-async function _getDashboardOdooMetrics(): Promise<DashboardOdooMetrics> {
-  const odoo = odooFromEnv();
+// Cross-request cached snapshot (60s) — Odoo XML-RPC is the slow link, and
+// the dashboard tolerates ~1min staleness easily. Inside a single request,
+// the React `cache()` wrapper below dedupes the 3 Suspense boundaries.
+const _getDashboardOdooMetricsUncached = unstable_cache(
+  async (): Promise<DashboardOdooMetrics> => {
+    const odoo = odooFromEnv();
 
-  // Pre-load stage names
-  const stages = await odoo.searchRead<Record<string, unknown>>(
-    "project.task.type", [], ["id", "name"], { limit: 200 },
-  );
-  const stageNameById = new Map<number, string>();
-  for (const s of stages) stageNameById.set(s.id as number, String(s.name));
+    const today = new Date().toISOString().slice(0, 10);
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 
-  // One big read — all tasks with the fields we need for every KPI
-  const taskRows = await odoo.searchRead<Record<string, unknown>>(
-    "project.task",
-    [],
-    ["id", "name", "project_id", "stage_id", "date_deadline", "date_end", "priority", "user_ids"],
-    { limit: 10000, order: "id desc" },
-  );
+    // Resolve stage IDs by category once — needed for status-based counts and
+    // to exclude "done" from the overdue domain server-side.
+    const stages = await odoo.searchRead<Record<string, unknown>>(
+      "project.task.type", [], ["id", "name"], { limit: 200 },
+    );
+    const idsForStages = (slugs: string[]) => {
+      const wanted = new Set(slugs);
+      return stages
+        .filter((s) => wanted.has(mapStageName(String(s.name))))
+        .map((s) => s.id as number);
+    };
+    const doneStageIds = idsForStages(["done"]);
+    const reworkStageIds = idsForStages(["client_changes"]);
+    const reviewStageIds = idsForStages(["manager_review", "specialist_review"]);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const openOverdueDomain: unknown[] = [
+      ["date_deadline", "<", today],
+      ["date_deadline", "!=", false],
+    ];
+    if (doneStageIds.length) {
+      openOverdueDomain.push(["stage_id", "not in", doneStageIds]);
+    }
 
-  let overdueCount = 0;
-  let reworkCount = 0;
-  let reviewBacklog = 0;
-  let closedThisWeek = 0;
-  let onTimeSample = 0;
-  let onTimeHits = 0;
-  const overdueAll: LiveTask[] = [];
+    // Run every count in parallel — search_count is O(index) on Odoo's side
+    // and avoids transferring task rows we don't render.
+    const [
+      overdueCount,
+      reworkCount,
+      reviewBacklog,
+      closedThisWeek,
+      overdueRows,
+      onTimeRows,
+      activeProjectsCount,
+      totalProjectsCount,
+      totalClientsCount,
+    ] = await Promise.all([
+      odoo.executeKw<number>("project.task", "search_count", [openOverdueDomain]),
+      reworkStageIds.length
+        ? odoo.executeKw<number>("project.task", "search_count", [[["stage_id", "in", reworkStageIds]]])
+        : Promise.resolve(0),
+      reviewStageIds.length
+        ? odoo.executeKw<number>("project.task", "search_count", [[["stage_id", "in", reviewStageIds]]])
+        : Promise.resolve(0),
+      doneStageIds.length
+        ? odoo.executeKw<number>("project.task", "search_count", [[
+            ["stage_id", "in", doneStageIds],
+            ["date_end", ">=", weekAgo],
+          ]])
+        : Promise.resolve(0),
+      odoo.searchRead<Record<string, unknown>>(
+        "project.task",
+        openOverdueDomain,
+        ["id", "name", "project_id", "stage_id", "date_deadline", "priority", "user_ids"],
+        { limit: 5, order: "date_deadline asc" },
+      ),
+      doneStageIds.length
+        ? odoo.searchRead<Record<string, unknown>>(
+            "project.task",
+            [
+              ["stage_id", "in", doneStageIds],
+              ["date_end", ">=", monthAgo],
+              ["date_deadline", "!=", false],
+            ],
+            ["date_deadline", "date_end"],
+            { limit: 1000 },
+          )
+        : Promise.resolve([] as Record<string, unknown>[]),
+      odoo.executeKw<number>("project.project", "search_count", [[["active", "=", true]]]),
+      odoo.executeKw<number>("project.project", "search_count", [[]]),
+      odoo.executeKw<number>(
+        "res.partner", "search_count",
+        [[["customer_rank", ">", 0], ["is_company", "=", true]]],
+      ),
+    ]);
 
-  for (const r of taskRows) {
-    const stageM2o = m2o(r.stage_id);
-    const stageName = stageM2o ? (stageNameById.get(stageM2o[0]) ?? stageM2o[1]) : "New";
-    const stage = mapStageName(stageName);
-    const deadline = str(r.date_deadline)?.slice(0, 10) ?? null;
-    const endDate = str(r.date_end)?.slice(0, 10) ?? null;
-    const project = m2o(r.project_id);
-    const userIds = Array.isArray(r.user_ids) ? (r.user_ids as number[]) : [];
+    // On-time % over the last 30 days of completions (sample capped at 1000).
+    let onTimeSample = 0;
+    let onTimeHits = 0;
+    for (const r of onTimeRows) {
+      const deadline = str(r.date_deadline)?.slice(0, 10);
+      const endDate = str(r.date_end)?.slice(0, 10);
+      if (!deadline || !endDate) continue;
+      onTimeSample++;
+      if (endDate <= deadline) onTimeHits++;
+    }
 
-    // Overdue: open tasks past their deadline
-    if (deadline && deadline < today && stage !== "done") {
-      overdueCount++;
-      overdueAll.push({
+    const stageNameById = new Map<number, string>();
+    for (const s of stages) stageNameById.set(s.id as number, String(s.name));
+
+    const overdueTasks: LiveTask[] = overdueRows.map((r) => {
+      const stageM2o = m2o(r.stage_id);
+      const stageName = stageM2o ? (stageNameById.get(stageM2o[0]) ?? stageM2o[1]) : "New";
+      const project = m2o(r.project_id);
+      const userIds = Array.isArray(r.user_ids) ? (r.user_ids as number[]) : [];
+      return {
         odooId: r.id as number,
         name: String(r.name),
         projectId: project?.[0] ?? null,
         projectName: project?.[1] ?? null,
-        stage,
+        stage: mapStageName(stageName),
         stageName,
-        deadline,
+        deadline: str(r.date_deadline)?.slice(0, 10) ?? null,
         priority: (r.priority as string) === "1" ? "high" : "medium",
         assigneeIds: userIds,
-      });
-    }
+      };
+    });
 
-    if (stage === "client_changes") reworkCount++;
-    if (stage === "manager_review" || stage === "specialist_review") reviewBacklog++;
+    return {
+      overdueCount,
+      reworkCount,
+      reviewBacklog,
+      closedThisWeek,
+      onTimeSample,
+      onTimeHits,
+      onTimePct: onTimeSample > 0 ? Math.round((onTimeHits / onTimeSample) * 100) : null,
+      overdueTasks,
+      totalProjects: totalProjectsCount,
+      totalActiveProjects: activeProjectsCount,
+      totalClients: totalClientsCount,
+    };
+  },
+  ["dashboard-odoo-metrics-v2"],
+  { revalidate: 60, tags: ["odoo-dashboard"] },
+);
 
-    if (stage === "done" && endDate) {
-      if (endDate >= weekAgo) closedThisWeek++;
-      if (endDate >= monthAgo && deadline) {
-        onTimeSample++;
-        if (endDate <= deadline) onTimeHits++;
-      }
-    }
-  }
-
-  // Sort overdue by deadline ascending (most overdue first)
-  overdueAll.sort((a, b) => {
-    if (!a.deadline) return 1;
-    if (!b.deadline) return -1;
-    return a.deadline < b.deadline ? -1 : 1;
-  });
-
-  // Side counts (cheap parallel queries)
-  const [activeProjectsCount, totalProjectsCount, totalClientsCount] = await Promise.all([
-    odoo.executeKw<number>("project.project", "search_count", [[["active", "=", true]]]),
-    odoo.executeKw<number>("project.project", "search_count", [[]]),
-    odoo.executeKw<number>(
-      "res.partner", "search_count",
-      [[["customer_rank", ">", 0], ["is_company", "=", true]]],
-    ),
-  ]);
-
-  return {
-    overdueCount,
-    reworkCount,
-    reviewBacklog,
-    closedThisWeek,
-    onTimeSample,
-    onTimeHits,
-    onTimePct: onTimeSample > 0 ? Math.round((onTimeHits / onTimeSample) * 100) : null,
-    overdueTasks: overdueAll.slice(0, 5),
-    totalProjects: totalProjectsCount,
-    totalActiveProjects: activeProjectsCount,
-    totalClients: totalClientsCount,
-  };
-}
+export const getDashboardOdooMetrics = cache(_getDashboardOdooMetricsUncached);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reports + governance — derived live from Odoo so the reactive layer

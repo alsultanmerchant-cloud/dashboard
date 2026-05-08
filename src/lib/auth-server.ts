@@ -9,8 +9,13 @@ export type ServerSession = {
   email: string;
   employeeId: string;
   orgId: string;
+  orgName: string;
   fullName: string;
+  departmentId: string | null;
+  jobTitle: string | null;
+  avatarUrl: string | null;
   roleKeys: string[];
+  roleNames: string[];
   permissions: Set<string>;
   isOwner: boolean;
 };
@@ -20,25 +25,32 @@ export const getServerSession = cache(async (): Promise<ServerSession | null> =>
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
 
+  // One round-trip: profile + nested org.
   const { data: profile } = await supabaseAdmin
     .from("employee_profiles")
-    .select("id, full_name, organization_id")
+    .select(
+      "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations ( id, name )",
+    )
     .eq("user_id", data.user.id)
     .maybeSingle();
   if (!profile) return null;
 
+  const org = Array.isArray(profile.organization) ? profile.organization[0] : profile.organization;
+
   const { data: roleRows } = await supabaseAdmin
     .from("user_roles")
-    .select("role:roles ( key, role_permissions ( permission:permissions ( key ) ) )")
+    .select("role:roles ( key, name, role_permissions ( permission:permissions ( key ) ) )")
     .eq("user_id", data.user.id)
     .eq("organization_id", profile.organization_id);
 
   const roleKeys: string[] = [];
+  const roleNames: string[] = [];
   const permissions = new Set<string>();
   for (const row of roleRows ?? []) {
     const role = Array.isArray(row.role) ? row.role[0] : row.role;
     if (!role) continue;
     roleKeys.push(role.key);
+    if (role.name) roleNames.push(role.name);
     for (const rp of role.role_permissions ?? []) {
       const perm = Array.isArray(rp.permission) ? rp.permission[0] : rp.permission;
       if (perm?.key) permissions.add(perm.key);
@@ -47,11 +59,16 @@ export const getServerSession = cache(async (): Promise<ServerSession | null> =>
 
   return {
     userId: data.user.id,
-    email: data.user.email ?? "",
+    email: profile.email ?? data.user.email ?? "",
     employeeId: profile.id,
     orgId: profile.organization_id,
+    orgName: org?.name ?? "",
     fullName: profile.full_name,
+    departmentId: profile.department_id,
+    jobTitle: profile.job_title,
+    avatarUrl: profile.avatar_url,
     roleKeys,
+    roleNames,
     permissions,
     isOwner: roleKeys.includes("owner"),
   };
