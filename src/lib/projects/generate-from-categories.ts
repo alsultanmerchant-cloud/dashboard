@@ -116,6 +116,10 @@ export async function generateTasksFromCategories(args: {
     created_from_template_item_id: g.templateItemId ?? null,
     created_by: args.createdByUserId ?? null,
     status: "todo" as const,
+    // Honour the template item's per-stage owner-position mapping. Falls
+    // back to the column default (the standard PDF mapping) when the
+    // template author hasn't customised it.
+    stage_owner_positions: g.stageOwnerPositions ?? null,
   }));
 
   const { data: inserted, error } = await supabaseAdmin

@@ -635,6 +635,177 @@ export type Database = {
           },
         ]
       }
+      direct_message_attachments: {
+        Row: {
+          created_at: string
+          filename: string
+          id: string
+          message_id: string
+          mimetype: string | null
+          organization_id: string
+          size_bytes: number | null
+          storage_path: string | null
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          filename: string
+          id?: string
+          message_id: string
+          mimetype?: string | null
+          organization_id: string
+          size_bytes?: number | null
+          storage_path?: string | null
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          filename?: string
+          id?: string
+          message_id?: string
+          mimetype?: string | null
+          organization_id?: string
+          size_bytes?: number | null
+          storage_path?: string | null
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_message_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "direct_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_message_attachments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      direct_messages: {
+        Row: {
+          body: string | null
+          context_project_id: string | null
+          context_task_id: string | null
+          created_at: string
+          id: string
+          organization_id: string
+          read_at: string | null
+          recipient_employee_id: string
+          recipient_user_id: string | null
+          sender_employee_id: string
+          sender_user_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          context_project_id?: string | null
+          context_task_id?: string | null
+          created_at?: string
+          id?: string
+          organization_id: string
+          read_at?: string | null
+          recipient_employee_id: string
+          recipient_user_id?: string | null
+          sender_employee_id: string
+          sender_user_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          context_project_id?: string | null
+          context_task_id?: string | null
+          created_at?: string
+          id?: string
+          organization_id?: string
+          read_at?: string | null
+          recipient_employee_id?: string
+          recipient_user_id?: string | null
+          sender_employee_id?: string
+          sender_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_messages_context_project_id_fkey"
+            columns: ["context_project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_project_id_fkey"
+            columns: ["context_project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_metrics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_on_time_delivery"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_review_backlog"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "direct_messages_context_task_id_fkey"
+            columns: ["context_task_id"]
+            isOneToOne: false
+            referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "direct_messages_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_messages_recipient_employee_id_fkey"
+            columns: ["recipient_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_messages_sender_employee_id_fkey"
+            columns: ["sender_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_profiles: {
         Row: {
           avatar_url: string | null
@@ -808,6 +979,13 @@ export type Database = {
             foreignKeyName: "escalations_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "escalations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -888,6 +1066,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exceptions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
           },
           {
             foreignKeyName: "exceptions_task_id_fkey"
@@ -1069,6 +1254,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "projects"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_violations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
           },
           {
             foreignKeyName: "governance_violations_task_id_fkey"
@@ -2745,6 +2937,13 @@ export type Database = {
             foreignKeyName: "task_activities_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_activities_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -2831,6 +3030,13 @@ export type Database = {
             foreignKeyName: "task_approval_history_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_approval_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -2906,6 +3112,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
           },
           {
             foreignKeyName: "task_assignees_task_id_fkey"
@@ -3009,6 +3222,13 @@ export type Database = {
             foreignKeyName: "task_attachments_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -3095,6 +3315,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_comments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
           },
           {
             foreignKeyName: "task_comments_task_id_fkey"
@@ -3215,6 +3442,13 @@ export type Database = {
             foreignKeyName: "task_delegations_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_delegations_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -3268,6 +3502,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "task_followers_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
           {
             foreignKeyName: "task_followers_task_id_fkey"
             columns: ["task_id"]
@@ -3348,6 +3589,13 @@ export type Database = {
             foreignKeyName: "task_links_source_task_id_fkey"
             columns: ["source_task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -3377,6 +3625,13 @@ export type Database = {
             columns: ["source_task_id"]
             isOneToOne: false
             referencedRelation: "v_rework_per_task"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_links_target_task_id_fkey"
+            columns: ["target_task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
             referencedColumns: ["task_id"]
           },
           {
@@ -3514,6 +3769,13 @@ export type Database = {
             foreignKeyName: "task_stage_history_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_stage_history_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -3563,6 +3825,7 @@ export type Database = {
           organization_id: string
           priority: string
           requires_approval: boolean
+          stage_owner_positions: Json
           task_template_id: string
           title: string
           updated_at: string
@@ -3584,6 +3847,7 @@ export type Database = {
           organization_id: string
           priority?: string
           requires_approval?: boolean
+          stage_owner_positions?: Json
           task_template_id: string
           title: string
           updated_at?: string
@@ -3605,6 +3869,7 @@ export type Database = {
           organization_id?: string
           priority?: string
           requires_approval?: boolean
+          stage_owner_positions?: Json
           task_template_id?: string
           title?: string
           updated_at?: string
@@ -3854,6 +4119,13 @@ export type Database = {
             foreignKeyName: "task_timesheets_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "task_timesheets_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -3932,6 +4204,7 @@ export type Database = {
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          stage_owner_positions: Json | null
           start_date: string | null
           state: Database["public"]["Enums"]["task_state"]
           status: string
@@ -3985,6 +4258,7 @@ export type Database = {
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
+          stage_owner_positions?: Json | null
           start_date?: string | null
           state?: Database["public"]["Enums"]["task_state"]
           status?: string
@@ -4038,6 +4312,7 @@ export type Database = {
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
+          stage_owner_positions?: Json | null
           start_date?: string | null
           state?: Database["public"]["Enums"]["task_state"]
           status?: string
@@ -4075,6 +4350,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
           },
           {
             foreignKeyName: "tasks_parent_task_id_fkey"
@@ -4348,6 +4630,13 @@ export type Database = {
             foreignKeyName: "wa_outbox_task_id_fkey"
             columns: ["task_id"]
             isOneToOne: false
+            referencedRelation: "task_current_stage_owner"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "wa_outbox_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
             referencedRelation: "tasks"
             referencedColumns: ["id"]
           },
@@ -4500,6 +4789,26 @@ export type Database = {
           task_count: number | null
         }
         Relationships: []
+      }
+      task_current_stage_owner: {
+        Row: {
+          owner_avatar_url: string | null
+          owner_employee_id: string | null
+          owner_full_name: string | null
+          owner_job_title: string | null
+          owner_position: string | null
+          stage: Database["public"]["Enums"]["task_stage"] | null
+          task_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_assignees_employee_id_fkey"
+            columns: ["owner_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       tasks_with_metrics: {
         Row: {
@@ -4783,6 +5092,7 @@ export type Database = {
     }
     Functions: {
       _current_employee_in_org: { Args: { p_org: string }; Returns: string }
+      _default_stage_owner_positions: { Args: never; Returns: Json }
       _next_project_code: { Args: { p_org: string }; Returns: string }
       _next_task_code: {
         Args: { p_project: string }
@@ -4841,6 +5151,7 @@ export type Database = {
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          stage_owner_positions: Json | null
           start_date: string | null
           state: Database["public"]["Enums"]["task_state"]
           status: string
@@ -4892,6 +5203,7 @@ export type Database = {
       }
       notify_overdue_activities: { Args: never; Returns: number }
       notify_overdue_tasks: { Args: never; Returns: number }
+      prune_old_direct_messages: { Args: never; Returns: undefined }
       recalculate_project_task_dates: {
         Args: { p_project: string }
         Returns: number
@@ -4944,6 +5256,7 @@ export type Database = {
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          stage_owner_positions: Json | null
           start_date: string | null
           state: Database["public"]["Enums"]["task_state"]
           status: string
@@ -5006,6 +5319,7 @@ export type Database = {
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          stage_owner_positions: Json | null
           start_date: string | null
           state: Database["public"]["Enums"]["task_state"]
           status: string
@@ -5072,6 +5386,7 @@ export type Database = {
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
+          stage_owner_positions: Json | null
           start_date: string | null
           state: Database["public"]["Enums"]["task_state"]
           status: string
