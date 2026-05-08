@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
   useTransition,
+  type ReactNode,
 } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -48,8 +49,22 @@ type FilterKey =
   | "mine"
   | "due_today"
   | "behind"
-  | "critical";
-type GroupBy = "stage" | "project" | "priority" | "deadline";
+  | "ahead"
+  | "critical"
+  | "not_started"
+  | "in_progress_pct"
+  | "completed_pct"
+  | "starred"
+  | "followed";
+type GroupBy =
+  | "stage"
+  | "project"
+  | "priority"
+  | "deadline"
+  | "assignee"
+  | "customer"
+  | "service"
+  | "last_stage_update";
 type SearchSuggestion = {
   id: string;
   projectName: string;
@@ -57,28 +72,66 @@ type SearchSuggestion = {
   clientName: string | null;
 };
 
-const FILTER_DEFS: { key: FilterKey; label: string }[] = [
-  { key: "open", label: "مفتوحة" },
-  { key: "mine", label: "مهامي" },
-  { key: "due_today", label: "تستحق اليوم" },
-  { key: "overdue", label: "متأخرة" },
-  { key: "behind", label: "خلف الجدول" },
-  { key: "critical", label: "تأخير حرج" },
-  { key: "done", label: "مكتملة" },
-  { key: "all", label: "كل المهام" },
+const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
+  { key: "open", label: "مفتوحة", group: "الحالة" },
+  { key: "done", label: "مكتملة", group: "الحالة" },
+  { key: "all", label: "كل المهام", group: "الحالة" },
+  { key: "mine", label: "مهامي", group: "ملكية" },
+  { key: "followed", label: "متابَعة", group: "ملكية" },
+  { key: "starred", label: "مميَّزة", group: "ملكية" },
+  { key: "not_started", label: "لم تبدأ (0%)", group: "تقدّم" },
+  { key: "in_progress_pct", label: "قيد التنفيذ", group: "تقدّم" },
+  { key: "completed_pct", label: "منجزة (100%)", group: "تقدّم" },
+  { key: "due_today", label: "تستحق اليوم", group: "جدولة" },
+  { key: "overdue", label: "متأخرة", group: "جدولة" },
+  { key: "behind", label: "خلف الجدول", group: "جدولة" },
+  { key: "ahead", label: "متقدّمة", group: "جدولة" },
+  { key: "critical", label: "تأخير حرج", group: "جدولة" },
 ];
+
+type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
+
+const DATE_FIELD_DEFS: { key: DateField; label: string }[] = [
+  { key: "due_date", label: "الموعد النهائي" },
+  { key: "actual_done_date", label: "تاريخ الإقفال" },
+  { key: "stage_entered_at", label: "آخر تحديث للمرحلة" },
+  { key: "created_at", label: "تاريخ الإنشاء" },
+];
+
+const MONTHS_AR = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+function tokenLabel(token: string): string {
+  // `due_date:2026q3` → `Q3 2026` style label for chips
+  const m = token.match(/^([a-z_]+):(\d{4})(?:(q)(\d)|(m)(\d{1,2}))?$/);
+  if (!m) return token;
+  const fieldDef = DATE_FIELD_DEFS.find((d) => d.key === m[1]);
+  const fieldLabel = fieldDef?.label ?? m[1];
+  const year = m[2];
+  if (m[3] === "q") return `${fieldLabel}: Q${m[4]} ${year}`;
+  if (m[5] === "m" && m[6]) return `${fieldLabel}: ${MONTHS_AR[Number(m[6]) - 1]} ${year}`;
+  return `${fieldLabel}: ${year}`;
+}
 
 const GROUPBY_DEFS: { key: GroupBy; label: string; available?: boolean }[] = [
   { key: "stage", label: "حسب المرحلة" },
   { key: "project", label: "حسب المشروع" },
   { key: "priority", label: "حسب الأولوية" },
   { key: "deadline", label: "حسب الموعد النهائي" },
+  { key: "assignee", label: "حسب المسؤول" },
+  { key: "customer", label: "حسب العميل" },
+  { key: "service", label: "حسب الخدمة" },
+  { key: "last_stage_update", label: "حسب آخر تحديث للمرحلة" },
 ];
 
 export type SavedTaskFilter = {
   id: string;
   name: string;
   is_default: boolean;
+  is_shared?: boolean;
+  owned_by_me?: boolean;
   definition: {
     filter?: string;
     q?: string;
@@ -108,12 +161,38 @@ export function SmartSearchBar({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const currentFilter = (filterKey ?? (params.get("filter") as FilterKey | null) ?? "open");
+  // Multi-select: read `?f=open,starred,behind`. Falls back to legacy `filter`
+  // (single key) for shareable links saved before the rollout, and finally to
+  // the default `{open}`. Empty `f=` (explicit) means no filters active.
+  const currentActive = useMemo<Set<FilterKey>>(() => {
+    const raw = params.get("f");
+    const legacy = params.get("filter");
+    const fallback = filterKey ?? legacy;
+    if (raw === null) return fallback ? new Set([fallback as FilterKey]) : new Set(["open"]);
+    if (raw === "") return new Set();
+    return new Set(
+      raw.split(",")
+        .map((s) => s.trim())
+        .filter((s): s is FilterKey => FILTER_DEFS.some((f) => f.key === s)),
+    );
+  }, [filterKey, params]);
+  const currentDates = useMemo<string[]>(() => {
+    const raw = params.get("d");
+    if (!raw) return [];
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }, [params]);
   const currentView = view ?? params.get("view") ?? "kanban";
-  const currentGroupBy = (
-    groupBy ??
-    ((params.get("groupBy") as GroupBy | null) ?? "stage")
-  );
+  // Group-by is now a stack — comma-separated keys form an outer→inner chain.
+  // The `groupBy` prop (single legacy value) seeds the array if URL is empty.
+  const currentGroupKeys = useMemo<GroupBy[]>(() => {
+    const raw = params.get("groupBy");
+    const parts = (raw ?? groupBy ?? "stage")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s): s is GroupBy => GROUPBY_DEFS.some((g) => g.key === s));
+    return parts.length ? parts : ["stage"];
+  }, [params, groupBy]);
+  const currentGroupBy = currentGroupKeys[0];
   const currentQuery = initialQuery ?? params.get("q") ?? "";
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(currentQuery);
@@ -182,18 +261,31 @@ export function SmartSearchBar({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const activeFilter = FILTER_DEFS.find((f) => f.key === currentFilter);
+  const activeChips = FILTER_DEFS.filter((f) => currentActive.has(f.key));
 
   function buildHref(next: Partial<{
-    filter: FilterKey;
-    groupBy: GroupBy;
+    filters: Set<FilterKey>;
+    dates: string[];
+    groupBy: GroupBy | GroupBy[];
     q: string | null;
     view: string;
     projectId: string | null;
   }>) {
     const sp = new URLSearchParams(params);
-    if (next.filter !== undefined) sp.set("filter", next.filter);
-    if (next.groupBy !== undefined) sp.set("groupBy", next.groupBy);
+    if (next.filters !== undefined) {
+      sp.delete("filter"); // drop legacy single-key param if present
+      if (next.filters.size === 0) sp.set("f", "");
+      else sp.set("f", [...next.filters].join(","));
+    }
+    if (next.dates !== undefined) {
+      if (next.dates.length === 0) sp.delete("d");
+      else sp.set("d", next.dates.join(","));
+    }
+    if (next.groupBy !== undefined) {
+      const arr = Array.isArray(next.groupBy) ? next.groupBy : [next.groupBy];
+      if (arr.length === 0) sp.delete("groupBy");
+      else sp.set("groupBy", arr.join(","));
+    }
     if (next.view !== undefined) sp.set("view", next.view);
     if (next.projectId === null) sp.delete("projectId");
     else if (next.projectId !== undefined) sp.set("projectId", next.projectId);
@@ -201,6 +293,20 @@ export function SmartSearchBar({
     else if (next.q !== undefined) sp.set("q", next.q);
     return `${pathname}?${sp.toString()}`;
   }
+
+  const toggleFilter = (key: FilterKey) => {
+    const next = new Set(currentActive);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    navigate(buildHref({ filters: next }));
+  };
+
+  const toggleDateToken = (token: string) => {
+    const set = new Set(currentDates);
+    if (set.has(token)) set.delete(token);
+    else set.add(token);
+    navigate(buildHref({ dates: [...set] }));
+  };
 
   const navigate = (href: string) => {
     start(() => router.push(href));
@@ -212,8 +318,8 @@ export function SmartSearchBar({
     setOpen(false);
   };
 
-  const clearFilter = () => {
-    navigate(buildHref({ filter: "all" }));
+  const clearAllFilters = () => {
+    navigate(buildHref({ filters: new Set() }));
   };
 
   const clearQuery = () => {
@@ -236,38 +342,62 @@ export function SmartSearchBar({
     "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors";
 
   // Memoize column pills so re-renders don't churn on every keystroke.
-  const filterColumn = useMemo(
-    () =>
-      FILTER_DEFS.map((f) => {
-        const active = f.key === currentFilter;
-        return (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => {
-              navigate(buildHref({ filter: f.key }));
-              setOpen(false);
-            }}
-            className={cn(
-              itemBase,
-              active
-                ? "bg-cyan-dim text-cyan"
-                : "text-foreground hover:bg-soft-1",
-            )}
+  const filterColumn = useMemo(() => {
+    const out: ReactNode[] = [];
+    let lastGroup: string | undefined;
+    for (const f of FILTER_DEFS) {
+      if (f.group && f.group !== lastGroup) {
+        out.push(
+          <div
+            key={`grp-${f.group}`}
+            className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 first:pt-0"
           >
-            <span>{f.label}</span>
-            {active && <Check className="size-3.5" />}
-          </button>
+            {f.group}
+          </div>,
         );
-      }),
+        lastGroup = f.group;
+      }
+      const active = currentActive.has(f.key);
+      out.push(
+        <button
+          key={f.key}
+          type="button"
+          onClick={() => {
+            toggleFilter(f.key);
+            // Keep popover open so users can stack filters Odoo-style.
+          }}
+          className={cn(
+            itemBase,
+            active
+              ? "bg-cyan-dim text-cyan"
+              : "text-foreground hover:bg-soft-1",
+          )}
+        >
+          <span>{f.label}</span>
+          {active && <Check className="size-3.5" />}
+        </button>,
+      );
+    }
+    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentFilter, params.toString()],
-  );
+  }, [currentActive, params.toString()]);
+
+  const toggleGroup = (key: GroupBy) => {
+    // Click to add to the chain; click again to remove. Order is the click
+    // order — first click = outer, second = inner — exactly how Rwasem
+    // composes "Stage > Assignee".
+    const idx = currentGroupKeys.indexOf(key);
+    const next = idx >= 0
+      ? currentGroupKeys.filter((k) => k !== key)
+      : [...currentGroupKeys, key];
+    navigate(buildHref({ groupBy: next.length ? next : (["stage"] as GroupBy[]), view: "kanban" }));
+  };
 
   const groupColumn = useMemo(
     () =>
       GROUPBY_DEFS.map((g) => {
-        const active = g.key === currentGroupBy;
+        const idx = currentGroupKeys.indexOf(g.key);
+        const active = idx >= 0;
         const disabled = g.available === false;
         return (
           <button
@@ -276,8 +406,7 @@ export function SmartSearchBar({
             disabled={disabled}
             onClick={() => {
               if (disabled) return;
-              navigate(buildHref({ groupBy: g.key, view: "kanban" }));
-              setOpen(false);
+              toggleGroup(g.key);
             }}
             className={cn(
               itemBase,
@@ -288,7 +417,14 @@ export function SmartSearchBar({
             )}
           >
             <span>{g.label}</span>
-            {active && !disabled && <Check className="size-3.5" />}
+            {active && !disabled && (
+              <span className="flex items-center gap-1">
+                <span className="rounded-full bg-cyan/30 px-1.5 text-[9px] tabular-nums text-cyan">
+                  {idx + 1}
+                </span>
+                <Check className="size-3.5" />
+              </span>
+            )}
             {disabled && (
               <span className="rounded-full border border-soft px-1.5 text-[9px] text-muted-foreground">
                 قريباً
@@ -298,7 +434,7 @@ export function SmartSearchBar({
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentGroupBy, params.toString()],
+    [currentGroupKeys, params.toString()],
   );
 
   const shellClassName =
@@ -337,18 +473,71 @@ export function SmartSearchBar({
         )}
       >
         <Search className={cn("size-3.5 shrink-0", iconClassName)} />
-        {activeFilter && activeFilter.key !== "all" && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan">
-            {activeFilter.label}
+        {activeChips.map((f) => (
+          <span
+            key={f.key}
+            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan"
+          >
+            <Filter className="size-2.5" />
+            {f.label}
             <button
               type="button"
-              onClick={clearFilter}
-              aria-label="إزالة الفلتر"
+              onClick={() => toggleFilter(f.key)}
+              aria-label={`إزالة ${f.label}`}
               className="opacity-70 hover:opacity-100"
             >
               <X className="size-3" />
             </button>
           </span>
+        ))}
+        {currentDates.map((token) => (
+          <span
+            key={token}
+            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan"
+          >
+            <Filter className="size-2.5" />
+            {tokenLabel(token)}
+            <button
+              type="button"
+              onClick={() => toggleDateToken(token)}
+              aria-label={`إزالة ${tokenLabel(token)}`}
+              className="opacity-70 hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        {/* Group-by chain chip — only render when something other than the
+            implicit default ("stage" alone) is active. Chain joined with "›". */}
+        {(currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet/15 px-2 py-0.5 text-[11px] font-medium text-violet">
+            <Layers className="size-2.5" />
+            {currentGroupKeys
+              .map((k) => GROUPBY_DEFS.find((g) => g.key === k)?.label.replace(/^حسب\s+/, ""))
+              .filter(Boolean)
+              .join(" ‹ ")}
+            <button
+              type="button"
+              onClick={() =>
+                navigate(buildHref({ groupBy: ["stage"] as GroupBy[], view: "kanban" }))
+              }
+              aria-label="إلغاء التجميع"
+              className="opacity-70 hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
+        {activeChips.length + currentDates.length > 1 && (
+          <button
+            type="button"
+            onClick={() => {
+              navigate(buildHref({ filters: new Set(), dates: [] }));
+            }}
+            className="text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            مسح الكل
+          </button>
         )}
         <input
           type="search"
@@ -444,6 +633,19 @@ export function SmartSearchBar({
                 الفلاتر
               </div>
               <div className="flex flex-col gap-0.5">{filterColumn}</div>
+              <div className="mt-2 border-t border-soft pt-1.5">
+                <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  التواريخ
+                </div>
+                {DATE_FIELD_DEFS.map((d) => (
+                  <DateFieldRow
+                    key={d.key}
+                    field={d}
+                    activeTokens={currentDates}
+                    onToggle={toggleDateToken}
+                  />
+                ))}
+              </div>
             </div>
             <div className="md:border-s md:border-soft md:ps-3">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
@@ -460,15 +662,20 @@ export function SmartSearchBar({
               <SavedFiltersColumn
                 items={filters}
                 currentDefinition={{
-                  filter: currentFilter,
+                  // Comma-joined active filter set. Legacy single-key entries
+                  // (saved before multi-select) still parse correctly because
+                  // a single key is a valid degenerate case of the join.
+                  filter: [...currentActive].join(",") || undefined,
                   q: currentQuery || undefined,
                   view: currentView,
-                  groupBy: currentGroupBy,
+                  // Comma-joined group-by chain. A single key is the
+                  // degenerate case so legacy single-key entries still apply.
+                  groupBy: currentGroupKeys.join(","),
                   projectId: params.get("projectId") || undefined,
                 }}
                 onApply={(def) => {
                   const url = new URLSearchParams();
-                  if (def.filter) url.set("filter", def.filter);
+                  if (def.filter) url.set("f", def.filter);
                   if (def.q) url.set("q", def.q);
                   if (def.view) url.set("view", def.view);
                   if (def.groupBy) url.set("groupBy", def.groupBy);
@@ -500,6 +707,8 @@ function SavedFiltersColumn({
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [isShared, setIsShared] = useState(false);
+  const [isDefault, setIsDefault] = useState(false);
   const [pending, start] = useTransition();
 
   const handleSave = () =>
@@ -509,10 +718,14 @@ function SavedFiltersColumn({
       const res = await saveTaskFilterAction({
         name: trimmed,
         definition: currentDefinition,
+        isShared,
+        isDefault,
       });
       if ("error" in res) return toast.error(res.error);
       toast.success("تم حفظ الفلتر");
       setName("");
+      setIsShared(false);
+      setIsDefault(false);
       router.refresh();
     });
 
@@ -564,6 +777,28 @@ function SavedFiltersColumn({
           حفظ
         </button>
       </div>
+      <div className="flex items-center gap-3 px-1 text-[10px] text-muted-foreground">
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(e) => setIsDefault(e.target.checked)}
+            disabled={pending}
+            className="size-3 accent-cyan"
+          />
+          افتراضي
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={isShared}
+            onChange={(e) => setIsShared(e.target.checked)}
+            disabled={pending}
+            className="size-3 accent-cyan"
+          />
+          مُشارَك
+        </label>
+      </div>
       {items.length === 0 ? (
         <div className="rounded-md border border-dashed border-soft px-2 py-3 text-center text-[11px] text-muted-foreground/80">
           لا توجد فلاتر محفوظة
@@ -583,27 +818,41 @@ function SavedFiltersColumn({
               >
                 {it.name}
               </button>
+              {it.is_shared && (
+                <span
+                  className="shrink-0 rounded-full bg-cyan/15 px-1.5 text-[9px] font-medium text-cyan"
+                  title={it.owned_by_me === false ? "مُشارَك من زميل" : "مُشارَك"}
+                >
+                  مُشارَك
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => toggleDefault(it)}
-                disabled={pending}
-                title={it.is_default ? "افتراضي" : "اجعله افتراضيًا"}
+                disabled={pending || it.owned_by_me === false}
+                title={
+                  it.owned_by_me === false
+                    ? "لا يمكن تعديل فلتر زميل"
+                    : it.is_default ? "افتراضي" : "اجعله افتراضيًا"
+                }
                 className={cn(
-                  "shrink-0 rounded p-1 hover:bg-background",
+                  "shrink-0 rounded p-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40",
                   it.is_default ? "text-amber" : "text-muted-foreground/60",
                 )}
               >
                 <Star className={cn("size-3", it.is_default && "fill-current")} />
               </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(it.id)}
-                disabled={pending}
-                title="حذف"
-                className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
-              >
-                <Trash2 className="size-3" />
-              </button>
+              {it.owned_by_me !== false && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(it.id)}
+                  disabled={pending}
+                  title="حذف"
+                  className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -611,3 +860,108 @@ function SavedFiltersColumn({
     </div>
   );
 }
+
+function DateFieldRow({
+  field,
+  activeTokens,
+  onToggle,
+}: {
+  field: { key: DateField; label: string };
+  activeTokens: string[];
+  onToggle: (token: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const fieldActive = activeTokens.some((t) => t.startsWith(`${field.key}:`));
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+  const years = [currentYear, currentYear - 1, currentYear - 2];
+  const has = (token: string) => activeTokens.includes(token);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={cn(
+          "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-soft-1",
+          fieldActive && "text-cyan",
+        )}
+      >
+        <span className="flex items-center gap-1.5">
+          {fieldActive && <Check className="size-3" />}
+          {field.label}
+        </span>
+        <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+      </button>
+      {expanded && (
+        <div className="me-2 ms-4 mt-0.5 flex flex-col gap-0.5 border-s border-soft ps-2">
+          {/* Months of current year (most recent 3) */}
+          {[currentMonth, currentMonth - 1, currentMonth - 2]
+            .filter((m) => m >= 1)
+            .map((m) => {
+              const token = `${field.key}:${currentYear}m${m}`;
+              return (
+                <DateBucketBtn
+                  key={token}
+                  label={MONTHS_AR[m - 1]}
+                  active={has(token)}
+                  onClick={() => onToggle(token)}
+                />
+              );
+            })}
+          <div className="my-0.5 border-t border-soft/50" />
+          {/* Quarters of current year */}
+          {[4, 3, 2, 1].map((q) => {
+            const token = `${field.key}:${currentYear}q${q}`;
+            return (
+              <DateBucketBtn
+                key={token}
+                label={`Q${q}`}
+                active={has(token)}
+                onClick={() => onToggle(token)}
+              />
+            );
+          })}
+          <div className="my-0.5 border-t border-soft/50" />
+          {/* Years */}
+          {years.map((y) => {
+            const token = `${field.key}:${y}`;
+            return (
+              <DateBucketBtn
+                key={token}
+                label={String(y)}
+                active={has(token)}
+                onClick={() => onToggle(token)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DateBucketBtn({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
+        active ? "bg-cyan-dim text-cyan" : "text-foreground hover:bg-soft-1",
+      )}
+    >
+      <span>{label}</span>
+      {active && <Check className="size-3" />}
+    </button>
+  );
+}
+

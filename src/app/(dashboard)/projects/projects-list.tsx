@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
 import { ProjectsTable } from "./projects-table";
+import { ProjectsBoard } from "./projects-board";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +38,7 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const reqIdRef = useRef(0);
   const search = (params.get("q") ?? "").trim();
+  const groupBy = params.get("groupBy") || undefined;
   const filters = useMemo<ProjectFilters>(() => {
     const flag = (k: string) => params.get(k) === "1" || params.get(k) === "true";
     const str = (k: string) => params.get(k) || undefined;
@@ -131,6 +133,8 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
           لا توجد نتائج
         </div>
+      ) : view === "kanban" && groupBy ? (
+        <ProjectsBoard items={items} groupBy={groupBy} />
       ) : view === "kanban" ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {items.map((p) => (

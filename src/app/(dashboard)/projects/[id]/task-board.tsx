@@ -712,7 +712,235 @@ function BucketColumn({
   );
 }
 
+// Outer column for stacked group-by: header is the OUTER bucket name+count;
+// body is a list of inner sub-sections (one per inner-key bucket) where each
+// sub-section has its own mini-header + collapsible card list.
+function NestedColumn({
+  title,
+  tasks,
+  innerKey,
+}: {
+  title: string;
+  tasks: BoardTask[];
+  innerKey: TaskGroupKey;
+}) {
+  const inner = bucketTasksBy(tasks, innerKey);
+  return (
+    <div className="flex w-80 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
+      <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
+        <div className="line-clamp-1 text-xs font-semibold">{title}</div>
+        <span className="tabular-nums text-xs text-muted-foreground">
+          {tasks.length}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[75vh] overflow-y-auto">
+        {inner.map((sub) => (
+          <NestedSubsection key={sub.id} title={sub.name} tasks={sub.tasks} />
+        ))}
+        {tasks.length === 0 && (
+          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
+            —
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NestedSubsection({
+  title,
+  tasks,
+}: {
+  title: string;
+  tasks: BoardTask[];
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <div className="rounded-lg border border-soft/70 bg-background/40">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-center justify-between gap-2 rounded-t-lg px-2 py-1.5 hover:bg-soft-1"
+      >
+        <span className="line-clamp-1 text-[11px] font-semibold text-muted-foreground">
+          {title}
+        </span>
+        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground">
+          {tasks.length}
+        </span>
+      </button>
+      {!collapsed && (
+        <div className="flex flex-col gap-1.5 p-1.5">
+          {tasks.map((t) => (
+            <Link
+              key={t.id}
+              href={`/tasks/${t.id}`}
+              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40"
+            >
+              <TaskCard task={t} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // -------- board ----------------------------------------------------------
+
+export type TaskGroupKey =
+  | "stage"
+  | "project"
+  | "priority"
+  | "deadline"
+  | "assignee"
+  | "customer"
+  | "service"
+  | "last_stage_update";
+
+type TaskBucket = { id: string; name: string; tasks: BoardTask[] };
+
+// Generic bucket function. Same data each existing useMemo produces, but
+// reachable both at the top level (current behaviour) and nested inside an
+// outer bucket (PR 5: stacked group-by, e.g. Stage > Assignee).
+function bucketTasksBy(tasks: BoardTask[], key: TaskGroupKey): TaskBucket[] {
+  const NONE = "__none__";
+
+  if (key === "stage") {
+    const order: TaskStage[] = [
+      "new", "in_progress", "manager_review", "specialist_review",
+      "ready_to_send", "sent_to_client", "client_changes", "done",
+    ];
+    const map = new Map<TaskStage, BoardTask[]>(order.map((s) => [s, []]));
+    for (const t of tasks) map.get(t.stage)?.push(t);
+    return order.map((s) => ({
+      id: s,
+      name: TASK_STAGE_LABELS[s],
+      tasks: map.get(s) ?? [],
+    }));
+  }
+
+  if (key === "project") {
+    const order: string[] = [];
+    const byId = new Map<string, TaskBucket>();
+    for (const t of tasks) {
+      const id = t.project?.id ?? NONE;
+      const name = t.project?.name ?? "بدون مشروع";
+      if (!byId.has(id)) {
+        byId.set(id, { id, name, tasks: [] });
+        order.push(id);
+      }
+      byId.get(id)!.tasks.push(t);
+    }
+    return order.map((id) => byId.get(id)!);
+  }
+
+  if (key === "priority") {
+    const order: Array<{ key: string; label: string }> = [
+      { key: "urgent", label: "عاجلة" },
+      { key: "high", label: "عالية" },
+      { key: "medium", label: "متوسطة" },
+      { key: "low", label: "منخفضة" },
+      { key: NONE, label: "بدون أولوية" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    for (const t of tasks) {
+      const k = ["urgent", "high", "medium", "low"].includes(t.priority) ? t.priority : NONE;
+      buckets.get(k)!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0 || c.id !== NONE);
+  }
+
+  if (key === "deadline") {
+    const order: Array<{ key: string; label: string }> = [
+      { key: "overdue", label: "متأخرة" },
+      { key: "today", label: "اليوم" },
+      { key: "week", label: "هذا الأسبوع" },
+      { key: "later", label: "لاحقاً" },
+      { key: "none", label: "غير محدد" },
+      { key: "done", label: "مكتملة" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    for (const t of tasks) {
+      if (t.stage === "done") {
+        buckets.get("done")!.push(t);
+        continue;
+      }
+      const raw = t.planned_date ?? t.due_date;
+      if (!raw) {
+        buckets.get("none")!.push(t);
+        continue;
+      }
+      const d = new Date(raw);
+      d.setHours(0, 0, 0, 0);
+      if (Number.isNaN(d.getTime())) buckets.get("none")!.push(t);
+      else if (d < today) buckets.get("overdue")!.push(t);
+      else if (d.getTime() === today.getTime()) buckets.get("today")!.push(t);
+      else if (d <= weekEnd) buckets.get("week")!.push(t);
+      else buckets.get("later")!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0);
+  }
+
+  // assignee / customer / service / last_stage_update — same shape as the
+  // existing `customColumns` memo, count-desc with a "بدون …" fallback last.
+  const noneLabel =
+    key === "assignee" ? "بدون مسؤول"
+      : key === "customer" ? "بدون عميل"
+        : key === "service" ? "بدون خدمة"
+          : "بدون تاريخ";
+  const map = new Map<string, TaskBucket>();
+  const push = (id: string, name: string, t: BoardTask) => {
+    const col = map.get(id) ?? { id, name, tasks: [] };
+    col.tasks.push(t);
+    map.set(id, col);
+  };
+  for (const t of tasks) {
+    if (key === "assignee") {
+      const slots = Object.values(t.role_slots ?? {});
+      const assigned = slots.filter(Boolean) as Array<{ id: string; full_name: string }>;
+      if (assigned.length === 0) push(NONE, noneLabel, t);
+      else for (const a of assigned) push(a.id, a.full_name, t);
+    } else if (key === "customer") {
+      const name = t.project?.client_name ?? null;
+      if (name) push(`c:${name}`, name, t);
+      else push(NONE, noneLabel, t);
+    } else if (key === "service") {
+      if (t.service?.id) push(t.service.id, t.service.name, t);
+      else push(NONE, noneLabel, t);
+    } else {
+      const raw = t.stage_entered_at;
+      if (!raw) {
+        push(NONE, noneLabel, t);
+        continue;
+      }
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) {
+        push(NONE, noneLabel, t);
+        continue;
+      }
+      const monday = new Date(d);
+      const dow = (monday.getDay() + 6) % 7;
+      monday.setDate(monday.getDate() - dow);
+      monday.setHours(0, 0, 0, 0);
+      const id = monday.toISOString().slice(0, 10);
+      push(id, `أسبوع ${id}`, t);
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.id === NONE) return 1;
+    if (b.id === NONE) return -1;
+    return b.tasks.length - a.tasks.length;
+  });
+}
 
 export function TaskBoard({
   tasks: initialTasks,
@@ -720,10 +948,20 @@ export function TaskBoard({
   projectId,
 }: {
   tasks: BoardTask[];
-  groupBy?: "stage" | "project" | "priority" | "deadline";
+  /**
+   * Comma-friendly group-by: pass a single key for flat columns OR an array
+   * for nested rendering (outer column + inner sub-sections, Rwasem-style).
+   */
+  groupBy?: TaskGroupKey | TaskGroupKey[];
   /** Optional: when set, each non-folded column shows a Rwasem-style quick-add input. */
   projectId?: string;
 }) {
+  const groupKeys: TaskGroupKey[] = Array.isArray(groupBy)
+    ? groupBy.filter(Boolean)
+    : [groupBy];
+  const outerKey = groupKeys[0] ?? "stage";
+  const innerKey = groupKeys[1];
+
   const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -769,7 +1007,7 @@ export function TaskBoard({
   }, [tasks]);
 
   const projectColumns = useMemo(() => {
-    if (groupBy !== "project") return [];
+    if (outerKey !== "project") return [];
     const order: string[] = [];
     const byId = new Map<
       string,
@@ -797,7 +1035,7 @@ export function TaskBoard({
   // unknown priority value falls into a "بدون أولوية" bucket so we never lose
   // tasks. Hidden when groupBy is something else.
   const priorityColumns = useMemo(() => {
-    if (groupBy !== "priority") return [];
+    if (outerKey !== "priority") return [];
     const order: Array<{ key: string; label: string }> = [
       { key: "urgent", label: "عاجلة" },
       { key: "high",   label: "عالية" },
@@ -821,7 +1059,7 @@ export function TaskBoard({
   // متأخرة / اليوم / هذا الأسبوع / لاحقاً / غير محدد. "Done" tasks land in
   // their own bucket so finished work doesn't pollute the active buckets.
   const deadlineColumns = useMemo(() => {
-    if (groupBy !== "deadline") return [];
+    if (outerKey !== "deadline") return [];
     const order: Array<{ key: string; label: string }> = [
       { key: "overdue", label: "متأخرة" },
       { key: "today",   label: "اليوم" },
@@ -859,6 +1097,76 @@ export function TaskBoard({
     return order
       .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
       .filter((c) => c.tasks.length > 0);
+  }, [tasks, groupBy]);
+
+  // Generic bucket for the four "any field" groupings — assignee / customer /
+  // service / last_stage_update. Each returns a list of {id, name, tasks}
+  // ordered by task count desc, with a "بدون …" fallback bucket sorted last.
+  const customColumns = useMemo(() => {
+    if (
+      outerKey !== "assignee" &&
+      outerKey !== "customer" &&
+      outerKey !== "service" &&
+      outerKey !== "last_stage_update"
+    ) {
+      return [];
+    }
+    type Col = { id: string; name: string; tasks: BoardTask[] };
+    const NONE = "__none__";
+    const noneLabel =
+      outerKey === "assignee"
+        ? "بدون مسؤول"
+        : outerKey === "customer"
+          ? "بدون عميل"
+          : outerKey === "service"
+            ? "بدون خدمة"
+            : "بدون تاريخ";
+    const map = new Map<string, Col>();
+    const push = (id: string, name: string, t: BoardTask) => {
+      const col = map.get(id) ?? { id, name, tasks: [] };
+      col.tasks.push(t);
+      map.set(id, col);
+    };
+    for (const t of tasks) {
+      if (outerKey === "assignee") {
+        const slots = Object.values(t.role_slots ?? {});
+        const assigned = slots.filter(Boolean) as Array<{ id: string; full_name: string }>;
+        if (assigned.length === 0) push(NONE, noneLabel, t);
+        else for (const a of assigned) push(a.id, a.full_name, t);
+      } else if (outerKey === "customer") {
+        const name = t.project?.client_name ?? null;
+        if (name) push(`c:${name}`, name, t);
+        else push(NONE, noneLabel, t);
+      } else if (outerKey === "service") {
+        if (t.service?.id) push(t.service.id, t.service.name, t);
+        else push(NONE, noneLabel, t);
+      } else {
+        // last_stage_update: bucket by ISO week of stage_entered_at
+        const raw = t.stage_entered_at;
+        if (!raw) {
+          push(NONE, noneLabel, t);
+          continue;
+        }
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) {
+          push(NONE, noneLabel, t);
+          continue;
+        }
+        const monday = new Date(d);
+        const day = (monday.getDay() + 6) % 7; // 0 = Monday
+        monday.setDate(monday.getDate() - day);
+        monday.setHours(0, 0, 0, 0);
+        const id = monday.toISOString().slice(0, 10);
+        const label = `أسبوع ${id}`;
+        push(id, label, t);
+      }
+    }
+    const out = [...map.values()].sort((a, b) => {
+      if (a.id === NONE) return 1;
+      if (b.id === NONE) return -1;
+      return b.tasks.length - a.tasks.length;
+    });
+    return out;
   }, [tasks, groupBy]);
 
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
@@ -905,7 +1213,30 @@ export function TaskBoard({
     moveTask(String(e.active.id), newStage);
   }
 
-  if (groupBy === "project") {
+  // Nested grouping (Rwasem stacked group-by like "Stage > Assignee"): outer
+  // produces columns, inner produces collapsible sub-sections inside each.
+  if (innerKey) {
+    const outerCols = bucketTasksBy(tasks, outerKey);
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {outerCols.map((col) => (
+          <NestedColumn
+            key={col.id}
+            title={col.name}
+            tasks={col.tasks}
+            innerKey={innerKey}
+          />
+        ))}
+        {outerCols.length === 0 && (
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+            لا توجد مهام لعرضها.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (outerKey === "project") {
     return (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {projectColumns.map((col) => (
@@ -926,14 +1257,34 @@ export function TaskBoard({
     );
   }
 
-  if (groupBy === "priority" || groupBy === "deadline") {
-    const cols = groupBy === "priority" ? priorityColumns : deadlineColumns;
+  if (outerKey === "priority" || outerKey === "deadline") {
+    const cols = outerKey === "priority" ? priorityColumns : deadlineColumns;
     return (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {cols.map((col) => (
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
         {cols.length === 0 && (
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+            لا توجد مهام لعرضها.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (
+    outerKey === "assignee" ||
+    outerKey === "customer" ||
+    outerKey === "service" ||
+    outerKey === "last_stage_update"
+  ) {
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {customColumns.map((col) => (
+          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+        ))}
+        {customColumns.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
             لا توجد مهام لعرضها.
           </div>

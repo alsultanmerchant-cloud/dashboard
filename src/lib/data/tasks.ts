@@ -11,11 +11,32 @@ export type TaskFilters = {
   dueToday?: boolean;
   // True → only tasks where progress_slip_percent > 5 (behind schedule).
   behindSchedule?: boolean;
+  // True → progress_slip_percent < -5 (ahead of schedule).
+  aheadSchedule?: boolean;
   // True → only tasks with delay_days > 3 (critical SLA breach).
   criticalDelay?: boolean;
+  // 0% / 1-99% / 100% buckets driven by progress_percent. Multi-select (OR).
+  progressBuckets?: Array<"not_started" | "in_progress" | "completed">;
+  // True → priority IN ('urgent','high') — Rwasem "starred" group.
+  starred?: boolean;
+  // Auth user id whose followed tasks should be included.
+  followedByUserId?: string;
   assignedToEmployeeId?: string;
   search?: string;
+  // Hierarchical date filters (Rwasem parity). Each entry is one bucket on one
+  // field; multiple entries on the SAME field OR together; entries on
+  // DIFFERENT fields AND together. Dates are inclusive on `from`, exclusive
+  // on `to` (ISO YYYY-MM-DD). Allowed fields are listed in `DATE_FIELDS`.
+  dateFilters?: Array<{ field: DateField; from: string; to: string }>;
 };
+
+export const DATE_FIELDS = [
+  "due_date",
+  "actual_done_date",
+  "stage_entered_at",
+  "created_at",
+] as const;
+export type DateField = (typeof DATE_FIELDS)[number];
 
 export async function listTasks(orgId: string, filters: TaskFilters = {}) {
   const search = filters.search?.trim();
@@ -63,8 +84,66 @@ export async function listTasks(orgId: string, filters: TaskFilters = {}) {
   if (filters.behindSchedule) {
     q = q.neq("stage", "done").gt("progress_slip_percent", 5);
   }
+  if (filters.aheadSchedule) {
+    q = q.neq("stage", "done").lt("progress_slip_percent", -5);
+  }
   if (filters.criticalDelay) {
     q = q.neq("stage", "done").gt("delay_days", 3);
+  }
+  if (filters.progressBuckets?.length && filters.progressBuckets.length < 3) {
+    const conds: string[] = [];
+    for (const b of filters.progressBuckets) {
+      if (b === "not_started") conds.push("progress_percent.eq.0");
+      else if (b === "in_progress") conds.push("and(progress_percent.gt.0,progress_percent.lt.100)");
+      else if (b === "completed") conds.push("progress_percent.eq.100");
+    }
+    if (conds.length === 1) {
+      // Single bucket — use a direct condition instead of `or()` so it composes
+      // with the search OR-clause below without clobbering it.
+      const b = filters.progressBuckets[0];
+      if (b === "not_started") q = q.eq("progress_percent", 0);
+      else if (b === "in_progress") q = q.gt("progress_percent", 0).lt("progress_percent", 100);
+      else if (b === "completed") q = q.eq("progress_percent", 100);
+    } else if (conds.length > 1) {
+      q = q.or(conds.join(","));
+    }
+  }
+  if (filters.starred) {
+    q = q.in("priority", ["urgent", "high"]);
+  }
+  if (filters.dateFilters?.length) {
+    // Group by field so multiple ranges on the same field OR together.
+    const byField = new Map<DateField, Array<{ from: string; to: string }>>();
+    for (const f of filters.dateFilters) {
+      const arr = byField.get(f.field) ?? [];
+      arr.push({ from: f.from, to: f.to });
+      byField.set(f.field, arr);
+    }
+    for (const [field, ranges] of byField) {
+      if (ranges.length === 1) {
+        const r = ranges[0];
+        q = q.gte(field, r.from).lt(field, r.to);
+      } else {
+        const conds = ranges.map(
+          (r) => `and(${field}.gte.${r.from},${field}.lt.${r.to})`,
+        );
+        q = q.or(conds.join(","));
+      }
+    }
+  }
+  if (filters.followedByUserId) {
+    const { data: followedRows, error: followedErr } = await supabaseAdmin
+      .from("task_followers")
+      .select("task_id")
+      .eq("user_id", filters.followedByUserId)
+      .limit(1000);
+    if (followedErr) throw followedErr;
+    const ids = (followedRows ?? []).map((r) => r.task_id as string);
+    if (ids.length === 0) {
+      q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+    } else {
+      q = q.in("id", ids);
+    }
   }
   if (search) {
     const escaped = search.replace(/[%,()]/g, " ").trim();

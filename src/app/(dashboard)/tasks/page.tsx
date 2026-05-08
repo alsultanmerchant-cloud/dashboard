@@ -8,6 +8,55 @@ import { TasksCalendarView } from "./tasks-calendar-view";
 import { TasksPivotView } from "./tasks-pivot-view";
 import { ViewSwitcher } from "./view-switcher";
 import { loadTasksForGlobalView } from "./_loaders";
+import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
+
+// Date filter token format: `<field>:<bucket>` where bucket is one of:
+//   • `YYYY`         — whole year
+//   • `YYYYqN`       — quarter N (1-4) of year
+//   • `YYYYmN`       — month N (1-12) of year
+// e.g. `due_date:2026,due_date:2026q3,actual_done_date:2025`.
+function expandDateToken(token: string): { field: DateField; from: string; to: string } | null {
+  const m = token.match(/^([a-z_]+):(\d{4})(?:(q)(\d)|(m)(\d{1,2}))?$/);
+  if (!m) return null;
+  const field = m[1] as DateField;
+  if (!DATE_FIELDS.includes(field)) return null;
+  const year = Number(m[2]);
+  if (m[3] === "q" && m[4]) {
+    const q = Number(m[4]);
+    if (q < 1 || q > 4) return null;
+    const startMonth = (q - 1) * 3 + 1;
+    const endMonth = startMonth + 3;
+    return {
+      field,
+      from: `${year}-${String(startMonth).padStart(2, "0")}-01`,
+      to: endMonth > 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(endMonth).padStart(2, "0")}-01`,
+    };
+  }
+  if (m[5] === "m" && m[6]) {
+    const month = Number(m[6]);
+    if (month < 1 || month > 12) return null;
+    return {
+      field,
+      from: `${year}-${String(month).padStart(2, "0")}-01`,
+      to: month === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(month + 1).padStart(2, "0")}-01`,
+    };
+  }
+  return { field, from: `${year}-01-01`, to: `${year + 1}-01-01` };
+}
+
+function parseDateFilters(raw: string | undefined) {
+  if (!raw) return undefined;
+  const out: Array<{ field: DateField; from: string; to: string }> = [];
+  for (const token of raw.split(",")) {
+    const expanded = expandDateToken(token.trim());
+    if (expanded) out.push(expanded);
+  }
+  return out.length ? out : undefined;
+}
 
 const OPEN_STAGES = [
   "new",
@@ -27,13 +76,39 @@ type FilterKey =
   | "mine"
   | "due_today"
   | "behind"
-  | "critical";
+  | "ahead"
+  | "critical"
+  | "not_started"
+  | "in_progress_pct"
+  | "completed_pct"
+  | "starred"
+  | "followed";
+
+const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
+  "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
+  "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
+]);
+
+function parseFilterKeys(raw: string | undefined, legacy: string | undefined): Set<FilterKey> {
+  // Multi-select param `f=open,starred,behind`. Falls back to legacy `filter=open`
+  // for shareable links saved before the multi-select rollout.
+  const source = raw ?? legacy;
+  if (source === undefined) return new Set(["open"]);
+  if (source === "") return new Set();
+  return new Set(
+    source.split(",")
+      .map((s) => s.trim())
+      .filter((s): s is FilterKey => ALL_FILTER_KEYS.has(s as FilterKey)),
+  );
+}
 
 export default async function TasksPage({
   searchParams,
 }: {
   searchParams: Promise<{
     view?: string;
+    f?: string;
+    d?: string;
     filter?: FilterKey;
     q?: string;
     projectId?: string;
@@ -44,24 +119,38 @@ export default async function TasksPage({
   const session = await requirePagePermission("tasks.view");
   const sp = await searchParams;
   const view = sp.view ?? "kanban";
-  const filterKey = (sp.filter as FilterKey) ?? "open";
+  const active = parseFilterKeys(sp.f, sp.filter);
+  const dateFilters = parseDateFilters(sp.d);
   const search = sp.q?.trim() || undefined;
-  const groupBy: "stage" | "project" | "priority" | "deadline" =
-    sp.groupBy === "project" || sp.groupBy === "priority" || sp.groupBy === "deadline"
-      ? sp.groupBy
-      : "stage";
+  const VALID_GROUPS = [
+    "stage", "project", "priority", "deadline",
+    "assignee", "customer", "service", "last_stage_update",
+  ] as const;
+  type GroupKey = (typeof VALID_GROUPS)[number];
+  // Comma-separated group-by stack (Rwasem-style "Stage > Assignee"). Pass the
+  // full ordered list to TaskBoard; it renders a flat board for length 1 and a
+  // nested outer/inner board for length 2+.
+  const groupBy: GroupKey[] = (() => {
+    const raw = sp.groupBy ?? "";
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    const filtered = parts.filter((p): p is GroupKey =>
+      (VALID_GROUPS as readonly string[]).includes(p),
+    );
+    return filtered.length ? filtered : ["stage"];
+  })();
 
-  // In kanban view we always render all 8 stages, so the "open" stage filter
-  // would just leave the "مكتملة" column permanently empty. Match Rwasem and
-  // include done tasks on kanban; list view keeps the strict filter.
-  const stageFilter =
-    view === "kanban" && filterKey === "open"
-      ? undefined
-      : filterKey === "open"
-        ? [...OPEN_STAGES]
-        : filterKey === "done"
-          ? ["done"]
-          : undefined;
+  // Stage filter combines "open" / "done" / "all". Both selected (or "all") =
+  // every stage. Kanban view always shows the "done" column even when only
+  // "open" is active — otherwise the column is permanently empty.
+  const stageFilter: string[] | undefined = (() => {
+    if (active.has("all")) return undefined;
+    const stages: string[] = [];
+    if (active.has("open")) stages.push(...OPEN_STAGES);
+    if (active.has("done")) stages.push("done");
+    if (stages.length === 0) return undefined;
+    if (view === "kanban" && active.has("open") && !active.has("done")) return undefined;
+    return stages;
+  })();
 
   // Resolve odooProjectId → Supabase project UUID when coming from the
   // project card (which only knows the Odoo integer ID).
@@ -91,16 +180,25 @@ export default async function TasksPage({
     projectInfo = data;
   }
 
+  const progressBuckets: Array<"not_started" | "in_progress" | "completed"> = [];
+  if (active.has("not_started")) progressBuckets.push("not_started");
+  if (active.has("in_progress_pct")) progressBuckets.push("in_progress");
+  if (active.has("completed_pct")) progressBuckets.push("completed");
+
   const tasks = await loadTasksForGlobalView(session.orgId, {
     stage: stageFilter,
-    overdue: filterKey === "overdue",
-    dueToday: filterKey === "due_today",
-    behindSchedule: filterKey === "behind",
-    criticalDelay: filterKey === "critical",
-    assignedToEmployeeId:
-      filterKey === "mine" ? session.employeeId : undefined,
+    overdue: active.has("overdue"),
+    dueToday: active.has("due_today"),
+    behindSchedule: active.has("behind"),
+    aheadSchedule: active.has("ahead"),
+    criticalDelay: active.has("critical"),
+    progressBuckets: progressBuckets.length ? progressBuckets : undefined,
+    starred: active.has("starred"),
+    followedByUserId: active.has("followed") ? session.userId : undefined,
+    assignedToEmployeeId: active.has("mine") ? session.employeeId : undefined,
     projectId: resolvedProjectId,
     search,
+    dateFilters,
   });
 
   // BoardTask shape for kanban (cross-project: project name shown on card).
