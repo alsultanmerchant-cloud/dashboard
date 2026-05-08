@@ -1,16 +1,21 @@
+"use client";
+
 // Sky Light task activity feed renderer.
-// Server component — receives the unified TaskActivity[] from
+// Client component (was server) — receives the unified TaskActivity[] from
 // getTaskActivityFeed and renders each item with a kind-specific layout.
+// Adds an "الأحدث / الأقدم" sort toggle for the log-note timeline.
 //
 // Visual conventions match the PDF screenshots:
 //   - stage changes: small colored chip with "from → to"
 //   - assignee changes: avatar swap with role color
 //   - notes: card with avatar + body, @mentions highlighted, URLs linkified
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import sanitizeHtml from "sanitize-html";
 import {
   ArrowLeftRight,
+  ArrowUpDown,
   GitCompareArrows,
   MessageSquare,
   Lock,
@@ -57,6 +62,18 @@ function groupByDay(
 }
 
 export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
+
+  const sorted = useMemo(() => {
+    const copy = [...items];
+    copy.sort((a, b) => {
+      const ta = new Date(a.created_at).getTime();
+      const tb = new Date(b.created_at).getTime();
+      return order === "asc" ? ta - tb : tb - ta;
+    });
+    return copy;
+  }, [items, order]);
+
   if (items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center">
@@ -65,10 +82,43 @@ export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
     );
   }
 
-  const groups = groupByDay(items);
+  const groups = groupByDay(sorted);
 
   return (
-    <ol className="space-y-3">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-lg border border-soft bg-soft-1/50 px-3 py-1.5">
+        <span className="text-[11px] font-medium text-muted-foreground inline-flex items-center gap-1.5">
+          <ArrowUpDown className="size-3.5" />
+          ترتيب حسب
+        </span>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setOrder("desc")}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+              order === "desc"
+                ? "border-cyan/40 bg-cyan-dim text-cyan"
+                : "border-soft bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            الأحدث أولًا
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrder("asc")}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+              order === "asc"
+                ? "border-cyan/40 bg-cyan-dim text-cyan"
+                : "border-soft bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            الأقدم أولًا
+          </button>
+        </div>
+      </div>
+      <ol className="space-y-3">
       {groups.map((g) => (
         <li key={g.key} className="space-y-3">
           {/* Date divider — Rwasem-style "April 15, 2026" */}
@@ -94,7 +144,8 @@ export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
           </ol>
         </li>
       ))}
-    </ol>
+      </ol>
+    </div>
   );
 }
 

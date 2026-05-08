@@ -61,6 +61,56 @@ export type Database = {
           },
         ]
       }
+      ai_insight_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          is_current: boolean
+          model: string | null
+          organization_id: string
+          requested_by: string | null
+          result_json: Json | null
+          snapshot_text: string | null
+          status: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          is_current?: boolean
+          model?: string | null
+          organization_id: string
+          requested_by?: string | null
+          result_json?: Json | null
+          snapshot_text?: string | null
+          status?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          is_current?: boolean
+          model?: string | null
+          organization_id?: string
+          requested_by?: string | null
+          result_json?: Json | null
+          snapshot_text?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_insight_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       am_targets: {
         Row: {
           account_manager_id: string
@@ -1992,6 +2042,7 @@ export type Database = {
           cycle_length_months: number | null
           description: string | null
           document_count: number
+          duration_label: string | null
           end_date: string | null
           external_id: string | null
           external_source: string | null
@@ -2004,18 +2055,22 @@ export type Database = {
           is_favorite: boolean
           last_update_color: number | null
           last_update_status: string | null
+          media_manager_id: string | null
           media_specialist_id: string | null
           name: string
           next_renewal_date: string | null
           organization_id: string
+          package_name: string | null
           priority: string
           project_code: string | null
           project_manager_employee_id: string | null
+          seo_manager_id: string | null
           seo_specialist_id: string | null
           site_address: string | null
           site_address_display: string | null
           site_latitude: number | null
           site_longitude: number | null
+          social_manager_id: string | null
           social_specialist_id: string | null
           start_date: string | null
           status: string
@@ -2034,6 +2089,7 @@ export type Database = {
           cycle_length_months?: number | null
           description?: string | null
           document_count?: number
+          duration_label?: string | null
           end_date?: string | null
           external_id?: string | null
           external_source?: string | null
@@ -2046,18 +2102,22 @@ export type Database = {
           is_favorite?: boolean
           last_update_color?: number | null
           last_update_status?: string | null
+          media_manager_id?: string | null
           media_specialist_id?: string | null
           name: string
           next_renewal_date?: string | null
           organization_id: string
+          package_name?: string | null
           priority?: string
           project_code?: string | null
           project_manager_employee_id?: string | null
+          seo_manager_id?: string | null
           seo_specialist_id?: string | null
           site_address?: string | null
           site_address_display?: string | null
           site_latitude?: number | null
           site_longitude?: number | null
+          social_manager_id?: string | null
           social_specialist_id?: string | null
           start_date?: string | null
           status?: string
@@ -2076,6 +2136,7 @@ export type Database = {
           cycle_length_months?: number | null
           description?: string | null
           document_count?: number
+          duration_label?: string | null
           end_date?: string | null
           external_id?: string | null
           external_source?: string | null
@@ -2088,18 +2149,22 @@ export type Database = {
           is_favorite?: boolean
           last_update_color?: number | null
           last_update_status?: string | null
+          media_manager_id?: string | null
           media_specialist_id?: string | null
           name?: string
           next_renewal_date?: string | null
           organization_id?: string
+          package_name?: string | null
           priority?: string
           project_code?: string | null
           project_manager_employee_id?: string | null
+          seo_manager_id?: string | null
           seo_specialist_id?: string | null
           site_address?: string | null
           site_address_display?: string | null
           site_latitude?: number | null
           site_longitude?: number | null
+          social_manager_id?: string | null
           social_specialist_id?: string | null
           start_date?: string | null
           status?: string
@@ -2125,6 +2190,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "projects_media_manager_id_fkey"
+            columns: ["media_manager_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "projects_media_specialist_id_fkey"
             columns: ["media_specialist_id"]
             isOneToOne: false
@@ -2146,8 +2218,22 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "projects_seo_manager_id_fkey"
+            columns: ["seo_manager_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "projects_seo_specialist_id_fkey"
             columns: ["seo_specialist_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "projects_social_manager_id_fkey"
+            columns: ["social_manager_id"]
             isOneToOne: false
             referencedRelation: "employee_profiles"
             referencedColumns: ["id"]

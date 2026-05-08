@@ -347,8 +347,9 @@ export async function addTaskCommentAction(input: {
   const { data: task } = await supabaseAdmin
     .from("tasks")
     .select(`
-      id, project_id, created_by,
-      task_assignees ( employee_id )
+      id, project_id, title, task_code, created_by,
+      task_assignees ( employee_id ),
+      project:projects ( id, name, project_code )
     `)
     .eq("id", parsed.data.task_id)
     .eq("organization_id", session.orgId)
@@ -403,6 +404,16 @@ export async function addTaskCommentAction(input: {
       })),
     );
 
+    // Build a notification title that includes the project name + task title
+    // so the recipient sees "في 'PRJ-XXXX • {project}' — {task title}" rather
+    // than the generic "في مهمة". Routing to the task uses entity_type='task'.
+    const proj = Array.isArray(task.project) ? task.project[0] : task.project;
+    const projectLabel = proj?.name ?? "";
+    const taskCodeLabel = task.task_code ? `${task.task_code} ` : "";
+    const titleSuffix = projectLabel
+      ? `في «${projectLabel}» — ${taskCodeLabel}${task.title ?? ""}`.trim()
+      : `في مهمة ${taskCodeLabel}${task.title ?? ""}`.trim();
+
     await Promise.all(
       resolved.map((r) =>
         Promise.all([
@@ -411,7 +422,7 @@ export async function addTaskCommentAction(input: {
             recipientUserId: r.userId,
             recipientEmployeeId: r.employeeId,
             type: "MENTION",
-            title: `${session!.fullName} أشار إليك في مهمة`,
+            title: `${session!.fullName} أشار إليك ${titleSuffix}`,
             body: parsed.data.body.slice(0, 140),
             entityType: "task",
             entityId: parsed.data.task_id,

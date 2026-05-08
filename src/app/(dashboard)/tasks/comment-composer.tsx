@@ -114,12 +114,17 @@ export function CommentComposer({
 
   const mentionMatches = useMemo<Mentionable[]>(() => {
     if (!mentionState) return [];
-    const q = mentionState.query;
+    const q = mentionState.query.trim();
+    // Empty query → show every mentionable employee (sorted alphabetically)
+    // so the user can browse the full list before typing. The popup is
+    // scrollable so we don't truncate.
+    if (!q) {
+      return [...mentionable].sort((a, b) => a.name.localeCompare(b.name));
+    }
     return mentionable
       .map((m) => ({ m, s: fuzzyScore(m.name, q) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s || a.m.name.localeCompare(b.m.name))
-      .slice(0, 8)
       .map((x) => x.m);
   }, [mentionState, mentionable]);
 
@@ -385,8 +390,11 @@ export function CommentComposer({
             <div
               role="listbox"
               aria-label="اقتراحات الإشارة"
-              className="absolute bottom-full start-0 mb-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-soft-2 bg-popover shadow-lg z-50"
+              className="absolute bottom-full start-0 mb-1 max-h-96 w-80 overflow-y-auto rounded-lg border border-soft-2 bg-popover shadow-lg z-50"
             >
+              <div className="sticky top-0 border-b border-soft bg-popover/95 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+                {mentionMatches.length} موظف{mentionState.query ? ` يطابق «${mentionState.query}»` : ""}
+              </div>
               {mentionMatches.map((emp, idx) => {
                 const active = idx === mentionState.activeIndex;
                 return (

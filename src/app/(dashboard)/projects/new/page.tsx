@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listClients } from "@/lib/data/clients";
-import { listAccountManagers, listServices } from "@/lib/data/employees";
+import { listAccountManagers, listEmployees, listServices } from "@/lib/data/employees";
 import { listServiceCategories, listTemplatesForServices } from "@/lib/data/service-categories";
 import { PageHeader } from "@/components/page-header";
 import { NewProjectForm } from "./new-project-form";
@@ -11,11 +11,12 @@ export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
   const session = await requirePagePermission("projects.manage");
-  const [clients, services, ams, categories] = await Promise.all([
+  const [clients, services, ams, categories, employees] = await Promise.all([
     listClients(session.orgId),
     listServices(session.orgId),
     listAccountManagers(session.orgId),
     listServiceCategories(session.orgId),
+    listEmployees(session.orgId),
   ]);
 
   // Pre-fetch every active template-with-items so the preview pane can render
@@ -37,12 +38,27 @@ export default async function NewProjectPage() {
       />
 
       <NewProjectForm
-        clients={clients.map((c) => ({ id: c.id, label: c.name }))}
+        clients={clients.map((c) => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          email: c.email,
+        }))}
         services={services.map((s) => ({ id: s.id, name: s.name, slug: s.slug }))}
         accountManagers={ams.map((a) => ({
           id: a.id,
-          label: a.full_name + (a.job_title ? ` — ${a.job_title}` : ""),
+          full_name: a.full_name,
+          job_title: a.job_title ?? null,
         }))}
+        employees={employees.map((e) => {
+          const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+          return {
+            id: e.id,
+            full_name: e.full_name,
+            job_title: e.job_title ?? null,
+            department_name: dept?.name ?? null,
+          };
+        })}
         categories={categories.map((c) => ({
           id: c.id,
           key: c.key,

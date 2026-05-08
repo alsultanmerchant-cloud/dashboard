@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { ProjectCreateSchema } from "@/lib/schemas";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -29,6 +30,10 @@ export async function createProjectAction(
 
   const serviceIds = formData.getAll("service_ids").map(String).filter(Boolean);
   const generateTasks = formData.get("generate_tasks") !== "false";
+  const followerEmployeeIds = formData
+    .getAll("follower_employee_ids")
+    .map(String)
+    .filter(Boolean);
 
   // T4: per-service week-split metadata is shipped as a JSON blob on the
   // form to avoid n form-fields per service. The shape is validated by zod
@@ -56,9 +61,16 @@ export async function createProjectAction(
     social_specialist_id: formData.get("social_specialist_id"),
     media_specialist_id: formData.get("media_specialist_id"),
     seo_specialist_id: formData.get("seo_specialist_id"),
+    social_manager_id: formData.get("social_manager_id"),
+    media_manager_id: formData.get("media_manager_id"),
+    seo_manager_id: formData.get("seo_manager_id"),
     service_ids: serviceIds,
     generate_tasks: generateTasks,
     service_week_splits: serviceWeekSplits,
+    package_name: formData.get("package_name"),
+    duration_label: formData.get("duration_label"),
+    follower_employee_ids: followerEmployeeIds,
+    constant_assignee_employee_id: formData.get("constant_assignee_employee_id"),
   });
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -85,6 +97,11 @@ export async function createProjectAction(
       social_specialist_id: parsed.data.social_specialist_id,
       media_specialist_id: parsed.data.media_specialist_id,
       seo_specialist_id: parsed.data.seo_specialist_id,
+      social_manager_id: parsed.data.social_manager_id,
+      media_manager_id: parsed.data.media_manager_id,
+      seo_manager_id: parsed.data.seo_manager_id,
+      package_name: parsed.data.package_name,
+      duration_label: parsed.data.duration_label,
     })
     .select("id, name, start_date")
     .single();
@@ -159,6 +176,18 @@ export async function createProjectAction(
     });
   }
 
+  // Followers picked at create time → project_followers (org-scoped, RLS-gated).
+  if (parsed.data.follower_employee_ids.length > 0) {
+    await supabaseAdmin.from("project_followers").insert(
+      parsed.data.follower_employee_ids.map((eid) => ({
+        organization_id: session!.orgId,
+        project_id: project.id,
+        employee_id: eid,
+        added_by: session!.userId,
+      })),
+    );
+  }
+
   let taskCount = 0;
   if (parsed.data.generate_tasks && parsed.data.service_ids.length > 0) {
     // T4 path: when any per-service override is present (week_split or
@@ -201,8 +230,98 @@ export async function createProjectAction(
     }
   }
 
+  // Constant assignee — every task on this project gets this employee as
+  // an extra agent assignee. Idempotent: skip rows that already exist.
+  if (
+    parsed.data.constant_assignee_employee_id &&
+    parsed.data.generate_tasks &&
+    taskCount > 0
+  ) {
+    const { data: createdTasks } = await supabaseAdmin
+      .from("tasks")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("project_id", project.id);
+    if (createdTasks && createdTasks.length > 0) {
+      const rows = createdTasks.map((t) => ({
+        organization_id: session!.orgId,
+        task_id: t.id as string,
+        employee_id: parsed.data.constant_assignee_employee_id!,
+        role_type: "agent" as const,
+      }));
+      // Insert ignoring conflicts on (task_id, employee_id, role_type) — the
+      // unique index prevents dupes when generate-tasks already added them.
+      const { error: caErr } = await supabaseAdmin
+        .from("task_assignees")
+        .upsert(rows, {
+          onConflict: "task_id,employee_id,role_type",
+          ignoreDuplicates: true,
+        });
+      if (caErr) console.warn(`constant_assignee: ${caErr.message}`);
+    }
+  }
+
   revalidatePath("/projects");
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
   return { ok: true, projectId: project.id, taskCount };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline "create client" used by the new-project wizard.
+// Returns { id, name } so the picker can select the freshly-created row.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const QuickClientSchema = z.object({
+  name: z.string().trim().min(2, { message: "اسم العميل قصير" }),
+  phone: z.string().trim().optional().nullable().transform((v) => v || null),
+  email: z
+    .string()
+    .trim()
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+});
+
+export type QuickClientResult =
+  | { ok: true; client: { id: string; name: string } }
+  | { ok: false; error: string };
+
+export async function createClientQuickAction(
+  input: { name: string; phone?: string; email?: string },
+): Promise<QuickClientResult> {
+  let session;
+  try {
+    session = await requirePermission("projects.manage");
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  const parsed = QuickClientSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+  const { data, error } = await supabaseAdmin
+    .from("clients")
+    .insert({
+      organization_id: session.orgId,
+      name: parsed.data.name,
+      phone: parsed.data.phone,
+      email: parsed.data.email,
+      status: "active",
+      created_by: session.userId,
+    })
+    .select("id, name")
+    .single();
+  if (error || !data) return { ok: false, error: error?.message ?? "تعذر الإنشاء" };
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "client.create",
+    entityType: "client",
+    entityId: data.id,
+    metadata: { source: "new_project_wizard" },
+  });
+  revalidatePath("/clients");
+  revalidatePath("/projects/new");
+  return { ok: true, client: { id: data.id, name: data.name } };
 }

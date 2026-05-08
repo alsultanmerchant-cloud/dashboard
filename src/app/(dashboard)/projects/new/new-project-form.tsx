@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Loader2, Check, CalendarClock, Users, Eye, AlertCircle,
   ChevronLeft, ChevronRight, User as UserIcon, Briefcase, ClipboardList,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
 import { expandTemplates, type GeneratedTask, type TemplateInput } from "@/lib/projects/offsets";
-import { createProjectAction, type ProjectFormState } from "../_actions";
+import { createProjectAction, createClientQuickAction, type ProjectFormState } from "../_actions";
 import type { TemplateWithItems } from "@/lib/data/service-categories";
 
 type WizardStep = 1 | 2 | 3;
@@ -25,10 +27,17 @@ const STEPS: { id: WizardStep; label: string; icon: React.ComponentType<{ classN
   { id: 3, label: "الجدولة والمراجعة", icon: ClipboardList },
 ];
 
-type Option = { id: string; label: string };
-
 const SELECT_CLASS =
   "flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+type ClientOpt = { id: string; name: string; phone: string | null; email: string | null };
+type EmployeeOpt = {
+  id: string;
+  full_name: string;
+  job_title: string | null;
+  department_name: string | null;
+};
+type AMOpt = { id: string; full_name: string; job_title: string | null };
 
 type CategoryOpt = {
   id: string;
@@ -39,15 +48,40 @@ type CategoryOpt = {
 };
 
 type ServiceOpt = { id: string; name: string; slug: string };
-
 type SplitState = Record<string, { week_split: boolean; weeks: number; category_id: string | null }>;
 
+// Sky Light's standard agency packages (extracted from project-name conventions).
+const PACKAGE_OPTIONS: SearchableOption[] = [
+  { value: "نوفا", label: "نوفا (Nova)", hint: "السوشال + الميديا + السيو" },
+  { value: "ذهبية", label: "ذهبية (Golden)", hint: "حزمة شاملة" },
+  { value: "فضية", label: "فضية (Silver)", hint: "حزمة مبسّطة" },
+  { value: "حملات إعلانية", label: "حملات إعلانية", hint: "ميديا فقط" },
+  { value: "سوشيال ميديا", label: "سوشيال ميديا", hint: "إدارة منصات التواصل" },
+  { value: "سيو", label: "سيو (SEO)", hint: "تحسين محركات البحث" },
+  { value: "إنشاء + نوفا", label: "إنشاء + نوفا", hint: "إنشاء متجر + باقة نوفا" },
+  { value: "خدمات جوجل", label: "خدمات جوجل", hint: "Google Ads + GMB" },
+];
+
+const DURATION_PRESETS: { value: string; label: string; days: number }[] = [
+  { value: "15 يوم", label: "15 يوم", days: 15 },
+  { value: "شهر", label: "شهر", days: 30 },
+  { value: "شهرين", label: "شهرين", days: 60 },
+  { value: "3 شهور", label: "3 شهور", days: 90 },
+];
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export function NewProjectForm({
-  clients, services, accountManagers, categories, templates,
+  clients: initialClients, services, accountManagers, employees, categories, templates,
 }: {
-  clients: Option[];
+  clients: ClientOpt[];
   services: ServiceOpt[];
-  accountManagers: Option[];
+  accountManagers: AMOpt[];
+  employees: EmployeeOpt[];
   categories: CategoryOpt[];
   templates: TemplateWithItems[];
 }) {
@@ -56,20 +90,51 @@ export function NewProjectForm({
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [splits, setSplits] = useState<SplitState>({});
   const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState<string>("");
+  const [activeDuration, setActiveDuration] = useState<string>("");
   const [generateTasks, setGenerateTasks] = useState(true);
-  // Mirrored form values so the wizard can validate per-step transitions.
+  const [clients, setClients] = useState<ClientOpt[]>(initialClients);
   const [clientId, setClientId] = useState<string>("");
   const [name, setName] = useState<string>("");
+  const [packageName, setPackageName] = useState<string>("");
+  const [accountManagerId, setAccountManagerId] = useState<string>("");
+  const [socialId, setSocialId] = useState<string>("");
+  const [mediaId, setMediaId] = useState<string>("");
+  const [seoId, setSeoId] = useState<string>("");
+  const [socialManagerId, setSocialManagerId] = useState<string>("");
+  const [mediaManagerId, setMediaManagerId] = useState<string>("");
+  const [seoManagerId, setSeoManagerId] = useState<string>("");
+  const [followerIds, setFollowerIds] = useState<string[]>([]);
+  const [constantAssigneeId, setConstantAssigneeId] = useState<string>("");
+  const [showQuickClient, setShowQuickClient] = useState(false);
+  const [quickClient, setQuickClient] = useState({ name: "", phone: "", email: "" });
+  const [creatingClient, setCreatingClient] = useState(false);
+
   const [state, formAction, pending] = useActionState<ProjectFormState | undefined, FormData>(
     createProjectAction,
     undefined,
   );
 
-  // Per-step gating for the Next button.
+  // Validation: each step must have its required fields filled.
+  const validation = useMemo(() => {
+    const issues: string[] = [];
+    if (step >= 1) {
+      if (!clientId) issues.push("اختر العميل");
+      if (name.trim().length < 3) issues.push("اسم المشروع قصير جدًا (3 أحرف على الأقل)");
+    }
+    if (step >= 2) {
+      if (selectedServices.size === 0) issues.push("اختر خدمة واحدة على الأقل");
+    }
+    if (step === 3) {
+      if (!startDate) issues.push("اختر تاريخ البدء");
+    }
+    return issues;
+  }, [step, clientId, name, selectedServices.size, startDate]);
+
   const canAdvance: Record<WizardStep, boolean> = {
-    1: clientId.length > 0 && name.trim().length > 0,
+    1: clientId.length > 0 && name.trim().length >= 3,
     2: selectedServices.size > 0,
-    3: true,
+    3: !!startDate,
   };
 
   useEffect(() => {
@@ -93,7 +158,6 @@ export function NewProjectForm({
         });
       } else {
         next.add(id);
-        // Default Social Media to a 3-week split per PDF §11.
         const svc = services.find((x) => x.id === id);
         const defaults = svc?.slug === "social-media-management"
           ? { week_split: true, weeks: 3, category_id: null }
@@ -107,7 +171,18 @@ export function NewProjectForm({
     setSplits((s) => ({ ...s, [sid]: { ...(s[sid] ?? { week_split: false, weeks: 0, category_id: null }), ...patch } }));
   };
 
-  // Live preview: re-run the pure offset engine on every tick.
+  const applyDuration = (value: string, days: number) => {
+    setActiveDuration(value);
+    if (startDate) setEndDate(addDaysIso(startDate, days));
+  };
+
+  // Re-apply active duration when start_date changes.
+  useEffect(() => {
+    if (!activeDuration || !startDate) return;
+    const preset = DURATION_PRESETS.find((d) => d.value === activeDuration);
+    if (preset) setEndDate(addDaysIso(startDate, preset.days));
+  }, [startDate, activeDuration]);
+
   const preview: GeneratedTask[] = useMemo(() => {
     if (selectedServices.size === 0 || !startDate) return [];
     const inputs = templates
@@ -149,23 +224,96 @@ export function NewProjectForm({
 
   const selectedClient = clients.find((c) => c.id === clientId);
 
+  // Searchable-select options.
+  const clientOptions: SearchableOption[] = clients.map((c) => ({
+    value: c.id,
+    label: c.name,
+    hint: c.phone || c.email || null,
+  }));
+  const employeeOptionsAll: SearchableOption[] = employees.map((e) => ({
+    value: e.id,
+    label: e.full_name,
+    hint: e.job_title || e.department_name || null,
+  }));
+  const amOptions: SearchableOption[] = accountManagers.map((a) => ({
+    value: a.id,
+    label: a.full_name,
+    hint: a.job_title || null,
+  }));
+
+  const submitQuickClient = async () => {
+    if (quickClient.name.trim().length < 2) {
+      toast.error("اسم العميل قصير");
+      return;
+    }
+    setCreatingClient(true);
+    try {
+      const res = await createClientQuickAction({
+        name: quickClient.name.trim(),
+        phone: quickClient.phone.trim() || undefined,
+        email: quickClient.email.trim() || undefined,
+      });
+      if (res.ok) {
+        toast.success("تم إضافة العميل");
+        const fresh: ClientOpt = {
+          id: res.client.id,
+          name: res.client.name,
+          phone: quickClient.phone || null,
+          email: quickClient.email || null,
+        };
+        setClients((prev) => [fresh, ...prev]);
+        setClientId(res.client.id);
+        setShowQuickClient(false);
+        setQuickClient({ name: "", phone: "", email: "" });
+      } else {
+        toast.error(res.error);
+      }
+    } finally {
+      setCreatingClient(false);
+    }
+  };
+
   return (
-    <form action={formAction} className="grid gap-4 lg:grid-cols-2">
-      {/* Hidden form payload — always present so the server action sees the
-          full set of fields regardless of which step is currently visible. */}
+    <form
+      action={formAction}
+      className="grid gap-4 lg:grid-cols-2"
+      onKeyDown={(e) => {
+        // Defensive: prevent any single-input Enter (project name, package
+        // search, employee search, etc.) from submitting the wizard. The
+        // ONLY way a project gets created is by clicking "إنشاء المشروع"
+        // on Step 3. Submit-via-Enter is silently swallowed; the user has
+        // to use the explicit button.
+        if (
+          e.key === "Enter" &&
+          !(e.target instanceof HTMLTextAreaElement) &&
+          !(e.target instanceof HTMLButtonElement && (e.target as HTMLButtonElement).type === "submit")
+        ) {
+          e.preventDefault();
+        }
+      }}
+    >
+      {/* Hidden form payload */}
       {Array.from(selectedServices).map((id) => (
         <input key={id} type="hidden" name="service_ids" value={id} />
       ))}
-      <input
-        type="hidden"
-        name="service_week_splits"
-        value={JSON.stringify(splitsForForm)}
-      />
+      <input type="hidden" name="service_week_splits" value={JSON.stringify(splitsForForm)} />
       <input type="hidden" name="generate_tasks" value={generateTasks ? "true" : "false"} />
+      <input type="hidden" name="client_id" value={clientId} />
+      <input type="hidden" name="package_name" value={packageName} />
+      <input type="hidden" name="duration_label" value={activeDuration} />
+      <input type="hidden" name="account_manager_employee_id" value={accountManagerId} />
+      <input type="hidden" name="social_specialist_id" value={socialId} />
+      <input type="hidden" name="media_specialist_id" value={mediaId} />
+      <input type="hidden" name="seo_specialist_id" value={seoId} />
+      <input type="hidden" name="social_manager_id" value={socialManagerId} />
+      <input type="hidden" name="media_manager_id" value={mediaManagerId} />
+      <input type="hidden" name="seo_manager_id" value={seoManagerId} />
+      <input type="hidden" name="constant_assignee_employee_id" value={constantAssigneeId} />
+      {followerIds.map((id) => (
+        <input key={id} type="hidden" name="follower_employee_ids" value={id} />
+      ))}
 
-      {/* Left: stepper + step bodies */}
       <div className="space-y-3">
-        {/* Rwasem-style stepper */}
         <Card>
           <CardContent className="flex items-stretch gap-1 p-2">
             {STEPS.map((s, i) => {
@@ -205,155 +353,226 @@ export function NewProjectForm({
           </CardContent>
         </Card>
 
-        {/* Step 1 — Customer */}
+        {/* STEP 1 — Client (searchable + quick-add) */}
         <div className={cn(step === 1 ? "block" : "hidden")}>
           <Card>
             <CardContent className="space-y-3 p-4">
               <div className="space-y-1.5">
-                <Label htmlFor="proj_client">العميل *</Label>
-                <select
-                  id="proj_client"
-                  name="client_id"
-                  required
+                <div className="flex items-center justify-between">
+                  <Label>العميل *</Label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickClient((v) => !v)}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-cyan-dim/40"
+                  >
+                    <UserPlus className="size-3.5" />
+                    {showQuickClient ? "إخفاء" : "إضافة عميل جديد"}
+                  </button>
+                </div>
+                <SearchableSelect
                   value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  className={SELECT_CLASS}
-                >
-                  <option value="" disabled>اختر العميل</option>
-                  {clients.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
-                </select>
+                  onValueChange={setClientId}
+                  options={clientOptions}
+                  placeholder="اختر العميل"
+                  searchPlaceholder="ابحث بالاسم أو الهاتف…"
+                  required
+                  onCreateNew={(q) => {
+                    setShowQuickClient(true);
+                    setQuickClient((p) => ({ ...p, name: q || p.name }));
+                  }}
+                  createLabel="إضافة عميل جديد"
+                />
                 {state?.fieldErrors?.client_id && (
                   <p className="text-xs text-cc-red">{state.fieldErrors.client_id}</p>
                 )}
               </div>
 
+              {showQuickClient && (
+                <div className="rounded-lg border border-cyan/30 bg-cyan-dim/30 p-3 space-y-2">
+                  <div className="text-[11px] font-semibold text-cyan">عميل جديد</div>
+                  <Input
+                    placeholder="اسم العميل *"
+                    value={quickClient.name}
+                    onChange={(e) => setQuickClient((p) => ({ ...p, name: e.target.value }))}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      placeholder="هاتف"
+                      value={quickClient.phone}
+                      onChange={(e) => setQuickClient((p) => ({ ...p, phone: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="بريد"
+                      type="email"
+                      value={quickClient.email}
+                      onChange={(e) => setQuickClient((p) => ({ ...p, email: e.target.value }))}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={submitQuickClient}
+                      disabled={creatingClient || quickClient.name.trim().length < 2}
+                    >
+                      {creatingClient && <Loader2 className="size-3.5 animate-spin" />}
+                      حفظ العميل
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowQuickClient(false)}
+                    >
+                      إلغاء
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label htmlFor="name">اسم المشروع *</Label>
                 <Input
                   id="name"
-                  name="name"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="مثال: حملة رمضان 1447"
                 />
+                {/* `name` value is sent via the visible input */}
+                <input type="hidden" name="name" value={name} />
                 {state?.fieldErrors?.name && (
                   <p className="text-xs text-cc-red">{state.fieldErrors.name}</p>
                 )}
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="description">وصف المشروع</Label>
-                <Textarea
-                  id="description"
-                  name="description"
-                  rows={3}
-                  placeholder="ملخص قصير عن المشروع…"
+                <Label>الباقة</Label>
+                <SearchableSelect
+                  value={packageName}
+                  onValueChange={setPackageName}
+                  options={PACKAGE_OPTIONS}
+                  placeholder="اختر الباقة (اختياري)"
+                  searchPlaceholder="ابحث في الباقات…"
+                  onCreateNew={(q) => {
+                    if (q) setPackageName(q);
+                  }}
+                  createLabel="استخدام نص حر"
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="description">وصف المشروع</Label>
+                <Textarea id="description" name="description" rows={3} placeholder="ملخص قصير عن المشروع…" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Step 2 — Services */}
+        {/* STEP 2 — Services (unchanged) */}
         <div className={cn(step === 2 ? "block" : "hidden")}>
           <Card>
             <CardContent className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
-              <Label className="m-0">الخدمات المتفق عليها</Label>
-              <span className="text-[11px] text-muted-foreground">
-                {selectedServices.size} مختارة
-              </span>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-2">
-              {services.map((s) => {
-                const active = selectedServices.has(s.id);
+              <div className="flex items-center justify-between">
+                <Label className="m-0">الخدمات المتفق عليها</Label>
+                <span className="text-[11px] text-muted-foreground">
+                  {selectedServices.size} مختارة
+                </span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {services.map((s) => {
+                  const active = selectedServices.has(s.id);
+                  return (
+                    <button
+                      type="button"
+                      key={s.id}
+                      onClick={() => toggleService(s.id)}
+                      className={cn(
+                        "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
+                        active
+                          ? "border-cyan/40 bg-cyan-dim text-cyan"
+                          : "border-soft bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <span className="text-start truncate">{s.name}</span>
+                      {active && <Check className="size-3.5 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {Array.from(selectedServices).map((sid) => {
+                const svc = services.find((x) => x.id === sid);
+                const sel = splits[sid] ?? { week_split: false, weeks: 0, category_id: null };
+                const cats = categories.filter((c) => c.service_id === sid);
                 return (
-                  <button
-                    type="button"
-                    key={s.id}
-                    onClick={() => toggleService(s.id)}
-                    className={cn(
-                      "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
-                      active
-                        ? "border-cyan/40 bg-cyan-dim text-cyan"
-                        : "border-soft bg-card text-muted-foreground hover:text-foreground",
+                  <div key={sid} className="rounded-lg border border-soft bg-card/40 p-3 text-xs space-y-2">
+                    <div className="font-semibold">{svc?.name}</div>
+                    {cats.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Label className="m-0 text-[11px] text-muted-foreground">التصنيف</Label>
+                        <select
+                          className={cn(SELECT_CLASS, "h-8 flex-1")}
+                          value={sel.category_id ?? ""}
+                          onChange={(e) => updateSplit(sid, { category_id: e.target.value || null })}
+                        >
+                          <option value="">— كل القوالب —</option>
+                          {cats.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name_ar}</option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                  >
-                    <span className="text-start truncate">{s.name}</span>
-                    {active && <Check className="size-3.5 shrink-0" />}
-                  </button>
+                    <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sel.week_split}
+                        onChange={(e) => updateSplit(sid, { week_split: e.target.checked, weeks: e.target.checked ? Math.max(1, sel.weeks || 3) : 0 })}
+                        className="size-3.5 accent-cyan"
+                      />
+                      تقسيم العمل عبر أسابيع
+                    </label>
+                    {sel.week_split && (
+                      <div className="flex items-center gap-2">
+                        <Label className="m-0 text-[11px] text-muted-foreground">عدد الأسابيع</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={12}
+                          className="h-8 w-20"
+                          value={sel.weeks || 0}
+                          onChange={(e) => updateSplit(sid, { weeks: Math.max(1, Math.min(12, Number(e.target.value) || 1)) })}
+                        />
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-            </div>
+            </CardContent>
+          </Card>
+        </div>
 
-            {Array.from(selectedServices).map((sid) => {
-              const svc = services.find((x) => x.id === sid);
-              const sel = splits[sid] ?? { week_split: false, weeks: 0, category_id: null };
-              const cats = categories.filter((c) => c.service_id === sid);
-              return (
-                <div key={sid} className="rounded-lg border border-soft bg-card/40 p-3 text-xs space-y-2">
-                  <div className="font-semibold">{svc?.name}</div>
-                  {cats.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Label className="m-0 text-[11px] text-muted-foreground">التصنيف</Label>
-                      <select
-                        className={cn(SELECT_CLASS, "h-8 flex-1")}
-                        value={sel.category_id ?? ""}
-                        onChange={(e) => updateSplit(sid, { category_id: e.target.value || null })}
-                      >
-                        <option value="">— كل القوالب —</option>
-                        {cats.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name_ar}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={sel.week_split}
-                      onChange={(e) => updateSplit(sid, { week_split: e.target.checked, weeks: e.target.checked ? Math.max(1, sel.weeks || 3) : 0 })}
-                      className="size-3.5 accent-cyan"
-                    />
-                    تقسيم العمل عبر أسابيع
-                  </label>
-                  {sel.week_split && (
-                    <div className="flex items-center gap-2">
-                      <Label className="m-0 text-[11px] text-muted-foreground">عدد الأسابيع</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={12}
-                        className="h-8 w-20"
-                        value={sel.weeks || 0}
-                        onChange={(e) => updateSplit(sid, { weeks: Math.max(1, Math.min(12, Number(e.target.value) || 1)) })}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-        </div>{/* /Step 2 */}
-
-        {/* Step 3 — Schedule, ownership, review */}
+        {/* STEP 3 — Schedule + ownership + followers + review */}
         <div className={cn(step === 3 ? "block space-y-3" : "hidden")}>
           <Card>
             <CardContent className="space-y-3 p-4">
               <div className="grid sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="start_date">تاريخ البدء</Label>
+                  <Label htmlFor="start_date">تاريخ البدء *</Label>
                   <Input
                     id="start_date" name="start_date" type="date" dir="ltr"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
+                    required
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="end_date">تاريخ الانتهاء</Label>
-                  <Input id="end_date" name="end_date" type="date" dir="ltr" />
+                  <Input
+                    id="end_date" name="end_date" type="date" dir="ltr"
+                    value={endDate}
+                    onChange={(e) => { setEndDate(e.target.value); setActiveDuration(""); }}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="proj_priority">الأولوية</Label>
@@ -366,36 +585,163 @@ export function NewProjectForm({
                 </div>
               </div>
 
+              {/* Duration presets */}
               <div className="space-y-1.5">
-                <Label htmlFor="proj_am">مدير الحساب</Label>
-                <select id="proj_am" name="account_manager_employee_id" defaultValue="" className={SELECT_CLASS}>
-                  <option value="">— اختياري — يمكن تعيينه لاحقًا</option>
-                  {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
-                </select>
+                <Label className="m-0">المدة (تحدِّد تاريخ الانتهاء تلقائيًا)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DURATION_PRESETS.map((d) => (
+                    <button
+                      key={d.value}
+                      type="button"
+                      onClick={() => applyDuration(d.value, d.days)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        activeDuration === d.value
+                          ? "border-cyan bg-cyan-dim text-cyan"
+                          : "border-soft bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                  {activeDuration && (
+                    <button
+                      type="button"
+                      onClick={() => { setActiveDuration(""); setEndDate(""); }}
+                      className="rounded-full border border-soft px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      مسح
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="grid sm:grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="proj_social">مسؤول السوشال</Label>
-                  <select id="proj_social" name="social_specialist_id" defaultValue="" className={SELECT_CLASS}>
-                    <option value="">—</option>
-                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
-                  </select>
+              <div className="space-y-1.5">
+                <Label>مدير الحساب</Label>
+                <SearchableSelect
+                  value={accountManagerId}
+                  onValueChange={setAccountManagerId}
+                  options={amOptions}
+                  placeholder="— اختياري — يمكن تعيينه لاحقًا"
+                  searchPlaceholder="ابحث بالاسم أو الوظيفة…"
+                />
+              </div>
+
+              {/* Per-role team: each row pairs the specialist (المتخصص) with
+                  the section head (مدير القسم) accountable for that specialty. */}
+              <div className="space-y-3">
+                <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
+                    <span className="grid size-5 place-items-center rounded-full bg-blue-400/20 text-blue-300">🔵</span>
+                    قسم السوشال ميديا
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">المتخصص</Label>
+                      <SearchableSelect
+                        value={socialId}
+                        onValueChange={setSocialId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر المتخصص —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">مدير القسم (Team Lead)</Label>
+                      <SearchableSelect
+                        value={socialManagerId}
+                        onValueChange={setSocialManagerId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر مدير القسم —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="proj_media">مسؤول الميديا</Label>
-                  <select id="proj_media" name="media_specialist_id" defaultValue="" className={SELECT_CLASS}>
-                    <option value="">—</option>
-                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
-                  </select>
+
+                <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
+                    <span className="grid size-5 place-items-center rounded-full bg-emerald-400/20 text-emerald-300">🟢</span>
+                    قسم الميديا (الحملات الإعلانية)
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">المتخصص</Label>
+                      <SearchableSelect
+                        value={mediaId}
+                        onValueChange={setMediaId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر المتخصص —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">مدير القسم (Team Lead)</Label>
+                      <SearchableSelect
+                        value={mediaManagerId}
+                        onValueChange={setMediaManagerId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر مدير القسم —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="proj_seo">مسؤول السيو</Label>
-                  <select id="proj_seo" name="seo_specialist_id" defaultValue="" className={SELECT_CLASS}>
-                    <option value="">—</option>
-                    {accountManagers.map((a) => (<option key={a.id} value={a.id}>{a.label}</option>))}
-                  </select>
+
+                <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
+                    <span className="grid size-5 place-items-center rounded-full bg-orange-400/20 text-orange-300">🟠</span>
+                    قسم السيو (SEO)
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">المتخصص</Label>
+                      <SearchableSelect
+                        value={seoId}
+                        onValueChange={setSeoId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر المتخصص —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">مدير القسم (Team Lead)</Label>
+                      <SearchableSelect
+                        value={seoManagerId}
+                        onValueChange={setSeoManagerId}
+                        options={employeeOptionsAll}
+                        placeholder="— اختر مدير القسم —"
+                        searchPlaceholder="ابحث في الموظفين…"
+                      />
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>متابعون (يستلمون التنبيهات)</Label>
+                <SearchableSelect
+                  multi
+                  value={followerIds}
+                  onValueChange={setFollowerIds}
+                  options={employeeOptionsAll}
+                  placeholder="إضافة متابعين"
+                  searchPlaceholder="ابحث في الموظفين…"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>منفِّذ ثابت لكل قوالب المهام</Label>
+                <SearchableSelect
+                  value={constantAssigneeId}
+                  onValueChange={setConstantAssigneeId}
+                  options={employeeOptionsAll}
+                  placeholder="— اختياري — يُضاف منفِّذًا لكل المهام المُولَّدة"
+                  searchPlaceholder="ابحث…"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  عند الاختيار، يضاف هذا الموظف كمنفِّذ لكل المهام التي تُولَّد من القوالب.
+                </p>
               </div>
 
               <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-cyan/15 bg-cyan-dim/40 px-3 py-2.5 text-xs text-foreground">
@@ -410,27 +756,48 @@ export function NewProjectForm({
             </CardContent>
           </Card>
 
-          {/* Review summary */}
+          {/* Validation summary */}
+          {validation.length > 0 && (
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardContent className="flex items-start gap-2 p-3 text-xs text-amber-400">
+                <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-semibold">يُرجى استكمال:</div>
+                  <ul className="mt-1 list-disc ps-4">
+                    {validation.map((v) => <li key={v}>{v}</li>)}
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent className="space-y-2 p-4 text-[12px]">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground">مراجعة سريعة</p>
               <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
                 <dt className="text-muted-foreground">العميل:</dt>
-                <dd className="font-medium">{selectedClient?.label ?? "—"}</dd>
+                <dd className="font-medium">{selectedClient?.name ?? "—"}</dd>
                 <dt className="text-muted-foreground">اسم المشروع:</dt>
                 <dd className="font-medium">{name || "—"}</dd>
+                <dt className="text-muted-foreground">الباقة:</dt>
+                <dd className="font-medium">{packageName || "—"}</dd>
+                <dt className="text-muted-foreground">المدة:</dt>
+                <dd className="font-medium">{activeDuration || "—"}</dd>
                 <dt className="text-muted-foreground">عدد الخدمات:</dt>
                 <dd className="font-medium tabular-nums">{selectedServices.size}</dd>
                 <dt className="text-muted-foreground">المهام المتوقعة:</dt>
                 <dd className="font-medium tabular-nums">{preview.length}</dd>
-                <dt className="text-muted-foreground">تاريخ البدء:</dt>
-                <dd className="font-medium tabular-nums" dir="ltr">{startDate || "—"}</dd>
+                <dt className="text-muted-foreground">المتابعون:</dt>
+                <dd className="font-medium tabular-nums">{followerIds.length}</dd>
+                <dt className="text-muted-foreground">من → إلى:</dt>
+                <dd className="font-medium tabular-nums" dir="ltr">
+                  {startDate || "—"} → {endDate || "—"}
+                </dd>
               </dl>
             </CardContent>
           </Card>
-        </div>{/* /Step 3 */}
+        </div>
 
-        {/* Wizard navigation */}
         <div className="flex items-center justify-between gap-2">
           <Button
             type="button"
@@ -457,7 +824,10 @@ export function NewProjectForm({
               <ChevronLeft className="size-4 icon-flip-rtl" />
             </Button>
           ) : (
-            <Button type="submit" disabled={pending || selectedServices.size === 0}>
+            <Button
+              type="submit"
+              disabled={pending || selectedServices.size === 0 || validation.length > 0}
+            >
               {pending && <Loader2 className="size-4 animate-spin" />}
               إنشاء المشروع
             </Button>
@@ -518,6 +888,11 @@ export function NewProjectForm({
                       <span className="inline-flex items-center gap-1">
                         <Users className="size-3" />
                         {t.defaultRoleKey}
+                      </span>
+                    )}
+                    {constantAssigneeId && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-cyan-dim px-1.5 py-0.5 text-cyan">
+                        + منفِّذ ثابت
                       </span>
                     )}
                   </div>

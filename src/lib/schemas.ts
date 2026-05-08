@@ -54,8 +54,36 @@ export const ProjectCreateSchema = z.object({
     .optional()
     .nullable()
     .transform((v) => v || null),
+  // Section heads per specialty (PDF §9 tier 4 — accountable for quality).
+  social_manager_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  media_manager_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  seo_manager_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
   service_ids: z.array(uuidLoose).default([]),
   generate_tasks: z.boolean().default(true),
+  // New-project wizard additions:
+  package_name: optionalString,
+  duration_label: optionalString,
+  /** Followers picked at create time (employee_profiles.id list). */
+  follower_employee_ids: z.array(uuidLoose).default([]),
+  /** When set, every auto-generated task gets this employee as an extra
+   *  agent assignee (in addition to the role inferred from the template). */
+  constant_assignee_employee_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
   // Per-service overrides (T4 categories engine). Keyed by service_id.
   // `weeks` only honored when `week_split` is true; clamped to 1..12.
   service_week_splits: z

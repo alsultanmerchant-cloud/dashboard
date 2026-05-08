@@ -583,36 +583,57 @@ export default async function TaskDetailPage({
       {allAssignees.length > 0 && (
         <Card className="mb-6">
           <CardContent className="p-4">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <div className="text-xs font-semibold text-muted-foreground">
                 كل المشاركين في المهمة ({allAssignees.length})
               </div>
               <div className="text-[11px] text-muted-foreground">
-                المُورَّدون من Odoo (`user_ids`) — الكل ضمن دور المنفذ افتراضيًا
+                المُورَّدون من Odoo (`user_ids`) — الدور والمسمى الوظيفي معروض أسفل كل اسم
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {allAssignees.map((a) => (
-                <div
-                  key={a.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 px-2 py-1 text-xs text-foreground"
-                  title={a.job_title ?? a.full_name}
-                >
-                  {a.avatar_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={a.avatar_url}
-                      alt={a.full_name}
-                      className="size-5 rounded-full object-cover"
-                    />
-                  ) : (
-                    <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
-                      {a.full_name.slice(0, 1)}
-                    </span>
-                  )}
-                  <span>{a.full_name}</span>
-                </div>
-              ))}
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {allAssignees.map((a) => {
+                const ROLE_AR: Record<TaskRoleType, string> = {
+                  account_manager: "مدير الحساب",
+                  specialist: "متخصص",
+                  manager: "مدير",
+                  agent: "منفِّذ",
+                };
+                const roleLabels = a.role_types
+                  .map((rt) => ROLE_AR[rt] ?? rt)
+                  .join(" · ");
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 rounded-xl border border-soft bg-soft-1 px-3 py-2"
+                    title={a.job_title ?? a.full_name}
+                  >
+                    {a.avatar_url ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={a.avatar_url}
+                        alt={a.full_name}
+                        className="size-9 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan/20 text-sm font-semibold text-cyan">
+                        {a.full_name.slice(0, 1)}
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{a.full_name}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                        <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-cyan">
+                          {roleLabels}
+                        </span>
+                        {a.job_title && (
+                          <span className="truncate">{a.job_title}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
