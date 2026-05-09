@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 // Temporary diagnostic endpoint — DELETE this file once auth is confirmed working.
 // Reveals what's broken about the authenticated path on Vercel without leaking
@@ -84,6 +85,49 @@ export async function GET(request: NextRequest) {
     }
   } else {
     result.profileLookup = { skipped: true, reason: "no userId or env vars" };
+  }
+
+  // 4. Run the EXACT query getServerSession runs (with the supabase-js client,
+  //    extra columns, and the nested organization join). This is the one that
+  //    actually gates the session — if it returns null/error here, that's the
+  //    bug.
+  if (userId) {
+    try {
+      const { data: profile, error } = await supabaseAdmin
+        .from("employee_profiles")
+        .select(
+          "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations ( id, name )",
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
+      result.realProfileQuery = {
+        profile,
+        error: error
+          ? { message: error.message, code: error.code, details: error.details, hint: error.hint }
+          : null,
+      };
+    } catch (err) {
+      result.realProfileQuery = { thrown: String(err) };
+    }
+
+    // 5. Run the role/permissions query too.
+    try {
+      const { data: roleRows, error } = await supabaseAdmin
+        .from("user_roles")
+        .select(
+          "role:roles ( key, name, role_permissions ( permission:permissions ( key ) ) )",
+        )
+        .eq("user_id", userId);
+      result.realRoleQuery = {
+        rowCount: Array.isArray(roleRows) ? roleRows.length : null,
+        sample: Array.isArray(roleRows) ? roleRows.slice(0, 2) : null,
+        error: error
+          ? { message: error.message, code: error.code, details: error.details, hint: error.hint }
+          : null,
+      };
+    } catch (err) {
+      result.realRoleQuery = { thrown: String(err) };
+    }
   }
 
   return NextResponse.json(result, { status: 200 });
