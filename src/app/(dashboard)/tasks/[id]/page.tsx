@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
@@ -25,20 +26,7 @@ import {
 import type { TaskStage } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
 import { CommentComposer } from "../comment-composer";
-import { TaskRolePanel } from "../task-role-panel";
-import { CommentsFeed } from "./comments-feed";
-import { TaskDescription } from "./task-description";
-import { FollowersPanel } from "./followers-panel";
-import { StageHistoryTimeline } from "./stage-history-timeline";
-import { StageStepper } from "./stage-stepper";
-import { TaskFormCard } from "./task-form-card";
-import { TaskFollowToggle } from "./follow-toggle";
 import { RecordPagination } from "./record-pagination";
-import { TaskApprovalPanel } from "./task-approval-panel";
-import { TaskLinksPanel, type TaskLinkRow } from "./task-links-panel";
-import { SubtasksTab, type SubtaskRow } from "./subtasks-tab";
-import { TimesheetsTab, type TimesheetRow } from "./timesheets-tab";
-import { ActivitiesTab, type ActivityRow, type ActivityType } from "./activities-tab";
 import { TaskSmartButtons } from "./task-smart-buttons";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { MessageButton } from "@/components/dm/message-button";
@@ -46,6 +34,52 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
+
+const TaskRolePanel = dynamic(
+  () => import("../task-role-panel").then((mod) => ({ default: mod.TaskRolePanel })),
+);
+const CommentsFeed = dynamic(
+  () => import("./comments-feed").then((mod) => ({ default: mod.CommentsFeed })),
+);
+const TaskDescription = dynamic(
+  () => import("./task-description").then((mod) => ({ default: mod.TaskDescription })),
+);
+const FollowersPanel = dynamic(
+  () => import("./followers-panel").then((mod) => ({ default: mod.FollowersPanel })),
+);
+const StageHistoryTimeline = dynamic(
+  () => import("./stage-history-timeline").then((mod) => ({ default: mod.StageHistoryTimeline })),
+);
+const StageStepper = dynamic(
+  () => import("./stage-stepper").then((mod) => ({ default: mod.StageStepper })),
+);
+const TaskFormCard = dynamic(
+  () => import("./task-form-card").then((mod) => ({ default: mod.TaskFormCard })),
+);
+const TaskFollowToggle = dynamic(
+  () => import("./follow-toggle").then((mod) => ({ default: mod.TaskFollowToggle })),
+);
+const TaskApprovalPanel = dynamic(
+  () => import("./task-approval-panel").then((mod) => ({ default: mod.TaskApprovalPanel })),
+);
+const TaskLinksPanel = dynamic(
+  () => import("./task-links-panel").then((mod) => ({ default: mod.TaskLinksPanel })),
+);
+const SubtasksTab = dynamic(
+  () => import("./subtasks-tab").then((mod) => ({ default: mod.SubtasksTab })),
+);
+const TimesheetsTab = dynamic(
+  () => import("./timesheets-tab").then((mod) => ({ default: mod.TimesheetsTab })),
+);
+const ActivitiesTab = dynamic(
+  () => import("./activities-tab").then((mod) => ({ default: mod.ActivitiesTab })),
+);
+
+type TaskLinkRow = import("./task-links-panel").TaskLinkRow;
+type SubtaskRow = import("./subtasks-tab").SubtaskRow;
+type TimesheetRow = import("./timesheets-tab").TimesheetRow;
+type ActivityRow = import("./activities-tab").ActivityRow;
+type ActivityType = import("./activities-tab").ActivityType;
 
 export default async function TaskDetailPage({
   params,

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { Briefcase, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listProjectsPaged } from "@/lib/data/projects";
@@ -7,6 +8,8 @@ import { MetricCard } from "@/components/metric-card";
 import { ProjectsList } from "./projects-list";
 
 const PAGE_SIZE = 25;
+
+const getProjectsFirstPage = cache(listProjectsPaged);
 
 function toEnabled(value: string | string[] | undefined) {
   return value === "1" || value === "true";
@@ -23,7 +26,7 @@ export default async function ProjectsPage({
 }) {
   const sp = await searchParams;
   const session = await requirePagePermission("projects.view");
-  const { rows: projects, total, totals } = await listProjectsPaged({
+  const { rows: projects, total, totals } = await getProjectsFirstPage({
     organizationId: session.orgId,
     page: 1,
     pageSize: PAGE_SIZE,

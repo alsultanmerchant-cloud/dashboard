@@ -10,7 +10,7 @@ import {
 import { requirePagePermission } from "@/lib/auth-server";
 import { getLiveProject } from "@/lib/odoo/live";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { loadTasksForGlobalView } from "../../../tasks/_loaders";
+import { loadTaskBoardForGlobalView } from "../../../tasks/_loaders";
 import { TaskBoard } from "../../[id]/task-board";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
@@ -106,7 +106,7 @@ export default async function OdooProjectDetailPage({
     (project.lastUpdateStatus as StatusValue | null) ??
     null;
   const boardTasks = supabaseProjectId
-    ? await loadTasksForGlobalView(session.orgId, { projectId: supabaseProjectId })
+    ? await loadTaskBoardForGlobalView(session.orgId, { projectId: supabaseProjectId })
     : [];
 
   return (
@@ -651,4 +651,3 @@ function SettingsPanel({
     </Card>
   );
 }
-

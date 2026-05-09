@@ -24,12 +24,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Logged in → redirect away from login
-  if (user && pathname === "/login") {
-    const dashUrl = request.nextUrl.clone();
-    dashUrl.pathname = "/";
-    return NextResponse.redirect(dashUrl);
-  }
+  // Note: we intentionally do NOT redirect authenticated users away from
+  // /login. If the user has a JWT but no employee_profiles row (e.g. wrong
+  // env or partial provisioning), `/` would return null session and bounce
+  // them back here — the previous bounce-from-login created an infinite
+  // redirect loop. After a successful login, the client-side router.push("/")
+  // already takes them to their landing page; if /` errors, they harmlessly
+  // stay on /login and can retry.
 
   return response;
 }

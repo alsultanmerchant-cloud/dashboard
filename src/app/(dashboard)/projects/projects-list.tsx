@@ -5,6 +5,7 @@
 // the right a result counter and a view toggle (Kanban grid | List).
 // Replaces page-based pagination with cursor-style "load more on scroll".
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Loader2,
@@ -13,10 +14,22 @@ import {
 import { useSearchParams } from "next/navigation";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
-import { ProjectsTable } from "./projects-table";
-import { ProjectsBoard } from "./projects-board";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";
 import { cn } from "@/lib/utils";
+
+const ProjectsTable = dynamic(
+  () =>
+    import("./projects-table").then((mod) => ({
+      default: mod.ProjectsTable,
+    })),
+);
+
+const ProjectsBoard = dynamic(
+  () =>
+    import("./projects-board").then((mod) => ({
+      default: mod.ProjectsBoard,
+    })),
+);
 
 type Props = {
   initial: LiveProject[];

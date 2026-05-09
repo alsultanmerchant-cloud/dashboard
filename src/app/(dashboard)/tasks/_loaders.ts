@@ -3,7 +3,7 @@ import "server-only";
 // Adapts listTasks() output into the BoardTask shape used by task-board.tsx
 // and into the row shape used by the rich Odoo-style list view.
 
-import { listTasks, type TaskFilters } from "@/lib/data/tasks";
+import { listBoardTasks, listTasks, type TaskFilters } from "@/lib/data/tasks";
 import type { BoardTask } from "../projects/[id]/task-board";
 import type { TaskStage, TaskRoleType } from "@/lib/labels";
 
@@ -93,4 +93,35 @@ export async function loadTasksForGlobalView(
   return raw
     .map(toListRow)
     .filter((x): x is ListTaskRow => x !== null);
+}
+
+export async function loadTaskBoardForGlobalView(
+  orgId: string,
+  filters: TaskFilters,
+): Promise<BoardTask[]> {
+  const rows = await listBoardTasks(orgId, filters);
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    stage: t.stage as TaskStage,
+    stage_entered_at: t.stage_entered_at,
+    planned_date: t.planned_date,
+    due_date: t.due_date,
+    priority: t.priority,
+    progress_percent: t.progress_percent,
+    expected_progress_percent: t.expected_progress_percent,
+    progress_slip_percent: t.progress_slip_percent ?? null,
+    allocated_time_minutes: t.allocated_time_minutes ?? null,
+    delay_days: t.delay_days ?? null,
+    completed_at: t.completed_at ?? null,
+    service: t.service,
+    project: {
+      id: t.project_id,
+      name: t.project_name,
+      client_name: t.client_name,
+    },
+    role_slots: t.role_slots as Partial<
+      Record<TaskRoleType, { id: string; full_name: string; avatar_url: string | null }>
+    >,
+  }));
 }

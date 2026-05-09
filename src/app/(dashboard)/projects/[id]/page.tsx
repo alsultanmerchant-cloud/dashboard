@@ -4,7 +4,6 @@ import {
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { getProject, getProjectTaskSummary } from "@/lib/data/projects";
-import { listTasks } from "@/lib/data/tasks";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
@@ -28,7 +27,7 @@ import { HoldDialog } from "./hold-dialog";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
 import { listProjectRenewalCycles, daysUntilRenewal } from "@/lib/data/renewals";
 import { RenewalsPanel } from "./renewals/renewals-panel";
-import type { TaskStage, TaskRoleType } from "@/lib/labels";
+import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
 
 export default async function ProjectDetailPage({
   params,
@@ -42,7 +41,7 @@ export default async function ProjectDetailPage({
 
   const [summary, tasks, waGroups, renewalCycles, allEmployees, allCategories, followersRes] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
-    listTasks(session.orgId, { projectId: project.id }),
+    loadTaskBoardForGlobalView(session.orgId, { projectId: project.id }),
     listProjectWhatsAppGroups(session.orgId, project.id),
     listProjectRenewalCycles(session.orgId, project.id),
     listEmployees(session.orgId),
@@ -416,41 +415,8 @@ export default async function ProjectDetailPage({
           variant="compact"
         />
       ) : (
-        <TaskBoard tasks={toBoardTasks(tasks)} />
+        <TaskBoard tasks={tasks} />
       )}
     </div>
   );
-}
-
-// Map the listTasks() shape into the board's expected BoardTask shape.
-type RawTask = Awaited<ReturnType<typeof listTasks>>[number];
-function toBoardTasks(rows: RawTask[]): BoardTask[] {
-  return rows.map((t) => {
-    const service = Array.isArray(t.service) ? t.service[0] : t.service;
-    const role_slots: BoardTask["role_slots"] = {};
-    for (const ta of t.task_assignees ?? []) {
-      const e = Array.isArray(ta.employee) ? ta.employee[0] : ta.employee;
-      if (!e) continue;
-      role_slots[ta.role_type as TaskRoleType] = {
-        id: e.id,
-        full_name: e.full_name,
-        avatar_url: e.avatar_url,
-      };
-    }
-    return {
-      id: t.id,
-      title: t.title,
-      stage: (t.stage ?? "new") as TaskStage,
-      stage_entered_at: t.stage_entered_at ?? t.created_at,
-      planned_date: t.planned_date ?? null,
-      due_date: t.due_date ?? null,
-      priority: t.priority,
-      progress_percent: t.progress_percent ?? null,
-      expected_progress_percent: t.expected_progress_percent ?? null,
-      service: service
-        ? { id: service.id, name: service.name, slug: service.slug }
-        : null,
-      role_slots,
-    };
-  });
 }

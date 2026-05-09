@@ -1,18 +1,37 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { TopbarProvider } from "@/components/layout/topbar-context";
 import { ModuleTabs } from "@/components/layout/module-tabs";
-import { NotificationPanel } from "@/components/layout/notification-panel";
-import { AIChatFAB } from "@/components/ai/ai-chat-fab";
-import { CommandPaletteProvider } from "@/components/command-palette";
 import { AuthProvider, useAuth, type AuthInitialUser } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { createClient } from "@/lib/supabase/client";
 import type { AppNotification } from "@/types";
+
+const NotificationPanel = dynamic(
+  () =>
+    import("@/components/layout/notification-panel").then((mod) => ({
+      default: mod.NotificationPanel,
+    })),
+);
+
+const AIChatFAB = dynamic(
+  () =>
+    import("@/components/ai/ai-chat-fab").then((mod) => ({
+      default: mod.AIChatFAB,
+    })),
+);
+
+const CommandPaletteProvider = dynamic(
+  () =>
+    import("@/components/command-palette").then((mod) => ({
+      default: mod.CommandPaletteProvider,
+    })),
+);
 
 type NotificationRow = {
   id: string;
@@ -56,19 +75,43 @@ function NotificationsLoader({
   const { user } = useAuth();
   useEffect(() => {
     if (!user?.id || !user.orgId) return;
+
+    let cancelled = false;
     const supabase = createClient();
-    supabase
-      .from("notifications")
-      .select("id, type, title, body, entity_type, entity_id, read_at, created_at")
-      .eq("organization_id", user.orgId)
-      .eq("recipient_user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
-        if (!data) return;
-        onLoad((data as NotificationRow[]).map(rowToNotification));
-      });
+    const loadNotifications = () => {
+      void supabase
+        .from("notifications")
+        .select("id, type, title, body, entity_type, entity_id, read_at, created_at")
+        .eq("organization_id", user.orgId)
+        .eq("recipient_user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50)
+        .then(({ data }) => {
+          if (cancelled || !data) return;
+          onLoad((data as NotificationRow[]).map(rowToNotification));
+        });
+    };
+
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      idleId = window.requestIdleCallback(loadNotifications, { timeout: 1200 });
+    } else {
+      timeoutId = window.setTimeout(loadNotifications, 250);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (idleId !== null) {
+        window.cancelIdleCallback(idleId);
+      }
+    };
   }, [user?.id, user?.orgId, onLoad]);
+
   return null;
 }
 

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { LiveProject } from "@/lib/odoo/live";
 
@@ -264,7 +265,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   return { rows: mapped, total, page, pageSize, totals };
 }
 
-async function aggregateProjectTotals(organizationId: string) {
+const aggregateProjectTotals = cache(async (organizationId: string) => {
   const [projectsCount, tasksCount, withMgrCount] = await Promise.all([
     supabaseAdmin
       .from("projects")
@@ -285,7 +286,7 @@ async function aggregateProjectTotals(organizationId: string) {
     tasks: tasksCount.count ?? 0,
     withManager: withMgrCount.count ?? 0,
   };
-}
+});
 
 export async function listProjects(orgId: string) {
   const { data, error } = await supabaseAdmin

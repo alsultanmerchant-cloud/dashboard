@@ -1,14 +1,33 @@
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Briefcase } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
-import { TasksListView } from "./tasks-list-view";
-import { TasksCalendarView } from "./tasks-calendar-view";
-import { TasksPivotView } from "./tasks-pivot-view";
 import { ViewSwitcher } from "./view-switcher";
-import { loadTasksForGlobalView } from "./_loaders";
+import { loadTaskBoardForGlobalView, loadTasksForGlobalView } from "./_loaders";
 import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
+
+const TasksListView = dynamic(
+  () =>
+    import("./tasks-list-view").then((mod) => ({
+      default: mod.TasksListView,
+    })),
+);
+
+const TasksCalendarView = dynamic(
+  () =>
+    import("./tasks-calendar-view").then((mod) => ({
+      default: mod.TasksCalendarView,
+    })),
+);
+
+const TasksPivotView = dynamic(
+  () =>
+    import("./tasks-pivot-view").then((mod) => ({
+      default: mod.TasksPivotView,
+    })),
+);
 
 // Date filter token format: `<field>:<bucket>` where bucket is one of:
 //   • `YYYY`         — whole year
@@ -185,7 +204,7 @@ export default async function TasksPage({
   if (active.has("in_progress_pct")) progressBuckets.push("in_progress");
   if (active.has("completed_pct")) progressBuckets.push("completed");
 
-  const tasks = await loadTasksForGlobalView(session.orgId, {
+  const taskFilters = {
     stage: stageFilter,
     overdue: active.has("overdue"),
     dueToday: active.has("due_today"),
@@ -199,31 +218,16 @@ export default async function TasksPage({
     projectId: resolvedProjectId,
     search,
     dateFilters,
-  });
+  };
 
-  // BoardTask shape for kanban (cross-project: project name shown on card).
-  const boardTasks: BoardTask[] = tasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    stage: t.stage,
-    stage_entered_at: t.stage_entered_at,
-    planned_date: t.planned_date,
-    due_date: t.due_date,
-    priority: t.priority,
-    progress_percent: t.progress_percent,
-    expected_progress_percent: t.expected_progress_percent,
-    progress_slip_percent: t.progress_slip_percent,
-    allocated_time_minutes: t.allocated_time_minutes,
-    delay_days: t.delay_days,
-    completed_at: t.completed_at,
-    service: t.service,
-    project: {
-      id: t.project_id,
-      name: t.project_name,
-      client_name: t.client_name,
-    },
-    role_slots: t.role_slots,
-  }));
+  const boardTasks: BoardTask[] =
+    view === "kanban"
+      ? await loadTaskBoardForGlobalView(session.orgId, taskFilters)
+      : [];
+  const tasks =
+    view === "kanban"
+      ? []
+      : await loadTasksForGlobalView(session.orgId, taskFilters);
 
   return (
     <div>

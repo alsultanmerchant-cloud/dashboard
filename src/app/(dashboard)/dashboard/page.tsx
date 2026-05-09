@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import {
@@ -81,17 +81,29 @@ const EMPTY_ODOO_METRICS = {
   totalProjects: 0, totalActiveProjects: 0, totalClients: 0,
 };
 
+const getCachedDashboardOdooMetrics = cache(() =>
+  getDashboardOdooMetrics().catch(() => EMPTY_ODOO_METRICS),
+);
+
+const getCachedGovernanceViolations = cache(() =>
+  getOdooGovernanceViolations().catch(() => ({
+    violations: [],
+    countsByKind: {
+      unowned_task: 0,
+      missing_deadline: 0,
+      stuck_in_review: 0,
+      overdue_no_progress: 0,
+    },
+    total: 0,
+  })),
+);
+
 // ── Hero KPIs (revenue / overdue / governance / renewals) ────────────────
 async function HeroKPIs({ orgId }: { orgId: string }) {
   const t = await getTranslations("Dashboard.metrics");
   const [odooMetrics, governance, renewalsThisMonth, commercialTiles] = await Promise.all([
-    getDashboardOdooMetrics().catch(() => EMPTY_ODOO_METRICS),
-    getOdooGovernanceViolations().catch(() => ({
-      violations: [], countsByKind: {
-        unowned_task: 0, missing_deadline: 0,
-        stuck_in_review: 0, overdue_no_progress: 0,
-      }, total: 0,
-    })),
+    getCachedDashboardOdooMetrics(),
+    getCachedGovernanceViolations(),
     countRenewalsThisMonth(orgId),
     getCeoCommercialTiles(orgId).catch(() => ({
       month: "", byType: {} as Record<string, { count: number; value: number }>,
@@ -140,7 +152,7 @@ async function HeroKPIs({ orgId }: { orgId: string }) {
 // ── Operational KPIs (rework / on-time / productivity / review backlog) ──
 async function OperationalKPIs() {
   const t = await getTranslations("Dashboard.metrics");
-  const odooMetrics = await getDashboardOdooMetrics().catch(() => EMPTY_ODOO_METRICS);
+  const odooMetrics = await getCachedDashboardOdooMetrics();
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
       <MetricCard
@@ -293,7 +305,7 @@ async function ExceptionsWatchList({ orgId }: { orgId: string }) {
 // ── Overdue tasks watch-list ──
 async function OverdueTasksWatchList() {
   const t = await getTranslations("Dashboard.overdue");
-  const odooMetrics = await getDashboardOdooMetrics().catch(() => EMPTY_ODOO_METRICS);
+  const odooMetrics = await getCachedDashboardOdooMetrics();
   return (
     <div>
       <SectionTitle

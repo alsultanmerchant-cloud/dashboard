@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell, RefreshCw, Menu, CalendarDays } from "lucide-react";
@@ -10,8 +11,33 @@ import { PAGE_TITLE_KEYS } from "@/lib/nav";
 import { CommandPaletteTrigger, QuickCreateTrigger } from "@/components/command-palette";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { intlLocale } from "@/lib/utils-format";
-import { SmartSearchBar } from "@/app/(dashboard)/tasks/smart-search-bar";
-import { ProjectsSearchBar } from "@/app/(dashboard)/projects/projects-search-bar";
+
+const SmartSearchBar = dynamic(
+  () =>
+    import("@/app/(dashboard)/tasks/smart-search-bar").then((mod) => ({
+      default: mod.SmartSearchBar,
+    })),
+  {
+    loading: () => <div className="h-10 rounded-xl border border-white/30 bg-white/8" />,
+  },
+);
+
+const ProjectsSearchBar = dynamic(
+  () =>
+    import("@/app/(dashboard)/projects/projects-search-bar").then((mod) => ({
+      default: mod.ProjectsSearchBar,
+    })),
+  {
+    loading: () => <div className="h-10 rounded-xl border border-white/30 bg-white/8" />,
+  },
+);
+
+const ProjectsDateFilterButton = dynamic(
+  () =>
+    import("@/app/(dashboard)/projects/projects-date-filter-button").then((mod) => ({
+      default: mod.ProjectsDateFilterButton,
+    })),
+);
 
 interface TopbarProps {
   unreadCount?: number;
@@ -19,6 +45,42 @@ interface TopbarProps {
   onMenuClick?: () => void;
   notificationPanel?: React.ReactNode;
 }
+
+const TopbarClock = memo(function TopbarClock({
+  locale,
+  className,
+}: {
+  locale: string;
+  className: string;
+}) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const schedule = () => {
+      const current = new Date();
+      const delay = (60 - current.getSeconds()) * 1000 - current.getMilliseconds();
+      return window.setTimeout(() => {
+        setNow(new Date());
+        timeoutId = schedule();
+      }, Math.max(delay, 250));
+    };
+
+    let timeoutId = schedule();
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  const clockStr = new Intl.DateTimeFormat(intlLocale(locale), {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(now);
+
+  return (
+    <span className={className} dir="ltr">
+      {clockStr}
+    </span>
+  );
+});
 
 // Slim, single-row top bar. The legacy day/week/month + month-name pills
 // were removed per owner feedback — the main page should breathe more.
@@ -52,20 +114,6 @@ export function Topbar({
         minute: "2-digit",
       }).format(new Date(lastUpdatedAt))
     : null;
-
-  /* Live clock — initialize null to avoid hydration mismatch */
-  const [now, setNow] = useState<Date | null>(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const clockStr = now
-    ? new Intl.DateTimeFormat(intlLocale(locale), {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }).format(now)
-    : "";
   const utilityChip =
     "rounded-xl border border-white/16 bg-white/12 text-white/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md hover:bg-white/18 hover:text-white dark:border-soft dark:bg-soft-2 dark:text-muted-foreground";
   const iconChip = `shrink-0 ${utilityChip}`;
@@ -133,12 +181,17 @@ export function Topbar({
           </div>
 
           <div className="hidden lg:flex items-center gap-2">
-            <span className={`${utilityChip} px-3 py-1.5 text-xs font-mono`} dir="ltr">
-              {clockStr}
-            </span>
-            <Button variant="ghost" size="icon" className={iconChip}>
-              <CalendarDays className="w-4 h-4 text-white/88 dark:text-muted-foreground" />
-            </Button>
+            <TopbarClock
+              locale={locale}
+              className={`${utilityChip} px-3 py-1.5 text-xs font-mono`}
+            />
+            {showProjectSearch ? (
+              <ProjectsDateFilterButton className={iconChip} />
+            ) : (
+              <Button variant="ghost" size="icon" className={iconChip}>
+                <CalendarDays className="w-4 h-4 text-white/88 dark:text-muted-foreground" />
+              </Button>
+            )}
           </div>
 
           <ThemeToggle className={iconChip} />
