@@ -21,6 +21,18 @@ export type ServerSession = {
 };
 
 export const getServerSession = cache(async (): Promise<ServerSession | null> => {
+  try {
+    return await loadSession();
+  } catch (err) {
+    // Surface as a logged error and treat as "no session" so callers redirect
+    // to /auth/sign-out instead of 503'ing the page. Common cause:
+    // SUPABASE_SERVICE_ROLE_KEY missing in this environment (see admin.ts).
+    console.error("[getServerSession] failed:", err);
+    return null;
+  }
+});
+
+async function loadSession(): Promise<ServerSession | null> {
   const supabase = await createServerSupabaseClient();
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
@@ -72,7 +84,7 @@ export const getServerSession = cache(async (): Promise<ServerSession | null> =>
     permissions,
     isOwner: roleKeys.includes("owner"),
   };
-});
+}
 
 export async function requireSession(): Promise<ServerSession> {
   const session = await getServerSession();
