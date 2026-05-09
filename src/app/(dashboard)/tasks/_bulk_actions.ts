@@ -22,7 +22,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
-import { TASK_STAGES, PRIORITIES } from "@/lib/labels";
+import { TASK_STAGES, PRIORITIES, isForwardStageMove, type TaskStage } from "@/lib/labels";
 
 const StageOp = z.object({
   op: z.literal("stage"),
@@ -87,6 +87,11 @@ export async function bulkUpdateTasksAction(input: z.infer<typeof Schema>): Prom
     // and we can report which ones it rejected.
     for (const row of rows ?? []) {
       if (row.stage === data.stage) continue;
+      // Forward-only: skip rows that would regress to an earlier stage.
+      if (!isForwardStageMove(row.stage as TaskStage, data.stage as TaskStage)) {
+        failed.push({ id: row.id, reason: "لا يمكن إرجاع المهمة إلى مرحلة سابقة" });
+        continue;
+      }
       const { error } = await supabaseAdmin
         .from("tasks")
         .update({ stage: data.stage })

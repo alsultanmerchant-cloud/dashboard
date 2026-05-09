@@ -7,6 +7,7 @@ import {
   TaskRoleAssignSchema,
   TaskCommentSchema,
 } from "@/lib/schemas";
+import { isForwardStageMove, type TaskStage } from "@/lib/labels";
 import type { Database } from "@/lib/supabase/types";
 
 type TaskStageEnum = Database["public"]["Enums"]["task_stage"];
@@ -210,6 +211,13 @@ export async function moveTaskStageAction(input: {
   if (!existing) return { error: "المهمة غير موجودة" };
   if (existing.stage === parsed.data.stage) {
     return { ok: true, from: existing.stage, to: parsed.data.stage };
+  }
+
+  // Forward-only: tasks cannot regress to an earlier stage. This applies
+  // to every caller (owners included) and runs before any role/permission
+  // bypass below.
+  if (!isForwardStageMove(existing.stage as TaskStage, parsed.data.stage as TaskStage)) {
+    return { error: "لا يمكن إرجاع المهمة إلى مرحلة سابقة" };
   }
 
   // Stage transition pre-flight gating. The DB trigger

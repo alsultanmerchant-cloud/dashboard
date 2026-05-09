@@ -26,9 +26,11 @@ import {
   TASK_STAGE_LABELS,
   TASK_STAGE_TONES,
   TASK_ROLE_TYPES,
+  isForwardStageMove,
   type TaskStage,
   type TaskRoleType,
 } from "@/lib/labels";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 // Rwasem-style priority star — `urgent`/`high` paint a filled star (gold/red),
 // medium = outline star, low = no star.
@@ -1217,32 +1219,54 @@ export function TaskBoard({
     setActiveId(String(e.active.id));
   }
 
+  // Pending stage move awaiting user confirmation in the alert dialog.
+  const [pendingMove, setPendingMove] = useState<{
+    taskId: string;
+    fromStage: TaskStage;
+    toStage: TaskStage;
+  } | null>(null);
+
   function moveTask(taskId: string, newStage: TaskStage) {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.stage === newStage) return;
-    const previousStage = task.stage;
+    if (!isForwardStageMove(task.stage, newStage)) {
+      toast.error("لا يمكن إرجاع المهمة إلى مرحلة سابقة");
+      return;
+    }
+    setPendingMove({ taskId, fromStage: task.stage, toStage: newStage });
+  }
+
+  function confirmPendingMove() {
+    if (!pendingMove) return;
+    const { taskId, fromStage, toStage } = pendingMove;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) {
+      setPendingMove(null);
+      return;
+    }
     const previousEntered = task.stage_entered_at;
     setTasks((curr) =>
       curr.map((t) =>
         t.id === taskId
-          ? { ...t, stage: newStage, stage_entered_at: new Date().toISOString() }
+          ? { ...t, stage: toStage, stage_entered_at: new Date().toISOString() }
           : t,
       ),
     );
+    setPendingMove(null);
     start(async () => {
-      const res = await moveTaskStageAction({ taskId, stage: newStage });
+      const res = await moveTaskStageAction({ taskId, stage: toStage });
       if ("error" in res) {
         toast.error(res.error);
         setTasks((curr) =>
           curr.map((t) =>
             t.id === taskId
-              ? { ...t, stage: previousStage, stage_entered_at: previousEntered }
+              ? { ...t, stage: fromStage, stage_entered_at: previousEntered }
               : t,
           ),
         );
         return;
       }
-      toast.success(`المهمة → ${TASK_STAGE_LABELS[newStage]}`);
+      toast.success(`المهمة → ${TASK_STAGE_LABELS[toStage]}`);
       router.refresh();
     });
   }
@@ -1356,7 +1380,6 @@ export function TaskBoard({
               tasks={grouped[s]}
               isMoving={pending}
               onAdvance={moveTask}
-              onRetreat={moveTask}
               folded={folded.has(s)}
               onToggleFold={() => toggleFold(s)}
               onQuickCreate={
@@ -1383,6 +1406,31 @@ export function TaskBoard({
           {activeTask ? <TaskCard task={activeTask} dragging /> : null}
         </DragOverlay>
       </DndContext>
+      <ConfirmDialog
+        open={pendingMove !== null}
+        onOpenChange={(o) => {
+          if (!o && !pending) setPendingMove(null);
+        }}
+        title="تأكيد نقل المرحلة"
+        description={
+          pendingMove ? (
+            <>
+              نقل المهمة من{" "}
+              <span className="font-semibold text-foreground">
+                {TASK_STAGE_LABELS[pendingMove.fromStage]}
+              </span>{" "}
+              إلى{" "}
+              <span className="font-semibold text-foreground">
+                {TASK_STAGE_LABELS[pendingMove.toStage]}
+              </span>
+              ؟ لا يمكن التراجع عن هذه الخطوة.
+            </>
+          ) : null
+        }
+        confirmLabel="نقل"
+        onConfirm={confirmPendingMove}
+        pending={pending}
+      />
     </div>
   );
 }

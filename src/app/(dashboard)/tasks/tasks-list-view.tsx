@@ -37,6 +37,7 @@ import {
 } from "@/components/data-table-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { ListTaskRow } from "./_loaders";
 import { bulkUpdateTasksAction } from "./_bulk_actions";
 
@@ -90,6 +91,7 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
   const [stage, setStage] = useState<TaskStage>("in_progress");
   const [priority, setPriority] = useState<Priority>("medium");
   const [shiftDays, setShiftDays] = useState<string>("1");
+  const [confirmStageOpen, setConfirmStageOpen] = useState(false);
 
   const allChecked = useMemo(
     () => tasks.length > 0 && tasks.every((t) => selected.has(t.id)),
@@ -143,9 +145,14 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
     router.refresh();
   };
 
-  const onMoveStage = () =>
+  const onMoveStage = () => {
+    setConfirmStageOpen(true);
+  };
+
+  const runMoveStage = () =>
     start(async () => {
       const res = await bulkUpdateTasksAction({ op: "stage", ids, stage });
+      setConfirmStageOpen(false);
       reportResult(res, "نقل المرحلة");
     });
 
@@ -434,6 +441,26 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmStageOpen}
+        onOpenChange={(o) => {
+          if (!o && !pending) setConfirmStageOpen(false);
+        }}
+        title="تأكيد نقل المرحلة"
+        description={
+          <>
+            نقل {selected.size} مهمة إلى{" "}
+            <span className="font-semibold text-foreground">
+              {TASK_STAGE_LABELS[stage]}
+            </span>
+            ؟ المهام التي تتطلّب الرجوع إلى مرحلة سابقة سيتم تخطيها. لا يمكن
+            التراجع عن هذه الخطوة.
+          </>
+        }
+        confirmLabel="نقل"
+        onConfirm={runMoveStage}
+        pending={pending}
+      />
     </>
   );
 }

@@ -182,6 +182,13 @@ export const TASK_STAGE_LABELS: Record<TaskStage, string> = {
   done: "مكتملة",
 };
 
+// Forward-only stage transitions: a move is allowed only when the target
+// stage is at the same or a later index in TASK_STAGES. Tasks cannot
+// regress to an earlier stage from any view (kanban, list, detail).
+export function isForwardStageMove(from: TaskStage, to: TaskStage): boolean {
+  return TASK_STAGES.indexOf(to) >= TASK_STAGES.indexOf(from);
+}
+
 export const TASK_STAGE_LABELS_EN: Record<TaskStage, string> = {
   new: "New",
   in_progress: "In Progress",
