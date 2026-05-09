@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Loader2, Send, MessageSquare, FileText } from "lucide-react";
+import { Loader2, Send, MessageSquare, FileText, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { Database } from "@/lib/supabase/types";
+import { createClient } from "@/lib/supabase/client";
 import { addTaskCommentAction } from "./_actions";
+
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB per file
+const MAX_FILES = 10;
+
+function sanitizeFilename(name: string): string {
+  // Keep Arabic letters, latin alphanumerics, dot, dash, underscore. Replace
+  // anything else with `_` so the storage key stays safe across S3-compatible
+  // backends.
+  return name.replace(/[^\p{L}\p{N}._-]+/gu, "_").slice(0, 200) || "file";
+}
+
+type PendingAttachment = {
+  id: string;
+  file: File;
+};
 
 type TaskStage = Database["public"]["Enums"]["task_stage"];
 type CommentKind = Database["public"]["Enums"]["task_comment_kind"];
@@ -93,7 +109,10 @@ export function CommentComposer({
   const router = useRouter();
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<PendingAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [mode, setMode] = useState<ComposerMode>("note");
   const [composerHeight, setComposerHeight] = useState(0);
   const [hovered, setHovered] = useState(false);
@@ -110,7 +129,31 @@ export function CommentComposer({
   const [kind, setKind] = useState<CommentKind>(initialKind);
   const [pending, start] = useTransition();
   const hasBody = body.trim().length > 0;
-  const expanded = !floating || hovered || focusedWithin || hasBody;
+  const hasFiles = files.length > 0;
+  const expanded = !floating || hovered || focusedWithin || hasBody || hasFiles;
+
+  function addFiles(picked: FileList | File[] | null) {
+    if (!picked) return;
+    const list = Array.from(picked);
+    if (list.length === 0) return;
+    const accepted: PendingAttachment[] = [];
+    for (const f of list) {
+      if (files.length + accepted.length >= MAX_FILES) {
+        toast.error(`الحد الأقصى ${MAX_FILES} ملفات`);
+        break;
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        toast.error(`«${f.name}» أكبر من 25MB`);
+        continue;
+      }
+      accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, file: f });
+    }
+    if (accepted.length > 0) setFiles((prev) => [...prev, ...accepted]);
+  }
+
+  function removeFile(id: string) {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+  }
 
   const mentionMatches = useMemo<Mentionable[]>(() => {
     if (!mentionState) return [];
@@ -199,15 +242,58 @@ export function CommentComposer({
 
   function submit() {
     const trimmed = body.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0 && files.length === 0) return;
     const submitKind: CommentKind = mode === "message" ? "note" : kind;
     const isInternal = mode !== "message";
     start(async () => {
+      let uploadedAttachments: {
+        storage_path: string;
+        filename: string;
+        mimetype: string | null;
+        size_bytes: number;
+      }[] = [];
+
+      if (files.length > 0) {
+        setUploading(true);
+        try {
+          const supabase = createClient();
+          const uploads = await Promise.all(
+            files.map(async ({ file }) => {
+              const safeName = sanitizeFilename(file.name);
+              const path = `tasks/${taskId}/${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}-${safeName}`;
+              const { error: upErr } = await supabase.storage
+                .from("attachments")
+                .upload(path, file, {
+                  cacheControl: "3600",
+                  contentType: file.type || "application/octet-stream",
+                  upsert: false,
+                });
+              if (upErr) throw new Error(`${file.name}: ${upErr.message}`);
+              return {
+                storage_path: path,
+                filename: file.name,
+                mimetype: file.type || null,
+                size_bytes: file.size,
+              };
+            }),
+          );
+          uploadedAttachments = uploads;
+        } catch (err) {
+          setUploading(false);
+          toast.error((err as Error).message || "تعذر رفع الملفات");
+          return;
+        }
+        setUploading(false);
+      }
+
       const res = await addTaskCommentAction({
         taskId,
-        body: trimmed,
+        body: trimmed.length > 0 ? trimmed : "(مرفقات)",
         kind: submitKind,
         isInternal,
+        attachments: uploadedAttachments,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -221,6 +307,7 @@ export function CommentComposer({
             : "نُشرت الملاحظة",
       );
       setBody("");
+      setFiles([]);
       setKind(defaultKindFor(currentStage, hasRequirements));
       router.refresh();
     });
@@ -238,7 +325,8 @@ export function CommentComposer({
         }
       }}
       className={cn(
-        "overflow-hidden rounded-2xl border border-soft bg-card transition-[box-shadow,transform] duration-200",
+        "rounded-2xl border border-soft bg-card transition-[box-shadow,transform] duration-200",
+        mentionState && mentionMatches.length > 0 ? "overflow-visible" : "overflow-hidden",
         floating && "shadow-[0_-10px_30px_rgba(0,0,0,0.08)]",
         floating && !expanded && "translate-y-1",
       )}
@@ -436,6 +524,41 @@ export function CommentComposer({
             </div>
           )}
         </div>
+        {hasFiles && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {files.map((f) => (
+              <span
+                key={f.id}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-soft-2 bg-soft-1 px-2 py-0.5 text-[11px]"
+                title={f.file.name}
+              >
+                <Paperclip className="size-3 text-muted-foreground" />
+                <span className="max-w-[14rem] truncate">{f.file.name}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {(f.file.size / 1024).toFixed(0)}KB
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(f.id)}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label="إزالة المرفق"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <div
           className={cn(
             "overflow-hidden transition-all duration-200",
@@ -443,20 +566,36 @@ export function CommentComposer({
           )}
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] text-muted-foreground">
-              ⌘+Enter للإرسال السريع
-            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={pending || uploading || files.length >= MAX_FILES}
+                className="inline-flex items-center gap-1 rounded-full border border-soft-2 bg-card px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-cyan/30 hover:text-cyan disabled:opacity-50"
+                aria-label="إرفاق ملف"
+              >
+                <Paperclip className="size-3.5" />
+                إرفاق
+              </button>
+              <p className="text-[11px] text-muted-foreground">
+                ⌘+Enter للإرسال السريع
+              </p>
+            </div>
             <Button
               onClick={submit}
-        disabled={pending || !hasBody}
+              disabled={pending || uploading || (!hasBody && !hasFiles)}
               size="sm"
             >
-              {pending ? (
+              {pending || uploading ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <Send className="size-4" />
               )}
-              {mode === "message" ? "إرسال" : "نشر"}
+              {uploading
+                ? "جارٍ الرفع…"
+                : mode === "message"
+                  ? "إرسال"
+                  : "نشر"}
             </Button>
           </div>
         </div>

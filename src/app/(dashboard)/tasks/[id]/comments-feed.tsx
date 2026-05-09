@@ -9,7 +9,7 @@ import sanitizeHtml from "sanitize-html";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatArabicDateTime } from "@/lib/utils-format";
-import { TaskActivityFeed } from "../task-activity-feed";
+import { TaskActivityFeed, NoteAttachments } from "../task-activity-feed";
 import type { TaskActivity } from "@/lib/data/task-activity";
 
 // Odoo chatter bodies are HTML (links, paragraphs, line breaks). Local
@@ -120,6 +120,9 @@ function CommentRow({ item }: { item: NoteItem }) {
           </p>
         </div>
         <CommentBody body={item.body} />
+        {item.attachments.length > 0 && (
+          <NoteAttachments attachments={item.attachments} />
+        )}
       </div>
     </div>
   );

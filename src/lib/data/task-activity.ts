@@ -15,6 +15,14 @@ type CommentKind = Database["public"]["Enums"]["task_comment_kind"];
 // Returns chronologically ordered items, oldest → newest.
 // (PDF screenshots show oldest at top with newest at bottom.)
 
+export type NoteAttachment = {
+  id: string;
+  filename: string;
+  mimetype: string | null;
+  size_bytes: number | null;
+  url: string | null;
+};
+
 export type TaskActivity =
   | {
       kind: "note";
@@ -25,6 +33,7 @@ export type TaskActivity =
       mentions: { employee_id: string; full_name: string }[];
       is_internal: boolean;
       comment_kind: CommentKind;
+      attachments: NoteAttachment[];
     }
   | {
       kind: "stage_change";
@@ -170,7 +179,14 @@ export function odooMessagesToActivity(
         created_at,
         actor,
         body_html: m.body,
-        attachments,
+        // Route every Odoo attachment through the dashboard proxy so the
+        // user doesn't need an active Odoo session in their browser. The
+        // raw `url` field on ir.attachment is only set for external links
+        // anyway — file-typed attachments (the common case) report null.
+        attachments: attachments.map((att) => ({
+          ...att,
+          url: `/api/odoo/attachment/${att.id}`,
+        })),
       });
     }
   }
@@ -181,8 +197,8 @@ export async function getTaskActivityFeed(
   orgId: string,
   taskId: string,
 ): Promise<TaskActivity[]> {
-  // Fan out three reads in parallel.
-  const [commentsRes, stageHistoryRes, auditRes] = await Promise.all([
+  // Fan out four reads in parallel.
+  const [commentsRes, stageHistoryRes, auditRes, attachmentsRes] = await Promise.all([
     supabaseAdmin
       .from("task_comments")
       .select("id, body, is_internal, created_at, author_user_id, kind, external_author_name, external_author_avatar_url")
@@ -200,11 +216,61 @@ export async function getTaskActivityFeed(
       .eq("entity_type", "task")
       .eq("entity_id", taskId)
       .eq("action", "task.assignee_change"),
+    supabaseAdmin
+      .from("task_attachments")
+      .select("id, task_comment_id, filename, mimetype, size_bytes, storage_path, source_url, external_source, external_id")
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId)
+      .not("task_comment_id", "is", null),
   ]);
 
   const comments = commentsRes.data ?? [];
   const stageHistory = stageHistoryRes.data ?? [];
   const audits = auditRes.data ?? [];
+  const attachments = attachmentsRes.data ?? [];
+
+  // Group attachments by comment + sign storage paths in batch. Odoo-imported
+  // rows carry only `source_url` (no storage_path) so they fall through as-is.
+  const attachmentsByComment = new Map<string, NoteAttachment[]>();
+  const pathsToSign = attachments
+    .map((a) => a.storage_path)
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
+  const signedByPath = new Map<string, string>();
+  if (pathsToSign.length > 0) {
+    const { data: signed } = await supabaseAdmin
+      .storage
+      .from("attachments")
+      .createSignedUrls(pathsToSign, 60 * 60); // 1 hour
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
+    }
+  }
+  for (const a of attachments) {
+    if (!a.task_comment_id) continue;
+    // Resolution order:
+    //   1. signed Supabase Storage URL (primary path post-backfill)
+    //   2. internal proxy /api/odoo/attachment/{external_id} for Odoo-imported
+    //      rows that still only have a source_url — the proxy authenticates
+    //      to Odoo server-side so the user doesn't need an Odoo session
+    //   3. raw source_url (last resort, user must auth to Odoo themselves)
+    let url: string | null = null;
+    if (a.storage_path) {
+      url = signedByPath.get(a.storage_path) ?? null;
+    } else if (a.external_source === "odoo" && a.external_id) {
+      url = `/api/odoo/attachment/${a.external_id}`;
+    } else if (a.source_url) {
+      url = a.source_url;
+    }
+    const arr = attachmentsByComment.get(a.task_comment_id) ?? [];
+    arr.push({
+      id: a.id,
+      filename: a.filename,
+      mimetype: a.mimetype,
+      size_bytes: a.size_bytes,
+      url,
+    });
+    attachmentsByComment.set(a.task_comment_id, arr);
+  }
 
   // Resolve actor names + employee labels we'll need across all sources.
   const userIds = new Set<string>();
@@ -299,6 +365,7 @@ export async function getTaskActivityFeed(
       mentions: mentionsByComment.get(c.id) ?? [],
       is_internal: c.is_internal,
       comment_kind: c.kind,
+      attachments: attachmentsByComment.get(c.id) ?? [],
     });
   }
 

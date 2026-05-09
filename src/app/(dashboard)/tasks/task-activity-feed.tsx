@@ -20,6 +20,9 @@ import {
   MessageSquare,
   Lock,
   Sparkles,
+  Paperclip,
+  FileIcon,
+  ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -248,10 +251,75 @@ function NoteRow({ item }: { item: Extract<TaskActivity, { kind: "note" }> }) {
                 ))}
               </div>
             )}
+            {item.attachments.length > 0 && (
+              <NoteAttachments attachments={item.attachments} />
+            )}
           </div>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function fmtSize(bytes: number | null): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+export function NoteAttachments({
+  attachments,
+}: {
+  attachments: import("@/lib/data/task-activity").NoteAttachment[];
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {attachments.map((att) => {
+        const isImage = att.mimetype?.startsWith("image/") ?? false;
+        const sizeLabel = fmtSize(att.size_bytes);
+        const inner = (
+          <>
+            <span
+              className={cn(
+                "inline-flex size-9 items-center justify-center rounded-md bg-soft-2",
+                isImage ? "text-cyan" : "text-muted-foreground",
+              )}
+            >
+              {isImage ? <ImageIcon className="size-4" /> : <FileIcon className="size-4" />}
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="line-clamp-1 max-w-[14rem] font-medium group-hover:text-cyan">
+                {att.filename}
+              </span>
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Paperclip className="size-2.5" />
+                {att.mimetype || "file"}
+                {sizeLabel && <span>· {sizeLabel}</span>}
+              </span>
+            </span>
+          </>
+        );
+        const className =
+          "group inline-flex items-center gap-2 rounded-lg border border-soft bg-card/60 p-2 pe-3 text-xs transition-colors hover:border-cyan/40 hover:bg-soft-1";
+        return att.url ? (
+          <a
+            key={att.id}
+            href={att.url}
+            target="_blank"
+            rel="noreferrer"
+            className={className}
+            title={att.filename}
+          >
+            {inner}
+          </a>
+        ) : (
+          <span key={att.id} className={className} title={att.filename}>
+            {inner}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

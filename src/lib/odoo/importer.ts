@@ -52,6 +52,7 @@ export interface ImportSummary {
   tags: number;
   tagAssignments: number;
   taskComments: number;
+  projectComments: number;
   errors: string[];
 }
 
@@ -814,6 +815,7 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
     message_type: string;
     subtype_id: OdooMany2one;
     tracking_value_ids: number[] | false;
+    attachment_ids: number[] | false;
   };
   type OdooTrackingValue = {
     id: number;
@@ -850,7 +852,7 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
       ],
       [
         "id", "res_id", "body", "author_id", "date", "message_type",
-        "subtype_id", "tracking_value_ids",
+        "subtype_id", "tracking_value_ids", "attachment_ids",
       ],
       { limit: 5000, order: "date asc" },
     );
@@ -962,8 +964,14 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
         }
 
         const body = typeof m.body === "string" ? m.body.trim() : "";
-        if (!body) return null;
-        return { ...baseRow, body };
+        const hasAttachments =
+          Array.isArray(m.attachment_ids) && m.attachment_ids.length > 0;
+        // Keep the note if it has either text OR an attachment. Odoo lets
+        // users post a chatter entry with only a file (no body); if we drop
+        // those here, the attachment also vanishes from the dashboard
+        // because task_attachments rows are linked through this comment.
+        if (!body && !hasAttachments) return null;
+        return { ...baseRow, body: body || "(مرفقات)" };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
@@ -976,6 +984,321 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
       console.warn(`task_comments chunk @${i}: ${error.message}`);
     } else {
       imported += rows.length;
+    }
+
+    // Mirror Odoo `ir.attachment` rows linked to these messages into
+    // `task_attachments`. We persist metadata + a fallback `source_url`
+    // pointing at Odoo `/web/content/{id}` (the original Odoo attachment
+    // controller serves binaries to authenticated users). Storage backfill
+    // can run later as a separate job. Idempotent on
+    // (organization_id, external_source, external_id).
+    const attachmentIds = Array.from(
+      new Set(
+        messages.flatMap((m) =>
+          Array.isArray(m.attachment_ids) ? (m.attachment_ids as number[]) : [],
+        ),
+      ),
+    );
+    if (attachmentIds.length === 0) continue;
+
+    // Map Odoo message id → Supabase comment uuid for this chunk.
+    const odooMsgIdsInChunk = messages.map((m) => String(m.id));
+    const { data: commentRows } = await supabaseAdmin
+      .from("task_comments")
+      .select("id, task_id, external_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .in("external_id", odooMsgIdsInChunk);
+    const commentByOdooMsgId = new Map<number, { id: string; task_id: string }>();
+    for (const c of commentRows ?? []) {
+      const n = Number(c.external_id);
+      if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, task_id: c.task_id });
+    }
+
+    type OdooAttachment = {
+      id: number;
+      name: string | false;
+      mimetype: string | false;
+      file_size: number | false;
+      url: string | false;
+      res_model: string | false;
+      res_id: number | false;
+    };
+    const attachmentRows = await ctx.odoo.searchRead<OdooAttachment>(
+      "ir.attachment",
+      [["id", "in", attachmentIds]],
+      ["id", "name", "mimetype", "file_size", "url", "res_model", "res_id"],
+    );
+
+    // Walk messages: for each attached file, decide which comment it belongs
+    // to (via the message link). Mail attachments are linked through
+    // `mail.message.attachment_ids`, so we scan the messages we already pulled.
+    const attRowsToInsert: {
+      organization_id: string;
+      task_id: string;
+      task_comment_id: string;
+      filename: string;
+      mimetype: string | null;
+      size_bytes: number | null;
+      storage_path: null;
+      source_url: string;
+      external_source: typeof SOURCE;
+      external_id: string;
+    }[] = [];
+    const attMetaById = new Map<number, OdooAttachment>();
+    for (const a of attachmentRows) attMetaById.set(a.id, a);
+
+    for (const m of messages) {
+      const ids = Array.isArray(m.attachment_ids) ? (m.attachment_ids as number[]) : [];
+      if (ids.length === 0) continue;
+      const link = commentByOdooMsgId.get(m.id);
+      if (!link) continue;
+      for (const aid of ids) {
+        const meta = attMetaById.get(aid);
+        if (!meta) continue;
+        const filename = typeof meta.name === "string" && meta.name ? meta.name : `attachment-${aid}`;
+        const mimetype = typeof meta.mimetype === "string" ? meta.mimetype : null;
+        const size = typeof meta.file_size === "number" ? meta.file_size : null;
+        const explicitUrl = typeof meta.url === "string" && meta.url ? meta.url : null;
+        const sourceUrl = explicitUrl
+          ? explicitUrl
+          : odooBase
+            ? `${odooBase}/web/content/${aid}?download=true`
+            : "";
+        if (!sourceUrl) continue;
+        attRowsToInsert.push({
+          organization_id: ctx.organizationId,
+          task_id: link.task_id,
+          task_comment_id: link.id,
+          filename,
+          mimetype,
+          size_bytes: size,
+          storage_path: null,
+          source_url: sourceUrl,
+          external_source: SOURCE,
+          external_id: String(aid),
+        });
+      }
+    }
+
+    if (attRowsToInsert.length > 0) {
+      const { error: attErr } = await supabaseAdmin
+        .from("task_attachments")
+        .upsert(attRowsToInsert, {
+          onConflict: "organization_id,external_source,external_id",
+        });
+      if (attErr) {
+        console.warn(`task_attachments chunk @${i}: ${attErr.message}`);
+      }
+    }
+  }
+
+  return imported;
+}
+
+// Mirror Odoo project chatter (mail.message on project.project) into
+// project_comments + project_attachments, parallel to importTaskComments.
+// Same idempotency contract: (organization_id, external_source, external_id).
+async function importProjectComments(ctx: ImportContext): Promise<number> {
+  const { data: projectRows } = await supabaseAdmin
+    .from("projects")
+    .select("id, external_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE);
+  const projectUuidByOdooId = new Map<number, string>();
+  for (const r of projectRows ?? []) {
+    if (r.external_id != null) {
+      const n = Number(r.external_id);
+      if (Number.isFinite(n)) projectUuidByOdooId.set(n, r.id as string);
+    }
+  }
+  if (projectUuidByOdooId.size === 0) return 0;
+
+  const odooProjectIds = Array.from(projectUuidByOdooId.keys());
+  const odooBase = process.env.ODOO_URL?.replace(/\/+$/, "") ?? "";
+
+  const CHUNK = 500;
+  let imported = 0;
+  type OdooMessage = {
+    id: number;
+    res_id: number;
+    body: string | false;
+    author_id: OdooMany2one;
+    date: string | false;
+    message_type: string;
+    subtype_id: OdooMany2one;
+    attachment_ids: number[] | false;
+  };
+
+  for (let i = 0; i < odooProjectIds.length; i += CHUNK) {
+    const slice = odooProjectIds.slice(i, i + CHUNK);
+    const messages = await ctx.odoo.searchRead<OdooMessage>(
+      "mail.message",
+      [
+        ["model", "=", "project.project"],
+        ["res_id", "in", slice],
+        // Project chatter is normally human comments/emails; notification
+        // tracking on projects is rare so we focus on real notes here.
+        ["message_type", "in", ["comment", "email"]],
+      ],
+      [
+        "id", "res_id", "body", "author_id", "date", "message_type",
+        "subtype_id", "attachment_ids",
+      ],
+      { limit: 5000, order: "date asc" },
+    );
+
+    if (messages.length === 0) continue;
+
+    const subtypeIds = Array.from(
+      new Set(
+        messages
+          .map((m) => (Array.isArray(m.subtype_id) ? (m.subtype_id[0] as number) : null))
+          .filter((x): x is number => Boolean(x)),
+      ),
+    );
+    const internalSubtypeIds = new Set<number>();
+    if (subtypeIds.length > 0) {
+      const subs = await ctx.odoo.searchRead<{ id: number; internal: boolean }>(
+        "mail.message.subtype",
+        [["id", "in", subtypeIds]],
+        ["id", "internal"],
+      );
+      for (const s of subs) if (s.internal) internalSubtypeIds.add(s.id);
+    }
+
+    const rows = messages
+      .map((m) => {
+        const projectUuid = projectUuidByOdooId.get(m.res_id);
+        if (!projectUuid) return null;
+        const author = Array.isArray(m.author_id) ? m.author_id : null;
+        const subtypeId = Array.isArray(m.subtype_id) ? (m.subtype_id[0] as number) : null;
+        const body = typeof m.body === "string" ? m.body.trim() : "";
+        const hasAttachments = Array.isArray(m.attachment_ids) && m.attachment_ids.length > 0;
+        // Skip empty messages with no attachments — nothing to mirror.
+        if (!body && !hasAttachments) return null;
+        return {
+          organization_id: ctx.organizationId,
+          project_id: projectUuid,
+          external_source: SOURCE,
+          external_id: String(m.id),
+          author_user_id: null,
+          external_author_name: author ? String(author[1]) : null,
+          external_author_avatar_url: author && odooBase
+            ? `${odooBase}/web/image/res.partner/${author[0]}/avatar_1`
+            : null,
+          is_internal: subtypeId ? internalSubtypeIds.has(subtypeId) : true,
+          kind: "note",
+          body: body || "(مرفقات)",
+          created_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
+          updated_at: typeof m.date === "string" ? m.date : new Date().toISOString(),
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    if (rows.length === 0) continue;
+
+    const { error } = await supabaseAdmin
+      .from("project_comments")
+      .upsert(rows, { onConflict: "organization_id,external_source,external_id" });
+    if (error) {
+      console.warn(`project_comments chunk @${i}: ${error.message}`);
+      continue;
+    }
+    imported += rows.length;
+
+    // Backfill ir.attachment rows linked to these messages.
+    const attachmentIds = Array.from(
+      new Set(
+        messages.flatMap((m) =>
+          Array.isArray(m.attachment_ids) ? (m.attachment_ids as number[]) : [],
+        ),
+      ),
+    );
+    if (attachmentIds.length === 0) continue;
+
+    const odooMsgIdsInChunk = messages.map((m) => String(m.id));
+    const { data: commentRows } = await supabaseAdmin
+      .from("project_comments")
+      .select("id, project_id, external_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .in("external_id", odooMsgIdsInChunk);
+    const commentByOdooMsgId = new Map<number, { id: string; project_id: string }>();
+    for (const c of commentRows ?? []) {
+      const n = Number(c.external_id);
+      if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, project_id: c.project_id });
+    }
+
+    type OdooAttachment = {
+      id: number;
+      name: string | false;
+      mimetype: string | false;
+      file_size: number | false;
+      url: string | false;
+    };
+    const attachmentRows = await ctx.odoo.searchRead<OdooAttachment>(
+      "ir.attachment",
+      [["id", "in", attachmentIds]],
+      ["id", "name", "mimetype", "file_size", "url"],
+    );
+    const attMetaById = new Map<number, OdooAttachment>();
+    for (const a of attachmentRows) attMetaById.set(a.id, a);
+
+    const attRowsToInsert: {
+      organization_id: string;
+      project_id: string;
+      project_comment_id: string;
+      filename: string;
+      mimetype: string | null;
+      size_bytes: number | null;
+      storage_path: null;
+      source_url: string;
+      external_source: typeof SOURCE;
+      external_id: string;
+    }[] = [];
+    for (const m of messages) {
+      const ids = Array.isArray(m.attachment_ids) ? (m.attachment_ids as number[]) : [];
+      if (ids.length === 0) continue;
+      const link = commentByOdooMsgId.get(m.id);
+      if (!link) continue;
+      for (const aid of ids) {
+        const meta = attMetaById.get(aid);
+        if (!meta) continue;
+        const filename = typeof meta.name === "string" && meta.name ? meta.name : `attachment-${aid}`;
+        const mimetype = typeof meta.mimetype === "string" ? meta.mimetype : null;
+        const size = typeof meta.file_size === "number" ? meta.file_size : null;
+        const explicitUrl = typeof meta.url === "string" && meta.url ? meta.url : null;
+        const sourceUrl = explicitUrl
+          ? explicitUrl
+          : odooBase
+            ? `${odooBase}/web/content/${aid}?download=true`
+            : "";
+        if (!sourceUrl) continue;
+        attRowsToInsert.push({
+          organization_id: ctx.organizationId,
+          project_id: link.project_id,
+          project_comment_id: link.id,
+          filename,
+          mimetype,
+          size_bytes: size,
+          storage_path: null,
+          source_url: sourceUrl,
+          external_source: SOURCE,
+          external_id: String(aid),
+        });
+      }
+    }
+
+    if (attRowsToInsert.length > 0) {
+      const { error: attErr } = await supabaseAdmin
+        .from("project_attachments")
+        .upsert(attRowsToInsert, {
+          onConflict: "organization_id,external_source,external_id",
+        });
+      if (attErr) {
+        console.warn(`project_attachments chunk @${i}: ${attErr.message}`);
+      }
     }
   }
 
@@ -1011,6 +1334,7 @@ export async function runImport(
     tags: 0,
     tagAssignments: 0,
     taskComments: 0,
+    projectComments: 0,
     errors: [],
   };
 
@@ -1053,6 +1377,11 @@ export async function runImport(
     summary.taskComments = await importTaskComments(ctx);
   } catch (e) {
     summary.errors.push(`task_comments: ${(e as Error).message}`);
+  }
+  try {
+    summary.projectComments = await importProjectComments(ctx);
+  } catch (e) {
+    summary.errors.push(`project_comments: ${(e as Error).message}`);
   }
 
   return summary;

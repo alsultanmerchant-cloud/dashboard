@@ -143,6 +143,13 @@ export const WhatsAppGroupUpsertSchema = z.object({
   notes: optionalString,
 });
 
+export const TaskCommentAttachmentSchema = z.object({
+  storage_path: z.string().min(1).max(1024),
+  filename: z.string().trim().min(1).max(512),
+  mimetype: z.string().trim().max(255).optional().nullable(),
+  size_bytes: z.number().int().nonnegative().max(50 * 1024 * 1024).optional().nullable(),
+});
+
 export const TaskCommentSchema = z.object({
   task_id: uuidLoose,
   body: z.string().trim().min(1, { message: "اكتب التعليق" }).max(4000),
@@ -150,6 +157,7 @@ export const TaskCommentSchema = z.object({
   kind: z
     .enum(["note", "requirements", "modification"])
     .default("note"),
+  attachments: z.array(TaskCommentAttachmentSchema).max(10).optional().default([]),
 });
 
 export const HandoverSubmitSchema = z.object({

@@ -326,6 +326,12 @@ export async function addTaskCommentAction(input: {
   body: string;
   isInternal?: boolean;
   kind?: "note" | "requirements" | "modification";
+  attachments?: {
+    storage_path: string;
+    filename: string;
+    mimetype?: string | null;
+    size_bytes?: number | null;
+  }[];
 }): Promise<CommentResult> {
   let session;
   try {
@@ -339,6 +345,7 @@ export async function addTaskCommentAction(input: {
     body: input.body,
     is_internal: input.isInternal ?? true,
     kind: input.kind ?? "note",
+    attachments: input.attachments ?? [],
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -386,6 +393,38 @@ export async function addTaskCommentAction(input: {
     .select("id")
     .single();
   if (error || !comment) return { error: error?.message ?? "تعذر إضافة التعليق" };
+
+  // Persist any uploaded attachments. Files were uploaded directly from the
+  // browser to the `attachments` storage bucket; the action just records
+  // metadata + storage_path linked to this comment. Path scoping is enforced
+  // here: every storage_path must live under tasks/{taskId}/ so a malicious
+  // client can't link arbitrary objects from another task.
+  const attachments = parsed.data.attachments ?? [];
+  if (attachments.length > 0) {
+    const taskPrefix = `tasks/${parsed.data.task_id}/`;
+    const validAttachments = attachments.filter((a) =>
+      a.storage_path.startsWith(taskPrefix),
+    );
+    if (validAttachments.length > 0) {
+      const { error: attErr } = await supabaseAdmin
+        .from("task_attachments")
+        .insert(
+          validAttachments.map((a) => ({
+            organization_id: session!.orgId,
+            task_id: parsed.data.task_id,
+            task_comment_id: comment.id,
+            filename: a.filename,
+            mimetype: a.mimetype ?? null,
+            size_bytes: a.size_bytes ?? null,
+            storage_path: a.storage_path,
+            uploaded_by: session!.userId,
+          })),
+        );
+      if (attErr) {
+        console.warn("[task_attachments] insert failed:", attErr.message);
+      }
+    }
+  }
 
   // Mention parsing
   const tokens = extractMentions(parsed.data.body);
