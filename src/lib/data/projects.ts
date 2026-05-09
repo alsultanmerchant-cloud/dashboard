@@ -16,6 +16,7 @@ export interface ListProjectsPagedOpts {
   page?: number;
   pageSize?: number;
   search?: string;
+  includeTotals?: boolean;
   // Rwasem-style filter flags. Each maps to a chip the user toggles in the
   // search bar's filter dropdown.
   onlyWithCategories?: boolean;
@@ -154,7 +155,9 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     if (idsErr) throw idsErr;
     const ids = [...new Set((idsRows ?? []).map((r) => r.project_id as string))];
     if (ids.length === 0) {
-      const empty = await aggregateProjectTotals(opts.organizationId);
+      const empty = opts.includeTotals === false
+        ? { projects: 0, tasks: 0, withManager: 0 }
+        : await aggregateProjectTotals(opts.organizationId);
       return { rows: [], total: 0, page, pageSize, totals: empty };
     }
     q = q.in("id", ids);
@@ -166,7 +169,9 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   const total = count ?? rows.length;
 
   if (rows.length === 0) {
-    const emptyTotals = await aggregateProjectTotals(opts.organizationId);
+    const emptyTotals = opts.includeTotals === false
+      ? { projects: 0, tasks: 0, withManager: 0 }
+      : await aggregateProjectTotals(opts.organizationId);
     return { rows: [], total, page, pageSize, totals: emptyTotals };
   }
 
@@ -260,7 +265,9 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     };
   });
 
-  const totals = await aggregateProjectTotals(opts.organizationId);
+  const totals = opts.includeTotals === false
+    ? { projects: 0, tasks: 0, withManager: 0 }
+    : await aggregateProjectTotals(opts.organizationId);
 
   return { rows: mapped, total, page, pageSize, totals };
 }
@@ -287,6 +294,8 @@ const aggregateProjectTotals = cache(async (organizationId: string) => {
     withManager: withMgrCount.count ?? 0,
   };
 });
+
+export const getProjectTotals = aggregateProjectTotals;
 
 export async function listProjects(orgId: string) {
   const { data, error } = await supabaseAdmin

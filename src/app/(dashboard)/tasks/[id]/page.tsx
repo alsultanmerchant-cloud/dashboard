@@ -1,9 +1,10 @@
+import { cache, Suspense } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask } from "@/lib/data/tasks";
-import { listEmployees } from "@/lib/data/employees";
 import { getTaskActivityFeed } from "@/lib/data/task-activity";
 import {
   listTaskFollowers,
@@ -15,9 +16,6 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Tabs, TabsList, TabsTrigger, TabsContent,
-} from "@/components/ui/tabs";
-import {
   PriorityBadge,
   ServiceBadge,
   TaskStageBadge,
@@ -25,15 +23,16 @@ import {
 } from "@/components/status-badges";
 import type { TaskStage } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
-import { CommentComposer } from "../comment-composer";
 import { RecordPagination } from "./record-pagination";
-import { TaskSmartButtons } from "./task-smart-buttons";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { MessageButton } from "@/components/dm/message-button";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
+import { listEmployees } from "@/lib/data/employees";
+import { CommentComposer } from "../comment-composer";
+import { TaskSmartButtons } from "./task-smart-buttons";
 
 const TaskRolePanel = dynamic(
   () => import("../task-role-panel").then((mod) => ({ default: mod.TaskRolePanel })),
@@ -81,246 +80,44 @@ type TimesheetRow = import("./timesheets-tab").TimesheetRow;
 type ActivityRow = import("./activities-tab").ActivityRow;
 type ActivityType = import("./activities-tab").ActivityType;
 
+const getEmployees = cache(listEmployees);
+const getCachedTaskActivityFeed = cache(getTaskActivityFeed);
+const getCachedTaskStageHistory = cache(listTaskStageHistory);
+const getCachedTaskFollowers = cache(listTaskFollowers);
+const getCachedInheritedProjectFollowers = cache(listInheritedProjectFollowers);
+
 export default async function TaskDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   const session = await requirePagePermission("tasks.view");
+  const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
 
-  const [task, employees, supabaseActivity, followers, stageHistory] =
-    await Promise.all([
-      getTask(session.orgId, id),
-      listEmployees(session.orgId),
-      getTaskActivityFeed(session.orgId, id),
-      listTaskFollowers(session.orgId, id),
-      listTaskStageHistory(session.orgId, id),
-    ]);
+  const [task, followingRes, openExc] = await Promise.all([
+    getTask(session.orgId, id),
+    supabaseAdmin
+      .from("task_followers")
+      .select("user_id")
+      .eq("organization_id", session.orgId)
+      .eq("task_id", id)
+      .eq("user_id", session.userId)
+      .limit(1),
+    supabaseAdmin
+      .from("exceptions")
+      .select("id")
+      .eq("task_id", id)
+      .is("resolved_at", null)
+      .limit(1),
+  ]);
   if (!task) notFound();
-
-  // Load task_links (in & out) + sibling tasks for the picker.
-  const projectIdForLinks = (task as { project_id?: string | null }).project_id ?? null;
-  const [outgoingLinks, incomingLinks, siblingTasks] = await Promise.all([
-    projectIdForLinks
-      ? supabaseAdmin
-          .from("task_links")
-          .select("id, dependency_type, lag_days, target_task_id, other:tasks!task_links_target_task_id_fkey ( id, title, task_code )")
-          .eq("organization_id", session.orgId)
-          .eq("source_task_id", id)
-      : Promise.resolve({ data: [] }),
-    projectIdForLinks
-      ? supabaseAdmin
-          .from("task_links")
-          .select("id, dependency_type, lag_days, source_task_id, other:tasks!task_links_source_task_id_fkey ( id, title, task_code )")
-          .eq("organization_id", session.orgId)
-          .eq("target_task_id", id)
-      : Promise.resolve({ data: [] }),
-    projectIdForLinks
-      ? supabaseAdmin
-          .from("tasks")
-          .select("id, title, task_code")
-          .eq("organization_id", session.orgId)
-          .eq("project_id", projectIdForLinks)
-          .neq("id", id)
-          .order("code_seq", { ascending: true, nullsFirst: false })
-      : Promise.resolve({ data: [] }),
-  ]);
-  const linkRows: TaskLinkRow[] = [
-    ...((outgoingLinks.data ?? []) as Array<{
-      id: string;
-      dependency_type: TaskLinkRow["dependency_type"];
-      lag_days: number;
-      other: { id: string; title: string; task_code: string | null }
-        | { id: string; title: string; task_code: string | null }[]
-        | null;
-    }>).map((r) => {
-      const o = Array.isArray(r.other) ? r.other[0] : r.other;
-      return {
-        id: r.id,
-        dependency_type: r.dependency_type,
-        lag_days: r.lag_days,
-        direction: "outgoing" as const,
-        other_task: o ?? { id: "", title: "—", task_code: null },
-      };
-    }),
-    ...((incomingLinks.data ?? []) as Array<{
-      id: string;
-      dependency_type: TaskLinkRow["dependency_type"];
-      lag_days: number;
-      other: { id: string; title: string; task_code: string | null }
-        | { id: string; title: string; task_code: string | null }[]
-        | null;
-    }>).map((r) => {
-      const o = Array.isArray(r.other) ? r.other[0] : r.other;
-      return {
-        id: r.id,
-        dependency_type: r.dependency_type,
-        lag_days: r.lag_days,
-        direction: "incoming" as const,
-        other_task: o ?? { id: "", title: "—", task_code: null },
-      };
-    }),
-  ];
-  const linkCandidates = ((siblingTasks.data ?? []) as Array<{
-    id: string;
-    title: string;
-    task_code: string | null;
-  }>);
-
-  // Sub-tasks + timesheets + scheduled activities
-  const [subtasksRes, timesheetsRes, activitiesRes] = await Promise.all([
-    supabaseAdmin
-      .from("tasks")
-      .select("id, title, task_code, stage, planned_date")
-      .eq("organization_id", session.orgId)
-      .eq("parent_task_id", id)
-      .order("created_at", { ascending: true }),
-    supabaseAdmin
-      .from("task_timesheets")
-      .select("id, spent_on, hours, description, employee:employee_profiles ( id, full_name, user_id )")
-      .eq("organization_id", session.orgId)
-      .eq("task_id", id)
-      .order("spent_on", { ascending: false }),
-    supabaseAdmin
-      .from("task_activities")
-      .select("id, activity_type, summary, due_date, completed_at, assignee:employee_profiles ( id, full_name )")
-      .eq("organization_id", session.orgId)
-      .eq("task_id", id)
-      .order("due_date", { ascending: true, nullsFirst: false })
-      .order("created_at", { ascending: true }),
-  ]);
-  const subtaskRows: SubtaskRow[] = ((subtasksRes.data ?? []) as SubtaskRow[]);
-  const timesheetRows: TimesheetRow[] = ((timesheetsRes.data ?? []) as Array<{
-    id: string;
-    spent_on: string;
-    hours: number | string;
-    description: string | null;
-    employee: { id: string; full_name: string; user_id: string | null }
-      | { id: string; full_name: string; user_id: string | null }[]
-      | null;
-  }>).map((r) => {
-    const e = Array.isArray(r.employee) ? r.employee[0] : r.employee;
-    return {
-      id: r.id,
-      spent_on: r.spent_on,
-      hours: r.hours,
-      description: r.description,
-      employee: e ?? null,
-      is_mine: e?.user_id === session.userId,
-    };
-  });
-  const activityRows: ActivityRow[] = ((activitiesRes.data ?? []) as Array<{
-    id: string;
-    activity_type: ActivityType;
-    summary: string;
-    due_date: string | null;
-    completed_at: string | null;
-    assignee:
-      | { id: string; full_name: string }
-      | { id: string; full_name: string }[]
-      | null;
-  }>).map((r) => {
-    const a = Array.isArray(r.assignee) ? r.assignee[0] : r.assignee;
-    return {
-      id: r.id,
-      activity_type: r.activity_type,
-      summary: r.summary,
-      due_date: r.due_date,
-      completed_at: r.completed_at,
-      assignee_name: a?.full_name ?? null,
-    };
-  });
-  const openActivitiesCount = activityRows.filter((a) => !a.completed_at).length;
-  const timesheetHoursTotal = timesheetRows.reduce(
-    (sum, r) => sum + Number(r.hours ?? 0),
-    0,
-  );
-
-  // Odoo chatter is now mirrored into task_comments by the hourly sync, so
-  // the supabaseActivity feed already includes it. The legacy live fetch
-  // (listLiveTaskMessages + odooMessagesToActivity) is intentionally NOT
-  // called here — keeping it would double-display every comment.
-  const activity = supabaseActivity.sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  const commentCount = activity.filter(
-    (a) => a.kind === "note" || a.kind === "odoo_message",
-  ).length;
-
-  // Inherited project followers (project_members ← Odoo favorite_user_ids).
-  // Surfaced read-only so Odoo-imported tasks aren't visually empty.
-  const projectIdForFollowers = (task as { project_id?: string | null }).project_id ?? null;
-  const inheritedFollowers = projectIdForFollowers
-    ? await listInheritedProjectFollowers(session.orgId, projectIdForFollowers)
-    : [];
-
-  // Merge: explicit task followers first, then any inherited not already
-  // present (dedup by user_id).
-  const explicitUserIds = new Set(followers.map((f) => f.user_id));
-  const mergedFollowers = [
-    ...followers,
-    ...inheritedFollowers.filter((i) => !explicitUserIds.has(i.user_id)),
-  ];
-
-  // Followers picker excludes anyone already following (explicit or inherited).
-  const followerCandidates = await listFollowerCandidates(
-    session.orgId,
-    mergedFollowers.map((f) => f.user_id),
-  );
-
-  // T5: detect any open exception on this task (read-only side query).
-  const { data: openExc } = await supabaseAdmin
-    .from("exceptions")
-    .select("id")
-    .eq("task_id", id)
-    .is("resolved_at", null)
-    .limit(1);
   const hasOpenException = (openExc ?? []).length > 0;
   const canOpenException = hasPermission(session, "exception.open");
-
-  // Record pagination — prev/next within the same project, ordered by
-  // created_at. Mirrors Odoo's "16 / 107" form-view pager. Cheap query:
-  // we only fetch ids, not full task rows.
-  const projectIdRaw = (task as { project_id?: string | null }).project_id ?? null;
-  let recordPager: {
-    position: number;
-    total: number;
-    prevId: string | null;
-    nextId: string | null;
-  } | null = null;
-  if (projectIdRaw) {
-    const { data: siblings } = await supabaseAdmin
-      .from("tasks")
-      .select("id")
-      .eq("organization_id", session.orgId)
-      .eq("project_id", projectIdRaw)
-      .order("created_at", { ascending: true });
-    if (siblings && siblings.length > 0) {
-      const idx = siblings.findIndex((r) => r.id === task.id);
-      if (idx >= 0) {
-        recordPager = {
-          position: idx + 1,
-          total: siblings.length,
-          prevId: idx > 0 ? siblings[idx - 1].id : null,
-          nextId: idx < siblings.length - 1 ? siblings[idx + 1].id : null,
-        };
-      }
-    }
-  }
-
-  // Only count EXPLICIT followers for the follow-toggle state (inherited
-  // project members can't be unfollowed at the task level).
-  const isFollowing = followers.some((f) => f.user_id === session.userId);
-
-  // Permission to add/remove followers: same shape as the server action
-  // (creator OR view_all OR manage_followers). The action is the
-  // canonical gate; this just hides the picker for unprivileged users.
-  const canManageFollowers =
-    task.created_by === session.userId ||
-    hasPermission(session, "task.view_all") ||
-    hasPermission(session, "task.manage_followers");
+  const isFollowing = (followingRes.data ?? []).length > 0;
 
   const roleSlots = (task.task_assignees ?? [])
     .map((ta) => {
@@ -376,20 +173,6 @@ export default async function TaskDetailPage({
     return out;
   })();
 
-  const employeeOptions = employees
-    .filter((e) => e.employment_status === "active")
-    .map((e) => {
-      const dept = Array.isArray(e.department) ? e.department[0] : e.department;
-      return {
-        id: e.id,
-        full_name: e.full_name,
-        job_title: e.job_title ?? null,
-        avatar_url: e.avatar_url ?? null,
-        department_kind: dept?.kind ?? null,
-        department_name: dept?.name ?? null,
-      };
-    });
-
   const project = Array.isArray(task.project) ? task.project[0] : task.project;
   const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
   const service = Array.isArray(task.service) ? task.service[0] : task.service;
@@ -426,15 +209,13 @@ export default async function TaskDetailPage({
         ]}
         actions={
           <div className="flex items-center gap-2">
-            {recordPager && (
-              <RecordPagination
-                position={recordPager.position}
-                total={recordPager.total}
-                prevId={recordPager.prevId}
-                nextId={recordPager.nextId}
-                basePath="/tasks"
+            <Suspense fallback={null}>
+              <TaskRecordPagination
+                orgId={session.orgId}
+                taskId={task.id}
+                projectId={(task as { project_id?: string | null }).project_id ?? null}
               />
-            )}
+            </Suspense>
             <TaskFollowToggle
               taskId={task.id}
               currentUserId={session.userId}
@@ -501,13 +282,9 @@ export default async function TaskDetailPage({
           </div>
 
           <div className="border-t border-soft/40 pt-3">
-            <TaskSmartButtons
-              subtaskCount={subtaskRows.length}
-              linkCount={linkRows.length}
-              timesheetHours={timesheetHoursTotal}
-              commentCount={commentCount}
-              openActivityCount={openActivitiesCount}
-            />
+            <Suspense fallback={<div className="h-10" />}>
+              <TaskSmartButtonsSection orgId={session.orgId} taskId={task.id} />
+            </Suspense>
           </div>
         </CardContent>
       </Card>
@@ -548,33 +325,26 @@ export default async function TaskDetailPage({
       </div>
 
       <div className="mb-6">
-        <TaskApprovalPanel
-          taskId={task.id}
-          approvalRequired={Boolean((task as { approval_required?: boolean }).approval_required)}
-          approvalStatus={
-            ((task as { approval_status?: "not_required" | "pending" | "approved" | "rejected" }).approval_status ??
-              "not_required")
-          }
-          firstApproverId={(task as { first_approver_id?: string | null }).first_approver_id ?? null}
-          approvalRequestedAt={(task as { approval_requested_at?: string | null }).approval_requested_at ?? null}
-          approvalDecidedAt={(task as { approval_decided_at?: string | null }).approval_decided_at ?? null}
-          employees={employeeOptions.map((e) => ({
-            id: e.id,
-            full_name: e.full_name,
-            job_title: e.job_title,
-          }))}
-          currentEmployeeId={
-            employeeOptions.find((e) => {
-              const emp = employees.find((src) => src.id === e.id);
-              return emp?.user_id === session.userId;
-            })?.id ?? null
-          }
-          canManage={
-            task.created_by === session.userId ||
-            hasPermission(session, "tasks.manage") ||
-            hasPermission(session, "task.view_all")
-          }
-        />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل الموافقات...</CardContent></Card>}>
+          <TaskApprovalSection
+            orgId={session.orgId}
+            taskId={task.id}
+            currentUserId={session.userId}
+            approvalRequired={Boolean((task as { approval_required?: boolean }).approval_required)}
+            approvalStatus={
+              ((task as { approval_status?: "not_required" | "pending" | "approved" | "rejected" }).approval_status ??
+                "not_required")
+            }
+            firstApproverId={(task as { first_approver_id?: string | null }).first_approver_id ?? null}
+            approvalRequestedAt={(task as { approval_requested_at?: string | null }).approval_requested_at ?? null}
+            approvalDecidedAt={(task as { approval_decided_at?: string | null }).approval_decided_at ?? null}
+            canManage={
+              task.created_by === session.userId ||
+              hasPermission(session, "tasks.manage") ||
+              hasPermission(session, "task.view_all")
+            }
+          />
+        </Suspense>
       </div>
 
       <div className="mb-6">
@@ -612,7 +382,13 @@ export default async function TaskDetailPage({
         description="عيِّن المتخصص والمدير والمنفذ ومدير الحساب — كل خانة تحدِّد من يُحرِّك المهمة في مرحلتها."
       />
       <div className="mb-4">
-        <TaskRolePanel taskId={task.id} slots={roleSlots} employees={employeeOptions} />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل فريق المهمة...</CardContent></Card>}>
+          <TaskRoleSection
+            orgId={session.orgId}
+            taskId={task.id}
+            slots={roleSlots}
+          />
+        </Suspense>
       </div>
 
       {(() => {
@@ -777,133 +553,587 @@ export default async function TaskDetailPage({
       />
       <Card className="mb-6">
         <CardContent className="p-4">
-          <FollowersPanel
-            taskId={task.id}
-            followers={mergedFollowers}
-            candidates={followerCandidates}
-            canManage={canManageFollowers}
-          />
+          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المتابعين...</div>}>
+            <TaskFollowersSection
+              orgId={session.orgId}
+              taskId={task.id}
+              projectId={(task as { project_id?: string | null }).project_id ?? null}
+              currentUserId={session.userId}
+              canManage={
+                task.created_by === session.userId ||
+                hasPermission(session, "task.view_all") ||
+                hasPermission(session, "task.manage_followers")
+              }
+            />
+          </Suspense>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="activity" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="activity" data-smart-target="activity">سجل النشاط</TabsTrigger>
-          <TabsTrigger value="description" data-smart-target="description">الوصف</TabsTrigger>
-          <TabsTrigger value="subtasks" data-smart-target="subtasks">
-            مهام فرعية{subtaskRows.length > 0 ? ` (${subtaskRows.length})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="links" data-smart-target="links">
-            ربط المهام{linkRows.length > 0 ? ` (${linkRows.length})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="timesheets" data-smart-target="timesheets">
-            السجل الزمني{timesheetRows.length > 0 ? ` (${timesheetRows.length})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="activities" data-smart-target="activities">
-            أنشطة مجدولة{openActivitiesCount > 0 ? ` (${openActivitiesCount})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="history" data-smart-target="history">تاريخ المراحل</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="activity" className="space-y-4">
-          <CommentsFeed items={activity} />
-          <CommentComposer
+      <div className="mt-2 space-y-4">
+        <TaskTabNav taskId={task.id} activeTab={activeTab} />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل هذا القسم...</CardContent></Card>}>
+          <TaskTabPanelSection
+            orgId={session.orgId}
             taskId={task.id}
+            currentUserId={session.userId}
             currentStage={task.stage}
-            hasRequirements={activity.some(
-              (a) => a.kind === "note" && a.comment_kind === "requirements",
-            )}
-            mentionable={employeeOptions.map((e) => ({
-              id: e.id,
-              name: e.full_name,
-              jobTitle: e.job_title,
-              avatarUrl: e.avatar_url,
-            }))}
-            floating
+            description={task.description ?? null}
+            activeTab={activeTab}
+            canManageTasks={hasPermission(session, "tasks.manage")}
+            canEnterTimesheets={!!session.employeeId}
+            projectId={(task as { project_id?: string | null }).project_id ?? null}
           />
-        </TabsContent>
-
-        <TabsContent value="description">
-          <Card>
-            <CardContent className="p-4">
-              <TaskDescription html={task.description ?? null} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="subtasks">
-          <Card>
-            <CardContent className="p-4">
-              <SubtasksTab
-                parentTaskId={task.id}
-                subtasks={subtaskRows}
-                canManage={hasPermission(session, "tasks.manage")}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="links">
-          <Card>
-            <CardContent className="p-4">
-              {projectIdForLinks ? (
-                <TaskLinksPanel
-                  taskId={task.id}
-                  projectId={projectIdForLinks}
-                  links={linkRows}
-                  candidates={linkCandidates}
-                  canManage={hasPermission(session, "tasks.manage")}
-                />
-              ) : (
-                <p className="text-xs text-muted-foreground">المهمة غير مرتبطة بمشروع.</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="timesheets">
-          <Card>
-            <CardContent className="p-4">
-              <TimesheetsTab
-                taskId={task.id}
-                rows={timesheetRows}
-                canEnter={!!session.employeeId}
-                canManage={hasPermission(session, "tasks.manage")}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="activities">
-          <Card>
-            <CardContent className="p-4">
-              <ActivitiesTab
-                taskId={task.id}
-                rows={activityRows}
-                canManage={hasPermission(session, "tasks.manage")}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="history">
-          <Card>
-            <CardContent className="p-4">
-              <StageHistoryTimeline
-                rows={stageHistory}
-                fallbackActivity={activity.filter(
-                  (a): a is Extract<typeof activity[number], { kind: "stage_change" }> =>
-                    a.kind === "stage_change",
-                )}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </Suspense>
+      </div>
     </div>
   );
 }
 
 function diffDaysFromNow(date: string): number {
   return Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
+}
+
+const TASK_TABS = [
+  "activity",
+  "description",
+  "subtasks",
+  "links",
+  "timesheets",
+  "activities",
+  "history",
+] as const;
+type TaskTab = (typeof TASK_TABS)[number];
+
+function isTaskTab(value: string | undefined): value is TaskTab {
+  return Boolean(value && (TASK_TABS as readonly string[]).includes(value));
+}
+
+function mapActiveEmployeeOptions(
+  employees: Awaited<ReturnType<typeof listEmployees>>,
+) {
+  return employees
+    .filter((e) => e.employment_status === "active")
+    .map((e) => {
+      const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+      return {
+        id: e.id,
+        full_name: e.full_name,
+        job_title: e.job_title ?? null,
+        avatar_url: e.avatar_url ?? null,
+        department_kind: dept?.kind ?? null,
+        department_name: dept?.name ?? null,
+        user_id: e.user_id ?? null,
+      };
+    });
+}
+
+async function TaskRecordPagination({
+  orgId,
+  taskId,
+  projectId,
+}: {
+  orgId: string;
+  taskId: string;
+  projectId: string | null;
+}) {
+  if (!projectId) return null;
+
+  const { data: siblings } = await supabaseAdmin
+    .from("tasks")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: true });
+
+  if (!siblings?.length) return null;
+  const idx = siblings.findIndex((r) => r.id === taskId);
+  if (idx < 0) return null;
+
+  return (
+    <RecordPagination
+      position={idx + 1}
+      total={siblings.length}
+      prevId={idx > 0 ? siblings[idx - 1].id : null}
+      nextId={idx < siblings.length - 1 ? siblings[idx + 1].id : null}
+      basePath="/tasks"
+    />
+  );
+}
+
+async function TaskSmartButtonsSection({
+  orgId,
+  taskId,
+}: {
+  orgId: string;
+  taskId: string;
+}) {
+  const [subtasks, outgoingLinks, incomingLinks, comments, openActivities, timesheets] =
+    await Promise.all([
+      supabaseAdmin
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("parent_task_id", taskId),
+      supabaseAdmin
+        .from("task_links")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("source_task_id", taskId),
+      supabaseAdmin
+        .from("task_links")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("target_task_id", taskId),
+      supabaseAdmin
+        .from("task_comments")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("task_id", taskId),
+      supabaseAdmin
+        .from("task_activities")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", orgId)
+        .eq("task_id", taskId)
+        .is("completed_at", null),
+      supabaseAdmin
+        .from("task_timesheets")
+        .select("hours")
+        .eq("organization_id", orgId)
+        .eq("task_id", taskId),
+    ]);
+
+  const timesheetHours = (timesheets.data ?? []).reduce(
+    (sum, row) => sum + Number(row.hours ?? 0),
+    0,
+  );
+
+  return (
+    <TaskSmartButtons
+      subtaskCount={subtasks.count ?? 0}
+      linkCount={(outgoingLinks.count ?? 0) + (incomingLinks.count ?? 0)}
+      timesheetHours={timesheetHours}
+      commentCount={comments.count ?? 0}
+      openActivityCount={openActivities.count ?? 0}
+    />
+  );
+}
+
+async function TaskApprovalSection({
+  orgId,
+  taskId,
+  currentUserId,
+  approvalRequired,
+  approvalStatus,
+  firstApproverId,
+  approvalRequestedAt,
+  approvalDecidedAt,
+  canManage,
+}: {
+  orgId: string;
+  taskId: string;
+  currentUserId: string;
+  approvalRequired: boolean;
+  approvalStatus: "not_required" | "pending" | "approved" | "rejected";
+  firstApproverId: string | null;
+  approvalRequestedAt: string | null;
+  approvalDecidedAt: string | null;
+  canManage: boolean;
+}) {
+  const employees = mapActiveEmployeeOptions(await getEmployees(orgId));
+  const currentEmployeeId =
+    employees.find((employee) => employee.user_id === currentUserId)?.id ?? null;
+
+  return (
+    <TaskApprovalPanel
+      taskId={taskId}
+      approvalRequired={approvalRequired}
+      approvalStatus={approvalStatus}
+      firstApproverId={firstApproverId}
+      approvalRequestedAt={approvalRequestedAt}
+      approvalDecidedAt={approvalDecidedAt}
+      employees={employees.map((employee) => ({
+        id: employee.id,
+        full_name: employee.full_name,
+        job_title: employee.job_title,
+      }))}
+      currentEmployeeId={currentEmployeeId}
+      canManage={canManage}
+    />
+  );
+}
+
+async function TaskRoleSection({
+  orgId,
+  taskId,
+  slots,
+}: {
+  orgId: string;
+  taskId: string;
+  slots: Array<{
+    role_type: TaskRoleType;
+    employee: {
+      id: string;
+      full_name: string;
+      job_title: string | null;
+      avatar_url: string | null;
+      department_kind: string | null;
+      department_name: string | null;
+    };
+  }>;
+}) {
+  const employees = mapActiveEmployeeOptions(await getEmployees(orgId)).map((employee) => ({
+    id: employee.id,
+    full_name: employee.full_name,
+    job_title: employee.job_title,
+    avatar_url: employee.avatar_url,
+    department_kind: employee.department_kind,
+    department_name: employee.department_name,
+  }));
+
+  return <TaskRolePanel taskId={taskId} slots={slots} employees={employees} />;
+}
+
+async function TaskFollowersSection({
+  orgId,
+  taskId,
+  projectId,
+  currentUserId,
+  canManage,
+}: {
+  orgId: string;
+  taskId: string;
+  projectId: string | null;
+  currentUserId: string;
+  canManage: boolean;
+}) {
+  const followers = await getCachedTaskFollowers(orgId, taskId);
+  const inheritedFollowers = projectId
+    ? await getCachedInheritedProjectFollowers(orgId, projectId)
+    : [];
+  const explicitUserIds = new Set(followers.map((f) => f.user_id));
+  const mergedFollowers = [
+    ...followers,
+    ...inheritedFollowers.filter((follower) => !explicitUserIds.has(follower.user_id)),
+  ];
+  const followerCandidates = await listFollowerCandidates(
+    orgId,
+    mergedFollowers.map((follower) => follower.user_id),
+  );
+
+  return (
+    <FollowersPanel
+      taskId={taskId}
+      followers={mergedFollowers}
+      candidates={followerCandidates}
+      canManage={canManage}
+    />
+  );
+}
+
+function TaskTabNav({
+  taskId,
+  activeTab,
+}: {
+  taskId: string;
+  activeTab: TaskTab;
+}) {
+  const tabs: Array<{ key: TaskTab; label: string }> = [
+    { key: "activity", label: "سجل النشاط" },
+    { key: "description", label: "الوصف" },
+    { key: "subtasks", label: "مهام فرعية" },
+    { key: "links", label: "ربط المهام" },
+    { key: "timesheets", label: "السجل الزمني" },
+    { key: "activities", label: "أنشطة مجدولة" },
+    { key: "history", label: "تاريخ المراحل" },
+  ];
+
+  return (
+    <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-2xl border border-border bg-card p-1">
+      {tabs.map((tab) => (
+        <Link
+          key={tab.key}
+          href={`/tasks/${taskId}?tab=${tab.key}`}
+          className={cn(
+            "inline-flex h-9 items-center justify-center rounded-xl border border-transparent px-4 py-1.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground",
+            activeTab === tab.key &&
+              "border-cyan/30 bg-cyan/15 text-cyan shadow-[0_0_12px_rgba(0,212,255,0.2)]",
+          )}
+        >
+          {tab.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+async function TaskTabPanelSection({
+  orgId,
+  taskId,
+  currentUserId,
+  currentStage,
+  description,
+  activeTab,
+  canManageTasks,
+  canEnterTimesheets,
+  projectId,
+}: {
+  orgId: string;
+  taskId: string;
+  currentUserId: string;
+  currentStage: string;
+  description: string | null;
+  activeTab: TaskTab;
+  canManageTasks: boolean;
+  canEnterTimesheets: boolean;
+  projectId: string | null;
+}) {
+  if (activeTab === "description") {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <TaskDescription html={description} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "subtasks") {
+    const { data } = await supabaseAdmin
+      .from("tasks")
+      .select("id, title, task_code, stage, planned_date")
+      .eq("organization_id", orgId)
+      .eq("parent_task_id", taskId)
+      .order("created_at", { ascending: true });
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <SubtasksTab
+            parentTaskId={taskId}
+            subtasks={(data ?? []) as SubtaskRow[]}
+            canManage={canManageTasks}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "links") {
+    if (!projectId) {
+      return (
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">المهمة غير مرتبطة بمشروع.</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    const [outgoingLinks, incomingLinks, siblingTasks] = await Promise.all([
+      supabaseAdmin
+        .from("task_links")
+        .select("id, dependency_type, lag_days, target_task_id, other:tasks!task_links_target_task_id_fkey ( id, title, task_code )")
+        .eq("organization_id", orgId)
+        .eq("source_task_id", taskId),
+      supabaseAdmin
+        .from("task_links")
+        .select("id, dependency_type, lag_days, source_task_id, other:tasks!task_links_source_task_id_fkey ( id, title, task_code )")
+        .eq("organization_id", orgId)
+        .eq("target_task_id", taskId),
+      supabaseAdmin
+        .from("tasks")
+        .select("id, title, task_code")
+        .eq("organization_id", orgId)
+        .eq("project_id", projectId)
+        .neq("id", taskId)
+        .order("code_seq", { ascending: true, nullsFirst: false }),
+    ]);
+
+    const linkRows: TaskLinkRow[] = [
+      ...((outgoingLinks.data ?? []) as Array<{
+        id: string;
+        dependency_type: TaskLinkRow["dependency_type"];
+        lag_days: number;
+        other:
+          | { id: string; title: string; task_code: string | null }
+          | { id: string; title: string; task_code: string | null }[]
+          | null;
+      }>).map((row) => {
+        const other = Array.isArray(row.other) ? row.other[0] : row.other;
+        return {
+          id: row.id,
+          dependency_type: row.dependency_type,
+          lag_days: row.lag_days,
+          direction: "outgoing" as const,
+          other_task: other ?? { id: "", title: "—", task_code: null },
+        };
+      }),
+      ...((incomingLinks.data ?? []) as Array<{
+        id: string;
+        dependency_type: TaskLinkRow["dependency_type"];
+        lag_days: number;
+        other:
+          | { id: string; title: string; task_code: string | null }
+          | { id: string; title: string; task_code: string | null }[]
+          | null;
+      }>).map((row) => {
+        const other = Array.isArray(row.other) ? row.other[0] : row.other;
+        return {
+          id: row.id,
+          dependency_type: row.dependency_type,
+          lag_days: row.lag_days,
+          direction: "incoming" as const,
+          other_task: other ?? { id: "", title: "—", task_code: null },
+        };
+      }),
+    ];
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <TaskLinksPanel
+            taskId={taskId}
+            projectId={projectId}
+            links={linkRows}
+            candidates={(siblingTasks.data ?? []) as Array<{ id: string; title: string; task_code: string | null }>}
+            canManage={canManageTasks}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "timesheets") {
+    const { data } = await supabaseAdmin
+      .from("task_timesheets")
+      .select("id, spent_on, hours, description, employee:employee_profiles ( id, full_name, user_id )")
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId)
+      .order("spent_on", { ascending: false });
+
+    const rows: TimesheetRow[] = ((data ?? []) as Array<{
+      id: string;
+      spent_on: string;
+      hours: number | string;
+      description: string | null;
+      employee:
+        | { id: string; full_name: string; user_id: string | null }
+        | { id: string; full_name: string; user_id: string | null }[]
+        | null;
+    }>).map((row) => {
+      const employee = Array.isArray(row.employee) ? row.employee[0] : row.employee;
+      return {
+        id: row.id,
+        spent_on: row.spent_on,
+        hours: row.hours,
+        description: row.description,
+        employee: employee ?? null,
+        is_mine: employee?.user_id === currentUserId,
+      };
+    });
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <TimesheetsTab
+            taskId={taskId}
+            rows={rows}
+            canEnter={canEnterTimesheets}
+            canManage={canManageTasks}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "activities") {
+    const { data } = await supabaseAdmin
+      .from("task_activities")
+      .select("id, activity_type, summary, due_date, completed_at, assignee:employee_profiles ( id, full_name )")
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
+
+    const rows: ActivityRow[] = ((data ?? []) as Array<{
+      id: string;
+      activity_type: ActivityType;
+      summary: string;
+      due_date: string | null;
+      completed_at: string | null;
+      assignee:
+        | { id: string; full_name: string }
+        | { id: string; full_name: string }[]
+        | null;
+    }>).map((row) => {
+      const assignee = Array.isArray(row.assignee) ? row.assignee[0] : row.assignee;
+      return {
+        id: row.id,
+        activity_type: row.activity_type,
+        summary: row.summary,
+        due_date: row.due_date,
+        completed_at: row.completed_at,
+        assignee_name: assignee?.full_name ?? null,
+      };
+    });
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <ActivitiesTab
+            taskId={taskId}
+            rows={rows}
+            canManage={canManageTasks}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "history") {
+    const [rows, activity] = await Promise.all([
+      getCachedTaskStageHistory(orgId, taskId),
+      getCachedTaskActivityFeed(orgId, taskId),
+    ]);
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <StageHistoryTimeline
+            rows={rows}
+            fallbackActivity={activity.filter(
+              (item): item is Extract<(typeof activity)[number], { kind: "stage_change" }> =>
+                item.kind === "stage_change",
+            )}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const [activity, employees] = await Promise.all([
+    getCachedTaskActivityFeed(orgId, taskId),
+    getEmployees(orgId),
+  ]);
+  const mentionable = mapActiveEmployeeOptions(employees).map((employee) => ({
+    id: employee.id,
+    name: employee.full_name,
+    jobTitle: employee.job_title,
+    avatarUrl: employee.avatar_url,
+  }));
+
+  return (
+    <div className="space-y-4">
+      <CommentsFeed items={activity} />
+      <CommentComposer
+        taskId={taskId}
+        currentStage={currentStage}
+        hasRequirements={activity.some(
+          (item) => item.kind === "note" && item.comment_kind === "requirements",
+        )}
+        mentionable={mentionable}
+        floating
+      />
+    </div>
+  );
 }

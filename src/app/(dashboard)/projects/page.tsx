@@ -1,15 +1,13 @@
-import { cache } from "react";
+import { Suspense } from "react";
 import { Briefcase, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listProjectsPaged } from "@/lib/data/projects";
+import { getProjectTotals, listProjectsPaged } from "@/lib/data/projects";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
 import { ProjectsList } from "./projects-list";
 
 const PAGE_SIZE = 25;
-
-const getProjectsFirstPage = cache(listProjectsPaged);
 
 function toEnabled(value: string | string[] | undefined) {
   return value === "1" || value === "true";
@@ -26,10 +24,11 @@ export default async function ProjectsPage({
 }) {
   const sp = await searchParams;
   const session = await requirePagePermission("projects.view");
-  const { rows: projects, total, totals } = await getProjectsFirstPage({
+  const { rows: projects, total } = await listProjectsPaged({
     organizationId: session.orgId,
     page: 1,
     pageSize: PAGE_SIZE,
+    includeTotals: false,
     search: typeof sp.q === "string" ? sp.q : "",
     onlyWithCategories: toEnabled(sp.onlyWithCategories),
     onlyFavorites: toEnabled(sp.onlyFavorites),
@@ -44,10 +43,6 @@ export default async function ProjectsPage({
     currentEmployeeId: session.employeeId,
   });
 
-  const avgTasksPerProject = totals.projects
-    ? Math.round(totals.tasks / totals.projects)
-    : 0;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -57,38 +52,9 @@ export default async function ProjectsPage({
 
       {/* Analytics overview */}
       {total > 0 && (
-        <div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4">
-          <MetricCard
-            label="إجمالي المشاريع"
-            value={totals.projects}
-            icon={<Briefcase className="size-5" />}
-            tone="default"
-            size="compact"
-          />
-          <MetricCard
-            label="إجمالي المهام"
-            value={totals.tasks}
-            icon={<ListTodo className="size-5" />}
-            tone="info"
-            size="compact"
-          />
-          <MetricCard
-            label="متوسط المهام"
-            value={avgTasksPerProject}
-            hint="لكل مشروع"
-            icon={<CheckCircle2 className="size-5" />}
-            tone="success"
-            size="compact"
-          />
-          <MetricCard
-            label="مشاريع بمدير"
-            value={totals.withManager}
-            hint={`${totals.projects - totals.withManager} بدون مدير`}
-            icon={<AlertTriangle className="size-5" />}
-            tone={totals.withManager === totals.projects ? "success" : "warning"}
-            size="compact"
-          />
-        </div>
+        <Suspense fallback={<div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4"><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /></div>}>
+          <ProjectsOverviewMetrics orgId={session.orgId} />
+        </Suspense>
       )}
 
       {total === 0 ? (
@@ -118,6 +84,48 @@ export default async function ProjectsPage({
           pageSize={PAGE_SIZE}
         />
       )}
+    </div>
+  );
+}
+
+async function ProjectsOverviewMetrics({ orgId }: { orgId: string }) {
+  const totals = await getProjectTotals(orgId);
+  const avgTasksPerProject = totals.projects
+    ? Math.round(totals.tasks / totals.projects)
+    : 0;
+
+  return (
+    <div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4">
+      <MetricCard
+        label="إجمالي المشاريع"
+        value={totals.projects}
+        icon={<Briefcase className="size-5" />}
+        tone="default"
+        size="compact"
+      />
+      <MetricCard
+        label="إجمالي المهام"
+        value={totals.tasks}
+        icon={<ListTodo className="size-5" />}
+        tone="info"
+        size="compact"
+      />
+      <MetricCard
+        label="متوسط المهام"
+        value={avgTasksPerProject}
+        hint="لكل مشروع"
+        icon={<CheckCircle2 className="size-5" />}
+        tone="success"
+        size="compact"
+      />
+      <MetricCard
+        label="مشاريع بمدير"
+        value={totals.withManager}
+        hint={`${totals.projects - totals.withManager} بدون مدير`}
+        icon={<AlertTriangle className="size-5" />}
+        tone={totals.withManager === totals.projects ? "success" : "warning"}
+        size="compact"
+      />
     </div>
   );
 }

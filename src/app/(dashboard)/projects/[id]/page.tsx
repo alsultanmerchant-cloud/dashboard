@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import {
   Briefcase, Calendar, User, ListTodo, PauseCircle,
@@ -39,28 +40,10 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks, waGroups, renewalCycles, allEmployees, allCategories, followersRes] = await Promise.all([
+  const [summary, tasks] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     loadTaskBoardForGlobalView(session.orgId, { projectId: project.id }),
-    listProjectWhatsAppGroups(session.orgId, project.id),
-    listProjectRenewalCycles(session.orgId, project.id),
-    listEmployees(session.orgId),
-    listServiceCategories(session.orgId),
-    supabaseAdmin
-      .from("project_followers")
-      .select("employee:employee_profiles ( id, full_name, avatar_url, job_title )")
-      .eq("organization_id", session.orgId)
-      .eq("project_id", project.id),
   ]);
-  type FollowerRow = {
-    employee:
-      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }
-      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }[]
-      | null;
-  };
-  const projectFollowers = ((followersRes.data ?? []) as FollowerRow[])
-    .map((r) => (Array.isArray(r.employee) ? r.employee[0] : r.employee))
-    .filter((e): e is NonNullable<typeof e> => e !== null);
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
   const canManageRenewal =
     session.isOwner || session.permissions.has("renewal.manage");
@@ -81,25 +64,6 @@ export default async function ProjectDetailPage({
     { label: "الميديا", emp: mediaSp },
     { label: "السيو", emp: seoSp },
   ];
-
-  const waRows: WhatsAppGroupRow[] = (["client", "internal"] as const).map(
-    (kind) => {
-      const existing = waGroups.find((g) => g.kind === kind);
-      return existing
-        ? {
-            id: existing.id,
-            kind: existing.kind,
-            name: existing.name,
-            invite_url: existing.invite_url,
-          }
-        : {
-            id: null,
-            kind,
-            name: client?.name ? suggestGroupName(kind, client.name) : "",
-            invite_url: null,
-          };
-    },
-  );
 
   return (
     <div>
@@ -137,20 +101,9 @@ export default async function ProjectDetailPage({
               مخطط جانت
             </Link>
             {session.permissions.has("tasks.manage") && (
-              <BulkReassignDialog
-                projectId={project.id}
-                categories={allCategories
-                  .filter((c) => c.is_active)
-                  .map((c) => ({ id: c.id, name: c.name_ar }))}
-                employees={allEmployees
-                  .filter((e) => e.employment_status === "active")
-                  .map((e) => ({
-                    id: e.id,
-                    full_name: e.full_name,
-                    user_id: e.user_id ?? null,
-                    job_title: e.job_title ?? null,
-                  }))}
-              />
+              <Suspense fallback={null}>
+                <BulkReassignSection orgId={session.orgId} projectId={project.id} />
+              </Suspense>
             )}
           </div>
         }
@@ -318,7 +271,13 @@ export default async function ProjectDetailPage({
         description="القناة الرسمية مع العميل والقروب الداخلي للفريق — تابع تسمية المنشور في الدليل."
       />
       <div className="mb-8">
-        <WhatsAppPanel projectId={project.id} rows={waRows} />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل مجموعات واتساب...</CardContent></Card>}>
+          <ProjectWhatsAppSection
+            orgId={session.orgId}
+            projectId={project.id}
+            clientName={client?.name ?? null}
+          />
+        </Suspense>
       </div>
 
       <SectionTitle title="فريق المشروع" />
@@ -349,44 +308,17 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title={`متابعون (${projectFollowers.length})`}
+        title="متابعون"
         description="المُورَّدون من Odoo (`mail.followers`) — يستلمون التنبيهات على المشروع."
       />
       <Card className="mb-8">
         <CardContent className="p-4">
-          {projectFollowers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">لا يوجد متابعون.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {projectFollowers.map((e) => (
-                <div
-                  key={e.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 ps-2 pe-1 py-1 text-xs text-foreground"
-                  title={e.job_title ?? e.full_name}
-                >
-                  {e.avatar_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={e.avatar_url}
-                      alt={e.full_name}
-                      className="size-5 rounded-full object-cover"
-                    />
-                  ) : (
-                    <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
-                      {e.full_name.slice(0, 1)}
-                    </span>
-                  )}
-                  <span>{e.full_name}</span>
-                  <MessageButton
-                    employeeId={e.id}
-                    employeeName={e.full_name}
-                    contextProjectId={project.id}
-                    size="xs"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المتابعين...</div>}>
+            <ProjectFollowersSection
+              orgId={session.orgId}
+              projectId={project.id}
+            />
+          </Suspense>
         </CardContent>
       </Card>
 
@@ -395,13 +327,15 @@ export default async function ProjectDetailPage({
         description="جدول التجديد المعتمد للمشروع وسجل الدورات السابقة."
       />
       <div className="mb-8">
-        <RenewalsPanel
-          projectId={project.id}
-          cycleLengthMonths={(project as { cycle_length_months?: number | null }).cycle_length_months ?? null}
-          nextRenewalDate={(project as { next_renewal_date?: string | null }).next_renewal_date ?? null}
-          cycles={renewalCycles}
-          canManage={canManageRenewal}
-        />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل دورات التجديد...</CardContent></Card>}>
+          <ProjectRenewalsSection
+            orgId={session.orgId}
+            projectId={project.id}
+            cycleLengthMonths={(project as { cycle_length_months?: number | null }).cycle_length_months ?? null}
+            nextRenewalDate={(project as { next_renewal_date?: string | null }).next_renewal_date ?? null}
+            canManage={canManageRenewal}
+          />
+        </Suspense>
       </div>
 
       <SectionTitle
@@ -418,5 +352,150 @@ export default async function ProjectDetailPage({
         <TaskBoard tasks={tasks} />
       )}
     </div>
+  );
+}
+
+async function BulkReassignSection({
+  orgId,
+  projectId,
+}: {
+  orgId: string;
+  projectId: string;
+}) {
+  const [allEmployees, allCategories] = await Promise.all([
+    listEmployees(orgId),
+    listServiceCategories(orgId),
+  ]);
+
+  return (
+    <BulkReassignDialog
+      projectId={projectId}
+      categories={allCategories
+        .filter((category) => category.is_active)
+        .map((category) => ({ id: category.id, name: category.name_ar }))}
+      employees={allEmployees
+        .filter((employee) => employee.employment_status === "active")
+        .map((employee) => ({
+          id: employee.id,
+          full_name: employee.full_name,
+          user_id: employee.user_id ?? null,
+          job_title: employee.job_title ?? null,
+        }))}
+    />
+  );
+}
+
+async function ProjectWhatsAppSection({
+  orgId,
+  projectId,
+  clientName,
+}: {
+  orgId: string;
+  projectId: string;
+  clientName: string | null;
+}) {
+  const waGroups = await listProjectWhatsAppGroups(orgId, projectId);
+  const rows: WhatsAppGroupRow[] = (["client", "internal"] as const).map((kind) => {
+    const existing = waGroups.find((group) => group.kind === kind);
+    return existing
+      ? {
+          id: existing.id,
+          kind: existing.kind,
+          name: existing.name,
+          invite_url: existing.invite_url,
+        }
+      : {
+          id: null,
+          kind,
+          name: clientName ? suggestGroupName(kind, clientName) : "",
+          invite_url: null,
+        };
+  });
+
+  return <WhatsAppPanel projectId={projectId} rows={rows} />;
+}
+
+async function ProjectFollowersSection({
+  orgId,
+  projectId,
+}: {
+  orgId: string;
+  projectId: string;
+}) {
+  const { data } = await supabaseAdmin
+    .from("project_followers")
+    .select("employee:employee_profiles ( id, full_name, avatar_url, job_title )")
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId);
+
+  const followers = ((data ?? []) as Array<{
+    employee:
+      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }
+      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }[]
+      | null;
+  }>)
+    .map((row) => (Array.isArray(row.employee) ? row.employee[0] : row.employee))
+    .filter((employee): employee is NonNullable<typeof employee> => employee !== null);
+
+  if (followers.length === 0) {
+    return <p className="text-sm text-muted-foreground">لا يوجد متابعون.</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {followers.map((employee) => (
+        <div
+          key={employee.id}
+          className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 ps-2 pe-1 py-1 text-xs text-foreground"
+          title={employee.job_title ?? employee.full_name}
+        >
+          {employee.avatar_url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={employee.avatar_url}
+              alt={employee.full_name}
+              className="size-5 rounded-full object-cover"
+            />
+          ) : (
+            <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
+              {employee.full_name.slice(0, 1)}
+            </span>
+          )}
+          <span>{employee.full_name}</span>
+          <MessageButton
+            employeeId={employee.id}
+            employeeName={employee.full_name}
+            contextProjectId={projectId}
+            size="xs"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function ProjectRenewalsSection({
+  orgId,
+  projectId,
+  cycleLengthMonths,
+  nextRenewalDate,
+  canManage,
+}: {
+  orgId: string;
+  projectId: string;
+  cycleLengthMonths: number | null;
+  nextRenewalDate: string | null;
+  canManage: boolean;
+}) {
+  const renewalCycles = await listProjectRenewalCycles(orgId, projectId);
+
+  return (
+    <RenewalsPanel
+      projectId={projectId}
+      cycleLengthMonths={cycleLengthMonths}
+      nextRenewalDate={nextRenewalDate}
+      cycles={renewalCycles}
+      canManage={canManage}
+    />
   );
 }
