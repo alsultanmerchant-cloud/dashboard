@@ -8,8 +8,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { LayoutGrid, List as ListIcon } from "lucide-react";
+import { LayoutGrid, List as ListIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTopbarControls } from "@/components/layout/topbar-context";
 
 type Tab = {
   label: string;
@@ -80,6 +81,7 @@ export function ModuleTabs() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { moduleTabsMeta } = useTopbarControls();
   const mod = MODULES.find((m) => m.prefixes.test(pathname));
   if (!mod) return null;
   const isProjectsIndex = /^\/projects$/.test(pathname);
@@ -135,31 +137,41 @@ export function ModuleTabs() {
           })}
         </div>
         {isProjectsIndex && (
-          <div className="ms-auto flex shrink-0 overflow-hidden rounded-md border border-border">
-            <button
-              type="button"
-              aria-label="عرض كانبان"
-              onClick={() => setProjectView("kanban")}
-              className={cn(
-                "grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-muted",
-                projectView === "kanban" && "bg-primary/15 text-primary hover:bg-primary/20",
-              )}
-              title="Kanban"
-            >
-              <LayoutGrid className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label="عرض قائمة"
-              onClick={() => setProjectView("list")}
-              className={cn(
-                "grid size-8 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
-                projectView === "list" && "bg-primary/15 text-primary hover:bg-primary/20",
-              )}
-              title="List"
-            >
-              <ListIcon className="size-3.5" />
-            </button>
+          <div className="ms-auto flex shrink-0 items-center gap-2">
+            {moduleTabsMeta?.trailingText ? (
+              <span className="text-[12px] tabular-nums text-muted-foreground" dir="ltr">
+                {moduleTabsMeta.trailingText}
+              </span>
+            ) : null}
+            {moduleTabsMeta?.isBusy ? (
+              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+            ) : null}
+            <div className="flex overflow-hidden rounded-md border border-border">
+              <button
+                type="button"
+                aria-label="عرض كانبان"
+                onClick={() => setProjectView("kanban")}
+                className={cn(
+                  "grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-muted",
+                  projectView === "kanban" && "bg-primary/15 text-primary hover:bg-primary/20",
+                )}
+                title="Kanban"
+              >
+                <LayoutGrid className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="عرض قائمة"
+                onClick={() => setProjectView("list")}
+                className={cn(
+                  "grid size-8 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
+                  projectView === "list" && "bg-primary/15 text-primary hover:bg-primary/20",
+                )}
+                title="List"
+              >
+                <ListIcon className="size-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>

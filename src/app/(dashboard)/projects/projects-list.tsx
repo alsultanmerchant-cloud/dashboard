@@ -7,13 +7,11 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import {
-  Loader2,
-} from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";
+import { useTopbarControls } from "@/components/layout/topbar-context";
 
 const ProjectsTable = dynamic(
   () =>
@@ -37,6 +35,7 @@ type Props = {
 
 export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const params = useSearchParams();
+  const { setModuleTabsMeta } = useTopbarControls();
   const [items, setItems] = useState<LiveProject[]>(initial);
   const [total, setTotal] = useState<number>(initialTotal);
   const [page, setPage] = useState<number>(1);
@@ -99,19 +98,16 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
     return () => obs.disconnect();
   }, [loadMore]);
 
+  useEffect(() => {
+    setModuleTabsMeta({
+      trailingText: `${items.length} / ${total}`,
+      isBusy: loading || isPending,
+    });
+    return () => setModuleTabsMeta(null);
+  }, [items.length, total, loading, isPending, setModuleTabsMeta]);
+
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-lg border border-border bg-card/95 px-2 py-1.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80">
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-[12px] tabular-nums text-muted-foreground" dir="ltr">
-            {items.length} / {total}
-          </span>
-          {(loading || isPending) && (
-            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-          )}
-        </div>
-      </div>
-
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
           لا توجد نتائج

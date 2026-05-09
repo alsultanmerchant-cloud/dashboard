@@ -14,6 +14,11 @@ interface TopbarPageMeta {
   subtitle?: string;
 }
 
+interface ModuleTabsMeta {
+  trailingText?: string;
+  isBusy?: boolean;
+}
+
 export type TimeFilter = "اليوم" | "الأسبوع" | "الشهر" | "الكل";
 
 interface TopbarContextValue {
@@ -21,6 +26,8 @@ interface TopbarContextValue {
   setControls: React.Dispatch<React.SetStateAction<TopbarControls>>;
   pageMeta: TopbarPageMeta | null;
   setPageMeta: React.Dispatch<React.SetStateAction<TopbarPageMeta | null>>;
+  moduleTabsMeta: ModuleTabsMeta | null;
+  setModuleTabsMeta: React.Dispatch<React.SetStateAction<ModuleTabsMeta | null>>;
   activeMonth: string | null;
   setActiveMonth: (month: string | null) => void;
   /** Returns { month, year } for the selected month, or null if none selected */
@@ -36,6 +43,7 @@ const TopbarContext = createContext<TopbarContextValue | null>(null);
 export function TopbarProvider({ children }: { children: React.ReactNode }) {
   const [controls, setControls] = useState<TopbarControls>({});
   const [pageMeta, setPageMeta] = useState<TopbarPageMeta | null>(null);
+  const [moduleTabsMeta, setModuleTabsMeta] = useState<ModuleTabsMeta | null>(null);
   const [activeMonth, setActiveMonthRaw] = useState<string | null>(null);
   const [activeFilter, setActiveFilterRaw] = useState<TimeFilter>("الكل");
 
@@ -82,6 +90,8 @@ export function TopbarProvider({ children }: { children: React.ReactNode }) {
       setControls,
       pageMeta,
       setPageMeta,
+      moduleTabsMeta,
+      setModuleTabsMeta,
       activeMonth,
       setActiveMonth,
       activeMonthIndex,
@@ -89,7 +99,7 @@ export function TopbarProvider({ children }: { children: React.ReactNode }) {
       setActiveFilter,
       filterCutoff,
     }),
-    [controls, pageMeta, activeMonth, setActiveMonth, activeMonthIndex, activeFilter, setActiveFilter, filterCutoff]
+    [controls, pageMeta, moduleTabsMeta, activeMonth, setActiveMonth, activeMonthIndex, activeFilter, setActiveFilter, filterCutoff]
   );
 
   return <TopbarContext.Provider value={value}>{children}</TopbarContext.Provider>;
