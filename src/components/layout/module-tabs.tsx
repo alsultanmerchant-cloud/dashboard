@@ -7,7 +7,8 @@
 // "soon" tooltip so the chrome looks complete.
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { LayoutGrid, List as ListIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Tab = {
@@ -77,48 +78,90 @@ function isActive(pathname: string, tab: Tab): boolean {
 
 export function ModuleTabs() {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const mod = MODULES.find((m) => m.prefixes.test(pathname));
   if (!mod) return null;
+  const isProjectsIndex = /^\/projects$/.test(pathname);
+  const projectView = searchParams.get("view") === "list" ? "list" : "kanban";
+
+  function setProjectView(nextView: "kanban" | "list") {
+    const next = new URLSearchParams(searchParams.toString());
+    if (nextView === "kanban") next.delete("view");
+    else next.set("view", nextView);
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   return (
     <nav
       aria-label={mod.name}
       className="sticky top-[88px] z-30 mx-3 mt-2 sm:mx-6"
     >
-      <div className="flex items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-card/95 px-1.5 py-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/85">
-        {mod.tabs.map((tab) => {
-          const active = isActive(pathname, tab);
-          const baseCls =
-            "shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors";
-          if (tab.comingSoon || !tab.href) {
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-card/95 px-1.5 py-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/85">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+          {mod.tabs.map((tab) => {
+            const active = isActive(pathname, tab);
+            const baseCls =
+              "shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors";
+            if (tab.comingSoon || !tab.href) {
+              return (
+                <span
+                  key={tab.label}
+                  title="قريباً"
+                  className={cn(
+                    baseCls,
+                    "text-muted-foreground/60 cursor-not-allowed",
+                  )}
+                >
+                  {tab.label}
+                </span>
+              );
+            }
             return (
-              <span
+              <Link
                 key={tab.label}
-                title="قريباً"
+                href={tab.href}
                 className={cn(
                   baseCls,
-                  "text-muted-foreground/60 cursor-not-allowed",
+                  active
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 {tab.label}
-              </span>
+              </Link>
             );
-          }
-          return (
-            <Link
-              key={tab.label}
-              href={tab.href}
+          })}
+        </div>
+        {isProjectsIndex && (
+          <div className="ms-auto flex shrink-0 overflow-hidden rounded-md border border-border">
+            <button
+              type="button"
+              aria-label="عرض كانبان"
+              onClick={() => setProjectView("kanban")}
               className={cn(
-                baseCls,
-                active
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                "grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-muted",
+                projectView === "kanban" && "bg-primary/15 text-primary hover:bg-primary/20",
               )}
+              title="Kanban"
             >
-              {tab.label}
-            </Link>
-          );
-        })}
+              <LayoutGrid className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label="عرض قائمة"
+              onClick={() => setProjectView("list")}
+              className={cn(
+                "grid size-8 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
+                projectView === "list" && "bg-primary/15 text-primary hover:bg-primary/20",
+              )}
+              title="List"
+            >
+              <ListIcon className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );

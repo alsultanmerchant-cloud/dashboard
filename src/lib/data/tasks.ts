@@ -62,6 +62,9 @@ export type BoardTaskData = {
   >;
 };
 
+const GLOBAL_BOARD_LIMIT = 120;
+const PROJECT_BOARD_LIMIT = 400;
+
 function buildTaskQuery(
   orgId: string,
   filters: TaskFilters,
@@ -243,7 +246,7 @@ export async function listBoardTasks(
       service:services ( id, name, slug ),
       task_assignees ( role_type, employee:employee_profiles ( id, full_name, avatar_url ) )
     `,
-    filters.projectId ? 1000 : 200,
+    filters.projectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT,
   );
 
   const { data, error } = await q;
@@ -323,6 +326,25 @@ export async function getTask(orgId: string, id: string) {
       *,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name ),
+      task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
+    `)
+    .eq("organization_id", orgId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function getTaskSummary(orgId: string, id: string) {
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select(`
+      id, title, description, stage, status, priority, planned_date, due_date,
+      completed_at, stage_entered_at, project_id, created_by, task_code,
+      approval_required, approval_status, first_approver_id,
+      approval_requested_at, approval_decided_at, stage_owner_positions,
+      project:projects ( id, name, client:clients ( id, name ) ),
+      service:services ( id, name, slug ),
       task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
     `)
     .eq("organization_id", orgId)

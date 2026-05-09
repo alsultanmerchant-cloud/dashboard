@@ -65,6 +65,8 @@ function prevStage(s: TaskStage): TaskStage | null {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { moveTaskStageAction, quickCreateTaskAction } from "../../tasks/_actions";
 
+const INITIAL_VISIBLE_CARDS = 24;
+
 // -------- types ----------------------------------------------------------
 
 export type BoardTask = {
@@ -486,6 +488,34 @@ function DraggableCard({
   );
 }
 
+function VisibleTaskList({
+  tasks,
+  renderTask,
+}: {
+  tasks: BoardTask[];
+  renderTask: (task: BoardTask) => React.ReactNode;
+}) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_CARDS);
+  const visibleTasks = tasks.slice(0, visibleCount);
+  const remainingCount = Math.max(0, tasks.length - visibleTasks.length);
+
+  return (
+    <>
+      {visibleTasks.map((task) => renderTask(task))}
+      {remainingCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_CARDS)}
+          className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+        >
+          عرض {Math.min(INITIAL_VISIBLE_CARDS, remainingCount)} أخرى
+          {remainingCount > INITIAL_VISIBLE_CARDS ? ` من ${remainingCount}` : ""}
+        </button>
+      )}
+    </>
+  );
+}
+
 // -------- column ---------------------------------------------------------
 
 function StageColumn({
@@ -585,15 +615,18 @@ function StageColumn({
             </button>
           </div>
           <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
-            {tasks.map((t) => (
-              <DraggableCard
-                key={t.id}
-                task={t}
-                advancing={isMoving}
-                onAdvance={onAdvance ? (next) => onAdvance(t.id, next) : undefined}
-                onRetreat={onRetreat ? (prev) => onRetreat(t.id, prev) : undefined}
-              />
-            ))}
+            <VisibleTaskList
+              tasks={tasks}
+              renderTask={(t) => (
+                <DraggableCard
+                  key={t.id}
+                  task={t}
+                  advancing={isMoving}
+                  onAdvance={onAdvance ? (next) => onAdvance(t.id, next) : undefined}
+                  onRetreat={onRetreat ? (prev) => onRetreat(t.id, prev) : undefined}
+                />
+              )}
+            />
             {tasks.length === 0 && !onQuickCreate && (
               <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[11px] text-muted-foreground">
                 {isMoving ? "…" : "—"}
@@ -658,15 +691,18 @@ function ProjectColumn({
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
-        {tasks.map((t) => (
-          <Link
-            key={t.id}
-            href={`/tasks/${t.id}`}
-            className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
-          >
-            <TaskCard task={t} />
-          </Link>
-        ))}
+        <VisibleTaskList
+          tasks={tasks}
+          renderTask={(t) => (
+            <Link
+              key={t.id}
+              href={`/tasks/${t.id}`}
+              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
+            >
+              <TaskCard task={t} />
+            </Link>
+          )}
+        />
         {tasks.length === 0 && (
           <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
             —
@@ -693,15 +729,18 @@ function BucketColumn({
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
-        {tasks.map((t) => (
-          <Link
-            key={t.id}
-            href={`/tasks/${t.id}`}
-            className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
-          >
-            <TaskCard task={t} />
-          </Link>
-        ))}
+        <VisibleTaskList
+          tasks={tasks}
+          renderTask={(t) => (
+            <Link
+              key={t.id}
+              href={`/tasks/${t.id}`}
+              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
+            >
+              <TaskCard task={t} />
+            </Link>
+          )}
+        />
         {tasks.length === 0 && (
           <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
             —
@@ -771,15 +810,18 @@ function NestedSubsection({
       </button>
       {!collapsed && (
         <div className="flex flex-col gap-1.5 p-1.5">
-          {tasks.map((t) => (
-            <Link
-              key={t.id}
-              href={`/tasks/${t.id}`}
-              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40"
-            >
-              <TaskCard task={t} />
-            </Link>
-          ))}
+          <VisibleTaskList
+            tasks={tasks}
+            renderTask={(t) => (
+              <Link
+                key={t.id}
+                href={`/tasks/${t.id}`}
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40"
+              >
+                <TaskCard task={t} />
+              </Link>
+            )}
+          />
         </div>
       )}
     </div>

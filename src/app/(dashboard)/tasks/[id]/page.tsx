@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { getTask } from "@/lib/data/tasks";
+import { getTask, getTaskSummary } from "@/lib/data/tasks";
 import { getTaskActivityFeed } from "@/lib/data/task-activity";
 import {
   listTaskFollowers,
@@ -99,7 +99,7 @@ export default async function TaskDetailPage({
   const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
 
   const [task, followingRes, openExc] = await Promise.all([
-    getTask(session.orgId, id),
+    getTaskSummary(session.orgId, id),
     supabaseAdmin
       .from("task_followers")
       .select("user_id")
@@ -256,13 +256,13 @@ export default async function TaskDetailPage({
               </div>
             </div>
 
-            <dl className="grid min-w-0 gap-3 rounded-xl border border-soft/60 bg-soft/20 p-3 text-sm sm:grid-cols-3 lg:min-w-[24rem]">
-              <div className="min-w-0">
+            <dl className="grid min-w-0 gap-3 rounded-xl border border-soft/60 bg-soft/20 p-3 text-sm sm:grid-cols-3 lg:min-w-[30rem]">
+              <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                 <dt className="text-[11px] text-muted-foreground">المشروع</dt>
-                <dd className="truncate font-medium text-foreground">
+                <dd className="text-pretty break-words font-medium leading-6 text-foreground">
                   {project?.name ?? "—"}
                 </dd>
-                <p className="truncate text-[11px] text-muted-foreground">
+                <p className="text-[11px] text-muted-foreground break-words">
                   {client?.name ?? "بدون عميل"}
                 </p>
               </div>
@@ -348,33 +348,9 @@ export default async function TaskDetailPage({
       </div>
 
       <div className="mb-6">
-        <TaskFormCard
-          task={{
-            priority: task.priority,
-            planned_date: task.planned_date ?? null,
-            due_date: task.due_date ?? null,
-            completed_at: task.completed_at ?? null,
-            actual_done_date:
-              (task as { actual_done_date?: string | null }).actual_done_date ?? null,
-            allocated_time_minutes:
-              (task as { allocated_time_minutes?: number | null }).allocated_time_minutes ?? null,
-            progress_percent:
-              (task as { progress_percent?: number | string | null }).progress_percent ?? null,
-            expected_progress_percent:
-              (task as { expected_progress_percent?: number | string | null }).expected_progress_percent ?? null,
-            progress_slip_percent:
-              (task as { progress_slip_percent?: number | string | null }).progress_slip_percent ?? null,
-            delay_days: storedDelay,
-            hold_reason: (task as { hold_reason?: string | null }).hold_reason ?? null,
-            hold_since: (task as { hold_since?: string | null }).hold_since ?? null,
-          }}
-          project={project ? { id: project.id, name: project.name } : null}
-          client={client ? { id: client.id, name: client.name } : null}
-          service={service ? { id: service.id, slug: service.slug, name: service.name } : null}
-          computedDelayDays={delayDays}
-          overdue={overdue}
-          formattedCompletedAt={formattedCompletedAt}
-        />
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل تفاصيل المهمة...</CardContent></Card>}>
+          <TaskFormSection orgId={session.orgId} taskId={task.id} />
+        </Suspense>
       </div>
 
       <SectionTitle
@@ -830,6 +806,62 @@ async function TaskFollowersSection({
   );
 }
 
+async function TaskFormSection({
+  orgId,
+  taskId,
+}: {
+  orgId: string;
+  taskId: string;
+}) {
+  const task = await getTask(orgId, taskId);
+  if (!task) return null;
+
+  const project = Array.isArray(task.project) ? task.project[0] : task.project;
+  const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
+  const service = Array.isArray(task.service) ? task.service[0] : task.service;
+  const deadline = task.planned_date ?? task.due_date;
+  const overdue = isOverdue(deadline) && task.stage !== "done";
+  const storedDelay = (task as { delay_days?: number | null }).delay_days ?? null;
+  const delayDays = task.stage === "done"
+    ? storedDelay
+    : deadline
+      ? diffDaysFromNow(deadline)
+      : null;
+  const formattedCompletedAt = task.completed_at
+    ? formatArabicDateTime(task.completed_at)
+    : null;
+
+  return (
+    <TaskFormCard
+      task={{
+        priority: task.priority,
+        planned_date: task.planned_date ?? null,
+        due_date: task.due_date ?? null,
+        completed_at: task.completed_at ?? null,
+        actual_done_date:
+          (task as { actual_done_date?: string | null }).actual_done_date ?? null,
+        allocated_time_minutes:
+          (task as { allocated_time_minutes?: number | null }).allocated_time_minutes ?? null,
+        progress_percent:
+          (task as { progress_percent?: number | string | null }).progress_percent ?? null,
+        expected_progress_percent:
+          (task as { expected_progress_percent?: number | string | null }).expected_progress_percent ?? null,
+        progress_slip_percent:
+          (task as { progress_slip_percent?: number | string | null }).progress_slip_percent ?? null,
+        delay_days: storedDelay,
+        hold_reason: (task as { hold_reason?: string | null }).hold_reason ?? null,
+        hold_since: (task as { hold_since?: string | null }).hold_since ?? null,
+      }}
+      project={project ? { id: project.id, name: project.name } : null}
+      client={client ? { id: client.id, name: client.name } : null}
+      service={service ? { id: service.id, slug: service.slug, name: service.name } : null}
+      computedDelayDays={delayDays}
+      overdue={overdue}
+      formattedCompletedAt={formattedCompletedAt}
+    />
+  );
+}
+
 function TaskTabNav({
   taskId,
   activeTab,
@@ -1111,6 +1143,42 @@ async function TaskTabPanelSection({
     );
   }
 
+  return (
+    <div className="space-y-4">
+      <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل سجل النشاط...</CardContent></Card>}>
+        <TaskActivityFeedSection orgId={orgId} taskId={taskId} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TaskCommentComposerSection
+          orgId={orgId}
+          taskId={taskId}
+          currentStage={currentStage}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+async function TaskActivityFeedSection({
+  orgId,
+  taskId,
+}: {
+  orgId: string;
+  taskId: string;
+}) {
+  const activity = await getCachedTaskActivityFeed(orgId, taskId);
+  return <CommentsFeed items={activity} />;
+}
+
+async function TaskCommentComposerSection({
+  orgId,
+  taskId,
+  currentStage,
+}: {
+  orgId: string;
+  taskId: string;
+  currentStage: string;
+}) {
   const [activity, employees] = await Promise.all([
     getCachedTaskActivityFeed(orgId, taskId),
     getEmployees(orgId),
@@ -1123,17 +1191,14 @@ async function TaskTabPanelSection({
   }));
 
   return (
-    <div className="space-y-4">
-      <CommentsFeed items={activity} />
-      <CommentComposer
-        taskId={taskId}
-        currentStage={currentStage}
-        hasRequirements={activity.some(
-          (item) => item.kind === "note" && item.comment_kind === "requirements",
-        )}
-        mentionable={mentionable}
-        floating
-      />
-    </div>
+    <CommentComposer
+      taskId={taskId}
+      currentStage={currentStage}
+      hasRequirements={activity.some(
+        (item) => item.kind === "note" && item.comment_kind === "requirements",
+      )}
+      mentionable={mentionable}
+      floating
+    />
   );
 }

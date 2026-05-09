@@ -9,13 +9,11 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Loader2,
-  LayoutGrid, List as ListIcon,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";
-import { cn } from "@/lib/utils";
 
 const ProjectsTable = dynamic(
   () =>
@@ -37,14 +35,11 @@ type Props = {
   pageSize: number;
 };
 
-type ViewMode = "kanban" | "list";
-
 export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const params = useSearchParams();
   const [items, setItems] = useState<LiveProject[]>(initial);
   const [total, setTotal] = useState<number>(initialTotal);
   const [page, setPage] = useState<number>(1);
-  const [view, setView] = useState<ViewMode>("kanban");
   const [loading, setLoading] = useState<boolean>(false);
   const [isPending, startTransition] = useTransition();
 
@@ -52,6 +47,7 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const reqIdRef = useRef(0);
   const search = (params.get("q") ?? "").trim();
   const groupBy = params.get("groupBy") || undefined;
+  const view = params.get("view") === "list" ? "list" : "kanban";
   const filters = useMemo<ProjectFilters>(() => {
     const flag = (k: string) => params.get(k) === "1" || params.get(k) === "true";
     const str = (k: string) => params.get(k) || undefined;
@@ -110,32 +106,6 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
           <span className="text-[12px] tabular-nums text-muted-foreground" dir="ltr">
             {items.length} / {total}
           </span>
-          <div className="flex overflow-hidden rounded-md border border-border">
-            <button
-              type="button"
-              aria-label="عرض كانبان"
-              onClick={() => setView("kanban")}
-              className={cn(
-                "grid size-7 place-items-center text-muted-foreground transition-colors hover:bg-muted",
-                view === "kanban" && "bg-primary/15 text-primary hover:bg-primary/20",
-              )}
-              title="Kanban"
-            >
-              <LayoutGrid className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label="عرض قائمة"
-              onClick={() => setView("list")}
-              className={cn(
-                "grid size-7 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
-                view === "list" && "bg-primary/15 text-primary hover:bg-primary/20",
-              )}
-              title="List"
-            >
-              <ListIcon className="size-3.5" />
-            </button>
-          </div>
           {(loading || isPending) && (
             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           )}
