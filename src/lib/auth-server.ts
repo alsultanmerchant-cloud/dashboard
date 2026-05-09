@@ -33,7 +33,13 @@ export const getServerSession = cache(async (): Promise<ServerSession | null> =>
     )
     .eq("user_id", data.user.id)
     .maybeSingle();
-  if (!profile) return null;
+  if (!profile) {
+    // User has a valid JWT but no employee_profiles row (e.g. provisioning
+    // incomplete, or wrong environment). Sign them out so the stale cookie
+    // doesn't cause a middleware → page.tsx redirect loop.
+    await supabase.auth.signOut();
+    return null;
+  }
 
   const org = Array.isArray(profile.organization) ? profile.organization[0] : profile.organization;
 
