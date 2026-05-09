@@ -9,6 +9,28 @@ import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
+import { StageOwnerEditor } from "./stage-owner-editor";
+
+// Server-side helper — renders the distinct roles used across stages as a
+// compact preview (e.g. "المتخصص · المنفذ · مدير الحساب"). Lives here so
+// the read-only render path doesn't import the client editor module.
+const ROLE_LABEL_PREVIEW: Record<string, string> = {
+  specialist: "المتخصص",
+  manager: "مدير القسم",
+  agent: "المنفذ",
+  account_manager: "مدير الحساب",
+  supporting_lead: "قائد القسم المساند",
+  supporting_agent: "منفذ القسم المساند",
+};
+function stageOwnerPreview(
+  mapping: Record<string, string | null> | null | undefined,
+): string {
+  if (!mapping) return "—";
+  const distinct = Array.from(
+    new Set(Object.values(mapping).filter((v): v is string => Boolean(v))),
+  ).map((r) => ROLE_LABEL_PREVIEW[r] ?? r);
+  return distinct.length > 0 ? distinct.join(" · ") : "—";
+}
 
 export default async function TaskTemplateDetailPage({
   params,
@@ -46,6 +68,7 @@ export default async function TaskTemplateDetailPage({
               <DataTableHeaderCell>الإزاحة (يوم)</DataTableHeaderCell>
               <DataTableHeaderCell>المدة (يوم)</DataTableHeaderCell>
               <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
+              <DataTableHeaderCell>مالك كل مرحلة</DataTableHeaderCell>
             </tr>
           </DataTableHead>
           <tbody>
@@ -70,6 +93,23 @@ export default async function TaskTemplateDetailPage({
                   </DataTableCell>
                   <DataTableCell className="tabular-nums text-xs text-muted-foreground" dir="ltr">{it.duration_days}</DataTableCell>
                   <DataTableCell><PriorityBadge priority={it.priority} /></DataTableCell>
+                  <DataTableCell>
+                    <div className="flex flex-col gap-1">
+                      <StageOwnerEditor
+                        itemId={it.id}
+                        initial={
+                          (it as { stage_owner_positions?: Record<string, string | null> | null })
+                            .stage_owner_positions ?? null
+                        }
+                      />
+                      <span className="text-[10px] text-muted-foreground">
+                        {stageOwnerPreview(
+                          (it as { stage_owner_positions?: Record<string, string | null> | null })
+                            .stage_owner_positions ?? null,
+                        )}
+                      </span>
+                    </div>
+                  </DataTableCell>
                 </DataTableRow>
               );
             })}

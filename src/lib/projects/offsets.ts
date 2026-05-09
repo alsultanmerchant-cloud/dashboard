@@ -35,6 +35,13 @@ export type TemplateItemInput = {
   upload_offset_days_before_deadline: number | null;
   week_index: number | null;
   order_index?: number | null;
+  /**
+   * Per-stage owner-position map (e.g. { manager_review: 'manager',
+   * sent_to_client: 'account_manager' }). Carried onto the generated task
+   * so the task page can resolve "who owns the current stage" by looking
+   * up the assignee with the matching role_type.
+   */
+  stage_owner_positions?: Record<string, string | null> | null;
 };
 
 export type TemplateInput = {
@@ -66,6 +73,7 @@ export type GeneratedTask = {
   uploadDue: string | null;
   weekIndex: number | null;
   orderIndex: number;
+  stageOwnerPositions: Record<string, string | null> | null;
 };
 
 export type ExpandInput = {
@@ -218,6 +226,7 @@ function buildTask(
     uploadDue,
     weekIndex,
     orderIndex,
+    stageOwnerPositions: item.stage_owner_positions ?? null,
   };
 }
 

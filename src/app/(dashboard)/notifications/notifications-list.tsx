@@ -46,6 +46,10 @@ function entityHref(entityType: string | null, entityId: string | null): string 
     case "client": return `/clients`;
     case "handover": return `/handover`;
     case "employee": return `/organization/employees`;
+    // DMs route to the messages inbox; the inbox auto-opens the latest
+    // conversation thread on landing. Falls through to a deep-link query
+    // so the inbox can scroll to the specific message if it wants.
+    case "direct_message": return `/messages?msg=${entityId}`;
     default: return null;
   }
 }

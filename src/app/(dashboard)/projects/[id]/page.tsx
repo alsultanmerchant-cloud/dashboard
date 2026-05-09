@@ -21,6 +21,7 @@ import { TaskBoard, type BoardTask } from "./task-board";
 import { BulkReassignDialog } from "./bulk-reassign-dialog";
 import { listEmployees } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { MessageButton } from "@/components/dm/message-button";
 import { listServiceCategories } from "@/lib/data/service-categories";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
@@ -361,7 +362,7 @@ export default async function ProjectDetailPage({
               {projectFollowers.map((e) => (
                 <div
                   key={e.id}
-                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 px-2 py-1 text-xs text-foreground"
+                  className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 ps-2 pe-1 py-1 text-xs text-foreground"
                   title={e.job_title ?? e.full_name}
                 >
                   {e.avatar_url ? (
@@ -377,6 +378,12 @@ export default async function ProjectDetailPage({
                     </span>
                   )}
                   <span>{e.full_name}</span>
+                  <MessageButton
+                    employeeId={e.id}
+                    employeeName={e.full_name}
+                    contextProjectId={project.id}
+                    size="xs"
+                  />
                 </div>
               ))}
             </div>

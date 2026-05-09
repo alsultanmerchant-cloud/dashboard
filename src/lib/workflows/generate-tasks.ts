@@ -59,7 +59,8 @@ export async function generateTasksForProjectFromServices(args: {
        task_template_items (
          id, title, description, default_department_id, default_role_key,
          offset_days_from_project_start, duration_days, priority,
-         upload_offset_days_before_deadline, week_index
+         upload_offset_days_before_deadline, week_index,
+         stage_owner_positions
        )`,
     )
     .eq("organization_id", args.organizationId)
@@ -85,6 +86,7 @@ export async function generateTasksForProjectFromServices(args: {
     created_from_template_item_id: string;
     created_by: string | null;
     status: "todo";
+    stage_owner_positions: Record<string, string | null> | null;
     template_service_id: string; // local field to attribute slot during fan-out
   };
 
@@ -109,6 +111,12 @@ export async function generateTasksForProjectFromServices(args: {
         created_from_template_item_id: item.id,
         created_by: args.createdByUserId ?? null,
         status: "todo" as const,
+        // Carry the template item's per-stage position mapping onto the
+        // generated task so the task page can show "owner of current stage"
+        // by resolving position → assignee at render time.
+        stage_owner_positions:
+          (item as { stage_owner_positions?: Record<string, string | null> })
+            .stage_owner_positions ?? null,
         template_service_id: tmpl.service_id,
       };
     }),

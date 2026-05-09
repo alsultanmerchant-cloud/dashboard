@@ -41,6 +41,7 @@ import { TimesheetsTab, type TimesheetRow } from "./timesheets-tab";
 import { ActivitiesTab, type ActivityRow, type ActivityType } from "./activities-tab";
 import { TaskSmartButtons } from "./task-smart-buttons";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
+import { MessageButton } from "@/components/dm/message-button";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
 import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
@@ -580,6 +581,97 @@ export default async function TaskDetailPage({
         <TaskRolePanel taskId={task.id} slots={roleSlots} employees={employeeOptions} />
       </div>
 
+      {(() => {
+        // Stage-owner widget: shows whose POSITION owns the current stage
+        // (per the task's stage_owner_positions map) + the resolved EMPLOYEE
+        // pulled from task_assignees with that role_type. Lets the team see
+        // at a glance "this is on Manager Review → it's on أحمد محسن now."
+        const stageOwnerMap =
+          (task as { stage_owner_positions?: Record<string, string | null> | null })
+            .stage_owner_positions ?? null;
+        const ownerPosition = stageOwnerMap?.[task.stage as string] ?? null;
+        if (!ownerPosition) return null;
+        const ROLE_LABEL: Record<string, string> = {
+          account_manager: "مدير الحساب",
+          specialist: "المتخصص",
+          manager: "مدير القسم",
+          agent: "المنفذ",
+          supporting_lead: "قائد القسم المساند",
+          supporting_agent: "منفذ القسم المساند",
+        };
+        const STAGE_LABEL: Record<string, string> = {
+          new: "جديدة",
+          in_progress: "قيد التنفيذ",
+          manager_review: "مراجعة المدير",
+          specialist_review: "مراجعة المتخصص",
+          ready_to_send: "جاهزة للإرسال",
+          sent_to_client: "أرسلت للعميل",
+          client_changes: "تعديلات العميل",
+          done: "مكتملة",
+        };
+        const owner = roleSlots.find(
+          (s) => s.role_type === ownerPosition,
+        )?.employee ?? null;
+        return (
+          <Card className="mb-6 border-cyan/30 bg-cyan-dim/15">
+            <CardContent className="flex flex-wrap items-center gap-3 p-4">
+              <div className="grid size-10 place-items-center rounded-full bg-cyan/20 text-cyan">
+                ⚡
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  المسؤول عن المرحلة الحالية
+                </p>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="rounded-full bg-cyan-dim px-2 py-0.5 text-[11px] font-semibold text-cyan">
+                    {STAGE_LABEL[task.stage as string] ?? task.stage}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">→</span>
+                  <span className="rounded-full bg-soft-1 px-2 py-0.5 text-[11px] font-medium">
+                    {ROLE_LABEL[ownerPosition] ?? ownerPosition}
+                  </span>
+                </div>
+              </div>
+              {owner ? (
+                <div className="flex items-center gap-2 rounded-xl border border-soft bg-card px-3 py-2">
+                  {owner.avatar_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={owner.avatar_url}
+                      alt={owner.full_name}
+                      className="size-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid size-8 place-items-center rounded-full bg-cyan/20 text-xs font-semibold text-cyan">
+                      {owner.full_name.slice(0, 1)}
+                    </span>
+                  )}
+                  <div>
+                    <p className="text-sm font-medium leading-tight">{owner.full_name}</p>
+                    {owner.job_title && (
+                      <p className="text-[11px] text-muted-foreground leading-tight">
+                        {owner.job_title}
+                      </p>
+                    )}
+                  </div>
+                  <MessageButton
+                    employeeId={owner.id}
+                    employeeName={owner.full_name}
+                    contextTaskId={task.id}
+                    size="sm"
+                  />
+                </div>
+              ) : (
+                <p className="text-xs text-amber-400">
+                  لا يوجد موظف مُسنَد بهذا الدور بعد —
+                  أضف {ROLE_LABEL[ownerPosition] ?? ownerPosition} من لوحة الفريق أعلاه.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {allAssignees.length > 0 && (
         <Card className="mb-6">
           <CardContent className="p-4">
@@ -631,6 +723,12 @@ export default async function TaskDetailPage({
                         )}
                       </div>
                     </div>
+                    <MessageButton
+                      employeeId={a.id}
+                      employeeName={a.full_name}
+                      contextTaskId={task.id}
+                      size="sm"
+                    />
                   </div>
                 );
               })}

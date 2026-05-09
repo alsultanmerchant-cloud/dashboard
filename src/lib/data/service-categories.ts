@@ -78,6 +78,7 @@ export type TemplateWithItems = {
     upload_offset_days_before_deadline: number | null;
     week_index: number | null;
     order_index: number;
+    stage_owner_positions: Record<string, string | null> | null;
   }[];
 };
 
@@ -94,7 +95,8 @@ export async function listTemplatesForServices(
        task_template_items (
          id, title, description, priority, default_role_key, default_department_id,
          offset_days_from_project_start, duration_days,
-         upload_offset_days_before_deadline, week_index, order_index
+         upload_offset_days_before_deadline, week_index, order_index,
+         stage_owner_positions
        )`,
     )
     .eq("organization_id", orgId)
@@ -125,6 +127,9 @@ export async function listTemplatesForServices(
         upload_offset_days_before_deadline: it.upload_offset_days_before_deadline ?? null,
         week_index: it.week_index ?? null,
         order_index: it.order_index ?? 0,
+        stage_owner_positions:
+          (it as { stage_owner_positions?: Record<string, string | null> | null })
+            .stage_owner_positions ?? null,
       }))
       .sort((a, b) => a.order_index - b.order_index),
   }));
