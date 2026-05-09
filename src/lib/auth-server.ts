@@ -41,7 +41,7 @@ async function loadSession(): Promise<ServerSession | null> {
   const { data: profile } = await supabaseAdmin
     .from("employee_profiles")
     .select(
-      "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations ( id, name )",
+      "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations!employee_profiles_organization_id_fkey ( id, name )",
     )
     .eq("user_id", data.user.id)
     .maybeSingle();

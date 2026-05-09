@@ -139,7 +139,7 @@ export function AuthProvider({
     const { data: profileRow, error: profileErr } = await supabase
       .from("employee_profiles")
       .select(
-        "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations ( id, name, slug )",
+        "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations!employee_profiles_organization_id_fkey ( id, name, slug )",
       )
       .eq("user_id", authUser.id)
       .maybeSingle();
