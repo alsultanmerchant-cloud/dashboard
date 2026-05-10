@@ -65,6 +65,7 @@ type OdooMessage = {
   message_type: string;
   subtype_id: [number, string] | false;
   tracking_value_ids: number[] | false;
+  attachment_ids: number[] | false;
 };
 
 type OdooTrackingValue = {
@@ -105,7 +106,7 @@ for (let i = 0; i < ids.length; i += CHUNK) {
     ],
     [
       "id", "res_id", "body", "author_id", "date", "message_type",
-      "subtype_id", "tracking_value_ids",
+      "subtype_id", "tracking_value_ids", "attachment_ids",
     ],
     { limit: 2000, order: "date asc" },
   );
@@ -214,9 +215,14 @@ for (let i = 0; i < ids.length; i += CHUNK) {
         return { ...baseRow, body: lines.join("") };
       }
 
-      // comment / email — keep the raw HTML body.
+      // comment / email — keep the raw HTML body. Empty bodies are still
+      // kept when the message has attachments (Odoo lets users post a
+      // chatter entry with only a file); dropping them would orphan the
+      // attachments since task_attachments are linked through the comment.
       const body = typeof m.body === "string" ? m.body.trim() : "";
-      if (!body) return null;
+      const hasAttachments =
+        Array.isArray(m.attachment_ids) && m.attachment_ids.length > 0;
+      if (!body && !hasAttachments) return null;
       return { ...baseRow, body };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
