@@ -34,9 +34,6 @@ import { listEmployees } from "@/lib/data/employees";
 import { CommentComposer } from "../comment-composer";
 import { TaskSmartButtons } from "./task-smart-buttons";
 
-const TaskRolePanel = dynamic(
-  () => import("../task-role-panel").then((mod) => ({ default: mod.TaskRolePanel })),
-);
 const CommentsFeed = dynamic(
   () => import("./comments-feed").then((mod) => ({ default: mod.CommentsFeed })),
 );
@@ -351,20 +348,6 @@ export default async function TaskDetailPage({
         <TaskFormSection task={task} />
       </div>
 
-      <SectionTitle
-        title="فريق المهمة"
-        description="عيِّن المتخصص والمدير والمنفذ ومدير الحساب — كل خانة تحدِّد من يُحرِّك المهمة في مرحلتها."
-      />
-      <div className="mb-4">
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل فريق المهمة...</CardContent></Card>}>
-          <TaskRoleSection
-            orgId={session.orgId}
-            taskId={task.id}
-            slots={roleSlots}
-          />
-        </Suspense>
-      </div>
-
       {(() => {
         // Stage-owner widget: shows whose POSITION owns the current stage
         // (per the task's stage_owner_positions map) + the resolved EMPLOYEE
@@ -448,7 +431,7 @@ export default async function TaskDetailPage({
               ) : (
                 <p className="text-xs text-amber-400">
                   لا يوجد موظف مُسنَد بهذا الدور بعد —
-                  أضف {ROLE_LABEL[ownerPosition] ?? ownerPosition} من لوحة الفريق أعلاه.
+                  أضف {ROLE_LABEL[ownerPosition] ?? ownerPosition} من قائمة المشاركين أدناه.
                 </p>
               )}
             </CardContent>
@@ -719,37 +702,6 @@ async function TaskApprovalSection({
       canManage={canManage}
     />
   );
-}
-
-async function TaskRoleSection({
-  orgId,
-  taskId,
-  slots,
-}: {
-  orgId: string;
-  taskId: string;
-  slots: Array<{
-    role_type: TaskRoleType;
-    employee: {
-      id: string;
-      full_name: string;
-      job_title: string | null;
-      avatar_url: string | null;
-      department_kind: string | null;
-      department_name: string | null;
-    };
-  }>;
-}) {
-  const employees = mapActiveEmployeeOptions(await getEmployees(orgId)).map((employee) => ({
-    id: employee.id,
-    full_name: employee.full_name,
-    job_title: employee.job_title,
-    avatar_url: employee.avatar_url,
-    department_kind: employee.department_kind,
-    department_name: employee.department_name,
-  }));
-
-  return <TaskRolePanel taskId={taskId} slots={slots} employees={employees} />;
 }
 
 async function TaskFollowersSection({
