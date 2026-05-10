@@ -103,6 +103,7 @@ export interface OdooTaskStage {
 export interface OdooTask {
   id: number;
   name: string;
+  active?: boolean;
   project_id: OdooMany2one;
   stage_id: OdooMany2one;
   user_ids: OdooMany2many;

@@ -28,6 +28,10 @@ export interface ListProjectsPagedOpts {
   onlyUnassigned?: boolean;
   /** Project on hold (held_at IS NOT NULL) or status='archived'. */
   archived?: boolean;
+  /** Project has zero active category links. Opposite of onlyWithCategories. */
+  allCategoriesArchived?: boolean;
+  /** Project has at least one task where logged hours exceed allocated. */
+  overTimesheets?: boolean;
   /** ISO YYYY-MM-DD bounds. */
   startDateFrom?: string;
   startDateTo?: string;
@@ -113,6 +117,8 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     p_end_date_from: opts.endDateFrom || null,
     p_end_date_to: opts.endDateTo || null,
     p_only_mine_employee_id: onlyMineEmployeeId,
+    p_all_categories_archived: !!opts.allCategoriesArchived,
+    p_over_timesheets: !!opts.overTimesheets,
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [], total: 0, totals: { projects: 0, tasks: 0, withManager: 0 } }) as BundleResult;
@@ -120,6 +126,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   const mapped: LiveProject[] = bundle.rows.map((r) => {
     const odooId = externalToOdooId(r.external_id);
     return {
+      id: r.id,
       odooId,
       name: r.name,
       clientId: r.client ? externalToOdooId(r.client.external_id) || null : null,
@@ -216,7 +223,7 @@ export async function getProject(orgId: string, id: string) {
       social_specialist:employee_profiles!projects_social_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
       media_specialist:employee_profiles!projects_media_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
       seo_specialist:employee_profiles!projects_seo_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
-      project_services ( id, status, service:services ( id, name, slug ) ),
+      project_services ( id, service_id, status, service:services ( id, name, slug ) ),
       project_members ( id, role_label, employee:employee_profiles ( id, full_name, job_title, avatar_url ) )
     `)
     .eq("organization_id", orgId)
@@ -224,6 +231,37 @@ export async function getProject(orgId: string, id: string) {
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+// Resolve the user who put the project on hold most recently. The actor is
+// stamped on `project.hold` rows in `audit_logs` (held_at lives on the project
+// row but the actor doesn't), so we fan out one extra read joined to
+// employee_profiles for the display name.
+export async function getProjectHoldActor(
+  orgId: string,
+  projectId: string,
+): Promise<{ name: string; at: string } | null> {
+  const { data } = await supabaseAdmin
+    .from("audit_logs")
+    .select("actor_user_id, created_at")
+    .eq("organization_id", orgId)
+    .eq("entity_type", "project")
+    .eq("entity_id", projectId)
+    .eq("action", "project.hold")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.actor_user_id) return null;
+  const { data: profile } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("full_name")
+    .eq("user_id", data.actor_user_id)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  return {
+    name: profile?.full_name ?? "—",
+    at: data.created_at,
+  };
 }
 
 export async function getProjectTaskSummary(orgId: string, projectId: string) {

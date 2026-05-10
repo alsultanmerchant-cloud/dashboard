@@ -1,6 +1,8 @@
 import { ClipboardList, CalendarDays } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listTaskTemplates, getTaskTemplate } from "@/lib/data/templates";
+import { listDepartments } from "@/lib/data/employees";
+import { AddTemplateItemDialog } from "./[id]/add-item-dialog";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { ConfigShell, type ConfigItem } from "@/components/config-shell";
@@ -36,9 +38,10 @@ export default async function TaskTemplatesPage({
   // Default to the first template when none picked — Odoo settings views
   // do the same so the right pane is never blank by default.
   const selectedId = sp.id ?? templates[0]?.id ?? null;
-  const selected = selectedId
-    ? await getTaskTemplate(session.orgId, selectedId)
-    : null;
+  const [selected, departments] = await Promise.all([
+    selectedId ? getTaskTemplate(session.orgId, selectedId) : Promise.resolve(null),
+    listDepartments(session.orgId),
+  ]);
 
   const items: ConfigItem[] = templates.map((t) => {
     const service = Array.isArray(t.service) ? t.service[0] : t.service;
@@ -77,7 +80,14 @@ export default async function TaskTemplatesPage({
           basePath="/task-templates"
           items={items}
           selectedId={selectedId}
-          detail={selected ? <TemplateDetail tpl={selected} /> : null}
+          detail={
+            selected ? (
+              <TemplateDetail
+                tpl={selected}
+                departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+              />
+            ) : null
+          }
         />
       )}
     </div>
@@ -88,8 +98,10 @@ export default async function TaskTemplatesPage({
 
 function TemplateDetail({
   tpl,
+  departments,
 }: {
   tpl: NonNullable<Awaited<ReturnType<typeof getTaskTemplate>>>;
+  departments: { id: string; name: string }[];
 }) {
   const service = Array.isArray(tpl.service) ? tpl.service[0] : tpl.service;
   const items = tpl.task_template_items ?? [];
@@ -115,6 +127,7 @@ function TemplateDetail({
             >
               {tpl.is_active ? "نشط" : "متوقف"}
             </span>
+            <AddTemplateItemDialog templateId={tpl.id} departments={departments} />
           </div>
         </CardContent>
       </Card>

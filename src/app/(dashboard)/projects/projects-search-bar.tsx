@@ -10,6 +10,7 @@ import {
   X,
   Star,
   Layers,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,22 +21,62 @@ type BoolFilterKey =
   | "onlyUnassigned"
   | "onlyWithCategories"
   | "onlyWithManager"
-  | "archived";
+  | "archived"
+  // Sky Light feedback follow-up: parity with Odoo's projects search-view.
+  // These map to: tasks have >100% timesheet vs allocated; all linked
+  // categories are archived (no active package); project has any task
+  // sub-resource (Rwasem extension showing only "active" projects).
+  | "overTimesheets"
+  | "allCategoriesArchived";
 
-const BOOL_FILTERS: { key: BoolFilterKey; label: string }[] = [
+// "Primary" filters — always visible. The rest live behind "Add Custom Filter"
+// (mirrors Odoo's filter list which only shows the 4-5 most-used filters
+// above-the-fold and tucks the rest under a custom-filter expander).
+const BOOL_FILTERS_PRIMARY: { key: BoolFilterKey; label: string }[] = [
   { key: "onlyMine", label: "My Projects" },
   { key: "onlyFavorites", label: "My Favorites" },
   { key: "onlyUnassigned", label: "Unassigned" },
-  { key: "onlyWithManager", label: "Has Project Manager" },
   { key: "onlyWithCategories", label: "With Active Categories" },
   { key: "archived", label: "Archived (On Hold)" },
 ];
+const BOOL_FILTERS_CUSTOM: { key: BoolFilterKey; label: string }[] = [
+  { key: "onlyWithManager", label: "Has Project Manager" },
+  { key: "overTimesheets", label: "Timesheets >100%" },
+  { key: "allCategoriesArchived", label: "All Categories Archived" },
+];
+const BOOL_FILTERS: { key: BoolFilterKey; label: string }[] = [
+  ...BOOL_FILTERS_PRIMARY,
+  ...BOOL_FILTERS_CUSTOM,
+];
 
-type GroupKey = "" | "project_manager" | "status" | "tags";
-const GROUP_OPTIONS: { key: GroupKey; label: string }[] = [
+type GroupKey =
+  | ""
+  | "project_manager"
+  | "status"
+  | "tags"
+  // Add-Custom-Group options. Each one is wired in projects-board.tsx so the
+  // kanban view actually clusters by the chosen dimension.
+  | "account_manager"
+  | "client"
+  | "target"
+  | "start_month"
+  | "end_month";
+
+const GROUP_OPTIONS_PRIMARY: { key: GroupKey; label: string }[] = [
   { key: "project_manager", label: "Project Manager" },
   { key: "status", label: "Status" },
   { key: "tags", label: "Tags" },
+];
+const GROUP_OPTIONS_CUSTOM: { key: GroupKey; label: string }[] = [
+  { key: "account_manager", label: "Account Manager" },
+  { key: "client", label: "Client" },
+  { key: "target", label: "Target" },
+  { key: "start_month", label: "Start Date (Month)" },
+  { key: "end_month", label: "End Date (Month)" },
+];
+const GROUP_OPTIONS: { key: GroupKey; label: string }[] = [
+  ...GROUP_OPTIONS_PRIMARY,
+  ...GROUP_OPTIONS_CUSTOM,
 ];
 
 function isEnabled(value: string | null) {
@@ -59,6 +100,14 @@ export function ProjectsSearchBar() {
   const activeFilterKeys = BOOL_FILTERS.filter(({ key }) => filters[key]).map(
     ({ key }) => key,
   );
+  // Custom-section expanders. Auto-open when a "custom" item is active so
+  // the user can see what they've toggled on a fresh popup open.
+  const customFilterActive = BOOL_FILTERS_CUSTOM.some(({ key }) => filters[key]);
+  const customGroupActive = GROUP_OPTIONS_CUSTOM.some(
+    ({ key }) => (params.get("groupBy") ?? "") === key,
+  );
+  const [customFilterOpen, setCustomFilterOpen] = useState(customFilterActive);
+  const [customGroupOpen, setCustomGroupOpen] = useState(customGroupActive);
 
   const startDateFrom = params.get("startDateFrom") ?? "";
   const startDateTo = params.get("startDateTo") ?? "";
@@ -247,15 +296,15 @@ export function ProjectsSearchBar() {
       </div>
 
       {open && (
-        <div className="absolute end-0 start-0 top-[calc(100%+6px)] z-30 rounded-2xl border border-white/20 bg-card/98 p-4 shadow-2xl backdrop-blur-xl">
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="absolute end-0 top-[calc(100%+6px)] z-30 w-[min(96vw,720px)] rounded-2xl border border-soft bg-popover p-4 shadow-2xl">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
             {/* Filters column */}
-            <div className="min-w-[180px]">
+            <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
                 <Filter className="size-3.5" /> Filters
               </div>
               <div className="flex flex-col gap-0.5">
-                {BOOL_FILTERS.map((f) => (
+                {BOOL_FILTERS_PRIMARY.map((f) => (
                   <button
                     key={f.key}
                     type="button"
@@ -271,6 +320,46 @@ export function ProjectsSearchBar() {
                     {filters[f.key] && <Check className="size-3.5" />}
                   </button>
                 ))}
+                <div className="my-2 border-t border-soft" />
+                {/* Add Custom Filter — mirrors Odoo. Expander reveals less-used
+                    filters (Has Project Manager, Timesheets >100%, All
+                    Categories Archived). */}
+                <button
+                  type="button"
+                  onClick={() => setCustomFilterOpen((v) => !v)}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground"
+                  aria-expanded={customFilterOpen}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Plus className="size-3" /> Add Custom Filter
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      customFilterOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+                {customFilterOpen && (
+                  <div className="ms-2 me-0 flex flex-col gap-0.5 border-s border-soft ps-2">
+                    {BOOL_FILTERS_CUSTOM.map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => toggleFilter(f.key)}
+                        className={cn(
+                          "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+                          filters[f.key]
+                            ? "bg-cyan-dim text-cyan"
+                            : "text-foreground hover:bg-soft-1",
+                        )}
+                      >
+                        <span>{f.label}</span>
+                        {filters[f.key] && <Check className="size-3.5" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="my-2 border-t border-soft" />
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                   Start Date
@@ -312,12 +401,12 @@ export function ProjectsSearchBar() {
             </div>
 
             {/* Group By column */}
-            <div className="min-w-[160px]">
+            <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
                 <Layers className="size-3.5" /> Group By
               </div>
               <div className="flex flex-col gap-0.5">
-                {GROUP_OPTIONS.map((g) => (
+                {GROUP_OPTIONS_PRIMARY.map((g) => (
                   <button
                     key={g.key}
                     type="button"
@@ -325,7 +414,7 @@ export function ProjectsSearchBar() {
                     className={cn(
                       "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
                       groupBy === g.key
-                        ? "bg-amber-400/20 text-amber-200"
+                        ? "bg-amber-500/20 text-amber-700 dark:text-amber-200"
                         : "text-foreground hover:bg-soft-1",
                     )}
                   >
@@ -333,11 +422,52 @@ export function ProjectsSearchBar() {
                     {groupBy === g.key && <Check className="size-3.5" />}
                   </button>
                 ))}
+                {/* Add Custom Group — direct parity with Odoo's
+                    `rwasem_*` project search-view. Expander reveals extra
+                    group-by dimensions (Account Manager, Client, Target,
+                    Start/End Month). Each one is wired through to
+                    projects-board.tsx's bucket() switch. */}
+                <button
+                  type="button"
+                  onClick={() => setCustomGroupOpen((v) => !v)}
+                  className="mt-1 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground"
+                  aria-expanded={customGroupOpen}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Plus className="size-3" /> Add Custom Group
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      customGroupOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+                {customGroupOpen && (
+                  <div className="ms-2 me-0 flex flex-col gap-0.5 border-s border-soft ps-2">
+                    {GROUP_OPTIONS_CUSTOM.map((g) => (
+                      <button
+                        key={g.key}
+                        type="button"
+                        onClick={() => setGroup(groupBy === g.key ? "" : g.key)}
+                        className={cn(
+                          "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+                          groupBy === g.key
+                            ? "bg-amber-500/20 text-amber-700 dark:text-amber-200"
+                            : "text-foreground hover:bg-soft-1",
+                        )}
+                      >
+                        <span>{g.label}</span>
+                        {groupBy === g.key && <Check className="size-3.5" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Favorites / quick saves column */}
-            <div className="min-w-[160px]">
+            <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
                 <Star className="size-3.5" /> Favorites
               </div>

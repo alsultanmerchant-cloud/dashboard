@@ -10,6 +10,8 @@ import {
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
 import { StageOwnerEditor } from "./stage-owner-editor";
+import { AddTemplateItemDialog } from "./add-item-dialog";
+import { listDepartments } from "@/lib/data/employees";
 
 // Server-side helper — renders the distinct roles used across stages as a
 // compact preview (e.g. "المتخصص · المنفذ · مدير الحساب"). Lives here so
@@ -39,7 +41,10 @@ export default async function TaskTemplateDetailPage({
 }) {
   const { id } = await params;
   const session = await requirePagePermission("templates.manage");
-  const tpl = await getTaskTemplate(session.orgId, id);
+  const [tpl, departments] = await Promise.all([
+    getTaskTemplate(session.orgId, id),
+    listDepartments(session.orgId),
+  ]);
   if (!tpl) notFound();
 
   const service = Array.isArray(tpl.service) ? tpl.service[0] : tpl.service;
@@ -54,7 +59,15 @@ export default async function TaskTemplateDetailPage({
           { label: "قوالب المهام", href: "/task-templates" },
           { label: tpl.name },
         ]}
-        actions={service && <ServiceBadge slug={service.slug} name={service.name} />}
+        actions={
+          <div className="flex items-center gap-2">
+            {service && <ServiceBadge slug={service.slug} name={service.name} />}
+            <AddTemplateItemDialog
+              templateId={tpl.id}
+              departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+            />
+          </div>
+        }
       />
 
       <DataTableShell>

@@ -55,7 +55,9 @@ type FilterKey =
   | "in_progress_pct"
   | "completed_pct"
   | "starred"
-  | "followed";
+  | "followed"
+  | "has_start_date"
+  | "has_end_date";
 type GroupBy =
   | "stage"
   | "project"
@@ -64,7 +66,10 @@ type GroupBy =
   | "assignee"
   | "customer"
   | "service"
-  | "last_stage_update";
+  | "last_stage_update"
+  | "progress"
+  | "status"
+  | "start_date";
 type SearchSuggestion = {
   id: string;
   projectName: string;
@@ -87,6 +92,10 @@ const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
   { key: "behind", label: "خلف الجدول", group: "جدولة" },
   { key: "ahead", label: "متقدّمة", group: "جدولة" },
   { key: "critical", label: "تأخير حرج", group: "جدولة" },
+  // #18 — Odoo "Has Start Date" / "Has End Date" presets. start = planned_date,
+  // end = due_date in our schema.
+  { key: "has_start_date", label: "لها تاريخ بدء", group: "جدولة" },
+  { key: "has_end_date", label: "لها تاريخ انتهاء", group: "جدولة" },
 ];
 
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
@@ -117,9 +126,12 @@ function tokenLabel(token: string): string {
 
 const GROUPBY_DEFS: { key: GroupBy; label: string; available?: boolean }[] = [
   { key: "stage", label: "حسب المرحلة" },
+  { key: "status", label: "حسب الحالة" },
   { key: "project", label: "حسب المشروع" },
   { key: "priority", label: "حسب الأولوية" },
+  { key: "progress", label: "حسب نسبة التقدّم" },
   { key: "deadline", label: "حسب الموعد النهائي" },
+  { key: "start_date", label: "حسب تاريخ البدء" },
   { key: "assignee", label: "حسب المسؤول" },
   { key: "customer", label: "حسب العميل" },
   { key: "service", label: "حسب الخدمة" },
@@ -339,7 +351,7 @@ export function SmartSearchBar({
   };
 
   const itemBase =
-    "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors";
+    "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-right text-xs transition-colors rtl:flex-row-reverse";
 
   // Memoize column pills so re-renders don't churn on every keystroke.
   const filterColumn = useMemo(() => {
@@ -467,7 +479,7 @@ export function SmartSearchBar({
       {/* Input shell — search icon, active-filter chip, query input, chevron */}
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors",
+          "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors rtl:flex-row-reverse",
           shellClassName,
           open && shellOpenClassName,
         )}
@@ -476,7 +488,7 @@ export function SmartSearchBar({
         {activeChips.map((f) => (
           <span
             key={f.key}
-            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan"
+            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
           >
             <Filter className="size-2.5" />
             {f.label}
@@ -493,7 +505,7 @@ export function SmartSearchBar({
         {currentDates.map((token) => (
           <span
             key={token}
-            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan"
+            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
           >
             <Filter className="size-2.5" />
             {tokenLabel(token)}
@@ -510,7 +522,7 @@ export function SmartSearchBar({
         {/* Group-by chain chip — only render when something other than the
             implicit default ("stage" alone) is active. Chain joined with "›". */}
         {(currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-violet/15 px-2 py-0.5 text-[11px] font-medium text-violet">
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet/15 px-2 py-0.5 text-[11px] font-medium text-violet rtl:flex-row-reverse">
             <Layers className="size-2.5" />
             {currentGroupKeys
               .map((k) => GROUPBY_DEFS.find((g) => g.key === k)?.label.replace(/^حسب\s+/, ""))
@@ -552,7 +564,7 @@ export function SmartSearchBar({
             if (e.key === "Escape") setOpen(false);
           }}
           placeholder="ابحث في المهام…"
-          className={cn("min-w-0 flex-1 bg-transparent focus:outline-none", inputClassName)}
+          className={cn("min-w-0 flex-1 bg-transparent text-right focus:outline-none", inputClassName)}
         />
         {query && (
           <button
@@ -591,10 +603,10 @@ export function SmartSearchBar({
 
       {/* Smart-search dropdown — 3 columns: Filters / Group By / Favorites */}
       {open && (
-        <div className={cn("absolute end-0 start-0 top-[calc(100%+6px)] z-30 rounded-2xl border p-3 shadow-2xl", dropdownClassName)}>
+        <div className={cn("absolute end-0 start-0 top-[calc(100%+6px)] z-30 rounded-2xl border p-3 text-right shadow-2xl", dropdownClassName)}>
           {(loadingSuggestions || suggestions.length > 0) && (
             <div className="mb-3 rounded-xl border border-soft bg-soft-1/40 p-2">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Search className="size-3.5" />
                 اقتراحات المشروع والمتجر
               </div>
@@ -604,14 +616,14 @@ export function SmartSearchBar({
                     key={item.id}
                     type="button"
                     onClick={() => chooseSuggestion(item)}
-                    className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-start text-xs transition-colors hover:bg-soft-1"
+                    className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                      <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
                         <Briefcase className="size-3.5 shrink-0 text-cyan" />
                         <span className="truncate">{item.projectName}</span>
                       </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
                         <Store className="size-3 shrink-0" />
                         <span className="truncate">{item.storeName || "بدون اسم متجر"}</span>
                         {item.clientName ? <span className="truncate">· {item.clientName}</span> : null}
@@ -628,7 +640,7 @@ export function SmartSearchBar({
           )}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Filter className="size-3.5" />
                 الفلاتر
               </div>
@@ -637,6 +649,27 @@ export function SmartSearchBar({
                 <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                   التواريخ
                 </div>
+                {/* #18 — Odoo "This Month" preset on due_date. One-click
+                    deadline-of-current-month filter. The existing per-field
+                    expansion below still works for other periods/fields. */}
+                {(() => {
+                  const now = new Date();
+                  const token = `due_date:${now.getFullYear()}m${now.getMonth() + 1}`;
+                  const active = currentDates.includes(token);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => toggleDateToken(token)}
+                      className={cn(
+                        itemBase,
+                        active ? "bg-cyan-dim text-cyan" : "text-foreground hover:bg-soft-1",
+                      )}
+                    >
+                      <span>هذا الشهر — الموعد النهائي</span>
+                      {active && <Check className="size-3.5" />}
+                    </button>
+                  );
+                })()}
                 {DATE_FIELD_DEFS.map((d) => (
                   <DateFieldRow
                     key={d.key}
@@ -648,14 +681,14 @@ export function SmartSearchBar({
               </div>
             </div>
             <div className="md:border-s md:border-soft md:ps-3">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Layers className="size-3.5" />
                 التجميع
               </div>
               <div className="flex flex-col gap-0.5">{groupColumn}</div>
             </div>
             <div className="md:border-s md:border-soft md:ps-3">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Star className="size-3.5" />
                 المفضلة
               </div>
@@ -750,7 +783,7 @@ function SavedFiltersColumn({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 rtl:flex-row-reverse">
         <input
           type="text"
           value={name}
@@ -777,8 +810,8 @@ function SavedFiltersColumn({
           حفظ
         </button>
       </div>
-      <div className="flex items-center gap-3 px-1 text-[10px] text-muted-foreground">
-        <label className="flex items-center gap-1">
+      <div className="flex items-center gap-3 px-1 text-[10px] text-muted-foreground rtl:flex-row-reverse">
+        <label className="flex items-center gap-1 rtl:flex-row-reverse">
           <input
             type="checkbox"
             checked={isDefault}
@@ -788,7 +821,7 @@ function SavedFiltersColumn({
           />
           افتراضي
         </label>
-        <label className="flex items-center gap-1">
+        <label className="flex items-center gap-1 rtl:flex-row-reverse">
           <input
             type="checkbox"
             checked={isShared}
@@ -808,12 +841,12 @@ function SavedFiltersColumn({
           {items.map((it) => (
             <li
               key={it.id}
-              className="group flex items-center gap-1 rounded-md px-1 py-1 text-xs hover:bg-soft-1"
-            >
+            className="group flex items-center gap-1 rounded-md px-1 py-1 text-xs hover:bg-soft-1 rtl:flex-row-reverse"
+          >
               <button
                 type="button"
                 onClick={() => onApply(it.definition)}
-                className="min-w-0 flex-1 truncate text-start"
+                className="min-w-0 flex-1 truncate text-right"
                 title={JSON.stringify(it.definition)}
               >
                 {it.name}
@@ -883,18 +916,18 @@ function DateFieldRow({
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-soft-1",
+          "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse",
           fieldActive && "text-cyan",
         )}
       >
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 rtl:flex-row-reverse">
           {fieldActive && <Check className="size-3" />}
           {field.label}
         </span>
         <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
       </button>
       {expanded && (
-        <div className="me-2 ms-4 mt-0.5 flex flex-col gap-0.5 border-s border-soft ps-2">
+        <div className="me-4 ms-2 mt-0.5 flex flex-col gap-0.5 border-e border-soft pe-2">
           {/* Months of current year (most recent 3) */}
           {[currentMonth, currentMonth - 1, currentMonth - 2]
             .filter((m) => m >= 1)
@@ -964,4 +997,3 @@ function DateBucketBtn({
     </button>
   );
 }
-

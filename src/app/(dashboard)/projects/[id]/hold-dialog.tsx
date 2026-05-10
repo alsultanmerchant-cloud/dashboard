@@ -24,11 +24,13 @@ export function HoldDialog({
   status,
   heldAt,
   holdReason,
+  heldBy,
 }: {
   projectId: string;
   status: string;
   heldAt: string | null;
   holdReason: string | null;
+  heldBy?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -38,12 +40,17 @@ export function HoldDialog({
   if (status === "on_hold") {
     return (
       <div className="flex items-center gap-2">
-        {(holdReason || heldAt) && (
-          <div className="hidden sm:flex max-w-xs items-center gap-2 rounded-lg border border-amber/30 bg-amber-dim/40 px-2.5 py-1.5 text-[11px] text-amber">
+        {(holdReason || heldAt || heldBy) && (
+          <div className="hidden sm:flex max-w-sm items-center gap-2 rounded-lg border border-amber/30 bg-amber-dim/40 px-2.5 py-1.5 text-[11px] text-amber">
             <PauseCircle className="size-3.5 shrink-0" />
             <span className="truncate" title={holdReason ?? undefined}>
               {holdReason ?? "موقوف"}
             </span>
+            {heldBy && (
+              <span className="text-muted-foreground shrink-0">
+                · بواسطة {heldBy}
+              </span>
+            )}
             <span className="text-muted-foreground shrink-0">
               {formatArabicShortDate(heldAt)}
             </span>

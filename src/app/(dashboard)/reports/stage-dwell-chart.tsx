@@ -29,22 +29,27 @@ export function StageDwellChart({
     fill: COLORS[r.stage],
   }));
 
+  // Bind chart text/tooltip colors to the dashboard's theme tokens so the
+  // chart renders correctly in both light and dark modes. Hardcoded hex
+  // colors (Sky Light feedback #8) made labels invisible on light theme
+  // and the tooltip render as a black banner.
   return (
     <ResponsiveContainer width="100%" height={Math.max(220, data.length * 38)}>
       <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24 }}>
-        <XAxis type="number" tick={{ fontSize: 11, fill: "#94A3B8" }} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
         <YAxis
           dataKey="name"
           type="category"
           width={120}
-          tick={{ fontSize: 11, fill: "#F1F5F9" }}
+          tick={{ fontSize: 11, fill: "var(--foreground)" }}
         />
         <Tooltip
           cursor={{ fill: "rgba(0,212,255,0.06)" }}
           contentStyle={{
-            background: "#0D1117",
-            border: "1px solid #1E2A3A",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
+            color: "var(--foreground)",
             fontSize: 12,
           }}
           formatter={(_, __, payload) => {

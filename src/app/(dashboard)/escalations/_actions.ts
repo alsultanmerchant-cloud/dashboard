@@ -213,7 +213,7 @@ export async function acknowledgeEscalationAction(
 
   const { data: esc } = await supabaseAdmin
     .from("escalations")
-    .select("id, organization_id, task_id, raised_to_user_id, status")
+    .select("id, organization_id, task_id, raised_to_user_id, status, task:tasks!escalations_task_id_fkey(task_code, title)")
     .eq("id", parsed.data.id)
     .maybeSingle();
   if (!esc || esc.organization_id !== session.orgId) {
@@ -236,13 +236,19 @@ export async function acknowledgeEscalationAction(
     .eq("id", parsed.data.id);
   if (error) return { error: error.message };
 
-  // Notify the original opener (if any) — best-effort.
+  // Notify the original opener (if any) — best-effort. Title carries the
+  // task code + title so the recipient sees what the ack is about, instead
+  // of the generic "تم الإقرار بتصعيد على مهمة".
+  const ackTask = Array.isArray(esc.task) ? esc.task[0] : esc.task;
+  const ackCode = ackTask?.task_code ? `${ackTask.task_code} ` : "";
+  const ackTitle = ackTask?.title ?? "";
+  const ackLabel = `${ackCode}${ackTitle}`.trim() || "مهمة";
   await createNotification({
     organizationId: session.orgId,
     recipientUserId: null,
     type: "ESCALATION_ACKNOWLEDGED",
-    title: `تم الإقرار بتصعيد على مهمة`,
-    body: null,
+    title: `${session.fullName} أقرّ بالتصعيد على «${ackLabel}»`,
+    body: ackTitle ? ackTitle : null,
     entityType: "task",
     entityId: esc.task_id,
   });

@@ -25,21 +25,25 @@ export function SlipHeatmapChart({
     fill: COLORS[r.bucket],
   }));
 
+  // Theme-aware colors so the chart renders on both light and dark themes
+  // (feedback #8: hardcoded dark-theme colors caused invisible axis labels
+  // and a black tooltip banner on light mode).
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={data} margin={{ left: 8, right: 24, top: 8 }}>
         <XAxis
           dataKey="name"
-          tick={{ fontSize: 11, fill: "#F1F5F9" }}
+          tick={{ fontSize: 11, fill: "var(--foreground)" }}
           interval={0}
         />
-        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#94A3B8" }} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
         <Tooltip
           cursor={{ fill: "rgba(239,68,68,0.06)" }}
           contentStyle={{
-            background: "#0D1117",
-            border: "1px solid #1E2A3A",
+            background: "var(--card)",
+            border: "1px solid var(--border)",
             borderRadius: 8,
+            color: "var(--foreground)",
             fontSize: 12,
           }}
           formatter={(value) => [`${value} مهمة`, "العدد"]}

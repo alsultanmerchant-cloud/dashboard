@@ -62,6 +62,8 @@ function rowToNotification(row: NotificationRow): AppNotification {
     icon: TYPE_ICONS[row.type] ?? TYPE_ICONS.default,
     message: row.body ? `${row.title} — ${row.body}` : row.title,
     section: row.entity_type ?? "notification",
+    entityType: row.entity_type,
+    entityId: row.entity_id,
     timestamp: row.created_at,
     isRead: !!row.read_at,
   };

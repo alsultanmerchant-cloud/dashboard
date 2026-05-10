@@ -47,7 +47,9 @@ export function DirectMessageDialog({
   onClose: () => void;
 }) {
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [otherJobTitle, setOtherJobTitle] = useState<string | null>(null);
   const [otherAvatarUrl, setOtherAvatarUrl] = useState<string | null>(null);
   const [body, setBody] = useState("");
@@ -70,10 +72,63 @@ export function DirectMessageDialog({
       return;
     }
     setMessages(res.messages);
+    setHasMore(res.hasMore);
     setOtherJobTitle(res.otherJobTitle);
     setOtherAvatarUrl(res.otherAvatarUrl);
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    });
+  };
+
+  // Sky Light feedback #11: paginate older messages. Anchored to the
+  // earliest currently-loaded message's `created_at`. Preserves scroll
+  // position so the user lands roughly where they were after older
+  // messages prepend at the top.
+  const loadOlder = async () => {
+    if (loadingOlder || messages.length === 0) return;
+    const before = messages[0].created_at;
+    setLoadingOlder(true);
+    const prevScrollHeight = scrollRef.current?.scrollHeight ?? 0;
+    const res = await listConversationAction(recipientEmployeeId, 50, before);
+    setLoadingOlder(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setMessages((prev) => [...res.messages, ...prev]);
+    setHasMore(res.hasMore);
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        // Keep the user's view anchored at the message they were reading.
+        const nextScrollHeight = scrollRef.current.scrollHeight;
+        scrollRef.current.scrollTop = nextScrollHeight - prevScrollHeight;
+      }
+    });
+  };
+
+  // Sky Light feedback #11: paginate older messages. Anchored to the
+  // earliest currently-loaded message's `created_at`. Preserves scroll
+  // position so the user lands roughly where they were after older
+  // messages prepend at the top.
+  const loadOlder = async () => {
+    if (loadingOlder || messages.length === 0) return;
+    const before = messages[0].created_at;
+    setLoadingOlder(true);
+    const prevScrollHeight = scrollRef.current?.scrollHeight ?? 0;
+    const res = await listConversationAction(recipientEmployeeId, 50, before);
+    setLoadingOlder(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setMessages((prev) => [...res.messages, ...prev]);
+    setHasMore(res.hasMore);
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        // Keep the user's view anchored at the message they were reading.
+        const nextScrollHeight = scrollRef.current.scrollHeight;
+        scrollRef.current.scrollTop = nextScrollHeight - prevScrollHeight;
+      }
     });
   };
 
@@ -202,9 +257,26 @@ export function DirectMessageDialog({
               لا توجد رسائل بعد. ابدأ المحادثة بكتابة رسالة أدناه.
             </p>
           ) : (
-            messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
-            ))
+            <>
+              {hasMore && (
+                <div className="flex justify-center pb-2">
+                  <button
+                    type="button"
+                    onClick={loadOlder}
+                    disabled={loadingOlder}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-soft bg-card px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground disabled:opacity-50"
+                  >
+                    {loadingOlder ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : null}
+                    تحميل رسائل أقدم
+                  </button>
+                </div>
+              )}
+              {messages.map((m) => (
+                <MessageBubble key={m.id} message={m} />
+              ))}
+            </>
           )}
         </div>
 
@@ -289,10 +361,10 @@ function MessageBubble({ message: m }: { message: ConversationMessage }) {
     minute: "2-digit",
   });
   return (
-    <div className={cn("flex", m.is_mine ? "justify-start" : "justify-end")}>
+    <div className={cn("flex", m.is_mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[78%] rounded-2xl px-3 py-1.5 text-sm",
+          "max-w-[78%] rounded-2xl px-3 py-1.5 text-right text-sm",
           m.is_mine ? "bg-cyan-dim text-foreground" : "bg-soft-2 text-foreground",
         )}
       >

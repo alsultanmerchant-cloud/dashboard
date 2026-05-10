@@ -99,6 +99,104 @@ function bucketByTag(items: LiveProject[]): Bucket[] {
   });
 }
 
+function bucketByAccountManager(items: LiveProject[]): Bucket[] {
+  const map = new Map<string, Bucket>();
+  for (const p of items) {
+    const key = p.accountManagerId ? String(p.accountManagerId) : NONE_KEY;
+    const label = p.accountManagerName ?? "بدون مدير حساب";
+    const b = map.get(key) ?? {
+      key,
+      label,
+      avatarUrl: p.accountManagerAvatarUrl ?? null,
+      items: [],
+    };
+    b.items.push(p);
+    map.set(key, b);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.key === NONE_KEY) return 1;
+    if (b.key === NONE_KEY) return -1;
+    return b.items.length - a.items.length;
+  });
+}
+
+function bucketByClient(items: LiveProject[]): Bucket[] {
+  const map = new Map<string, Bucket>();
+  for (const p of items) {
+    const key = p.clientId ? String(p.clientId) : NONE_KEY;
+    const label = p.clientName ?? "بدون عميل";
+    const b = map.get(key) ?? { key, label, items: [] };
+    b.items.push(p);
+    map.set(key, b);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.key === NONE_KEY) return 1;
+    if (b.key === NONE_KEY) return -1;
+    return b.items.length - a.items.length;
+  });
+}
+
+const TARGET_LABEL: Record<string, string> = {
+  on_target: "على الهدف",
+  off_target: "خارج الهدف",
+  out: "خرج",
+  sales_deposit: "دفعة مبيعات",
+  renewed: "مجدَّد",
+};
+
+function bucketByTarget(items: LiveProject[]): Bucket[] {
+  const order = ["on_target", "off_target", "out", "sales_deposit", "renewed"] as const;
+  const map = new Map<string, Bucket>(
+    order.map((k) => [k, { key: k, label: TARGET_LABEL[k], items: [] }]),
+  );
+  map.set(NONE_KEY, { key: NONE_KEY, label: "بدون هدف", items: [] });
+  for (const p of items) {
+    const k = p.target ?? NONE_KEY;
+    if (!map.has(k)) map.set(k, { key: k, label: TARGET_LABEL[k] ?? k, items: [] });
+    map.get(k)!.items.push(p);
+  }
+  return [...map.values()].filter((b) => b.items.length > 0);
+}
+
+const MONTH_AR = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+function bucketByMonth(
+  items: LiveProject[],
+  pick: (p: LiveProject) => string | null,
+  noneLabel: string,
+): Bucket[] {
+  const map = new Map<string, Bucket>();
+  for (const p of items) {
+    const raw = pick(p);
+    if (!raw) {
+      const b = map.get(NONE_KEY) ?? { key: NONE_KEY, label: noneLabel, items: [] };
+      b.items.push(p);
+      map.set(NONE_KEY, b);
+      continue;
+    }
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) {
+      const b = map.get(NONE_KEY) ?? { key: NONE_KEY, label: noneLabel, items: [] };
+      b.items.push(p);
+      map.set(NONE_KEY, b);
+      continue;
+    }
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = `${MONTH_AR[d.getMonth()]} ${d.getFullYear()}`;
+    const b = map.get(key) ?? { key, label, items: [] };
+    b.items.push(p);
+    map.set(key, b);
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.key === NONE_KEY) return 1;
+    if (b.key === NONE_KEY) return -1;
+    return a.key.localeCompare(b.key);
+  });
+}
+
 function bucket(items: LiveProject[], groupBy: string): Bucket[] {
   switch (groupBy) {
     case "project_manager":
@@ -111,6 +209,16 @@ function bucket(items: LiveProject[], groupBy: string): Bucket[] {
     case "tags":
     case "tag_ids":
       return bucketByTag(items);
+    case "account_manager":
+      return bucketByAccountManager(items);
+    case "client":
+      return bucketByClient(items);
+    case "target":
+      return bucketByTarget(items);
+    case "start_month":
+      return bucketByMonth(items, (p) => p.startDate, "بدون تاريخ بدء");
+    case "end_month":
+      return bucketByMonth(items, (p) => p.endDate, "بدون تاريخ انتهاء");
     default:
       return [{ key: "all", label: "الكل", items }];
   }

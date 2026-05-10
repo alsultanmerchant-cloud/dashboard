@@ -88,12 +88,22 @@ export class OdooClient {
     model: string,
     domain: unknown[] = [],
     fields: string[] = [],
-    opts: { limit?: number; offset?: number; order?: string } = {},
+    opts: {
+      limit?: number;
+      offset?: number;
+      order?: string;
+      /**
+       * Pass `{ active_test: false }` to include archived rows. Odoo's
+       * default ORM context applies an implicit `active=true` filter for
+       * any model with an `active` field; this lets callers opt out.
+       */
+      context?: Record<string, unknown>;
+    } = {},
   ): Promise<T[]> {
-    return this.executeKw<T[]>(model, "search_read", [domain], {
-      fields,
-      ...opts,
-    });
+    const { context, ...rest } = opts;
+    const kwargs: Record<string, unknown> = { fields, ...rest };
+    if (context) kwargs.context = context;
+    return this.executeKw<T[]>(model, "search_read", [domain], kwargs);
   }
 
   /** read shorthand for a known list of ids. */

@@ -4,7 +4,7 @@ import {
   Briefcase, Calendar, User, ListTodo, PauseCircle,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { getProject, getProjectTaskSummary } from "@/lib/data/projects";
+import { getProject, getProjectHoldActor, getProjectTaskSummary } from "@/lib/data/projects";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
@@ -23,8 +23,11 @@ import { listEmployees } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { MessageButton } from "@/components/dm/message-button";
 import { listServiceCategories } from "@/lib/data/service-categories";
+import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate } from "./services-panel";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
+import { ProjectHolidaysPanel, type ProjectHolidayRow } from "./project-holidays-panel";
+import { AttachmentsTab, type AttachmentRow } from "../../tasks/[id]/attachments-tab";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
 import { listProjectRenewalCycles, daysUntilRenewal } from "@/lib/data/renewals";
 import { RenewalsPanel } from "./renewals/renewals-panel";
@@ -40,9 +43,12 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks] = await Promise.all([
+  const [summary, tasks, holdActor] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     loadTaskBoardForGlobalView(session.orgId, { projectId: project.id }),
+    project.status === "on_hold"
+      ? getProjectHoldActor(session.orgId, project.id)
+      : Promise.resolve(null),
   ]);
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
   const canManageRenewal =
@@ -82,6 +88,7 @@ export default async function ProjectDetailPage({
               status={project.status}
               heldAt={project.held_at}
               holdReason={project.hold_reason}
+              heldBy={holdActor?.name ?? null}
             />
             {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
               <span
@@ -249,20 +256,19 @@ export default async function ProjectDetailPage({
         ))}
       </div>
 
+      {/* Sky Light feedback #12: editable multi-package list. The chip
+          row mirrors the wizard's behavior post-creation; uses the same
+          services catalog seeded by the Odoo importer (project.category_ids
+          → services). canManage gates the add/remove affordances behind
+          the projects.manage permission. */}
       <SectionTitle title="الخدمات" />
       <Card className="mb-8">
         <CardContent className="p-4">
-          {(project.project_services ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">لا توجد خدمات مرتبطة بعد.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {(project.project_services ?? []).map((ps) => {
-                const s = Array.isArray(ps.service) ? ps.service[0] : ps.service;
-                if (!s) return null;
-                return <ServiceBadge key={ps.id} slug={s.slug} name={s.name} />;
-              })}
-            </div>
-          )}
+          <ProjectServicesSection
+            project={project}
+            orgId={session.orgId}
+            canManage={session.permissions.has("projects.manage") || session.isOwner}
+          />
         </CardContent>
       </Card>
 
@@ -279,6 +285,55 @@ export default async function ProjectDetailPage({
           />
         </Suspense>
       </div>
+
+      {/* Sky Light feedback #16: per-project blackout dates. Schema + RPC
+          recalculate_project_task_dates already honor these via migration 0091;
+          this is the operator surface to add/remove without going through the
+          org-wide /settings/holidays admin. */}
+      <SectionTitle
+        title="عطلات المشروع"
+        description="تواريخ تُضاف فوق التقويم العام (إغلاق العميل، تجميد إطلاق، …) وتُزاح تواريخ المهام تلقائيًا."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <Suspense
+            fallback={
+              <div className="text-sm text-muted-foreground">
+                جاري تحميل العطلات...
+              </div>
+            }
+          >
+            <ProjectHolidaysSection
+              orgId={session.orgId}
+              projectId={project.id}
+              canManage={
+                session.permissions.has("projects.manage") || session.isOwner
+              }
+            />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      {/* Sky Light feedback #14: aggregated "All Documents" section. Mirrors
+          Odoo `rwasem_document_management_project`'s smart-button — pulls
+          attachments from the project itself AND every task under it, then
+          lists them with task code so the operator can see what belongs where. */}
+      <SectionTitle
+        title="المرفقات"
+        description="كل الملفات المرفقة بالمشروع وكل مهامه (تطابق smart-button «All Documents» في Odoo)."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <Suspense
+            fallback={<div className="text-sm text-muted-foreground">جاري تحميل المرفقات...</div>}
+          >
+            <ProjectDocumentsSection
+              orgId={session.orgId}
+              projectId={project.id}
+            />
+          </Suspense>
+        </CardContent>
+      </Card>
 
       <SectionTitle title="فريق المشروع" />
       <Card className="mb-8">
@@ -495,6 +550,171 @@ async function ProjectRenewalsSection({
       cycleLengthMonths={cycleLengthMonths}
       nextRenewalDate={nextRenewalDate}
       cycles={renewalCycles}
+      canManage={canManage}
+    />
+  );
+}
+
+// Sky Light feedback #12: editable services chip row. Rendered inline as an
+// async server component so the catalog query lives off the main project
+// loader (the chip strip is below the fold and shouldn't block above-the-fold
+// metrics).
+async function ProjectServicesSection({
+  project,
+  orgId,
+  canManage,
+}: {
+  project: { id: string; project_services?: unknown };
+  orgId: string;
+  canManage: boolean;
+}) {
+  const rawLinks = (project.project_services ?? []) as Array<{
+    id: string;
+    service_id: string;
+    service:
+      | { id: string; name: string; slug: string }
+      | { id: string; name: string; slug: string }[]
+      | null;
+  }>;
+  const attached: ServiceLink[] = rawLinks.flatMap((ps) => {
+    const s = Array.isArray(ps.service) ? ps.service[0] : ps.service;
+    return s ? [{ id: ps.id, service_id: ps.service_id, service: s }] : [];
+  });
+
+  const { data: catalog } = await supabaseAdmin
+    .from("services")
+    .select("id, name, slug")
+    .eq("organization_id", orgId)
+    .order("name");
+  const candidates: ServiceCandidate[] = (catalog ?? []).map((s) => ({
+    id: s.id as string,
+    name: s.name as string,
+    slug: s.slug as string,
+  }));
+
+  if (attached.length === 0 && !canManage) {
+    return <p className="text-sm text-muted-foreground">لا توجد خدمات مرتبطة بعد.</p>;
+  }
+  return (
+    <ProjectServicesPanel
+      projectId={project.id}
+      attached={attached}
+      candidates={candidates}
+      canManage={canManage}
+    />
+  );
+}
+
+async function ProjectDocumentsSection({
+  orgId,
+  projectId,
+}: {
+  orgId: string;
+  projectId: string;
+}) {
+  // Aggregate from BOTH tables: attachments directly on the project AND those
+  // on each task. In parallel, then merge + sort by created_at desc.
+  const [projAttach, taskAttach] = await Promise.all([
+    supabaseAdmin
+      .from("project_attachments")
+      .select(
+        "id, filename, mimetype, size_bytes, storage_path, source_url, created_at",
+      )
+      .eq("organization_id", orgId)
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabaseAdmin
+      .from("task_attachments")
+      .select(
+        "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at, task:tasks!task_attachments_task_id_fkey ( id, task_code, project_id )",
+      )
+      .eq("organization_id", orgId)
+      .order("created_at", { ascending: false })
+      .limit(500),
+  ]);
+
+  const projectTasks = ((taskAttach.data ?? []) as Array<{
+    id: string;
+    task_id: string;
+    filename: string;
+    mimetype: string | null;
+    size_bytes: number | null;
+    storage_path: string | null;
+    source_url: string | null;
+    created_at: string;
+    task:
+      | { id: string; task_code: string | null; project_id: string }
+      | { id: string; task_code: string | null; project_id: string }[]
+      | null;
+  }>)
+    .filter((r) => {
+      const t = Array.isArray(r.task) ? r.task[0] : r.task;
+      return t?.project_id === projectId;
+    })
+    .map((r) => {
+      const t = Array.isArray(r.task) ? r.task[0] : r.task;
+      return {
+        id: r.id,
+        task_id: r.task_id,
+        task_code: t?.task_code ?? null,
+        task_title: null,
+        filename: r.filename,
+        mimetype: r.mimetype,
+        size_bytes: r.size_bytes,
+        storage_path: r.storage_path,
+        source_url: r.source_url,
+        created_at: r.created_at,
+      } satisfies AttachmentRow;
+    });
+
+  const projectLevel: AttachmentRow[] = (projAttach.data ?? []).map((r) => ({
+    id: r.id as string,
+    task_id: "",
+    task_code: null,
+    task_title: null,
+    filename: r.filename as string,
+    mimetype: (r.mimetype as string | null) ?? null,
+    size_bytes: (r.size_bytes as number | null) ?? null,
+    storage_path: (r.storage_path as string | null) ?? null,
+    source_url: (r.source_url as string | null) ?? null,
+    created_at: r.created_at as string,
+  }));
+
+  const rows: AttachmentRow[] = [...projectLevel, ...projectTasks].sort(
+    (a, b) => (a.created_at < b.created_at ? 1 : -1),
+  );
+
+  return <AttachmentsTab rows={rows} showTaskColumn />;
+}
+
+async function ProjectHolidaysSection({
+  orgId,
+  projectId,
+  canManage,
+}: {
+  orgId: string;
+  projectId: string;
+  canManage: boolean;
+}) {
+  const { data } = await supabaseAdmin
+    .from("project_holidays")
+    .select("id, holiday_date, name, recurring")
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId)
+    .order("holiday_date", { ascending: true });
+
+  const rows: ProjectHolidayRow[] = (data ?? []).map((r) => ({
+    id: r.id as string,
+    holiday_date: r.holiday_date as string,
+    name: r.name as string,
+    recurring: Boolean(r.recurring),
+  }));
+
+  return (
+    <ProjectHolidaysPanel
+      projectId={projectId}
+      rows={rows}
       canManage={canManage}
     />
   );

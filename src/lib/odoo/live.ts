@@ -5,6 +5,8 @@ import { odooFromEnv } from "./client";
 import { mapStageName } from "./types";
 
 export interface LiveProject {
+  /** Supabase project UUID. Set by the Supabase-backed mapper; absent for pure-Odoo paths. */
+  id?: string;
   odooId: number;
   name: string;
   clientId: number | null;

@@ -5,12 +5,13 @@ import type { Database } from "@/lib/supabase/types";
 type Stage = Database["public"]["Enums"]["task_stage"];
 type RoleType = Database["public"]["Enums"]["task_role_type"];
 type CommentKind = Database["public"]["Enums"]["task_comment_kind"];
+import { TASK_STATUSES, type TaskStatus } from "@/lib/labels";
 
 // Sky Light task activity feed.
 // Unified read-side projection over three sources:
 //   - task_comments         (kind = "note")
 //   - task_stage_history    (kind = "stage_change")
-//   - audit_logs            (kind = "assignee_change") for task.assignee_change
+//   - audit_logs            (kind = "assignee_change" / "status_change")
 //
 // Returns chronologically ordered items, oldest → newest.
 // (PDF screenshots show oldest at top with newest at bottom.)
@@ -52,6 +53,14 @@ export type TaskActivity =
       role_type: RoleType;
       from_employee: { id: string; full_name: string } | null;
       to_employee: { id: string; full_name: string } | null;
+    }
+  | {
+      kind: "status_change";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      from_status: TaskStatus | null;
+      to_status: TaskStatus;
     }
   | {
       kind: "task_created";
@@ -215,7 +224,7 @@ export async function getTaskActivityFeed(
       .eq("organization_id", orgId)
       .eq("entity_type", "task")
       .eq("entity_id", taskId)
-      .eq("action", "task.assignee_change"),
+      .in("action", ["task.assignee_change", "task.status_change"]),
     supabaseAdmin
       .from("task_attachments")
       .select("id, task_comment_id, filename, mimetype, size_bytes, storage_path, source_url, external_source, external_id")
@@ -393,7 +402,23 @@ export async function getTaskActivityFeed(
     });
   }
 
+  const isTaskStatus = (v: unknown): v is TaskStatus =>
+    typeof v === "string" && (TASK_STATUSES as readonly string[]).includes(v);
+
   for (const a of audits) {
+    if (a.action === "task.status_change") {
+      const meta = (a.metadata ?? {}) as { from?: unknown; to?: unknown };
+      if (!isTaskStatus(meta.to)) continue;
+      items.push({
+        kind: "status_change",
+        id: a.id,
+        created_at: a.created_at,
+        actor: a.actor_user_id ? profileByUser.get(a.actor_user_id) ?? null : null,
+        from_status: isTaskStatus(meta.from) ? meta.from : null,
+        to_status: meta.to,
+      });
+      continue;
+    }
     const meta = (a.metadata ?? {}) as {
       role_type?: RoleType;
       from_employee_id?: string | null;

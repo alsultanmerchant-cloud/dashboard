@@ -1,0 +1,903 @@
+{
+  "activity_ids": {
+    "relation": "mail.activity",
+    "string": "Activities",
+    "type": "one2many"
+  },
+  "activity_state": {
+    "selection": [
+      [
+        "overdue",
+        "Overdue"
+      ],
+      [
+        "today",
+        "Today"
+      ],
+      [
+        "planned",
+        "Planned"
+      ]
+    ],
+    "string": "Activity State",
+    "type": "selection"
+  },
+  "activity_user_id": {
+    "relation": "res.users",
+    "string": "Responsible User",
+    "type": "many2one"
+  },
+  "activity_type_id": {
+    "relation": "mail.activity.type",
+    "string": "Next Activity Type",
+    "type": "many2one"
+  },
+  "activity_type_icon": {
+    "string": "Activity Type Icon",
+    "type": "char"
+  },
+  "activity_date_deadline": {
+    "string": "Next Activity Deadline",
+    "type": "date"
+  },
+  "my_activity_date_deadline": {
+    "string": "My Activity Deadline",
+    "type": "date"
+  },
+  "activity_summary": {
+    "string": "Next Activity Summary",
+    "type": "char"
+  },
+  "activity_exception_decoration": {
+    "selection": [
+      [
+        "warning",
+        "Alert"
+      ],
+      [
+        "danger",
+        "Error"
+      ]
+    ],
+    "string": "Activity Exception Decoration",
+    "type": "selection"
+  },
+  "activity_exception_icon": {
+    "string": "Icon",
+    "type": "char"
+  },
+  "activity_calendar_event_id": {
+    "relation": "calendar.event",
+    "string": "Next Activity Calendar Event",
+    "type": "many2one"
+  },
+  "message_is_follower": {
+    "string": "Is Follower",
+    "type": "boolean"
+  },
+  "message_follower_ids": {
+    "relation": "mail.followers",
+    "string": "Followers",
+    "type": "one2many"
+  },
+  "message_partner_ids": {
+    "relation": "res.partner",
+    "string": "Followers (Partners)",
+    "type": "many2many"
+  },
+  "message_ids": {
+    "relation": "mail.message",
+    "string": "Messages",
+    "type": "one2many"
+  },
+  "has_message": {
+    "string": "Has Message",
+    "type": "boolean"
+  },
+  "message_needaction": {
+    "string": "Action Needed",
+    "type": "boolean"
+  },
+  "message_needaction_counter": {
+    "string": "Number of Actions",
+    "type": "integer"
+  },
+  "message_has_error": {
+    "string": "Message Delivery error",
+    "type": "boolean"
+  },
+  "message_has_error_counter": {
+    "string": "Number of errors",
+    "type": "integer"
+  },
+  "message_attachment_count": {
+    "string": "Attachment Count",
+    "type": "integer"
+  },
+  "rating_ids": {
+    "relation": "rating.rating",
+    "string": "Ratings",
+    "type": "one2many"
+  },
+  "website_message_ids": {
+    "relation": "mail.message",
+    "string": "Website Messages",
+    "type": "one2many"
+  },
+  "message_has_sms_error": {
+    "string": "SMS Delivery error",
+    "type": "boolean"
+  },
+  "rating_percentage_satisfaction": {
+    "string": "Rating Satisfaction",
+    "type": "integer"
+  },
+  "rating_count": {
+    "string": "# Ratings",
+    "type": "integer"
+  },
+  "rating_avg": {
+    "string": "Average Rating",
+    "type": "float"
+  },
+  "rating_avg_percentage": {
+    "string": "Average Rating (%)",
+    "type": "float"
+  },
+  "alias_id": {
+    "relation": "mail.alias",
+    "string": "Alias",
+    "type": "many2one"
+  },
+  "alias_name": {
+    "string": "Alias Name",
+    "type": "char"
+  },
+  "alias_domain_id": {
+    "relation": "mail.alias.domain",
+    "string": "Alias Domain",
+    "type": "many2one"
+  },
+  "alias_domain": {
+    "string": "Alias Domain Name",
+    "type": "char"
+  },
+  "alias_defaults": {
+    "string": "Default Values",
+    "type": "text"
+  },
+  "alias_email": {
+    "string": "Email Alias",
+    "type": "char"
+  },
+  "access_url": {
+    "string": "Portal Access URL",
+    "type": "char"
+  },
+  "access_token": {
+    "string": "Security Token",
+    "type": "char"
+  },
+  "access_warning": {
+    "string": "Access warning",
+    "type": "text"
+  },
+  "name": {
+    "string": "Name",
+    "type": "char"
+  },
+  "description": {
+    "string": "Description",
+    "type": "html"
+  },
+  "active": {
+    "string": "Active",
+    "type": "boolean"
+  },
+  "sequence": {
+    "string": "Sequence",
+    "type": "integer"
+  },
+  "partner_id": {
+    "relation": "res.partner",
+    "string": "Customer",
+    "type": "many2one"
+  },
+  "company_id": {
+    "relation": "res.company",
+    "string": "Company",
+    "type": "many2one"
+  },
+  "currency_id": {
+    "relation": "res.currency",
+    "string": "Currency",
+    "type": "many2one"
+  },
+  "analytic_account_id": {
+    "relation": "account.analytic.account",
+    "string": "Analytic Account",
+    "type": "many2one"
+  },
+  "analytic_account_balance": {
+    "string": "Balance",
+    "type": "monetary"
+  },
+  "favorite_user_ids": {
+    "relation": "res.users",
+    "string": "Members",
+    "type": "many2many"
+  },
+  "is_favorite": {
+    "string": "Show Project on Dashboard",
+    "type": "boolean"
+  },
+  "label_tasks": {
+    "string": "Use Tasks as",
+    "type": "char"
+  },
+  "tasks": {
+    "relation": "project.task",
+    "string": "Task Activities",
+    "type": "one2many"
+  },
+  "resource_calendar_id": {
+    "relation": "resource.calendar",
+    "string": "Working Time",
+    "type": "many2one"
+  },
+  "type_ids": {
+    "relation": "project.task.type",
+    "string": "Tasks Stages",
+    "type": "many2many"
+  },
+  "task_count": {
+    "string": "Task Count",
+    "type": "integer"
+  },
+  "open_task_count": {
+    "string": "Open Task Count",
+    "type": "integer"
+  },
+  "closed_task_count": {
+    "string": "Closed Task Count",
+    "type": "integer"
+  },
+  "task_ids": {
+    "relation": "project.task",
+    "string": "Tasks",
+    "type": "one2many"
+  },
+  "color": {
+    "string": "Color Index",
+    "type": "integer"
+  },
+  "user_id": {
+    "relation": "res.users",
+    "string": "Project Manager",
+    "type": "many2one"
+  },
+  "privacy_visibility": {
+    "selection": [
+      [
+        "followers",
+        "Invited internal users (private)"
+      ],
+      [
+        "employees",
+        "All internal users"
+      ],
+      [
+        "portal",
+        "Invited portal users and all internal users (public)"
+      ]
+    ],
+    "string": "Visibility",
+    "type": "selection"
+  },
+  "privacy_visibility_warning": {
+    "string": "Privacy Visibility Warning",
+    "type": "char"
+  },
+  "access_instruction_message": {
+    "string": "Access Instruction Message",
+    "type": "char"
+  },
+  "doc_count": {
+    "string": "Number of documents attached",
+    "type": "integer"
+  },
+  "date_start": {
+    "string": "Start Date",
+    "type": "date"
+  },
+  "date": {
+    "string": "Expiration Date",
+    "type": "date"
+  },
+  "allow_task_dependencies": {
+    "string": "Task Dependencies",
+    "type": "boolean"
+  },
+  "allow_milestones": {
+    "string": "Milestones",
+    "type": "boolean"
+  },
+  "tag_ids": {
+    "relation": "project.tags",
+    "string": "Tags",
+    "type": "many2many"
+  },
+  "task_properties_definition": {
+    "string": "Task Properties",
+    "type": "properties_definition"
+  },
+  "collaborator_ids": {
+    "relation": "project.collaborator",
+    "string": "Collaborators",
+    "type": "one2many"
+  },
+  "collaborator_count": {
+    "string": "# Collaborators",
+    "type": "integer"
+  },
+  "rating_request_deadline": {
+    "string": "Rating Request Deadline",
+    "type": "datetime"
+  },
+  "rating_active": {
+    "string": "Customer Ratings",
+    "type": "boolean"
+  },
+  "allow_rating": {
+    "string": "Allow Customer Ratings",
+    "type": "boolean"
+  },
+  "rating_status": {
+    "selection": [
+      [
+        "stage",
+        "when reaching a given stage"
+      ],
+      [
+        "periodic",
+        "on a periodic basis"
+      ]
+    ],
+    "string": "Customer Ratings Status",
+    "type": "selection"
+  },
+  "rating_status_period": {
+    "selection": [
+      [
+        "daily",
+        "Daily"
+      ],
+      [
+        "weekly",
+        "Weekly"
+      ],
+      [
+        "bimonthly",
+        "Twice a Month"
+      ],
+      [
+        "monthly",
+        "Once a Month"
+      ],
+      [
+        "quarterly",
+        "Quarterly"
+      ],
+      [
+        "yearly",
+        "Yearly"
+      ]
+    ],
+    "string": "Rating Frequency",
+    "type": "selection"
+  },
+  "update_ids": {
+    "relation": "project.update",
+    "string": "Update",
+    "type": "one2many"
+  },
+  "last_update_id": {
+    "relation": "project.update",
+    "string": "Last Update",
+    "type": "many2one"
+  },
+  "last_update_status": {
+    "selection": [
+      [
+        "on_track",
+        "On Track"
+      ],
+      [
+        "at_risk",
+        "At Risk"
+      ],
+      [
+        "off_track",
+        "Off Track"
+      ],
+      [
+        "on_hold",
+        "On Hold"
+      ],
+      [
+        "to_define",
+        "Set Status"
+      ],
+      [
+        "done",
+        "Done"
+      ]
+    ],
+    "string": "Last Update Status",
+    "type": "selection"
+  },
+  "last_update_color": {
+    "string": "Last Update Color",
+    "type": "integer"
+  },
+  "milestone_ids": {
+    "relation": "project.milestone",
+    "string": "Milestone",
+    "type": "one2many"
+  },
+  "is_milestone_exceeded": {
+    "string": "Is Milestone Exceeded",
+    "type": "boolean"
+  },
+  "id": {
+    "string": "ID",
+    "type": "integer"
+  },
+  "display_name": {
+    "string": "Display Name",
+    "type": "char"
+  },
+  "create_uid": {
+    "relation": "res.users",
+    "string": "Created by",
+    "type": "many2one"
+  },
+  "create_date": {
+    "string": "Created on",
+    "type": "datetime"
+  },
+  "write_uid": {
+    "relation": "res.users",
+    "string": "Last Updated by",
+    "type": "many2one"
+  },
+  "write_date": {
+    "string": "Last Updated on",
+    "type": "datetime"
+  },
+  "allow_timesheets": {
+    "string": "Timesheets",
+    "type": "boolean"
+  },
+  "timesheet_ids": {
+    "relation": "account.analytic.line",
+    "string": "Associated Timesheets",
+    "type": "one2many"
+  },
+  "timesheet_encode_uom_id": {
+    "relation": "uom.uom",
+    "string": "Timesheet Encode Uom",
+    "type": "many2one"
+  },
+  "total_timesheet_time": {
+    "string": "Total Timesheet Time",
+    "type": "integer"
+  },
+  "encode_uom_in_days": {
+    "string": "Encode Uom In Days",
+    "type": "boolean"
+  },
+  "is_internal_project": {
+    "string": "Is Internal Project",
+    "type": "boolean"
+  },
+  "remaining_hours": {
+    "string": "Remaining Invoiced Time",
+    "type": "float"
+  },
+  "is_project_overtime": {
+    "string": "Project in Overtime",
+    "type": "boolean"
+  },
+  "allocated_hours": {
+    "string": "Allocated Hours",
+    "type": "float"
+  },
+  "document_count": {
+    "string": "Document Count",
+    "type": "integer"
+  },
+  "ks_project_start": {
+    "string": "Start Date",
+    "type": "datetime"
+  },
+  "ks_project_end": {
+    "string": "End Date",
+    "type": "datetime"
+  },
+  "ks_enable_project_deadline": {
+    "string": "Deadline",
+    "type": "boolean"
+  },
+  "ks_enable_task_dynamic_text": {
+    "string": "Dynamic Text",
+    "type": "boolean"
+  },
+  "ks_enable_task_dynamic_progress": {
+    "string": "Dynamic Progress",
+    "type": "boolean"
+  },
+  "ks_days_off": {
+    "string": "Days Off",
+    "type": "boolean"
+  },
+  "ks_hide_date": {
+    "string": "Hide Holiday Day",
+    "type": "boolean"
+  },
+  "ks_days_off_selection": {
+    "relation": "ks.week.days",
+    "string": "Select Days",
+    "type": "many2many"
+  },
+  "ks_enable_quickinfo_extension": {
+    "string": "Quick Info",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_name": {
+    "string": "Name",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_duration": {
+    "string": "Duration",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_start_date": {
+    "string": "Start Date",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_end_date": {
+    "string": "End Date",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_progress": {
+    "string": "Progress",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_deadline": {
+    "string": "Deadline",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_stage": {
+    "string": "Stage",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_constraint_type": {
+    "string": "Constraint Type",
+    "type": "boolean"
+  },
+  "ks_tooltip_task_constraint_date": {
+    "string": "Constraint Date",
+    "type": "boolean"
+  },
+  "ks_mail_timesheet_user": {
+    "relation": "res.partner",
+    "string": "Mail user",
+    "type": "many2one"
+  },
+  "ks_project_task_json": {
+    "string": "Ks Project Task Json",
+    "type": "char"
+  },
+  "ks_project_task_linking": {
+    "string": "Ks Project Task Linking",
+    "type": "char"
+  },
+  "allow_subtasks": {
+    "string": "Allow Sub-tasks",
+    "type": "boolean"
+  },
+  "purchase_orders_count": {
+    "string": "# Purchase Orders",
+    "type": "integer"
+  },
+  "production_count": {
+    "string": "Manufacturing Orders Count",
+    "type": "integer"
+  },
+  "workorder_count": {
+    "string": "Work Order Count",
+    "type": "integer"
+  },
+  "bom_count": {
+    "string": "BoM Count",
+    "type": "integer"
+  },
+  "total_progress": {
+    "string": "Total Progress (%)",
+    "type": "float"
+  },
+  "allow_billable": {
+    "string": "Billable",
+    "type": "boolean"
+  },
+  "sale_line_id": {
+    "relation": "sale.order.line",
+    "string": "Sales Order Item",
+    "type": "many2one"
+  },
+  "sale_order_id": {
+    "relation": "sale.order",
+    "string": "Sales Order",
+    "type": "many2one"
+  },
+  "has_any_so_to_invoice": {
+    "string": "Has SO to Invoice",
+    "type": "boolean"
+  },
+  "sale_order_line_count": {
+    "string": "Sale Order Line Count",
+    "type": "integer"
+  },
+  "sale_order_count": {
+    "string": "Sale Order Count",
+    "type": "integer"
+  },
+  "has_any_so_with_nothing_to_invoice": {
+    "string": "Has a SO with an invoice status of No",
+    "type": "boolean"
+  },
+  "invoice_count": {
+    "string": "Invoice Count",
+    "type": "integer"
+  },
+  "vendor_bill_count": {
+    "string": "Vendor Bill Count",
+    "type": "integer"
+  },
+  "display_sales_stat_buttons": {
+    "string": "Display Sales Stat Buttons",
+    "type": "boolean"
+  },
+  "category_ids": {
+    "relation": "project.category",
+    "string": "Categories",
+    "type": "many2many"
+  },
+  "temp_task_ids": {
+    "relation": "project.temp.task",
+    "string": "Category Tasks",
+    "type": "one2many"
+  },
+  "pricing_type": {
+    "selection": [
+      [
+        "task_rate",
+        "Task rate"
+      ],
+      [
+        "fixed_rate",
+        "Project rate"
+      ],
+      [
+        "employee_rate",
+        "Employee rate"
+      ]
+    ],
+    "string": "Pricing",
+    "type": "selection"
+  },
+  "sale_line_employee_ids": {
+    "relation": "project.sale.line.employee.map",
+    "string": "Sale line/Employee map",
+    "type": "one2many"
+  },
+  "billable_percentage": {
+    "string": "Billable Percentage",
+    "type": "integer"
+  },
+  "timesheet_product_id": {
+    "relation": "product.product",
+    "string": "Timesheet Product",
+    "type": "many2one"
+  },
+  "warning_employee_rate": {
+    "string": "Warning Employee Rate",
+    "type": "boolean"
+  },
+  "billing_type": {
+    "selection": [
+      [
+        "not_billable",
+        "not billable"
+      ],
+      [
+        "manually",
+        "billed manually"
+      ]
+    ],
+    "string": "Billing Type",
+    "type": "selection"
+  },
+  "store_name": {
+    "string": "Store Name",
+    "type": "char"
+  },
+  "target": {
+    "selection": [
+      [
+        "on_target",
+        "ON Target"
+      ],
+      [
+        "off_target",
+        "OFF Target"
+      ],
+      [
+        "out",
+        "Out"
+      ],
+      [
+        "sales_deposit",
+        "Sales Deposit"
+      ],
+      [
+        "renewed",
+        "Renewed"
+      ]
+    ],
+    "string": "Target",
+    "type": "selection"
+  },
+  "account_manager_id": {
+    "relation": "res.users",
+    "string": "Account Manager",
+    "type": "many2one"
+  },
+  "seo_specialist_id": {
+    "relation": "res.users",
+    "string": "SEO Specialist",
+    "type": "many2one"
+  },
+  "media_specialist_id": {
+    "relation": "res.users",
+    "string": "Media Specialist",
+    "type": "many2one"
+  },
+  "social_specialist_id": {
+    "relation": "res.users",
+    "string": "Social Specialist",
+    "type": "many2one"
+  },
+  "project_code": {
+    "string": "Project ID",
+    "type": "char"
+  },
+  "last_update_status_display": {
+    "string": "Last Update Status Display",
+    "type": "char"
+  },
+  "calendar_id": {
+    "relation": "resource.calendar",
+    "string": "Working Calendar",
+    "type": "many2one"
+  },
+  "partner_store_name": {
+    "string": "Store Name",
+    "type": "char"
+  },
+  "partner_account_manager_id": {
+    "relation": "res.users",
+    "string": "Account Manager",
+    "type": "many2one"
+  },
+  "follower_ids": {
+    "relation": "res.partner",
+    "string": "Followers",
+    "type": "many2many"
+  },
+  "site_address": {
+    "string": "Site Address",
+    "type": "text"
+  },
+  "site_latitude": {
+    "string": "Site Latitude",
+    "type": "float"
+  },
+  "site_longitude": {
+    "string": "Site Longitude",
+    "type": "float"
+  },
+  "financial_info": {
+    "string": "Financial Info",
+    "type": "char"
+  },
+  "site_address_display": {
+    "string": "Site Address (Display)",
+    "type": "char"
+  },
+  "has_active_category": {
+    "string": "Has Active Category",
+    "type": "boolean"
+  },
+  "alias_full_name": {
+    "string": "Alias Email",
+    "type": "char"
+  },
+  "alias_model_id": {
+    "relation": "ir.model",
+    "string": "Aliased Model",
+    "type": "many2one"
+  },
+  "alias_force_thread_id": {
+    "string": "Record Thread ID",
+    "type": "integer"
+  },
+  "alias_parent_model_id": {
+    "relation": "ir.model",
+    "string": "Parent Model",
+    "type": "many2one"
+  },
+  "alias_parent_thread_id": {
+    "string": "Parent Record Thread ID",
+    "type": "integer"
+  },
+  "alias_contact": {
+    "selection": [
+      [
+        "everyone",
+        "Everyone"
+      ],
+      [
+        "partners",
+        "Authenticated Partners"
+      ],
+      [
+        "followers",
+        "Followers only"
+      ],
+      [
+        "employees",
+        "Authenticated Employees"
+      ]
+    ],
+    "string": "Alias Contact Security",
+    "type": "selection"
+  },
+  "alias_incoming_local": {
+    "string": "Local-part based incoming detection",
+    "type": "boolean"
+  },
+  "alias_bounced_content": {
+    "string": "Custom Bounced Message",
+    "type": "html"
+  },
+  "alias_status": {
+    "selection": [
+      [
+        "not_tested",
+        "Not Tested"
+      ],
+      [
+        "valid",
+        "Valid"
+      ],
+      [
+        "invalid",
+        "Invalid"
+      ]
+    ],
+    "string": "Alias Status",
+    "type": "selection"
+  }
+}

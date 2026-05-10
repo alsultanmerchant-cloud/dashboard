@@ -44,13 +44,16 @@ function toListRow(t: RawTask): ListTaskRow | null {
   }
 
   // Extra Rwasem fields surfaced in the Odoo task overview (allocated time,
-  // delay days, completion date, computed progress slip).
+  // delay days, completion date, computed progress slip). Plus the new
+  // Sky Light parity fields from #19 (design_count / closed_subtask_count).
   const tx = t as RawTask & {
     progress_slip_percent?: number | null;
     allocated_time_minutes?: number | null;
     delay_days?: number | null;
     completed_at?: string | null;
     task_code?: string | null;
+    design_count?: number | null;
+    closed_subtask_count?: number | null;
   };
 
   return {
@@ -77,6 +80,8 @@ function toListRow(t: RawTask): ListTaskRow | null {
       client_name: client?.name ?? null,
     },
     role_slots,
+    design_count: tx.design_count ?? 0,
+    closed_subtask_count: tx.closed_subtask_count ?? 0,
     status: t.status,
     created_at: t.created_at,
     client_name: client?.name ?? null,
@@ -103,6 +108,7 @@ export async function loadTaskBoardForGlobalView(
   return rows.map((t) => ({
     id: t.id,
     title: t.title,
+    task_code: t.task_code ?? null,
     stage: t.stage as TaskStage,
     stage_entered_at: t.stage_entered_at,
     planned_date: t.planned_date,
@@ -114,6 +120,7 @@ export async function loadTaskBoardForGlobalView(
     allocated_time_minutes: t.allocated_time_minutes ?? null,
     delay_days: t.delay_days ?? null,
     completed_at: t.completed_at ?? null,
+    status: t.status,
     service: t.service,
     project: {
       id: t.project_id,
@@ -123,5 +130,7 @@ export async function loadTaskBoardForGlobalView(
     role_slots: t.role_slots as Partial<
       Record<TaskRoleType, { id: string; full_name: string; avatar_url: string | null }>
     >,
+    design_count: t.design_count,
+    closed_subtask_count: t.closed_subtask_count,
   }));
 }

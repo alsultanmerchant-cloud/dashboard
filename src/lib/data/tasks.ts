@@ -20,6 +20,10 @@ export type TaskFilters = {
   progressBuckets?: Array<"not_started" | "in_progress" | "completed">;
   // True → priority IN ('urgent','high') — Rwasem "starred" group.
   starred?: boolean;
+  // Sky Light feedback #18 (filter parity): Odoo's "Has Start Date" /
+  // "Has End Date" presets. start = planned_date, end = due_date.
+  hasStartDate?: boolean;
+  hasEndDate?: boolean;
   // Auth user id whose followed tasks should be included.
   followedByUserId?: string;
   assignedToEmployeeId?: string;
@@ -42,6 +46,8 @@ export type DateField = (typeof DATE_FIELDS)[number];
 export type BoardTaskData = {
   id: string;
   title: string;
+  // tasks.status — surfaced so kanban can group by status (#18 parity).
+  status: string;
   stage: TaskStage;
   stage_entered_at: string;
   planned_date: string | null;
@@ -53,6 +59,7 @@ export type BoardTaskData = {
   allocated_time_minutes?: number | null;
   delay_days?: number | null;
   completed_at?: string | null;
+  task_code: string | null;
   project_id: string;
   project_name: string;
   client_name: string | null;
@@ -60,6 +67,9 @@ export type BoardTaskData = {
   role_slots: Partial<
     Record<TaskRoleType, { id: string; full_name: string; avatar_url: string | null }>
   >;
+  // #19: design / edit counts (Sky Light parity).
+  design_count: number | null;
+  closed_subtask_count: number | null;
 };
 
 const GLOBAL_BOARD_LIMIT = 120;
@@ -89,6 +99,9 @@ type TaskBundleRow = {
   actual_done_date: string | null;
   created_at: string;
   project_id: string;
+  // #19: counts surfaced as new task list columns. Both default to 0.
+  design_count: number | null;
+  closed_subtask_count: number | null;
   project:
     | {
         id: string;
@@ -142,6 +155,8 @@ async function fetchTaskBundle(
     p_assigned_to_employee_id: filters.assignedToEmployeeId ?? null,
     p_search: sanitizedSearch || null,
     p_date_filters: filters.dateFilters?.length ? filters.dateFilters : null,
+    p_has_start_date: !!filters.hasStartDate,
+    p_has_end_date: !!filters.hasEndDate,
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [] }) as TaskBundleResult;
@@ -180,6 +195,7 @@ export async function listBoardTasks(
     return {
       id: t.id,
       title: t.title,
+      status: t.status,
       stage: t.stage as TaskStage,
       stage_entered_at: t.stage_entered_at ?? t.created_at,
       planned_date: t.planned_date ?? null,
@@ -191,6 +207,7 @@ export async function listBoardTasks(
       allocated_time_minutes: t.allocated_time_minutes ?? null,
       delay_days: t.delay_days ?? null,
       completed_at: t.completed_at ?? null,
+      task_code: t.task_code ?? null,
       project_id: project?.id ?? t.project_id,
       project_name: project?.name ?? "—",
       client_name: client?.name ?? null,
@@ -198,6 +215,8 @@ export async function listBoardTasks(
         ? { id: service.id, name: service.name, slug: service.slug }
         : null,
       role_slots,
+      design_count: t.design_count ?? 0,
+      closed_subtask_count: t.closed_subtask_count ?? 0,
     };
   });
 }

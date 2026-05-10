@@ -124,8 +124,8 @@ export function Topbar({
 
   return (
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
-      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between rounded-[20px] sm:rounded-[26px] px-3 sm:px-5 py-3 gap-3 shadow-[var(--surface-elev)] dark:shadow-none lg:rtl:px-24 lg:ltr:pl-24">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between gap-3 rounded-[20px] px-3 py-3 shadow-[var(--surface-elev)] sm:rounded-[26px] sm:px-5 dark:shadow-none rtl:flex-row-reverse lg:rtl:px-24 lg:ltr:pl-24">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rtl:flex-row-reverse">
           <Button
             variant="ghost"
             size="icon"
@@ -135,13 +135,13 @@ export function Topbar({
             <Menu className="w-5 h-5 text-white/90 dark:text-muted-foreground" />
           </Button>
 
-          <div className="min-w-0">
+          <div className="min-w-0 rtl:text-right">
             <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">{title}</h2>
             <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">{subtitle}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3 rtl:flex-row-reverse">
           {showRefresh && (
             <div className="hidden md:flex items-center gap-2 rounded-2xl border border-white/40 bg-white/40 dark:border-soft dark:bg-soft-2 px-3 py-2">
               {formattedLastUpdated && (
@@ -200,7 +200,7 @@ export function Topbar({
             <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
               <Bell className="w-4 h-4 text-amber" />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -left-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
+                <span className="absolute -top-0.5 -start-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
                   {unreadCount}
                 </span>
               )}

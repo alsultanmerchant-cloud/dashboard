@@ -80,6 +80,21 @@ export function TasksCalendarView({ tasks }: { tasks: ListTaskRow[] }) {
 
   return (
     <div className="rounded-2xl border border-soft bg-card/30 p-4">
+      {/* #15/#17: link to the repurposed personal-activities calendar. Sky
+          Light's Odoo disables the project-deadline calendar entirely; this
+          callout points them at our analog without removing the legacy view
+          for users who still find it useful. */}
+      <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-cyan/30 bg-cyan-dim/40 px-3 py-2 text-xs">
+        <span className="text-foreground">
+          هل تبحث عن تذكيراتك الشخصية بدلًا من مواعيد المشاريع؟
+        </span>
+        <Link
+          href="/my-activities"
+          className="shrink-0 rounded-md border border-cyan/40 bg-card/60 px-2 py-1 font-medium text-cyan hover:bg-card"
+        >
+          افتح «أنشطتي»
+        </Link>
+      </div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">
           {ARABIC_MONTHS[cursor.month]} {cursor.year}

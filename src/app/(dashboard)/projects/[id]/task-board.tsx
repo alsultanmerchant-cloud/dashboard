@@ -86,7 +86,18 @@ export type BoardTask = {
   allocated_time_minutes?: number | null;
   delay_days?: number | null;
   completed_at?: string | null;
+  // tasks.status — distinct from stage. Used by the "Status" group-by (#18)
+  // to mirror Odoo's `state` filter. Optional because legacy callers pre-#18
+  // didn't pass it; the group-by falls back to "بدون حالة" when absent.
+  status?: string | null;
   service: { id: string; name: string; slug: string } | null;
+  // Sky Light feedback #19: surface "# designs" and "# edits" alongside the
+  // task. design_count is the manually-entered Odoo `project_customization`
+  // field (Design / Post Count). closed_subtask_count is the count of
+  // sub-tasks currently in stage=done — the Sky Light team treats each
+  // closed sub-task as one revision/edit.
+  design_count?: number | null;
+  closed_subtask_count?: number | null;
   // Optional project name — set when board is cross-project (global /tasks view)
   // so the card can show "Project · Client" under the task title like Odoo.
   project?: { id: string; name: string; client_name?: string | null } | null;
@@ -190,7 +201,7 @@ function TaskCard({
   const slip = expected != null ? expected - progress : null;
   const nxt = nextStage(task.stage);
   const prv = prevStage(task.stage);
-  const ref = `TSK-${String(task.id).slice(0, 8).toUpperCase()}`;
+  const ref = task.task_code ?? `TSK-${String(task.id).slice(0, 8).toUpperCase()}`;
   const hasAssignee = TASK_ROLE_TYPES.some((r) => task.role_slots[r]);
   const svcColor = task.service ? serviceColor(task.service.slug) : null;
 
@@ -840,7 +851,12 @@ export type TaskGroupKey =
   | "assignee"
   | "customer"
   | "service"
-  | "last_stage_update";
+  | "last_stage_update"
+  // #18 (filter parity with Odoo): progress bucket, distinct workflow
+  // status, and start-date (planned_date) month groupings.
+  | "progress"
+  | "status"
+  | "start_date";
 
 type TaskBucket = { id: string; name: string; tasks: BoardTask[] };
 
@@ -895,6 +911,81 @@ function bucketTasksBy(tasks: BoardTask[], key: TaskGroupKey): TaskBucket[] {
     return order
       .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
       .filter((c) => c.tasks.length > 0 || c.id !== NONE);
+  }
+
+  if (key === "progress") {
+    const order: Array<{ key: string; label: string }> = [
+      { key: "not_started", label: "لم تبدأ (0%)" },
+      { key: "in_progress", label: "قيد التنفيذ (1-99%)" },
+      { key: "completed", label: "منجزة (100%)" },
+      { key: NONE, label: "غير محدد" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    for (const t of tasks) {
+      const p = t.progress_percent;
+      if (p === null || p === undefined) buckets.get(NONE)!.push(t);
+      else if (p <= 0) buckets.get("not_started")!.push(t);
+      else if (p >= 100) buckets.get("completed")!.push(t);
+      else buckets.get("in_progress")!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0 || c.id !== NONE);
+  }
+
+  if (key === "status") {
+    // tasks.status workflow column from migration 0003. Distinct from `stage`.
+    const order: Array<{ key: string; label: string }> = [
+      { key: "todo", label: "للتنفيذ" },
+      { key: "in_progress", label: "قيد التنفيذ" },
+      { key: "review", label: "مراجعة" },
+      { key: "blocked", label: "متوقفة" },
+      { key: "done", label: "مكتملة" },
+      { key: "cancelled", label: "ملغاة" },
+      { key: NONE, label: "بدون حالة" },
+    ];
+    const buckets = new Map<string, BoardTask[]>(order.map((o) => [o.key, []]));
+    for (const t of tasks) {
+      const k = t.status && order.some((o) => o.key === t.status) ? t.status : NONE;
+      buckets.get(k as string)!.push(t);
+    }
+    return order
+      .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
+      .filter((c) => c.tasks.length > 0);
+  }
+
+  if (key === "start_date") {
+    // Bucket by planned_date month — Odoo parity for "Group By: Start Date".
+    const map = new Map<string, TaskBucket>();
+    const push = (id: string, name: string, t: BoardTask) => {
+      const col = map.get(id) ?? { id, name, tasks: [] };
+      col.tasks.push(t);
+      map.set(id, col);
+    };
+    const MONTH_AR = [
+      "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+      "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+    ];
+    for (const t of tasks) {
+      const raw = t.planned_date;
+      if (!raw) {
+        push(NONE, "بدون تاريخ بدء", t);
+        continue;
+      }
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) {
+        push(NONE, "بدون تاريخ بدء", t);
+        continue;
+      }
+      const id = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      push(id, `${MONTH_AR[d.getMonth()]} ${d.getFullYear()}`, t);
+    }
+    // Sort by id ascending so months read chronologically, "بدون" last.
+    return [...map.values()].sort((a, b) => {
+      if (a.id === NONE) return 1;
+      if (b.id === NONE) return -1;
+      return a.id.localeCompare(b.id);
+    });
   }
 
   if (key === "deadline") {
@@ -1351,6 +1442,28 @@ export function TaskBoard({
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
         {customColumns.length === 0 && (
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+            لا توجد مهام لعرضها.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // #18 — Odoo parity group-bys (progress / status / start_date) share the
+  // generic BucketColumn renderer fed by bucketTasksBy.
+  if (
+    outerKey === "progress" ||
+    outerKey === "status" ||
+    outerKey === "start_date"
+  ) {
+    const cols = bucketTasksBy(tasks, outerKey);
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {cols.map((col) => (
+          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+        ))}
+        {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
             لا توجد مهام لعرضها.
           </div>

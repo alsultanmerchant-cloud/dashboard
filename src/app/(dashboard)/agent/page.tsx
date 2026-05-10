@@ -40,6 +40,36 @@ interface Conversation {
   createdAt: Date;
 }
 
+// Sky Light feedback #9: AI assistant chat history must survive navigation.
+// We persist conversations + per-conversation messages to sessionStorage so
+// switching pages (or briefly reloading) doesn't wipe the thread.
+// Keys are namespaced under `mr-agent-*` to avoid colliding with other
+// session state.
+const STORAGE_KEYS = {
+  conversations: "mr-agent-conversations",
+  active: "mr-agent-active-conversation",
+  messagesPrefix: "mr-agent-messages:",
+} as const;
+
+function readStorage<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Quota exceeded or storage disabled — silently fail.
+  }
+}
+
 const SUGGESTED_PROMPTS = [
   {
     icon: TrendingUp,
@@ -103,6 +133,10 @@ export default function AgentPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Tracks whether we've already attempted to hydrate from sessionStorage.
+  // Without this guard the persistence effect would clobber session data
+  // with the empty initial useChat state on the very first render.
+  const hydratedRef = useRef(false);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -115,6 +149,57 @@ export default function AgentPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Sky Light feedback #9: hydrate the conversation list, the active
+  // conversation, and its messages from sessionStorage on first mount.
+  // Runs once — subsequent route navigations remount the page and re-hit
+  // this effect with fresh state, restoring the user's last view.
+  useEffect(() => {
+    const savedConversations = readStorage<Conversation[]>(STORAGE_KEYS.conversations);
+    const savedActive = readStorage<string>(STORAGE_KEYS.active);
+    if (savedConversations && savedConversations.length > 0) {
+      setConversations(
+        savedConversations.map((c) => ({ ...c, createdAt: new Date(c.createdAt) })),
+      );
+    }
+    if (savedActive) {
+      setActiveConversation(savedActive);
+      const savedMessages = readStorage<typeof messages>(
+        `${STORAGE_KEYS.messagesPrefix}${savedActive}`,
+      );
+      if (savedMessages && savedMessages.length > 0) {
+        setMessages(savedMessages);
+      }
+    }
+    hydratedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist conversations sidebar.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    writeStorage(STORAGE_KEYS.conversations, conversations);
+  }, [conversations]);
+
+  // Persist the currently active conversation id.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (activeConversation) {
+      writeStorage(STORAGE_KEYS.active, activeConversation);
+    } else {
+      window.sessionStorage.removeItem(STORAGE_KEYS.active);
+    }
+  }, [activeConversation]);
+
+  // Persist messages for the active conversation. Skip while we haven't
+  // hydrated yet, otherwise the empty initial useChat state would wipe
+  // the saved messages before they're loaded.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!activeConversation) return;
+    if (messages.length === 0) return;
+    writeStorage(`${STORAGE_KEYS.messagesPrefix}${activeConversation}`, messages);
+  }, [messages, activeConversation]);
 
   // Save conversation title from first user message
   useEffect(() => {
@@ -149,8 +234,27 @@ export default function AgentPage() {
   };
 
   const openConversation = (id: string) => {
+    // Sky Light feedback #9: actually load the persisted messages for the
+    // selected conversation. Without this the sidebar was decorative — the
+    // chat area always reflected the active useChat state regardless of
+    // which conversation was clicked.
+    const saved = readStorage<typeof messages>(`${STORAGE_KEYS.messagesPrefix}${id}`);
     setActiveConversation(id);
+    setMessages(saved ?? []);
     setHistoryOpen(false);
+    inputRef.current?.focus();
+  };
+
+  const deleteConversation = (id: string) => {
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.removeItem(`${STORAGE_KEYS.messagesPrefix}${id}`);
+      } catch {
+        // ignore
+      }
+    }
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeConversation === id) handleNewChat();
   };
 
   const copyText = async (content: string) => {
@@ -213,7 +317,7 @@ export default function AgentPage() {
         <Button
           onClick={handleNewChat}
           variant="outline"
-          className="w-full justify-start gap-2 border-cyan/30 text-xs text-cyan hover:bg-cyan/10"
+          className="w-full gap-2 border-cyan/30 text-xs text-cyan hover:bg-cyan/10 rtl:justify-end ltr:justify-start"
         >
           <MessageSquarePlus className="w-3.5 h-3.5" />
           محادثة جديدة
@@ -232,7 +336,7 @@ export default function AgentPage() {
                 key={conv.id}
                 onClick={() => openConversation(conv.id)}
                 className={cn(
-                  "group flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs transition-colors",
+                  "group flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs transition-colors rtl:flex-row-reverse",
                   activeConversation === conv.id
                     ? "bg-cyan/10 text-cyan"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -243,8 +347,7 @@ export default function AgentPage() {
                   className="mx-1 h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-50 hover:!opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setConversations((prev) => prev.filter((c) => c.id !== conv.id));
-                    if (activeConversation === conv.id) handleNewChat();
+                    deleteConversation(conv.id);
                   }}
                 />
               </button>
@@ -257,7 +360,7 @@ export default function AgentPage() {
 
   return (
     <div
-      className="relative flex h-[calc(100dvh-11.5rem)] min-h-[34rem] flex-col gap-4 lg:h-[calc(100vh-7rem)] lg:min-h-0 lg:flex-row"
+      className="relative flex h-[calc(100dvh-11.5rem)] min-h-[34rem] flex-col gap-4 lg:h-[calc(100vh-7rem)] lg:min-h-0 lg:flex-row rtl:lg:flex-row-reverse"
     >
       {/* Desktop conversations rail */}
       <div className="hidden w-[240px] flex-shrink-0 overflow-hidden rounded-xl cc-card lg:flex lg:flex-col">
@@ -266,7 +369,7 @@ export default function AgentPage() {
 
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
         <SheetContent
-          side="right"
+          side="left"
           className="w-[88vw] max-w-[360px] border-border bg-card p-0 sm:w-[360px]"
         >
           <SheetHeader className="border-b border-border">
@@ -282,13 +385,13 @@ export default function AgentPage() {
       {/* Main Chat Area */}
       <div className="flex min-h-[70vh] flex-1 flex-col overflow-hidden rounded-xl cc-card lg:min-h-0">
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5 rtl:flex-row-reverse">
+          <div className="flex min-w-0 items-center gap-3 rtl:flex-row-reverse">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan to-cc-purple">
               <Bot className="w-5 h-5 text-white" />
             </div>
-            <div className="min-w-0">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
+            <div className="min-w-0 text-right">
+              <div className="mb-1 flex flex-wrap items-center gap-2 rtl:flex-row-reverse">
                 <span className="rounded-full border border-cyan/20 bg-cyan/10 px-2 py-0.5 text-[10px] font-semibold text-cyan">
                   AI Copilot
                 </span>
@@ -304,7 +407,7 @@ export default function AgentPage() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 rtl:flex-row-reverse">
             <Button
               variant="ghost"
               size="icon"
@@ -345,15 +448,15 @@ export default function AgentPage() {
                 ابدأ بسؤال مباشر أو اختر واحدة من هذه المحاور.
               </p>
 
-              <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {SUGGESTED_PROMPTS.map((item, i) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => handlePromptClick(item.prompt)}
-                      className={cn(
-                        "flex items-start gap-3 rounded-xl border p-3.5 text-right transition-all",
+            <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {SUGGESTED_PROMPTS.map((item, i) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handlePromptClick(item.prompt)}
+                    className={cn(
+                        "flex items-start gap-3 rounded-xl border p-3.5 text-right transition-all rtl:flex-row-reverse",
                         item.bg
                       )}
                     >
@@ -375,7 +478,7 @@ export default function AgentPage() {
               {messages.map((msg) => {
                 const text = getMessageText(msg);
                 return (
-                  <div key={msg.id} className="flex gap-2.5 sm:gap-3">
+                  <div key={msg.id} className="flex gap-2.5 sm:gap-3 rtl:flex-row-reverse">
                     {/* Avatar */}
                     <div
                       className={cn(
@@ -393,8 +496,8 @@ export default function AgentPage() {
                     </div>
 
                     {/* Message Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                    <div className="flex-1 min-w-0 text-right">
+                      <div className="mb-1 flex items-center gap-2 rtl:flex-row-reverse">
                         <span className="text-xs font-bold text-foreground">
                           {msg.role === "user" ? "أنت" : "المساعد الذكي"}
                         </span>
@@ -491,7 +594,7 @@ export default function AgentPage() {
                       {msg.role === "assistant" && text && (
                         <button
                           onClick={() => copyMessage(msg.id, text)}
-                          className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                          className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground rtl:flex-row-reverse"
                         >
                           {copiedId === msg.id ? (
                             <>
@@ -513,11 +616,11 @@ export default function AgentPage() {
 
               {/* Generic loading — only when no assistant message exists yet */}
               {isLoading && messages[messages.length - 1]?.role === "user" && (
-                <div className="flex gap-3">
+                <div className="flex gap-3 rtl:flex-row-reverse">
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan/20 to-cc-purple/20 flex items-center justify-center flex-shrink-0">
                     <Bot className="w-4 h-4 text-cyan" />
                   </div>
-                  <div className="flex items-center gap-2 pt-2">
+                  <div className="flex items-center gap-2 pt-2 rtl:flex-row-reverse">
                     <span className="text-xs text-muted-foreground">يفكر</span>
                     <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                     <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -531,8 +634,8 @@ export default function AgentPage() {
 
         {/* Input Area — always visible */}
         <div className="sticky bottom-0 z-10 flex-shrink-0 border-t border-border bg-card/95 p-3 backdrop-blur-sm sm:p-4">
-          <div className="flex items-end gap-2 sm:gap-3">
-            <div className="flex-1 relative">
+          <div className="flex items-end gap-2 sm:gap-3 rtl:flex-row-reverse">
+            <div className="relative flex-1">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -540,7 +643,7 @@ export default function AgentPage() {
                 onKeyDown={handleKeyDown}
                 placeholder="اسأل عن المبيعات، الفريق، الدعم، أو المشاريع..."
                 rows={1}
-                className="w-full resize-none rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25"
+                className="w-full resize-none rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-right text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25"
                 style={{ minHeight: "48px", maxHeight: "120px" }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;

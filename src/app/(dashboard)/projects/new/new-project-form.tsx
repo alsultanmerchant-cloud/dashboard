@@ -320,12 +320,23 @@ export function NewProjectForm({
               const active = step === s.id;
               const done = step > s.id;
               const Icon = s.icon;
+              // #3 — gate jumps on EVERY prior step's canAdvance, not just
+              // the immediate predecessor. Otherwise a partial state (e.g.
+              // services pre-selected from a previous attempt) could let the
+              // user click directly from step 1 to step 3, silently skipping
+              // step 2 — which matches the team's "skipped 3 steps" report.
+              const priorComplete = STEPS.slice(0, i).every(
+                (prev) => canAdvance[prev.id],
+              );
               return (
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => setStep(s.id)}
-                  disabled={!done && !active && !canAdvance[(s.id - 1) as WizardStep]}
+                  onClick={() => {
+                    if (active) return;
+                    if (s.id < step || priorComplete) setStep(s.id);
+                  }}
+                  disabled={!done && !active && !priorComplete}
                   className={cn(
                     "flex flex-1 items-center gap-2 rounded-md px-3 py-2 text-[12px] font-medium transition-colors",
                     active

@@ -104,11 +104,39 @@ export async function sendDirectMessageAction(
   }
 
   // Notification — only deliverable to recipients who have signed in
-  // (recipient_user_id is non-null).
+  // (recipient_user_id is non-null). When the DM is anchored to a task or
+  // project (contextTaskId/contextProjectId), prepend «<project>» — <task>
+  // to the preview so the recipient gets the same context shape as the
+  // rwasem_notifications_link addon (Sky Light parity, feedback #5).
   if (recipient.user_id) {
-    const preview = trimmedBody
+    let contextLine: string | null = null;
+    if (contextTaskId) {
+      const { data: ctxTask } = await supabaseAdmin
+        .from("tasks")
+        .select("title, task_code, project:projects!tasks_project_id_fkey(name)")
+        .eq("id", contextTaskId)
+        .eq("organization_id", session.orgId)
+        .maybeSingle();
+      if (ctxTask) {
+        const proj = Array.isArray(ctxTask.project) ? ctxTask.project[0] : ctxTask.project;
+        const code = ctxTask.task_code ? `${ctxTask.task_code} ` : "";
+        contextLine = `«${proj?.name ?? "—"}» — ${code}${ctxTask.title ?? ""}`.trim();
+      }
+    } else if (contextProjectId) {
+      const { data: ctxProj } = await supabaseAdmin
+        .from("projects")
+        .select("name")
+        .eq("id", contextProjectId)
+        .eq("organization_id", session.orgId)
+        .maybeSingle();
+      if (ctxProj) contextLine = `«${ctxProj.name}»`;
+    }
+
+    const messagePreview = trimmedBody
       ? trimmedBody.slice(0, 140)
       : `(${attachments?.length ?? 0} مرفق)`;
+    const preview = contextLine ? `${contextLine} — ${messagePreview}` : messagePreview;
+
     await createNotification({
       organizationId: session.orgId,
       recipientUserId: recipient.user_id,
@@ -160,12 +188,25 @@ export type ConversationMessage = {
 };
 
 export type ConversationResult =
-  | { ok: true; messages: ConversationMessage[]; otherFullName: string; otherAvatarUrl: string | null; otherJobTitle: string | null }
+  | {
+      ok: true;
+      messages: ConversationMessage[];
+      otherFullName: string;
+      otherAvatarUrl: string | null;
+      otherJobTitle: string | null;
+      // Sky Light feedback #11: pagination cursor. When `hasMore` is true
+      // the dialog can call listConversationAction(..., {before: <iso>})
+      // to fetch the previous page (older messages).
+      hasMore: boolean;
+    }
   | { ok: false; error: string };
 
 export async function listConversationAction(
   recipientEmployeeId: string,
   limit = 50,
+  // ISO timestamp — when set, return only messages STRICTLY before this
+  // moment. Used by the dialog's "تحميل رسائل أقدم" button.
+  before?: string,
 ): Promise<ConversationResult> {
   let session;
   try {
@@ -185,7 +226,13 @@ export async function listConversationAction(
   }
 
   const me = session.employeeId;
-  const { data: rows, error } = await supabaseAdmin
+  // Sky Light feedback #11: the previous query ordered ASC + limit, which
+  // returned the OLDEST 50 messages and silently hid newer ones once a
+  // thread crossed the 50-message mark. Switch to DESC + limit, then
+  // reverse client-side so the UI still renders chronologically. Combined
+  // with the optional `before` cursor this also unlocks "load older"
+  // pagination — the team's actual ask.
+  let query = supabaseAdmin
     .from("direct_messages")
     .select(
       "id, body, sender_employee_id, recipient_employee_id, created_at, read_at, direct_message_attachments ( id, filename, mimetype, size_bytes, storage_path )",
@@ -193,12 +240,21 @@ export async function listConversationAction(
     .eq("organization_id", session.orgId)
     .or(
       `and(sender_employee_id.eq.${me},recipient_employee_id.eq.${other.id}),and(sender_employee_id.eq.${other.id},recipient_employee_id.eq.${me})`,
-    )
-    .order("created_at", { ascending: true })
-    .limit(limit);
+    );
+  if (before) {
+    query = query.lt("created_at", before);
+  }
+  const { data: rows, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(limit + 1); // +1 to detect hasMore without a separate count query
   if (error) return { ok: false, error: error.message };
 
-  const unreadIds = (rows ?? [])
+  const hasMore = (rows ?? []).length > limit;
+  const sliced = (rows ?? []).slice(0, limit);
+  // Reverse to chronological for display.
+  sliced.reverse();
+
+  const unreadIds = sliced
     .filter((m) => m.recipient_employee_id === me && m.read_at === null)
     .map((m) => m.id as string);
   if (unreadIds.length > 0) {
@@ -208,7 +264,7 @@ export async function listConversationAction(
       .in("id", unreadIds);
   }
 
-  const messages: ConversationMessage[] = (rows ?? []).map((m) => {
+  const messages: ConversationMessage[] = sliced.map((m) => {
     const att = (m as { direct_message_attachments?: ConversationMessage["attachments"] })
       .direct_message_attachments ?? [];
     return {
@@ -229,6 +285,7 @@ export async function listConversationAction(
     otherFullName: other.full_name as string,
     otherAvatarUrl: (other.avatar_url as string | null) ?? null,
     otherJobTitle: (other.job_title as string | null) ?? null,
+    hasMore,
   };
 }
 

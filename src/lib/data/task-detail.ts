@@ -14,6 +14,12 @@ export type TaskStageHistoryEntry = {
   duration_seconds: number | null;
   changed_by_user_id: string | null;
   changed_by_name: string | null;
+  // Sky Light feedback #13: surface the actor's position/role next to their
+  // name on each stage transition (e.g. "موزة العتيبي · مدير الحسابات").
+  // Resolved from employee_profiles.job_title at read time — we don't
+  // snapshot it on the history row because role moves are rare and we'd
+  // rather always show the current title than a stale one.
+  changed_by_role: string | null;
 };
 
 export async function listTaskStageHistory(
@@ -41,29 +47,38 @@ export async function listTaskStageHistory(
         .filter((u): u is string => typeof u === "string"),
     ),
   );
-  const nameByUserId = new Map<string, string>();
+  const profileByUserId = new Map<
+    string,
+    { full_name: string; job_title: string | null }
+  >();
   if (userIds.length > 0) {
     const { data: emps } = await supabaseAdmin
       .from("employee_profiles")
-      .select("user_id, full_name")
+      .select("user_id, full_name, job_title")
       .eq("organization_id", orgId)
       .in("user_id", userIds);
     for (const e of emps ?? []) {
-      if (e.user_id) nameByUserId.set(e.user_id, e.full_name);
+      if (e.user_id)
+        profileByUserId.set(e.user_id, {
+          full_name: e.full_name,
+          job_title: e.job_title ?? null,
+        });
     }
   }
 
-  return data.map((r) => ({
-    id: r.id,
-    stage: r.to_stage,
-    entered_at: r.entered_at,
-    exited_at: r.exited_at,
-    duration_seconds: r.duration_seconds,
-    changed_by_user_id: r.moved_by,
-    changed_by_name: r.moved_by
-      ? (nameByUserId.get(r.moved_by) ?? "موظف")
-      : null,
-  }));
+  return data.map((r) => {
+    const profile = r.moved_by ? profileByUserId.get(r.moved_by) : undefined;
+    return {
+      id: r.id,
+      stage: r.to_stage,
+      entered_at: r.entered_at,
+      exited_at: r.exited_at,
+      duration_seconds: r.duration_seconds,
+      changed_by_user_id: r.moved_by,
+      changed_by_name: r.moved_by ? (profile?.full_name ?? "موظف") : null,
+      changed_by_role: profile?.job_title ?? null,
+    };
+  });
 }
 
 export type TaskFollower = {

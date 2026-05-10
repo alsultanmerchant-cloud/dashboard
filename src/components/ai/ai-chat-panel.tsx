@@ -130,10 +130,10 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-24 left-6 z-50 w-[420px] max-h-[80vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/50 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+    <div className="fixed bottom-24 z-50 flex max-h-[80vh] w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/50 animate-in slide-in-from-bottom-4 duration-300 rtl:right-6 ltr:left-6">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-gradient-to-l from-cyan/5 to-cc-purple/5">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between border-b border-border bg-gradient-to-l from-cyan/5 to-cc-purple/5 px-4 py-3 rtl:flex-row-reverse">
+        <div className="flex items-center gap-2 rtl:flex-row-reverse">
           <Sparkles className="w-4 h-4 text-cyan" />
           <span className="text-sm font-bold text-foreground">المحلل الذكي</span>
         </div>
@@ -148,12 +148,12 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
           <div className="text-center py-8">
             <Sparkles className="w-10 h-10 text-cyan/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-4">مرحباً! كيف أقدر أساعدك؟</p>
-            <div className="flex flex-wrap gap-2 justify-center">
+            <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTED_QUESTIONS.map((q, i) => (
                 <button
                   key={i}
                   onClick={() => sendMessage(q)}
-                  className="px-3 py-1.5 bg-muted rounded-full text-[11px] text-muted-foreground hover:text-cyan hover:bg-cyan-dim transition-colors"
+                className="rounded-full bg-muted px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-cyan-dim hover:text-cyan"
                 >
                   {q}
                 </button>
@@ -165,10 +165,10 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex ${msg.role === "user" ? "justify-start" : "justify-end"}`}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+                  className={`max-w-[85%] rounded-xl px-3 py-2 text-right text-xs leading-relaxed ${
                     msg.role === "user"
                       ? "bg-cyan/15 text-cyan border border-cyan/20"
                       : "bg-muted text-foreground border border-border"
@@ -179,7 +179,7 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
               </div>
             ))}
             {isLoading && messages[messages.length - 1]?.content === "" && (
-              <div className="flex justify-end">
+              <div className="flex justify-start">
                 <div className="flex gap-1 px-3 py-2">
                   <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -193,7 +193,7 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
 
       {/* Input */}
       <div className="p-3 border-t border-border">
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 rtl:flex-row-reverse">
           <textarea
             ref={inputRef}
             value={input}
@@ -201,7 +201,7 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
             onKeyDown={handleKeyDown}
             placeholder="اكتب سؤالك..."
             rows={1}
-            className="flex-1 resize-none bg-muted rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground border-0 focus:outline-none focus:ring-1 focus:ring-cyan/50"
+            className="flex-1 resize-none rounded-lg border-0 bg-muted px-3 py-2 text-right text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan/50"
           />
           <Button
             size="icon"

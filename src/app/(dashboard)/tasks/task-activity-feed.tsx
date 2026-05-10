@@ -32,6 +32,7 @@ import {
   TASK_STAGE_TONES,
   TASK_ROLE_LABELS,
   TASK_ROLE_TONES,
+  TASK_STATUS_LABELS,
 } from "@/lib/labels";
 import { formatArabicDateTime } from "@/lib/utils-format";
 import type { TaskActivity } from "@/lib/data/task-activity";
@@ -137,6 +138,7 @@ export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
               <li key={`${item.kind}:${item.id}`}>
                 {item.kind === "note" && <NoteRow item={item} />}
                 {item.kind === "stage_change" && <StageRow item={item} />}
+                {item.kind === "status_change" && <StatusRow item={item} />}
                 {item.kind === "assignee_change" && <AssigneeRow item={item} />}
                 {item.kind === "task_created" && <CreatedRow item={item} />}
                 {item.kind === "odoo_message" && <OdooMessageRow item={item} />}
@@ -422,6 +424,36 @@ function StageRow({ item }: { item: Extract<TaskActivity, { kind: "stage_change"
               · بقيت {dur}
             </span>
           )}
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatArabicDateTime(item.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function StatusRow({ item }: { item: Extract<TaskActivity, { kind: "status_change" }> }) {
+  return (
+    <div className="flex items-start gap-3 px-1">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-soft-2 bg-card text-muted-foreground">
+        <ArrowLeftRight className="size-3.5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">
+            {item.actor?.name ?? "النظام"}
+          </span>
+          <span className="text-muted-foreground">غيَّر الحالة من</span>
+          {item.from_status && (
+            <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+              {TASK_STATUS_LABELS[item.from_status]}
+            </span>
+          )}
+          <span className="text-muted-foreground">→</span>
+          <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+            {TASK_STATUS_LABELS[item.to_status]}
+          </span>
         </div>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           {formatArabicDateTime(item.created_at)}

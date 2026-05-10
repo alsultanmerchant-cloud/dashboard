@@ -5,6 +5,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { ViewSwitcher } from "./view-switcher";
+import { MonthQuickPick } from "./month-quick-pick";
 import { loadTaskBoardForGlobalView, loadTasksForGlobalView } from "./_loaders";
 import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
 
@@ -101,11 +102,14 @@ type FilterKey =
   | "in_progress_pct"
   | "completed_pct"
   | "starred"
-  | "followed";
+  | "followed"
+  | "has_start_date"
+  | "has_end_date";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
   "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
+  "has_start_date", "has_end_date",
 ]);
 
 function parseFilterKeys(raw: string | undefined, legacy: string | undefined): Set<FilterKey> {
@@ -144,6 +148,8 @@ export default async function TasksPage({
   const VALID_GROUPS = [
     "stage", "project", "priority", "deadline",
     "assignee", "customer", "service", "last_stage_update",
+    // #18 — Odoo parity additions.
+    "progress", "status", "start_date",
   ] as const;
   type GroupKey = (typeof VALID_GROUPS)[number];
   // Comma-separated group-by stack (Rwasem-style "Stage > Assignee"). Pass the
@@ -213,6 +219,8 @@ export default async function TasksPage({
     criticalDelay: active.has("critical"),
     progressBuckets: progressBuckets.length ? progressBuckets : undefined,
     starred: active.has("starred"),
+    hasStartDate: active.has("has_start_date"),
+    hasEndDate: active.has("has_end_date"),
     followedByUserId: active.has("followed") ? session.userId : undefined,
     assignedToEmployeeId: active.has("mine") ? session.employeeId : undefined,
     projectId: resolvedProjectId,
@@ -244,6 +252,7 @@ export default async function TasksPage({
           </Link>
         )}
         <ViewSwitcher current={view} />
+        <MonthQuickPick />
       </div>
 
       {view === "list" && <TasksListView tasks={tasks} />}

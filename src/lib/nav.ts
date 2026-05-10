@@ -18,6 +18,7 @@ import {
   Building,
   UsersRound,
   Network,
+  CalendarCheck,
   BarChart3,
   Settings2,
   Flag,
@@ -63,6 +64,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { labelKey: "projects", href: "/projects", icon: FolderKanban, perm: "projects.view" },
       { labelKey: "tasks", href: "/tasks", icon: CheckSquare2, perm: "tasks.view" },
+      // Sky Light feedback #15/#17: their Odoo disables the calendar entirely
+      // and adds a "To-do" surface. Our analog is /my-activities — a personal
+      // calendar of mail.activity-style reminders (`task_activities`) the user
+      // owns. Each employee sees their own.
+      { labelKey: "myActivities", href: "/my-activities", icon: CalendarCheck, perm: "tasks.view" },
       { labelKey: "uploadsToday", href: "/uploads", icon: Upload, perm: "tasks.view" },
       { labelKey: "clients", href: "/clients", icon: Building2, perm: "clients.view" },
       { labelKey: "taskTemplates", href: "/task-templates", icon: FileText, perm: "templates.manage" },
@@ -119,6 +125,7 @@ export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: s
   "/clients": { titleKey: "clientsTitle", subtitleKey: "clientsSubtitle" },
   "/projects": { titleKey: "projectsTitle", subtitleKey: "projectsSubtitle" },
   "/tasks": { titleKey: "tasksTitle", subtitleKey: "tasksSubtitle" },
+  "/my-activities": { titleKey: "myActivitiesTitle", subtitleKey: "myActivitiesSubtitle" },
   "/task-templates": { titleKey: "taskTemplatesTitle", subtitleKey: "taskTemplatesSubtitle" },
   "/service-categories": { titleKey: "serviceCategoriesTitle", subtitleKey: "serviceCategoriesSubtitle" },
   "/contracts": { titleKey: "contractsTitle", subtitleKey: "contractsSubtitle" },

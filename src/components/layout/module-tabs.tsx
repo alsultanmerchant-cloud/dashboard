@@ -100,8 +100,8 @@ export function ModuleTabs() {
       aria-label={mod.name}
       className="sticky top-[88px] z-30 mx-3 mt-2 sm:mx-6"
     >
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-card/95 px-1.5 py-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/85">
-        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-card/95 px-1.5 py-1 shadow-sm backdrop-blur rtl:flex-row-reverse supports-[backdrop-filter]:bg-card/85">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rtl:flex-row-reverse">
           {mod.tabs.map((tab) => {
             const active = isActive(pathname, tab);
             const baseCls =

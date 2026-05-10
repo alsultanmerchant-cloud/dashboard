@@ -57,6 +57,8 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       onlyMine: flag("onlyMine"),
       onlyUnassigned: flag("onlyUnassigned"),
       archived: flag("archived"),
+      allCategoriesArchived: flag("allCategoriesArchived"),
+      overTimesheets: flag("overTimesheets"),
       startDateFrom: str("startDateFrom"),
       startDateTo: str("startDateTo"),
       endDateFrom: str("endDateFrom"),

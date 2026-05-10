@@ -282,15 +282,20 @@ const ALLOWED_TARGETS = new Set([
 ]);
 
 async function importProjects(ctx: ImportContext): Promise<number> {
-  // Pull active projects (the kanban subset). Archived/deactivated projects
-  // are reconciled below by flipping their status to 'archived' so the
-  // dashboard list mirrors Odoo's "1-N / N" count.
+  // Pull both active and archived projects so the chatter on completed
+  // engagements remains accessible in the dashboard. Archived rows get
+  // status='archived' on insert (see below); the existing reconciliation
+  // pass at the bottom of this function still flips status for projects
+  // that were active when last synced and have since been deactivated.
+  // The default Odoo ORM context applies `active_test=true` which would
+  // otherwise drop archived rows even when the domain includes them.
   const projects = await ctx.odoo.searchRead<OdooProject>(
     "project.project",
-    [["active", "=", true]],
+    [["active", "in", [true, false]]],
     [
       "id",
       "name",
+      "active",
       "partner_id",
       "user_id",
       "date_start",
@@ -320,7 +325,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "ks_project_start",
       "ks_project_end",
     ],
-    { limit: 1000 },
+    // active_test=false bypasses the implicit `active=true` filter Odoo
+    // applies to every model with an `active` column.
+    { limit: 5000, context: { active_test: false } },
   );
 
   let imported = 0;
@@ -371,7 +378,10 @@ async function importProjects(ctx: ImportContext): Promise<number> {
           ? p.ks_project_end.slice(0, 10)
           : null) ?? nullable(p.date),
       description: nullable(p.description),
-      status: "active",
+      // Mirror Odoo's archive flag: an `active=false` project becomes
+      // `status='archived'` here so the dashboard UI can hide it from
+      // active-only views while still keeping its tasks + chatter reachable.
+      status: p.active === false ? "archived" : "active",
       priority: "medium",
       store_name: nullable(p.store_name),
       target,
@@ -418,8 +428,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
   }
 
   // Archive any previously-imported project whose Odoo source has been
-  // deactivated since the last sync. This keeps Supabase counts aligned
-  // with Odoo's "active" kanban (Odoo flips active=false instead of deleting).
+  // hard-deleted since the last sync. The `active=false` (archived) case is
+  // now handled directly in the insert above; this only catches genuine
+  // deletions, which are rare but possible.
   const liveActiveIds = new Set(projects.map((p) => String(p.id)));
   const { data: priorRows } = await supabaseAdmin
     .from("projects")
@@ -604,6 +615,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   const TASK_FIELDS = [
     "id",
     "name",
+    "active",
     "project_id",
     "stage_id",
     "user_ids",
@@ -640,7 +652,9 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         "project.task",
         [["project_id", "in", slice]],
         TASK_FIELDS,
-        { limit: 2000 },
+        // active_test=false bypasses Odoo's implicit `active=true` filter so
+        // archived tasks under archived projects flow through too.
+        { limit: 5000, context: { active_test: false } },
       );
       tasks.push(...rows);
       console.log(

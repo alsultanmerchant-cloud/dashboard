@@ -14,7 +14,8 @@ interface NotificationPanelProps {
   onClearAll: () => void;
 }
 
-// Route notification clicks by entity_type / section slug.
+// Route notification clicks by entity_type / section slug. Used as the
+// fallback when no entity_id is attached to the notification.
 const SECTION_PATH: Record<string, string> = {
   handover: "/handover",
   task: "/tasks",
@@ -25,6 +26,29 @@ const SECTION_PATH: Record<string, string> = {
   mention: "/tasks",
   team: "/organization/employees",
 };
+
+// Build a deep link to the specific entity when entity_id is available, so
+// clicks land on the actual task/project page instead of dumping the user
+// at the section list.
+function notificationHref(n: { entityType?: string | null; entityId?: string | null; section: string }): string | null {
+  const id = n.entityId;
+  switch (n.entityType) {
+    case "task":
+      return id ? `/tasks/${id}` : "/tasks";
+    case "project":
+      return id ? `/projects/${id}` : "/projects";
+    case "handover":
+      return "/handover";
+    case "client":
+      return "/clients";
+    case "direct_message":
+      return id ? `/messages?msg=${id}` : "/messages";
+    case "employee":
+      return "/organization/employees";
+    default:
+      return SECTION_PATH[n.section] ?? null;
+  }
+}
 
 export function NotificationPanel({
   notifications,
@@ -95,7 +119,7 @@ export function NotificationPanel({
               <button
                 key={n.id}
                 onClick={() => {
-                  const path = SECTION_PATH[n.section];
+                  const path = notificationHref(n);
                   if (path) router.push(path);
                   onClose();
                 }}

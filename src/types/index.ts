@@ -375,6 +375,10 @@ export interface AppNotification {
   icon: string;
   message: string;
   section: string;
+  // Optional entity reference so the topbar panel can deep-link to the
+  // exact entity (e.g. /tasks/{id}) instead of falling back to the list.
+  entityType?: string | null;
+  entityId?: string | null;
   timestamp: string;
   isRead: boolean;
 }

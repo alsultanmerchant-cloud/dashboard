@@ -75,7 +75,16 @@ export function StageHistoryTimeline({
               {row.changed_by_name && (
                 <>
                   {" "}
-                  · بواسطة <span className="text-foreground/80">{row.changed_by_name}</span>
+                  · بواسطة{" "}
+                  <span className="text-foreground/80">{row.changed_by_name}</span>
+                  {row.changed_by_role && (
+                    <span
+                      className="ms-1 inline-flex items-center rounded-full bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan"
+                      title="الوظيفة في وقت النقل"
+                    >
+                      {row.changed_by_role}
+                    </span>
+                  )}
                 </>
               )}
             </div>

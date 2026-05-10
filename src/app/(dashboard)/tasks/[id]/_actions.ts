@@ -52,11 +52,28 @@ type ActionResult = { ok: true } | { error: string };
 async function loadTaskOrError(taskId: string, orgId: string) {
   const { data: task } = await supabaseAdmin
     .from("tasks")
-    .select("id, title, organization_id, project_id, created_by")
+    .select("id, title, task_code, organization_id, project_id, created_by, project:projects!tasks_project_id_fkey(name)")
     .eq("id", taskId)
     .eq("organization_id", orgId)
     .maybeSingle();
   return task;
+}
+
+// Sky Light parity: notification body should always read like the
+// rwasem_notifications_link addon's chatter format —
+//   «<project name>» — <task code> <task title>
+// so the recipient sees the same context they would in Odoo. This is the
+// single source of truth for the "task context" line.
+function taskNotificationBody(task: {
+  title: string | null;
+  task_code: string | null;
+  project: { name: string } | { name: string }[] | null;
+}): string {
+  const proj = Array.isArray(task.project) ? task.project[0] : task.project;
+  const projectLabel = proj?.name ?? "—";
+  const codePart = task.task_code ? `${task.task_code} ` : "";
+  const titlePart = task.title ?? "";
+  return `«${projectLabel}» — ${codePart}${titlePart}`.trim();
 }
 
 export async function addFollowerAction(input: {
@@ -143,14 +160,15 @@ export async function addFollowerAction(input: {
     importance: "low",
   });
 
-  // Notify the new follower so they know they were added.
+  // Notify the new follower so they know they were added. Body carries the
+  // project + task_code context (Sky Light parity, feedback #5).
   await createNotification({
     organizationId: session.orgId,
     recipientUserId: parsed.data.user_id,
     recipientEmployeeId: targetEmp.id,
     type: "TASK_FOLLOWER",
     title: `${session.fullName} أضافك كمتابع للمهمة`,
-    body: task.title,
+    body: taskNotificationBody(task),
     entityType: "task",
     entityId: parsed.data.task_id,
   });
@@ -435,7 +453,7 @@ export async function requestTaskApprovalAction(input: {
         recipientEmployeeId: approver.id,
         type: "TASK_APPROVAL",
         title: `${session.fullName} طلب اعتمادًا على مهمة`,
-        body: task.title,
+        body: taskNotificationBody(task),
         entityType: "task",
         entityId: parsed.data.task_id,
       });
@@ -448,7 +466,13 @@ export async function requestTaskApprovalAction(input: {
 
 async function notifyCreatorOfDecision(
   session: { orgId: string; userId: string; fullName: string },
-  task: { id: string; title: string; created_by: string | null },
+  task: {
+    id: string;
+    title: string;
+    task_code: string | null;
+    created_by: string | null;
+    project: { name: string } | { name: string }[] | null;
+  },
   decision: "approved" | "rejected",
 ) {
   if (!task.created_by) return;
@@ -467,7 +491,7 @@ async function notifyCreatorOfDecision(
       decision === "approved"
         ? `${session.fullName} اعتمد المهمة`
         : `${session.fullName} رفض المهمة`,
-    body: task.title,
+    body: taskNotificationBody(task),
     entityType: "task",
     entityId: task.id,
   });

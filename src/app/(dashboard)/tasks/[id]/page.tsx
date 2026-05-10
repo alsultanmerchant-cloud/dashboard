@@ -70,6 +70,9 @@ const TimesheetsTab = dynamic(
 const ActivitiesTab = dynamic(
   () => import("./activities-tab").then((mod) => ({ default: mod.ActivitiesTab })),
 );
+const AttachmentsTab = dynamic(
+  () => import("./attachments-tab").then((mod) => ({ default: mod.AttachmentsTab })),
+);
 
 type TaskLinkRow = import("./task-links-panel").TaskLinkRow;
 type SubtaskRow = import("./subtasks-tab").SubtaskRow;
@@ -557,6 +560,7 @@ const TASK_TABS = [
   "links",
   "timesheets",
   "activities",
+  "documents",
   "history",
 ] as const;
 type TaskTab = (typeof TASK_TABS)[number];
@@ -629,10 +633,20 @@ async function TaskSmartButtonsSection({
 }) {
   // One RPC instead of six concurrent PostgREST head/count queries; see
   // migration 0086. Halves wall-clock for this Suspense slot (~0.9s → ~0.45s).
-  const { data } = await supabaseAdmin.rpc("task_smart_button_counts", {
-    p_org_id: orgId,
-    p_task_id: taskId,
-  });
+  // The attachment count isn't in that RPC yet — one extra head/count query
+  // until 0086 is regenerated; cheap and the RPC body is shared with other
+  // RPCs whose touch radius we don't want to expand here.
+  const [{ data }, attachmentCountResult] = await Promise.all([
+    supabaseAdmin.rpc("task_smart_button_counts", {
+      p_org_id: orgId,
+      p_task_id: taskId,
+    }),
+    supabaseAdmin
+      .from("task_attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId),
+  ]);
   const counts = (data ?? {
     subtaskCount: 0,
     outgoingLinks: 0,
@@ -656,6 +670,7 @@ async function TaskSmartButtonsSection({
       timesheetHours={Number(counts.timesheetHours) || 0}
       commentCount={counts.commentCount}
       openActivityCount={counts.openActivities}
+      attachmentCount={attachmentCountResult.count ?? 0}
     />
   );
 }
@@ -811,6 +826,7 @@ function TaskTabNav({
     { key: "links", label: "ربط المهام" },
     { key: "timesheets", label: "السجل الزمني" },
     { key: "activities", label: "أنشطة مجدولة" },
+    { key: "documents", label: "المرفقات" },
     { key: "history", label: "تاريخ المراحل" },
   ];
 
@@ -820,6 +836,10 @@ function TaskTabNav({
         <Link
           key={tab.key}
           href={`/tasks/${taskId}?tab=${tab.key}`}
+          // Smart-button hooks: clicking the pill in TaskSmartButtons calls
+          // document.querySelector('[data-smart-target=…]')?.click(); without
+          // this attribute the click was a no-op.
+          data-smart-target={tab.key}
           className={cn(
             "inline-flex h-9 items-center justify-center rounded-xl border border-transparent px-4 py-1.5 text-sm font-medium text-muted-foreground transition-all hover:text-foreground",
             activeTab === tab.key &&
@@ -1052,6 +1072,42 @@ async function TaskTabPanelSection({
             rows={rows}
             canManage={canManageTasks}
           />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "documents") {
+    // #14 — pull task_attachments AND comment-attached files (uploaded via
+    // the chatter). Both share the same table; the comment-attached rows have
+    // task_comment_id set. We surface every row that points at this task.
+    // Children sub-tasks: not aggregated here — they have their own page.
+    const { data } = await supabaseAdmin
+      .from("task_attachments")
+      .select(
+        "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at",
+      )
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId)
+      .order("created_at", { ascending: false });
+
+    const rows = (data ?? []).map((r) => ({
+      id: r.id as string,
+      task_id: r.task_id as string,
+      task_code: null,
+      task_title: null,
+      filename: r.filename as string,
+      mimetype: (r.mimetype as string | null) ?? null,
+      size_bytes: (r.size_bytes as number | null) ?? null,
+      storage_path: (r.storage_path as string | null) ?? null,
+      source_url: (r.source_url as string | null) ?? null,
+      created_at: r.created_at as string,
+    }));
+
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <AttachmentsTab rows={rows} />
         </CardContent>
       </Card>
     );

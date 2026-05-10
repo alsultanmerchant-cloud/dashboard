@@ -6,6 +6,7 @@ import {
   Clock,
   MessageSquare,
   AlarmClock,
+  Paperclip,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,12 +24,15 @@ export function TaskSmartButtons({
   timesheetHours,
   commentCount,
   openActivityCount,
+  attachmentCount,
 }: {
   subtaskCount: number;
   linkCount: number;
   timesheetHours: number;
   commentCount: number;
   openActivityCount: number;
+  // #14 — Sky Light's Odoo "All Documents" smart-button.
+  attachmentCount: number;
 }) {
   const buttons: SmartButton[] = [
     {
@@ -61,6 +65,12 @@ export function TaskSmartButtons({
       value: String(openActivityCount),
       icon: AlarmClock,
       tone: openActivityCount > 0 ? "amber" : "default",
+    },
+    {
+      target: "documents",
+      label: "مرفقات",
+      value: String(attachmentCount),
+      icon: Paperclip,
     },
   ];
 

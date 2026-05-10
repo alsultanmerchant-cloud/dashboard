@@ -198,6 +198,8 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
               <DataTableHeaderCell>الفريق</DataTableHeaderCell>
               <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
               <DataTableHeaderCell>الموعد النهائي</DataTableHeaderCell>
+              <DataTableHeaderCell className="text-center" title="عدد التصاميم / المنشورات (Design / Post Count)">تصاميم</DataTableHeaderCell>
+              <DataTableHeaderCell className="text-center" title="عدد المهام الفرعية المنجزة (تعديلات/مراجعات)">تعديلات</DataTableHeaderCell>
               <DataTableHeaderCell>المدة في المرحلة</DataTableHeaderCell>
               <DataTableHeaderCell>التقدم</DataTableHeaderCell>
               <DataTableHeaderCell aria-label="فتح" />
@@ -314,6 +316,30 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </DataTableCell>
+                  <DataTableCell className="text-center tabular-nums">
+                    {(t.design_count ?? 0) > 0 ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-cyan/10 text-cyan px-1.5 py-0.5 text-[11px]"
+                        title="عدد التصاميم / المنشورات"
+                      >
+                        🎨 {t.design_count}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/40">—</span>
+                    )}
+                  </DataTableCell>
+                  <DataTableCell className="text-center tabular-nums">
+                    {(t.closed_subtask_count ?? 0) > 0 ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber/10 text-amber px-1.5 py-0.5 text-[11px]"
+                        title="عدد المهام الفرعية المنجزة (تعديلات / مراجعات)"
+                      >
+                        ✎ {t.closed_subtask_count}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/40">—</span>
                     )}
                   </DataTableCell>
                   <DataTableCell>
