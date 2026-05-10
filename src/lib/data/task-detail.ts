@@ -66,8 +66,25 @@ export async function listTaskStageHistory(
     }
   }
 
+  // Sky Light feedback #7 (polish): rows with moved_by=null are usually
+  // Odoo-imported (the importer doesn't map Odoo res.users → Supabase
+  // auth.users). Look up the parent task once; if it's Odoo-imported, use
+  // "مزامنة من Odoo" instead of leaving the actor field blank.
+  const { data: parentTask } = await supabaseAdmin
+    .from("tasks")
+    .select("external_source")
+    .eq("id", taskId)
+    .maybeSingle();
+  const isOdooTask = parentTask?.external_source === "odoo";
+
   return data.map((r) => {
     const profile = r.moved_by ? profileByUserId.get(r.moved_by) : undefined;
+    let changedByName: string | null = null;
+    if (r.moved_by) {
+      changedByName = profile?.full_name ?? "موظف";
+    } else if (isOdooTask) {
+      changedByName = "مزامنة من Odoo";
+    }
     return {
       id: r.id,
       stage: r.to_stage,
@@ -75,7 +92,7 @@ export async function listTaskStageHistory(
       exited_at: r.exited_at,
       duration_seconds: r.duration_seconds,
       changed_by_user_id: r.moved_by,
-      changed_by_name: r.moved_by ? (profile?.full_name ?? "موظف") : null,
+      changed_by_name: changedByName,
       changed_by_role: profile?.job_title ?? null,
     };
   });

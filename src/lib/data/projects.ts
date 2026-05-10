@@ -251,7 +251,23 @@ export async function getProjectHoldActor(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!data?.actor_user_id) return null;
+  if (!data?.actor_user_id) {
+    // Sky Light feedback #4 (polish): the dashboard writes audit_logs on
+    // every hold, but Odoo-imported holds were set before the dashboard
+    // existed and have no row. Surface "مزامنة من Odoo" so the ribbon
+    // doesn't render an empty actor and the operator knows where it came
+    // from. Only kicks in when held_at is set.
+    const { data: project } = await supabaseAdmin
+      .from("projects")
+      .select("held_at, external_source")
+      .eq("organization_id", orgId)
+      .eq("id", projectId)
+      .maybeSingle();
+    if (project?.held_at && project.external_source === "odoo") {
+      return { name: "مزامنة من Odoo", at: project.held_at };
+    }
+    return null;
+  }
   const { data: profile } = await supabaseAdmin
     .from("employee_profiles")
     .select("full_name")

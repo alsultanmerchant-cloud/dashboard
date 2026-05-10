@@ -7,13 +7,14 @@
 // _service_actions.ts.
 
 import { useMemo, useRef, useState, useTransition, useEffect } from "react";
-import { Plus, X, Loader2, Check, Search } from "lucide-react";
+import { Plus, X, Loader2, Check, Search, ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { ServiceBadge } from "@/components/status-badges";
 import { cn } from "@/lib/utils";
 import {
   attachProjectServiceAction,
+  createServiceTaskAction,
   detachProjectServiceAction,
 } from "./_service_actions";
 
@@ -48,6 +49,41 @@ export function ProjectServicesPanel({
   const [pending, start] = useTransition();
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Sky Light feedback #10: per-chip "create task" form. Only one expands at
+  // a time. State is { serviceId, title, dueDate, priority } or null.
+  const [taskForm, setTaskForm] = useState<{
+    serviceId: string;
+    serviceName: string;
+    title: string;
+    dueDate: string;
+    priority: "low" | "medium" | "high" | "urgent";
+  } | null>(null);
+  const taskTitleRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (taskForm) taskTitleRef.current?.focus();
+  }, [taskForm?.serviceId]);
+
+  function submitTask() {
+    if (!taskForm) return;
+    setBusyServiceId(taskForm.serviceId);
+    start(async () => {
+      const res = await createServiceTaskAction({
+        projectId,
+        serviceId: taskForm.serviceId,
+        title: taskForm.title,
+        dueDate: taskForm.dueDate || null,
+        priority: taskForm.priority,
+      });
+      setBusyServiceId(null);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`تم إنشاء المهمة في «${taskForm.serviceName}»`);
+      setTaskForm(null);
+      router.refresh();
+    });
+  }
 
   const attachedIds = useMemo(
     () => new Set(attached.map((a) => a.service_id)),
@@ -133,6 +169,7 @@ export function ProjectServicesPanel({
   }
 
   return (
+    <div className="space-y-3">
     <div className="flex flex-wrap items-center gap-2">
       {attached.length === 0 && !canManage && (
         <p className="text-sm text-muted-foreground">لا توجد باقات مرتبطة بعد.</p>
@@ -147,19 +184,43 @@ export function ProjectServicesPanel({
           >
             <ServiceBadge slug={s.slug} name={s.name} />
             {canManage && (
-              <button
-                type="button"
-                onClick={() => detach(ps.service_id, s.name)}
-                disabled={pending}
-                aria-label={`إزالة ${s.name}`}
-                className="rounded-full p-0.5 text-muted-foreground hover:bg-cc-red/10 hover:text-cc-red transition-colors disabled:opacity-50"
-              >
-                {isBusy ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <X className="size-3" />
-                )}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTaskForm((f) =>
+                      f?.serviceId === s.id
+                        ? null
+                        : {
+                            serviceId: s.id,
+                            serviceName: s.name,
+                            title: "",
+                            dueDate: "",
+                            priority: "medium",
+                          },
+                    )
+                  }
+                  disabled={pending}
+                  aria-label={`إضافة مهمة لـ ${s.name}`}
+                  title="إضافة مهمة"
+                  className="rounded-full p-0.5 text-muted-foreground hover:bg-cyan-dim/40 hover:text-cyan transition-colors disabled:opacity-50"
+                >
+                  <ListPlus className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => detach(ps.service_id, s.name)}
+                  disabled={pending}
+                  aria-label={`إزالة ${s.name}`}
+                  className="rounded-full p-0.5 text-muted-foreground hover:bg-cc-red/10 hover:text-cc-red transition-colors disabled:opacity-50"
+                >
+                  {isBusy ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <X className="size-3" />
+                  )}
+                </button>
+              </>
             )}
           </span>
         );
@@ -239,6 +300,94 @@ export function ProjectServicesPanel({
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+
+      {taskForm && (
+        <div className="rounded-xl border border-cyan/30 bg-cyan-dim/20 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-foreground">
+              مهمة جديدة في «{taskForm.serviceName}»
+            </p>
+            <button
+              type="button"
+              onClick={() => setTaskForm(null)}
+              disabled={pending}
+              className="rounded-full p-1 text-muted-foreground hover:bg-soft-2"
+              aria-label="إلغاء"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
+            <input
+              ref={taskTitleRef}
+              value={taskForm.title}
+              onChange={(e) =>
+                setTaskForm((f) => (f ? { ...f, title: e.target.value } : f))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && taskForm.title.trim().length >= 2) {
+                  e.preventDefault();
+                  submitTask();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setTaskForm(null);
+                }
+              }}
+              placeholder="عنوان المهمة..."
+              className="rounded-lg border border-soft bg-card px-2.5 py-1.5 text-sm outline-none focus:border-cyan/50"
+              disabled={pending}
+            />
+            <input
+              type="date"
+              value={taskForm.dueDate}
+              onChange={(e) =>
+                setTaskForm((f) => (f ? { ...f, dueDate: e.target.value } : f))
+              }
+              title="الموعد النهائي (اختياري)"
+              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
+              disabled={pending}
+            />
+            <select
+              value={taskForm.priority}
+              onChange={(e) =>
+                setTaskForm((f) =>
+                  f
+                    ? {
+                        ...f,
+                        priority: e.target.value as
+                          | "low"
+                          | "medium"
+                          | "high"
+                          | "urgent",
+                      }
+                    : f,
+                )
+              }
+              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
+              disabled={pending}
+            >
+              <option value="low">منخفضة</option>
+              <option value="medium">متوسطة</option>
+              <option value="high">عالية</option>
+              <option value="urgent">عاجلة</option>
+            </select>
+            <button
+              type="button"
+              onClick={submitTask}
+              disabled={pending || taskForm.title.trim().length < 2}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-cyan px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              {pending ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Plus className="size-3" />
+              )}
+              إنشاء
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -45,7 +45,10 @@ export default async function ProjectDetailPage({
 
   const [summary, holdActor] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
-    project.status === "on_hold"
+    // Key off held_at, not status — Odoo-imported holds can sit on
+    // status='archived' or other text values; the ribbon below already
+    // keys off held_at for the same reason.
+    project.held_at
       ? getProjectHoldActor(session.orgId, project.id)
       : Promise.resolve(null),
   ]);
@@ -133,6 +136,12 @@ export default async function ProjectDetailPage({
                   <p className="text-sm font-semibold text-amber">المشروع موقوف مؤقتًا</p>
                   <p className="text-[11px] text-muted-foreground">
                     منذ {formatArabicShortDate(project.held_at)}
+                    {holdActor?.name && (
+                      <>
+                        {" "}· بواسطة{" "}
+                        <span className="text-foreground/80">{holdActor.name}</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 {project.hold_reason && (

@@ -102,6 +102,108 @@ export async function attachProjectServiceAction(input: {
   return { ok: true };
 }
 
+// Sky Light feedback #10: ad-hoc "create new task" inside a service chip on
+// the project detail page. Mirrors the wizard's auto-generation but for one
+// task at a time, scoped to a specific service the project is already
+// subscribed to.
+const CreateServiceTaskSchema = z.object({
+  project_id: z.string().uuid(),
+  service_id: z.string().uuid(),
+  title: z.string().trim().min(2, { message: "عنوان المهمة قصير" }).max(200),
+  due_date: z.string().optional().nullable(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
+});
+
+export async function createServiceTaskAction(input: {
+  projectId: string;
+  serviceId: string;
+  title: string;
+  dueDate?: string | null;
+  priority?: "low" | "medium" | "high" | "urgent";
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = CreateServiceTaskSchema.safeParse({
+    project_id: input.projectId,
+    service_id: input.serviceId,
+    title: input.title,
+    due_date: input.dueDate || null,
+    priority: input.priority ?? "medium",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const supa = await createServerSupabaseClient();
+
+  // Verify the project + service are in this org and the service is attached
+  // (so we don't create orphan tasks on services the project never bought).
+  const { data: project } = await supa
+    .from("projects")
+    .select("id, organization_id, name")
+    .eq("id", parsed.data.project_id)
+    .maybeSingle();
+  if (!project || project.organization_id !== session.orgId) {
+    return { error: "المشروع غير موجود" };
+  }
+  const { data: link } = await supa
+    .from("project_services")
+    .select("id")
+    .eq("project_id", parsed.data.project_id)
+    .eq("service_id", parsed.data.service_id)
+    .maybeSingle();
+  if (!link) return { error: "الخدمة غير مرتبطة بالمشروع" };
+
+  const { data: inserted, error } = await supa
+    .from("tasks")
+    .insert({
+      organization_id: session.orgId,
+      project_id: parsed.data.project_id,
+      service_id: parsed.data.service_id,
+      title: parsed.data.title,
+      priority: parsed.data.priority,
+      due_date: parsed.data.due_date,
+      created_by: session.userId,
+    })
+    .select("id, task_code")
+    .single();
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.create",
+    entityType: "task",
+    entityId: inserted.id,
+    metadata: {
+      project_id: parsed.data.project_id,
+      service_id: parsed.data.service_id,
+      via: "service_chip",
+    },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "TASK_CREATED",
+    entityType: "task",
+    entityId: inserted.id,
+    payload: {
+      title: parsed.data.title,
+      project_id: parsed.data.project_id,
+      service_id: parsed.data.service_id,
+    },
+    importance: "low",
+  });
+
+  revalidatePath(`/projects/${parsed.data.project_id}`);
+  return { ok: true };
+}
+
 export async function detachProjectServiceAction(input: {
   projectId: string;
   serviceId: string;
