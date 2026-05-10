@@ -1062,7 +1062,12 @@ export interface ReportsOdooData {
 // Build all reports KPIs from one big Odoo task fetch + one users batch lookup.
 // Used by /reports and the dashboard page (it can call this if it ever needs
 // the per-project / per-user breakdowns that getDashboardOdooMetrics omits).
-export async function getReportsOdooData(): Promise<ReportsOdooData> {
+//
+// Wrapped in unstable_cache (60s) + per-request cache() — same pattern as
+// getDashboardOdooMetrics. Reports tolerate ~1min staleness easily, and the
+// 10k-task pull dominates page wait if every render re-fetches.
+const _getReportsOdooDataUncached = unstable_cache(
+  async (): Promise<ReportsOdooData> => {
   const odoo = odooFromEnv();
 
   // Pre-load stage names
@@ -1219,7 +1224,12 @@ export async function getReportsOdooData(): Promise<ReportsOdooData> {
     agentLeaderboard: agentLeaderboard.slice(0, 10),
     projectCompliance,
   };
-}
+  },
+  ["reports-odoo-data-v1"],
+  { revalidate: 60, tags: ["odoo-reports"] },
+);
+
+export const getReportsOdooData = cache(_getReportsOdooDataUncached);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Governance violations — computed live from Odoo state
