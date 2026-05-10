@@ -106,32 +106,6 @@ export function DirectMessageDialog({
     });
   };
 
-  // Sky Light feedback #11: paginate older messages. Anchored to the
-  // earliest currently-loaded message's `created_at`. Preserves scroll
-  // position so the user lands roughly where they were after older
-  // messages prepend at the top.
-  const loadOlder = async () => {
-    if (loadingOlder || messages.length === 0) return;
-    const before = messages[0].created_at;
-    setLoadingOlder(true);
-    const prevScrollHeight = scrollRef.current?.scrollHeight ?? 0;
-    const res = await listConversationAction(recipientEmployeeId, 50, before);
-    setLoadingOlder(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
-    }
-    setMessages((prev) => [...res.messages, ...prev]);
-    setHasMore(res.hasMore);
-    requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        // Keep the user's view anchored at the message they were reading.
-        const nextScrollHeight = scrollRef.current.scrollHeight;
-        scrollRef.current.scrollTop = nextScrollHeight - prevScrollHeight;
-      }
-    });
-  };
-
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
