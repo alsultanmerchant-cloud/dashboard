@@ -103,7 +103,60 @@ export async function listTemplatesForServices(
     .eq("is_active", true)
     .in("service_id", serviceIds);
   if (error) throw error;
-  return (data ?? []).map((t) => ({
+  return (data ?? []).map((t) => mapTemplateRow(t));
+}
+
+// Same shape as listTemplatesForServices but no service-id filter, so the
+// new-project page can fetch the full active catalog in parallel with the
+// services list (avoids a sequential round-trip).
+export async function listAllActiveTemplates(
+  orgId: string,
+): Promise<TemplateWithItems[]> {
+  const { data, error } = await supabaseAdmin
+    .from("task_templates")
+    .select(
+      `id, service_id, category_id, name, default_owner_position,
+       deadline_offset_days, upload_offset_days, default_followers_positions,
+       task_template_items (
+         id, title, description, priority, default_role_key, default_department_id,
+         offset_days_from_project_start, duration_days,
+         upload_offset_days_before_deadline, week_index, order_index,
+         stage_owner_positions
+       )`,
+    )
+    .eq("organization_id", orgId)
+    .eq("is_active", true);
+  if (error) throw error;
+  return (data ?? []).map((t) => mapTemplateRow(t));
+}
+
+type RawTemplateRow = {
+  id: string;
+  service_id: string;
+  category_id: string | null;
+  name: string;
+  default_owner_position: string | null;
+  deadline_offset_days: number | null;
+  upload_offset_days: number | null;
+  default_followers_positions: unknown;
+  task_template_items: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    priority: string | null;
+    default_role_key: string | null;
+    default_department_id: string | null;
+    offset_days_from_project_start: number | null;
+    duration_days: number | null;
+    upload_offset_days_before_deadline: number | null;
+    week_index: number | null;
+    order_index: number | null;
+    stage_owner_positions?: Record<string, string | null> | null;
+  }> | null;
+};
+
+function mapTemplateRow(t: RawTemplateRow): TemplateWithItems {
+  return {
     id: t.id,
     service_id: t.service_id,
     category_id: t.category_id ?? null,
@@ -132,5 +185,5 @@ export async function listTemplatesForServices(
             .stage_owner_positions ?? null,
       }))
       .sort((a, b) => a.order_index - b.order_index),
-  }));
+  };
 }

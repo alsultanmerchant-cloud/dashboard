@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   Activity, AlertTriangle, BarChart3, ListChecks, Sparkles,
@@ -9,6 +10,8 @@ import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatRowSkeleton } from "@/components/skeletons";
 import { getReportsOdooData } from "@/lib/odoo/live";
 import {
   getRenewalForecast90d, getLatestStoredDigest,
@@ -34,21 +37,6 @@ function pctTone(pct: number | null): "success" | "warning" | "destructive" | "d
 
 export default async function ReportsPage() {
   const session = await requirePagePermission("reports.view");
-  // Reports KPIs come live from Odoo — single round-trip aggregator.
-  // Renewals + weekly digest stay Supabase-native (those concepts don't
-  // exist in Odoo).
-  const [reports, renewals, latestDigest, stageDwell, specialistLoad, slipBuckets] =
-    await Promise.all([
-      getReportsOdooData(),
-      getRenewalForecast90d(session.orgId),
-      getLatestStoredDigest(session.orgId),
-      getStageDwellAverages(session.orgId),
-      getSpecialistLoad(session.orgId),
-      getBehindScheduleBuckets(session.orgId),
-    ]);
-
-  const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
-  const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
 
   return (
     <div>
@@ -63,7 +51,6 @@ export default async function ReportsPage() {
         }
       />
 
-      {/* AI summary affordance + headline KPIs */}
       <Card className="mb-6 border-cyan/20">
         <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -79,6 +66,73 @@ export default async function ReportsPage() {
         </CardContent>
       </Card>
 
+      {/* Odoo-backed sections share one heavy fetch — wrap them together so we
+          pay the JSON-RPC round-trip once, but everything Supabase-backed
+          streams in independently below. */}
+      <Suspense fallback={<OdooSectionsFallback />}>
+        <OdooSections />
+      </Suspense>
+
+      <SectionTitle
+        title="متوسط البقاء في كل مرحلة"
+        description="بالأيام، محسوب من المقاطع المُغلقة في سجل المراحل"
+      />
+      <Suspense fallback={<ChartFallback />}>
+        <StageDwellSection orgId={session.orgId} />
+      </Suspense>
+
+      <SectionTitle
+        title="حِمل المتخصصين الحالي"
+        description="عدد المهام المفتوحة لكل منفذ، مع مجموع الساعات المخصصة"
+      />
+      <Suspense fallback={<ChartFallback />}>
+        <SpecialistLoadSection orgId={session.orgId} />
+      </Suspense>
+
+      <SectionTitle
+        title="توزّع التأخّر الزمني"
+        description="المهام المفتوحة مصنّفة حسب نسبة الانحراف عن الجدول الزمني"
+      />
+      <Suspense fallback={<ChartFallback />}>
+        <SlipHeatmapSection orgId={session.orgId} />
+      </Suspense>
+
+      <SectionTitle
+        title="توقّع التجديدات — التسعون يومًا القادمة"
+        description="مرتَّبة بحسب الأقرب موعدًا"
+        actions={
+          <Link href="/projects?filter=renewals_this_month" className="text-xs text-cyan hover:underline">
+            فتح المشاريع
+          </Link>
+        }
+      />
+      <Suspense fallback={<ListFallback />}>
+        <RenewalsSection orgId={session.orgId} />
+      </Suspense>
+
+      <Suspense fallback={<DigestFallback />}>
+        <DigestSection orgId={session.orgId} />
+      </Suspense>
+
+      <div className="mt-4 rounded-2xl border border-cyan/20 bg-cyan-dim/20 p-5 flex items-start gap-3">
+        <BarChart3 className="size-5 text-cyan shrink-0 mt-0.5" />
+        <div className="text-sm text-foreground/90 leading-relaxed">
+          مؤشرات الأداء (KPIs والمشاريع والأفراد) تُحسب مباشرة من Odoo عند كل فتح للصفحة. التجديدات والموجز الأسبوعي قراءة من قاعدة لوحة التحكم.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── Odoo-backed sections ─────────────────────────
+
+async function OdooSections() {
+  const reports = await getReportsOdooData();
+  const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
+  const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
+
+  return (
+    <>
       <SectionTitle
         title="مؤشرات الأسبوع"
         description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
@@ -106,16 +160,14 @@ export default async function ReportsPage() {
           tone={reports.reworkTotal > 0 ? "warning" : "default"}
         />
         <MetricCard
-          label="تجديدات قادمة (90 يومًا)"
-          value={renewals.length}
-          hint={renewals[0]?.client_name ? `أقرب: ${renewals[0].client_name}` : "لا تجديدات"}
+          label="مهام Odoo (آخر سحب)"
+          value={reports.agentLeaderboard.reduce((s, r) => s + r.closedCount, 0)}
+          hint="إغلاقات آخر 4 أسابيع"
           icon={<TrendingUp className="size-5" />}
-          tone={renewals.length > 0 ? "info" : "default"}
+          tone="info"
         />
       </div>
 
-      {/* Per-project SLA compliance — replaces per-department which required
-          mapping not present in Odoo. Worst 10 projects by % within deadline. */}
       <SectionTitle
         title="التزام الموعد النهائي حسب المشروع"
         description="نسبة المهام المفتوحة التي ما زالت ضمن الموعد — أسوأ 10 مشاريع"
@@ -153,7 +205,6 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {/* Rework heat-map by project */}
       <SectionTitle
         title="إعادة العمل حسب المشروع"
         description="عدد المهام في مرحلة Client Changes — يكشف المشاريع الأكثر إرهاقًا"
@@ -191,7 +242,6 @@ export default async function ReportsPage() {
         </Card>
       )}
 
-      {/* Agent leaderboard */}
       <SectionTitle
         title="لوحة الأفراد — آخر 4 أسابيع"
         description="عدد المهام المُغلقة + استخدام نسبيّ (من الأعلى إنتاجًا = 100%)"
@@ -227,99 +277,121 @@ export default async function ReportsPage() {
           </CardContent>
         </Card>
       )}
+    </>
+  );
+}
 
-      {/* Per-stage dwell time — Supabase-native, from task_stage_history. */}
+function OdooSectionsFallback() {
+  return (
+    <>
       <SectionTitle
-        title="متوسط البقاء في كل مرحلة"
-        description="بالأيام، محسوب من المقاطع المُغلقة في سجل المراحل"
+        title="مؤشرات الأسبوع"
+        description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
       />
-      {stageDwell.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا بيانات بعد — يحتاج لمهام عبرت أكثر من مرحلة.
-        </p>
-      ) : (
-        <Card className="mb-8">
-          <CardContent className="p-4">
-            <StageDwellChart rows={stageDwell} />
-          </CardContent>
-        </Card>
-      )}
+      <div className="mb-8">
+        <StatRowSkeleton count={4} />
+      </div>
+      <Skeleton className="h-48 w-full mb-8 rounded-2xl" />
+      <Skeleton className="h-48 w-full mb-8 rounded-2xl" />
+    </>
+  );
+}
 
-      {/* Specialist load — open tasks per agent + allocated hours. */}
-      <SectionTitle
-        title="حِمل المتخصصين الحالي"
-        description="عدد المهام المفتوحة لكل منفذ، مع مجموع الساعات المخصصة"
-      />
-      {specialistLoad.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا توجد مهام مفتوحة مُسندة.
-        </p>
-      ) : (
-        <Card className="mb-8">
-          <CardContent className="p-4">
-            <SpecialistLoadChart rows={specialistLoad} />
-          </CardContent>
-        </Card>
-      )}
+// ───────────────────── Supabase-backed sections ─────────────────────
 
-      {/* Behind-schedule heatmap — buckets by progress_slip_percent. */}
-      <SectionTitle
-        title="توزّع التأخّر الزمني"
-        description="المهام المفتوحة مصنّفة حسب نسبة الانحراف عن الجدول الزمني"
-      />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          <SlipHeatmapChart rows={slipBuckets} />
-        </CardContent>
-      </Card>
+async function StageDwellSection({ orgId }: { orgId: string }) {
+  const stageDwell = await getStageDwellAverages(orgId);
+  if (stageDwell.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
+        لا بيانات بعد — يحتاج لمهام عبرت أكثر من مرحلة.
+      </p>
+    );
+  }
+  return (
+    <Card className="mb-8">
+      <CardContent className="p-4">
+        <StageDwellChart rows={stageDwell} />
+      </CardContent>
+    </Card>
+  );
+}
 
-      {/* Renewal forecast (still Supabase-native) */}
-      <SectionTitle
-        title="توقّع التجديدات — التسعون يومًا القادمة"
-        description="مرتَّبة بحسب الأقرب موعدًا"
-        actions={
-          <Link href="/projects?filter=renewals_this_month" className="text-xs text-cyan hover:underline">
-            فتح المشاريع
-          </Link>
-        }
-      />
-      {renewals.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا تجديدات في الأفق.
-        </p>
-      ) : (
-        <Card className="mb-8">
-          <CardContent className="p-0">
-            <ul className="divide-y divide-white/[0.04]">
-              {renewals.slice(0, 12).map((r) => (
-                <li key={r.project_id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/projects/${r.project_id}`}
-                      className="text-sm font-medium hover:text-cyan transition-colors truncate"
-                    >
-                      {r.project_name}
-                    </Link>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
-                      {r.client_name}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end shrink-0">
-                    <span className="text-xs tabular-nums" dir="ltr">
-                      {r.next_renewal_date}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      بعد {r.days_until} يومًا
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+async function SpecialistLoadSection({ orgId }: { orgId: string }) {
+  const specialistLoad = await getSpecialistLoad(orgId);
+  if (specialistLoad.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
+        لا توجد مهام مفتوحة مُسندة.
+      </p>
+    );
+  }
+  return (
+    <Card className="mb-8">
+      <CardContent className="p-4">
+        <SpecialistLoadChart rows={specialistLoad} />
+      </CardContent>
+    </Card>
+  );
+}
 
-      {/* Weekly digest (Supabase-native) */}
+async function SlipHeatmapSection({ orgId }: { orgId: string }) {
+  const slipBuckets = await getBehindScheduleBuckets(orgId);
+  return (
+    <Card className="mb-8">
+      <CardContent className="p-4">
+        <SlipHeatmapChart rows={slipBuckets} />
+      </CardContent>
+    </Card>
+  );
+}
+
+async function RenewalsSection({ orgId }: { orgId: string }) {
+  const renewals = await getRenewalForecast90d(orgId);
+  if (renewals.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
+        لا تجديدات في الأفق.
+      </p>
+    );
+  }
+  return (
+    <Card className="mb-8">
+      <CardContent className="p-0">
+        <ul className="divide-y divide-white/[0.04]">
+          {renewals.slice(0, 12).map((r) => (
+            <li key={r.project_id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <Link
+                  href={`/projects/${r.project_id}`}
+                  className="text-sm font-medium hover:text-cyan transition-colors truncate"
+                >
+                  {r.project_name}
+                </Link>
+                <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
+                  {r.client_name}
+                </p>
+              </div>
+              <div className="flex flex-col items-end shrink-0">
+                <span className="text-xs tabular-nums" dir="ltr">
+                  {r.next_renewal_date}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  بعد {r.days_until} يومًا
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+async function DigestSection({ orgId }: { orgId: string }) {
+  const latestDigest = await getLatestStoredDigest(orgId);
+  return (
+    <>
       <SectionTitle
         title="موجز الأسبوع المخزَّن"
         description={
@@ -368,13 +440,27 @@ export default async function ReportsPage() {
           سيظهر هنا فور تشغيل أوّل دورة من weekly-digest.
         </p>
       )}
+    </>
+  );
+}
 
-      <div className="mt-4 rounded-2xl border border-cyan/20 bg-cyan-dim/20 p-5 flex items-start gap-3">
-        <BarChart3 className="size-5 text-cyan shrink-0 mt-0.5" />
-        <div className="text-sm text-foreground/90 leading-relaxed">
-          مؤشرات الأداء (KPIs والمشاريع والأفراد) تُحسب مباشرة من Odoo عند كل فتح للصفحة. التجديدات والموجز الأسبوعي قراءة من قاعدة لوحة التحكم.
-        </div>
-      </div>
-    </div>
+function ChartFallback() {
+  return <Skeleton className="h-48 w-full mb-8 rounded-2xl" />;
+}
+
+function ListFallback() {
+  return <Skeleton className="h-64 w-full mb-8 rounded-2xl" />;
+}
+
+function DigestFallback() {
+  return (
+    <>
+      <SectionTitle
+        title="موجز الأسبوع المخزَّن"
+        description="جاري التحميل..."
+        actions={<ListChecks className="size-4 text-muted-foreground" />}
+      />
+      <Skeleton className="h-32 w-full mb-8 rounded-2xl" />
+    </>
   );
 }

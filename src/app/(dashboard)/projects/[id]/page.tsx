@@ -17,7 +17,7 @@ import { formatArabicShortDate } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { GanttChart } from "lucide-react";
-import { TaskBoard, type BoardTask } from "./task-board";
+import { TaskBoard } from "./task-board";
 import { BulkReassignDialog } from "./bulk-reassign-dialog";
 import { listEmployees } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -43,9 +43,8 @@ export default async function ProjectDetailPage({
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
 
-  const [summary, tasks, holdActor] = await Promise.all([
+  const [summary, holdActor] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
-    loadTaskBoardForGlobalView(session.orgId, { projectId: project.id }),
     project.status === "on_hold"
       ? getProjectHoldActor(session.orgId, project.id)
       : Promise.resolve(null),
@@ -395,19 +394,41 @@ export default async function ProjectDetailPage({
 
       <SectionTitle
         title="لوحة المهام"
-        description={`${tasks.length} مهمة — اسحب البطاقة بين الأعمدة لتغيير المرحلة`}
+        description={`${summary.total} مهمة — اسحب البطاقة بين الأعمدة لتغيير المرحلة`}
       />
-      {tasks.length === 0 ? (
-        <EmptyState
-          title="لا توجد مهام بعد"
-          description="ستظهر هنا تلقائيًا عند ربط خدمة لها قالب مهام."
-          variant="compact"
-        />
-      ) : (
-        <TaskBoard tasks={tasks} />
-      )}
+      <Suspense
+        fallback={
+          <Card>
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              جاري تحميل لوحة المهام...
+            </CardContent>
+          </Card>
+        }
+      >
+        <ProjectTaskBoardSection orgId={session.orgId} projectId={project.id} />
+      </Suspense>
     </div>
   );
+}
+
+async function ProjectTaskBoardSection({
+  orgId,
+  projectId,
+}: {
+  orgId: string;
+  projectId: string;
+}) {
+  const tasks = await loadTaskBoardForGlobalView(orgId, { projectId });
+  if (tasks.length === 0) {
+    return (
+      <EmptyState
+        title="لا توجد مهام بعد"
+        description="ستظهر هنا تلقائيًا عند ربط خدمة لها قالب مهام."
+        variant="compact"
+      />
+    );
+  }
+  return <TaskBoard tasks={tasks} />;
 }
 
 async function BulkReassignSection({
@@ -627,9 +648,10 @@ async function ProjectDocumentsSection({
     supabaseAdmin
       .from("task_attachments")
       .select(
-        "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at, task:tasks!task_attachments_task_id_fkey ( id, task_code, project_id )",
+        "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at, task:tasks!task_attachments_task_id_fkey!inner ( id, task_code, project_id )",
       )
       .eq("organization_id", orgId)
+      .eq("task.project_id", projectId)
       .order("created_at", { ascending: false })
       .limit(500),
   ]);
@@ -648,10 +670,6 @@ async function ProjectDocumentsSection({
       | { id: string; task_code: string | null; project_id: string }[]
       | null;
   }>)
-    .filter((r) => {
-      const t = Array.isArray(r.task) ? r.task[0] : r.task;
-      return t?.project_id === projectId;
-    })
     .map((r) => {
       const t = Array.isArray(r.task) ? r.task[0] : r.task;
       return {

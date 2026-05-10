@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listClients } from "@/lib/data/clients";
 import { listAccountManagers, listEmployees, listServices } from "@/lib/data/employees";
-import { listServiceCategories, listTemplatesForServices } from "@/lib/data/service-categories";
+import { listAllActiveTemplates, listServiceCategories } from "@/lib/data/service-categories";
 import { PageHeader } from "@/components/page-header";
 import { NewProjectForm } from "./new-project-form";
 
@@ -11,20 +11,18 @@ export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
   const session = await requirePagePermission("projects.manage");
-  const [clients, services, ams, categories, employees] = await Promise.all([
-    listClients(session.orgId),
-    listServices(session.orgId),
-    listAccountManagers(session.orgId),
-    listServiceCategories(session.orgId),
-    listEmployees(session.orgId),
-  ]);
-
-  // Pre-fetch every active template-with-items so the preview pane can render
-  // entirely client-side without a round-trip on each tick of the date input.
-  const allTemplates = await listTemplatesForServices(
-    session.orgId,
-    services.map((s) => s.id),
-  );
+  const [clients, services, ams, categories, employees, allTemplates] =
+    await Promise.all([
+      listClients(session.orgId),
+      listServices(session.orgId),
+      listAccountManagers(session.orgId),
+      listServiceCategories(session.orgId),
+      listEmployees(session.orgId),
+      // Pre-fetch every active template-with-items so the preview pane can render
+      // entirely client-side. Fetched in parallel with services (no service-id
+      // filter) to avoid a sequential round-trip.
+      listAllActiveTemplates(session.orgId),
+    ]);
 
   return (
     <div className="space-y-4">
