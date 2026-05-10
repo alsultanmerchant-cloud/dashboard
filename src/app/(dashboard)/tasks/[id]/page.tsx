@@ -348,9 +348,7 @@ export default async function TaskDetailPage({
       </div>
 
       <div className="mb-6">
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل تفاصيل المهمة...</CardContent></Card>}>
-          <TaskFormSection orgId={session.orgId} taskId={task.id} />
-        </Suspense>
+        <TaskFormSection task={task} />
       </div>
 
       <SectionTitle
@@ -614,23 +612,26 @@ async function TaskRecordPagination({
 }) {
   if (!projectId) return null;
 
-  const { data: siblings } = await supabaseAdmin
-    .from("tasks")
-    .select("id")
-    .eq("organization_id", orgId)
-    .eq("project_id", projectId)
-    .order("created_at", { ascending: true });
-
-  if (!siblings?.length) return null;
-  const idx = siblings.findIndex((r) => r.id === taskId);
-  if (idx < 0) return null;
+  // Window functions inside `task_record_pagination` (migration 0086) compute
+  // position/total/prev/next directly. Replaces the previous full-sibling-id
+  // fetch — which sent up to N uuids over the wire just to walk to the
+  // current task's index — with a fixed-size jsonb payload.
+  const { data } = await supabaseAdmin.rpc("task_record_pagination", {
+    p_org_id: orgId,
+    p_project_id: projectId,
+    p_task_id: taskId,
+  });
+  const result = data as
+    | { position: number; total: number; prevId: string | null; nextId: string | null }
+    | null;
+  if (!result) return null;
 
   return (
     <RecordPagination
-      position={idx + 1}
-      total={siblings.length}
-      prevId={idx > 0 ? siblings[idx - 1].id : null}
-      nextId={idx < siblings.length - 1 ? siblings[idx + 1].id : null}
+      position={result.position}
+      total={result.total}
+      prevId={result.prevId}
+      nextId={result.nextId}
       basePath="/tasks"
     />
   );
@@ -643,53 +644,35 @@ async function TaskSmartButtonsSection({
   orgId: string;
   taskId: string;
 }) {
-  const [subtasks, outgoingLinks, incomingLinks, comments, openActivities, timesheets] =
-    await Promise.all([
-      supabaseAdmin
-        .from("tasks")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("parent_task_id", taskId),
-      supabaseAdmin
-        .from("task_links")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("source_task_id", taskId),
-      supabaseAdmin
-        .from("task_links")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("target_task_id", taskId),
-      supabaseAdmin
-        .from("task_comments")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("task_id", taskId),
-      supabaseAdmin
-        .from("task_activities")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("task_id", taskId)
-        .is("completed_at", null),
-      supabaseAdmin
-        .from("task_timesheets")
-        .select("hours")
-        .eq("organization_id", orgId)
-        .eq("task_id", taskId),
-    ]);
-
-  const timesheetHours = (timesheets.data ?? []).reduce(
-    (sum, row) => sum + Number(row.hours ?? 0),
-    0,
-  );
+  // One RPC instead of six concurrent PostgREST head/count queries; see
+  // migration 0086. Halves wall-clock for this Suspense slot (~0.9s → ~0.45s).
+  const { data } = await supabaseAdmin.rpc("task_smart_button_counts", {
+    p_org_id: orgId,
+    p_task_id: taskId,
+  });
+  const counts = (data ?? {
+    subtaskCount: 0,
+    outgoingLinks: 0,
+    incomingLinks: 0,
+    commentCount: 0,
+    openActivities: 0,
+    timesheetHours: 0,
+  }) as {
+    subtaskCount: number;
+    outgoingLinks: number;
+    incomingLinks: number;
+    commentCount: number;
+    openActivities: number;
+    timesheetHours: number | string;
+  };
 
   return (
     <TaskSmartButtons
-      subtaskCount={subtasks.count ?? 0}
-      linkCount={(outgoingLinks.count ?? 0) + (incomingLinks.count ?? 0)}
-      timesheetHours={timesheetHours}
-      commentCount={comments.count ?? 0}
-      openActivityCount={openActivities.count ?? 0}
+      subtaskCount={counts.subtaskCount}
+      linkCount={counts.outgoingLinks + counts.incomingLinks}
+      timesheetHours={Number(counts.timesheetHours) || 0}
+      commentCount={counts.commentCount}
+      openActivityCount={counts.openActivities}
     />
   );
 }
@@ -806,16 +789,16 @@ async function TaskFollowersSection({
   );
 }
 
-async function TaskFormSection({
-  orgId,
-  taskId,
+function TaskFormSection({
+  task,
 }: {
-  orgId: string;
-  taskId: string;
+  task: NonNullable<Awaited<ReturnType<typeof getTaskSummary>>>;
 }) {
-  const task = await getTask(orgId, taskId);
-  if (!task) return null;
-
+  // Renders synchronously from the eager getTaskSummary result the parent
+  // already awaited — the previous version did its own getTask() round trip
+  // inside the Suspense boundary, which duplicated everything getTaskSummary
+  // already had. getTaskSummary now selects all the form-card fields too
+  // (see src/lib/data/tasks.ts).
   const project = Array.isArray(task.project) ? task.project[0] : task.project;
   const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
   const service = Array.isArray(task.service) ? task.service[0] : task.service;

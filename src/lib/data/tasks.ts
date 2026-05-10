@@ -246,6 +246,9 @@ export async function getTask(orgId: string, id: string) {
 }
 
 export async function getTaskSummary(orgId: string, id: string) {
+  // Includes the form-card fields (allocated_time_minutes, progress_*,
+  // hold_*, etc.) so /tasks/[id] doesn't need a second `getTask()` round
+  // trip inside its TaskFormSection Suspense boundary.
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(`
@@ -253,6 +256,9 @@ export async function getTaskSummary(orgId: string, id: string) {
       completed_at, stage_entered_at, project_id, created_by, task_code,
       approval_required, approval_status, first_approver_id,
       approval_requested_at, approval_decided_at, stage_owner_positions,
+      actual_done_date, allocated_time_minutes,
+      progress_percent, expected_progress_percent, progress_slip_percent,
+      delay_days, hold_reason, hold_since,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name, slug ),
       task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
