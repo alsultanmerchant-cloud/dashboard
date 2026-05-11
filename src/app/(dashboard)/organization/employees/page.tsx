@@ -1,35 +1,60 @@
-import Link from "next/link";
-import { Users, Mail, Phone, ChevronLeft } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
-import { listLiveEmployeesPaged } from "@/lib/odoo/live";
-import { listDepartments } from "@/lib/data/employees";
+import { Users } from "lucide-react";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import { listEmployees, listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { Pagination } from "@/components/pagination";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
-  DataTableRow, DataTableCell,
-} from "@/components/data-table-shell";
 import { ROLE_LABELS } from "@/lib/labels";
 import { InviteEmployeeDialog } from "./invite-employee-dialog";
+import { EmployeesAdmin, type EmployeeRow, type DeptOption } from "./employees-admin";
 
-const PAGE_SIZE = 25;
+// One-page employee management for the owner.
+// • Reads local employee_profiles (not Odoo live) so it can edit them.
+// • Inline edit / soft-delete (terminate) / restore / hard-delete with
+//   typed confirmation — all gated on `employees.manage`.
+// • Invite dialog remains for adding new staff with login.
 
-export default async function EmployeesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ page?: string }>;
-}) {
+export default async function EmployeesPage() {
   const session = await requirePagePermission("employees.view");
-  const sp = await searchParams;
-  const page = Math.max(1, Number(sp.page) || 1);
-  const [{ rows: employees, total }, departments, roleOptions] = await Promise.all([
-    listLiveEmployeesPaged({ page, pageSize: PAGE_SIZE }),
+  const canManage = hasPermission(session, "employees.manage");
+
+  const [employees, departments, roleOptions] = await Promise.all([
+    listEmployees(session.orgId),
     listDepartments(session.orgId),
     listOrgRoleOptions(session.orgId),
   ]);
+
+  // Build a deptId → name lookup + manager_employee_id → full_name lookup so
+  // the table can show resolved labels without extra round trips.
+  const deptById = new Map<string, string>(
+    departments.map((d) => [d.id, d.name]),
+  );
+  const empById = new Map<string, string>(
+    employees.map((e) => [e.id, e.full_name]),
+  );
+
+  const rows: EmployeeRow[] = employees.map((e) => ({
+    id: e.id,
+    user_id: e.user_id ?? null,
+    full_name: e.full_name,
+    email: e.email ?? null,
+    phone: e.phone ?? null,
+    job_title: e.job_title ?? null,
+    position: (e as { position?: string | null }).position ?? null,
+    employment_status: e.employment_status ?? "active",
+    department_id: e.department_id ?? null,
+    department_name: e.department_id ? (deptById.get(e.department_id) ?? null) : null,
+    manager_employee_id: (e as { manager_employee_id?: string | null }).manager_employee_id ?? null,
+    manager_name: (e as { manager_employee_id?: string | null }).manager_employee_id
+      ? (empById.get((e as { manager_employee_id?: string }).manager_employee_id!) ?? null)
+      : null,
+    external_source: (e as { external_source?: string | null }).external_source ?? null,
+  }));
+
+  const deptOptions: DeptOption[] = departments.map((d) => ({
+    id: d.id,
+    name: d.name,
+  }));
 
   const inviteButton = (
     <InviteEmployeeDialog
@@ -39,7 +64,10 @@ export default async function EmployeesPage({
         kind: d.kind,
         parent_department_id: d.parent_department_id,
       }))}
-      roles={roleOptions.map((r) => ({ id: r.id, label: ROLE_LABELS[r.key] ?? r.name }))}
+      roles={roleOptions.map((r) => ({
+        id: r.id,
+        label: ROLE_LABELS[r.key] ?? r.name,
+      }))}
     />
   );
 
@@ -47,92 +75,23 @@ export default async function EmployeesPage({
     <div>
       <PageHeader
         title="الموظفون"
-        description="فريق الوكالة من Odoo — الأقسام والمسميات الوظيفية."
-        actions={inviteButton}
+        description="إدارة كاملة لفريق الوكالة — إضافة، تعديل، إنهاء خدمة، أو حذف نهائي."
+        actions={canManage ? inviteButton : null}
       />
 
-      {total === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={<Users className="size-6" />}
           title="لا يوجد موظفون"
-          description="لا يوجد موظفون نشطون في Odoo حالياً."
-          action={inviteButton}
+          description="ابدأ بإضافة أول موظف للوكالة."
+          action={canManage ? inviteButton : null}
         />
       ) : (
-        <DataTableShell>
-          <DataTable>
-            <DataTableHead>
-              <tr>
-                <DataTableHeaderCell>الموظف</DataTableHeaderCell>
-                <DataTableHeaderCell>المسمى</DataTableHeaderCell>
-                <DataTableHeaderCell>القسم</DataTableHeaderCell>
-                <DataTableHeaderCell>المدير المباشر</DataTableHeaderCell>
-                <DataTableHeaderCell>التواصل</DataTableHeaderCell>
-                <DataTableHeaderCell aria-label="إجراءات" />
-              </tr>
-            </DataTableHead>
-            <tbody>
-              {employees.map((e) => (
-                <DataTableRow key={e.odooId}>
-                  <DataTableCell>
-                    <Link
-                      href={`/organization/employees/odoo/${e.odooId}`}
-                      className="flex items-center gap-2.5 hover:text-cyan transition-colors"
-                    >
-                      <Avatar size="sm">
-                        <AvatarFallback>{e.name[0]}</AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{e.name}</p>
-                        {e.email && (
-                          <p className="text-[11px] text-muted-foreground" dir="ltr">{e.email}</p>
-                        )}
-                      </div>
-                    </Link>
-                  </DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground">
-                    {e.jobTitle ?? "—"}
-                  </DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground">
-                    {e.departmentName ?? "—"}
-                  </DataTableCell>
-                  <DataTableCell className="text-xs text-muted-foreground">
-                    {e.managerName ?? "—"}
-                  </DataTableCell>
-                  <DataTableCell>
-                    <div className="flex flex-col gap-1 text-[11px]">
-                      {e.phone && (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground" dir="ltr">
-                          <Phone className="size-3" /> {e.phone}
-                        </span>
-                      )}
-                      {e.email && (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground" dir="ltr">
-                          <Mail className="size-3" /> {e.email}
-                        </span>
-                      )}
-                    </div>
-                  </DataTableCell>
-                  <DataTableCell>
-                    <Link
-                      href={`/organization/employees/odoo/${e.odooId}`}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
-                      aria-label="فتح"
-                    >
-                      <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                    </Link>
-                  </DataTableCell>
-                </DataTableRow>
-              ))}
-            </tbody>
-          </DataTable>
-        </DataTableShell>
-      )}
-
-      {total > 0 && (
-        <div className="mt-4">
-          <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />
-        </div>
+        <EmployeesAdmin
+          rows={rows}
+          departments={deptOptions}
+          canManage={canManage}
+        />
       )}
     </div>
   );

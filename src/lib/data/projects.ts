@@ -123,6 +123,31 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   if (error) throw error;
   const bundle = (data ?? { rows: [], total: 0, totals: { projects: 0, tasks: 0, withManager: 0 } }) as BundleResult;
 
+  // Custom project_tags (HOLD, Urgent, …) attached to the visible rows.
+  // One round-trip per page keeps render fast; tags are tiny by definition.
+  const projectIds = bundle.rows.map((r) => r.id);
+  type TagAssignmentRow = {
+    project_id: string;
+    tag: { id: string; name: string; color: number }
+      | { id: string; name: string; color: number }[]
+      | null;
+  };
+  const tagsByProject = new Map<string, { id: string; name: string; color: number }[]>();
+  if (projectIds.length > 0) {
+    const { data: tagRows } = await supabaseAdmin
+      .from("project_tag_assignments")
+      .select("project_id, tag:project_tags ( id, name, color )")
+      .eq("organization_id", opts.organizationId)
+      .in("project_id", projectIds);
+    for (const row of (tagRows ?? []) as TagAssignmentRow[]) {
+      const t = Array.isArray(row.tag) ? row.tag[0] : row.tag;
+      if (!t) continue;
+      const list = tagsByProject.get(row.project_id) ?? [];
+      list.push(t);
+      tagsByProject.set(row.project_id, list);
+    }
+  }
+
   const mapped: LiveProject[] = bundle.rows.map((r) => {
     const odooId = externalToOdooId(r.external_id);
     return {
@@ -156,6 +181,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       stageName: null,
       siteAddress: r.client?.address ?? null,
       members: r.members.map((m) => ({ name: m.full_name, avatarUrl: m.avatar_url })),
+      customTags: tagsByProject.get(r.id) ?? [],
     };
   });
 
@@ -211,6 +237,41 @@ export async function listProjects(orgId: string) {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
+}
+
+// Project tags surfaced from the org-wide `project_tags` table. The detail
+// page reads both lists in parallel — attached chips drive the panel display,
+// `all` feeds the search-and-pick combobox.
+export type ProjectTagRow = { id: string; name: string; color: number };
+export async function getProjectTagsForProject(
+  orgId: string,
+  projectId: string,
+): Promise<{ attached: ProjectTagRow[]; all: ProjectTagRow[] }> {
+  const [attachedRes, allRes] = await Promise.all([
+    supabaseAdmin
+      .from("project_tag_assignments")
+      .select("tag:project_tags ( id, name, color )")
+      .eq("organization_id", orgId)
+      .eq("project_id", projectId),
+    supabaseAdmin
+      .from("project_tags")
+      .select("id, name, color")
+      .eq("organization_id", orgId)
+      .order("name", { ascending: true }),
+  ]);
+  if (attachedRes.error) throw attachedRes.error;
+  if (allRes.error) throw allRes.error;
+
+  type AttRow = {
+    tag: ProjectTagRow | ProjectTagRow[] | null;
+  };
+  const attached: ProjectTagRow[] = (attachedRes.data ?? [])
+    .map((row) => {
+      const t = (row as AttRow).tag;
+      return Array.isArray(t) ? t[0] : t;
+    })
+    .filter((t): t is ProjectTagRow => Boolean(t));
+  return { attached, all: (allRes.data ?? []) as ProjectTagRow[] };
 }
 
 export async function getProject(orgId: string, id: string) {

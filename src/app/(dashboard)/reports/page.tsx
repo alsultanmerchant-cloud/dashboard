@@ -20,11 +20,13 @@ import {
   getStageDwellAverages,
   getSpecialistLoad,
   getBehindScheduleBuckets,
+  getDesignerMonthlyOutput,
 } from "@/lib/data/reports-extras";
 import { SummarizeWeekButton } from "./summarize-week-button";
 import { StageDwellChart } from "./stage-dwell-chart";
 import { SpecialistLoadChart } from "./specialist-load-chart";
 import { SlipHeatmapChart } from "./slip-heatmap-chart";
+import { DesignerMonthlyOutput } from "./designer-monthly-output";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +37,23 @@ function pctTone(pct: number | null): "success" | "warning" | "destructive" | "d
   return "destructive";
 }
 
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ designerMonth?: string }>;
+}) {
   const session = await requirePagePermission("reports.view");
+  const sp = (await searchParams) ?? {};
+  // Default the picker to "this month" so the page renders sensibly without
+  // any URL param. Parsing is forgiving — bad input falls back to today.
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthParam = typeof sp.designerMonth === "string" && /^\d{4}-\d{2}$/.test(sp.designerMonth)
+    ? sp.designerMonth
+    : defaultMonth;
+  const [yearStr, monthStr] = monthParam.split("-");
+  const designerYear = parseInt(yearStr, 10);
+  const designerMonth = parseInt(monthStr, 10);
 
   return (
     <div>
@@ -87,6 +104,19 @@ export default async function ReportsPage() {
       />
       <Suspense fallback={<ChartFallback />}>
         <SpecialistLoadSection orgId={session.orgId} />
+      </Suspense>
+
+      <SectionTitle
+        title="إنتاج المصممين شهريًا"
+        description="مجموع التصاميم والتعديلات لكل موظف على المهام المُغلَقة في الشهر المحدد"
+      />
+      <Suspense fallback={<ChartFallback />}>
+        <DesignerOutputSection
+          orgId={session.orgId}
+          year={designerYear}
+          month={designerMonth}
+          monthParam={monthParam}
+        />
       </Suspense>
 
       <SectionTitle
@@ -333,6 +363,21 @@ async function SpecialistLoadSection({ orgId }: { orgId: string }) {
       </CardContent>
     </Card>
   );
+}
+
+async function DesignerOutputSection({
+  orgId,
+  year,
+  month,
+  monthParam,
+}: {
+  orgId: string;
+  year: number;
+  month: number;
+  monthParam: string;
+}) {
+  const rows = await getDesignerMonthlyOutput(orgId, year, month);
+  return <DesignerMonthlyOutput rows={rows} selectedMonth={monthParam} />;
 }
 
 async function SlipHeatmapSection({ orgId }: { orgId: string }) {

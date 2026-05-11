@@ -24,22 +24,39 @@ export function HolidaysForm({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [date, setDate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [name, setName] = useState("");
   const [recurring, setRecurring] = useState(false);
 
   const onAdd = () =>
     start(async () => {
-      if (!date) return toast.error("اختر التاريخ");
+      if (!startDate) return toast.error("اختر تاريخ البداية");
+      if (endDate && endDate < startDate)
+        return toast.error("تاريخ النهاية يجب أن يكون بعد البداية");
       if (name.trim().length < 2) return toast.error("اكتب اسم الإجازة");
       const res = await createHolidayAction({
-        date,
+        startDate,
+        endDate: endDate || null,
         name: name.trim(),
         recurring,
       });
       if ("error" in res) return toast.error(res.error);
-      toast.success("أُضيفت الإجازة");
-      setDate("");
+      const s = res.summary;
+      const rangeLabel =
+        s.start === s.end ? s.start : `${s.start} → ${s.end}`;
+      if (s.affected_tasks === 0) {
+        toast.success(
+          `أُضيفت الإجازة (${rangeLabel}). لم تتأثر أي مهام نشطة.`,
+        );
+      } else {
+        toast.success(
+          `أُضيفت الإجازة (${rangeLabel}). تم ترحيل ${s.affected_tasks} مهمة عبر ${s.affected_projects} مشروع.`,
+          { duration: 8000 },
+        );
+      }
+      setStartDate("");
+      setEndDate("");
       setName("");
       setRecurring(false);
       router.refresh();
@@ -56,16 +73,31 @@ export function HolidaysForm({
   return (
     <div className="space-y-4">
       {canManage && (
-        <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[auto_1fr_auto_auto]">
+        <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[auto_auto_1fr_auto_auto]">
           <div className="grid gap-1">
-            <label className="text-xs font-medium text-muted-foreground">التاريخ</label>
+            <label className="text-xs font-medium text-muted-foreground">من</label>
             <Input
               type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
               dir="ltr"
               className="h-9"
               disabled={pending}
+            />
+          </div>
+          <div className="grid gap-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              إلى (اختياري)
+            </label>
+            <Input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              min={startDate || undefined}
+              dir="ltr"
+              className="h-9"
+              disabled={pending}
+              title="اتركه فارغًا ليوم واحد"
             />
           </div>
           <div className="grid gap-1">

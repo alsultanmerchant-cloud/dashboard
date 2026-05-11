@@ -104,12 +104,13 @@ type FilterKey =
   | "starred"
   | "followed"
   | "has_start_date"
-  | "has_end_date";
+  | "has_end_date"
+  | "no_deadline";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
   "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
-  "has_start_date", "has_end_date",
+  "has_start_date", "has_end_date", "no_deadline",
 ]);
 
 function parseFilterKeys(raw: string | undefined, legacy: string | undefined): Set<FilterKey> {
@@ -221,6 +222,7 @@ export default async function TasksPage({
     starred: active.has("starred"),
     hasStartDate: active.has("has_start_date"),
     hasEndDate: active.has("has_end_date"),
+    noDeadline: active.has("no_deadline"),
     followedByUserId: active.has("followed") ? session.userId : undefined,
     assignedToEmployeeId: active.has("mine") ? session.employeeId : undefined,
     projectId: resolvedProjectId,

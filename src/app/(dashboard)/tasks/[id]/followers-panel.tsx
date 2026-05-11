@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { cn } from "@/lib/utils";
 import { addFollowerAction, removeFollowerAction } from "./_actions";
 
@@ -51,7 +52,7 @@ export function FollowersPanel({
   const [activeIndex, setActiveIndex] = useState(0);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const normalized = (s: string) => s.toLowerCase();
@@ -70,19 +71,10 @@ export function FollowersPanel({
     setActiveIndex((i) => Math.min(Math.max(0, i), Math.max(0, filtered.length - 1)));
   }, [filtered.length]);
 
-  // Focus the search input when the popover opens, and close on outside click.
+  // Focus the search input when the popover opens. Outside-click + Esc is
+  // handled by the AnchoredPopover wrapper below.
   useEffect(() => {
-    if (!picking) return;
-    inputRef.current?.focus();
-    function onPointerDown(e: PointerEvent) {
-      if (!popoverRef.current) return;
-      if (!popoverRef.current.contains(e.target as Node)) {
-        setPicking(false);
-        setQuery("");
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    if (picking) inputRef.current?.focus();
   }, [picking]);
 
   function add(userId: string) {
@@ -136,9 +128,17 @@ export function FollowersPanel({
   return (
     <div className="space-y-3">
       {followers.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          لا يوجد متابعون بعد. أضف من تريد إبقاءه على اطلاع دون إسناد دور تنفيذي.
-        </p>
+        <div className="rounded-xl border border-dashed border-soft-2 bg-soft-1/40 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">
+            لا يوجد متابعون بعد
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            أضف من تريد إبقاءه على اطلاع دون إسناد دور تنفيذي.
+            {canManage && candidates.length > 0 && (
+              <> اضغط «إضافة متابع» أدناه ({candidates.length} متاح).</>
+            )}
+          </p>
+        </div>
       ) : (
         <ul className="flex flex-wrap gap-2">
           {followers.map((f) => (
@@ -178,30 +178,41 @@ export function FollowersPanel({
       )}
 
       {canManage && (
-        <div className="relative" ref={popoverRef}>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPicking((v) => !v)}
-            disabled={candidates.length === 0}
-            aria-haspopup="listbox"
-            aria-expanded={picking}
-          >
-            <UserPlus className="size-3.5" />
-            إضافة متابع
-          </Button>
+        <div>
+          <span ref={triggerRef} className="inline-block">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPicking((v) => !v)}
+              disabled={candidates.length === 0}
+              aria-haspopup="listbox"
+              aria-expanded={picking}
+            >
+              <UserPlus className="size-3.5" />
+              إضافة متابع
+              {candidates.length > 0 && (
+                <span className="ms-1 rounded-full bg-cyan-dim px-1.5 text-[10px] text-cyan">
+                  {candidates.length}
+                </span>
+              )}
+            </Button>
+          </span>
           {!picking && candidates.length === 0 && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               كل الزملاء النشطين متابعون بالفعل.
             </p>
           )}
-          {picking && (
-            <div
-              className="absolute z-30 mt-1.5 w-72 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
-              role="dialog"
-              aria-label="اختر متابعًا"
-            >
+          <AnchoredPopover
+            anchorRef={triggerRef}
+            open={picking}
+            onClose={() => {
+              setPicking(false);
+              setQuery("");
+            }}
+            className="z-50 w-72 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
+          >
+            <div role="dialog" aria-label="اختر متابعًا">
               <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
                 <Search className="size-3.5 shrink-0 text-muted-foreground" />
                 <input
@@ -290,7 +301,7 @@ export function FollowersPanel({
                 </button>
               </div>
             </div>
-          )}
+          </AnchoredPopover>
         </div>
       )}
     </div>

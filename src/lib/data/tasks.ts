@@ -24,6 +24,10 @@ export type TaskFilters = {
   // "Has End Date" presets. start = planned_date, end = due_date.
   hasStartDate?: boolean;
   hasEndDate?: boolean;
+  // True → planned_date IS NULL AND due_date IS NULL. Sky Light "tasks
+  // without a deadline" filter. Applied post-fetch so we don't need a new
+  // RPC parameter; cheap because the bundle is already capped at LIMIT.
+  noDeadline?: boolean;
   // Auth user id whose followed tasks should be included.
   followedByUserId?: string;
   assignedToEmployeeId?: string;
@@ -160,7 +164,15 @@ async function fetchTaskBundle(
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [] }) as TaskBundleResult;
-  return bundle.rows;
+  let rows = bundle.rows;
+  if (filters.noDeadline) {
+    rows = rows.filter(
+      (r) =>
+        (r as { planned_date?: string | null }).planned_date == null &&
+        (r as { due_date?: string | null }).due_date == null,
+    );
+  }
+  return rows;
 }
 
 export async function listTasks(orgId: string, filters: TaskFilters = {}) {
@@ -255,7 +267,7 @@ export async function getTask(orgId: string, id: string) {
       *,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name ),
-      task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
+      task_assignees ( id, role_type, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, avatar_url, job_title, position, department:departments!employee_profiles_department_id_fkey ( id, name ) ) )
     `)
     .eq("organization_id", orgId)
     .eq("id", id)
@@ -278,9 +290,10 @@ export async function getTaskSummary(orgId: string, id: string) {
       actual_done_date, allocated_time_minutes,
       progress_percent, expected_progress_percent, progress_slip_percent,
       delay_days, hold_reason, hold_since,
+      design_count, revision_count,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name, slug ),
-      task_assignees ( id, role_type, employee:employee_profiles ( id, full_name, avatar_url, job_title ) )
+      task_assignees ( id, role_type, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, avatar_url, job_title, position, department:departments!employee_profiles_department_id_fkey ( id, name ) ) )
     `)
     .eq("organization_id", orgId)
     .eq("id", id)

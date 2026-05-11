@@ -144,3 +144,108 @@ export async function getBehindScheduleBuckets(
     count: buckets[b],
   }));
 }
+
+// Designer monthly output: for the given YYYY-MM, sum design_count and
+// revision_count over every task whose completed_at falls in that month,
+// grouped by each task's assignees (every role_type — the same task can be
+// shared between a designer + reviewer). Used by the monthly closing flow:
+// the manager picks a month and reads off totals per employee.
+export async function getDesignerMonthlyOutput(
+  orgId: string,
+  year: number,
+  month: number,
+): Promise<Array<{
+  employee_id: string;
+  full_name: string;
+  job_title: string | null;
+  design_total: number;
+  revision_total: number;
+  task_count: number;
+}>> {
+  // Month range: [YYYY-MM-01, next-month-01).
+  const start = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+  const end = new Date(Date.UTC(year, month, 1)).toISOString();
+
+  // Tasks closed in the window that have at least one count > 0.
+  const { data: tasks, error: tErr } = await supabaseAdmin
+    .from("tasks")
+    .select("id, design_count, revision_count")
+    .eq("organization_id", orgId)
+    .gte("completed_at", start)
+    .lt("completed_at", end)
+    .or("design_count.gt.0,revision_count.gt.0");
+  if (tErr) throw tErr;
+
+  if (!tasks || tasks.length === 0) return [];
+
+  const taskIds = tasks.map((t) => t.id as string);
+  const taskMap = new Map<
+    string,
+    { design: number; revision: number }
+  >();
+  for (const t of tasks) {
+    taskMap.set(t.id as string, {
+      design: (t as { design_count: number }).design_count ?? 0,
+      revision: (t as { revision_count: number }).revision_count ?? 0,
+    });
+  }
+
+  // Pull every assignee on those tasks.
+  const { data: assignees, error: aErr } = await supabaseAdmin
+    .from("task_assignees")
+    .select("task_id, employee:employee_profiles ( id, full_name, job_title )")
+    .eq("organization_id", orgId)
+    .in("task_id", taskIds);
+  if (aErr) throw aErr;
+
+  // Aggregate per employee. The same employee on multiple roles for one task
+  // must only count once for that task's totals — dedupe with a Set keyed on
+  // (employee_id, task_id).
+  const totals = new Map<
+    string,
+    {
+      employee_id: string;
+      full_name: string;
+      job_title: string | null;
+      design_total: number;
+      revision_total: number;
+      task_count: number;
+    }
+  >();
+  const seen = new Set<string>();
+
+  for (const row of (assignees ?? []) as Array<{
+    task_id: string;
+    employee:
+      | { id: string; full_name: string; job_title: string | null }
+      | { id: string; full_name: string; job_title: string | null }[]
+      | null;
+  }>) {
+    const emp = Array.isArray(row.employee) ? row.employee[0] : row.employee;
+    if (!emp) continue;
+    const dedupeKey = `${emp.id}:${row.task_id}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const taskCounts = taskMap.get(row.task_id);
+    if (!taskCounts) continue;
+
+    const entry = totals.get(emp.id) ?? {
+      employee_id: emp.id,
+      full_name: emp.full_name,
+      job_title: emp.job_title ?? null,
+      design_total: 0,
+      revision_total: 0,
+      task_count: 0,
+    };
+    entry.design_total += taskCounts.design;
+    entry.revision_total += taskCounts.revision;
+    entry.task_count += 1;
+    totals.set(emp.id, entry);
+  }
+
+  return Array.from(totals.values()).sort(
+    (a, b) =>
+      b.design_total + b.revision_total - (a.design_total + a.revision_total),
+  );
+}

@@ -69,6 +69,42 @@ function rowToNotification(row: NotificationRow): AppNotification {
   };
 }
 
+// Poll DM unread for the current user. Used to badge the chat icon in the
+// topbar so the user knows when someone DM'd them without opening /messages.
+function DmUnreadLoader({
+  onChange,
+}: {
+  onChange: (count: number) => void;
+}) {
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!user?.id || !user.orgId) return;
+    let cancelled = false;
+    const supabase = createClient();
+    const load = () => {
+      void supabase
+        .from("direct_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", user.orgId)
+        .eq("recipient_user_id", user.id)
+        .is("read_at", null)
+        .then(({ count }) => {
+          if (!cancelled) onChange(count ?? 0);
+        });
+    };
+    load();
+    // Cheap re-check every 60s — same cadence the notification panel uses
+    // implicitly via realtime; DM channel events would be more responsive
+    // but a poll is enough to badge the icon.
+    const t = window.setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [user?.id, user?.orgId, onChange]);
+  return null;
+}
+
 function NotificationsLoader({
   onLoad,
 }: {
@@ -129,6 +165,7 @@ export function DashboardShell({
   const [notifOpen, setNotifOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [dmUnreadCount, setDmUnreadCount] = useState(0);
 
   const addNotifications = useCallback((next: AppNotification[]) => {
     setNotifications((prev) => {
@@ -151,12 +188,14 @@ export function DashboardShell({
         <TopbarProvider>
           <CommandPaletteProvider />
           <NotificationsLoader onLoad={addNotifications} />
+          <DmUnreadLoader onChange={setDmUnreadCount} />
           <div className="min-h-screen bg-background panel-grid">
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
             <div className="min-h-screen">
               <Topbar
                 unreadCount={unreadCount}
+                dmUnreadCount={dmUnreadCount}
                 onBellClick={() => setNotifOpen((p) => !p)}
                 onMenuClick={() => setSidebarOpen(true)}
                 notificationPanel={

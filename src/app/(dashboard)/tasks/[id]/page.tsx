@@ -73,6 +73,12 @@ const ActivitiesTab = dynamic(
 const AttachmentsTab = dynamic(
   () => import("./attachments-tab").then((mod) => ({ default: mod.AttachmentsTab })),
 );
+const TaskAssigneesPanel = dynamic(
+  () =>
+    import("./task-assignees-panel").then((mod) => ({
+      default: mod.TaskAssigneesPanel,
+    })),
+);
 
 type TaskLinkRow = import("./task-links-panel").TaskLinkRow;
 type SubtaskRow = import("./subtasks-tab").SubtaskRow;
@@ -148,6 +154,8 @@ export default async function TaskDetailPage({
       id: string;
       full_name: string;
       job_title: string | null;
+      position: string | null;
+      department_name: string | null;
       avatar_url: string | null;
       role_types: TaskRoleType[];
     }[] = [];
@@ -162,10 +170,14 @@ export default async function TaskDetailPage({
         continue;
       }
       seen.add(e.id);
+      const dept = (e as { department?: { id: string; name: string } | { id: string; name: string }[] | null }).department;
+      const deptObj = Array.isArray(dept) ? dept[0] : dept;
       out.push({
         id: e.id,
         full_name: e.full_name,
         job_title: e.job_title ?? null,
+        position: (e as { position?: string | null }).position ?? null,
+        department_name: deptObj?.name ?? null,
         avatar_url: e.avatar_url ?? null,
         role_types: [ta.role_type as TaskRoleType],
       });
@@ -348,7 +360,19 @@ export default async function TaskDetailPage({
       </div>
 
       <div className="mb-6">
-        <TaskFormSection task={task} />
+        <TaskFormSection
+          task={task}
+          canEditCounts={
+            task.created_by === session.userId ||
+            hasPermission(session, "tasks.manage") ||
+            hasPermission(session, "task.view_all")
+          }
+          canEditDeadline={
+            task.created_by === session.userId ||
+            hasPermission(session, "tasks.manage") ||
+            hasPermission(session, "task.view_all")
+          }
+        />
       </div>
 
       {(() => {
@@ -442,7 +466,29 @@ export default async function TaskDetailPage({
         );
       })()}
 
-      {allAssignees.length > 0 && (
+      <SectionTitle
+        title="المُسنَدون"
+        description="كل مَن يعمل على المهمة. لكل شخص دور (متخصص/مدير/منفّذ/مدير حساب) ومدير فريق اختياري."
+      />
+      <Card className="mb-6">
+        <CardContent className="p-4">
+          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المُسنَدين...</div>}>
+            <TaskAssigneesSection
+              orgId={session.orgId}
+              taskId={task.id}
+              canManage={
+                task.created_by === session.userId ||
+                hasPermission(session, "tasks.manage") ||
+                hasPermission(session, "task.view_all")
+              }
+            />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      {/* Legacy read-only summary kept for visibility into Odoo-imported
+          assignees; the panel above is the authoritative editor. */}
+      {false && allAssignees.length > 0 && (
         <Card className="mb-6">
           <CardContent className="p-4">
             <div className="mb-3 flex items-center justify-between">
@@ -489,7 +535,14 @@ export default async function TaskDetailPage({
                           {roleLabels}
                         </span>
                         {a.job_title && (
-                          <span className="truncate">{a.job_title}</span>
+                          <span className="truncate font-medium text-foreground/80">
+                            {a.job_title}
+                          </span>
+                        )}
+                        {a.department_name && (
+                          <span className="truncate" title={a.department_name}>
+                            · {a.department_name}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -721,6 +774,114 @@ async function TaskApprovalSection({
   );
 }
 
+async function TaskAssigneesSection({
+  orgId,
+  taskId,
+  canManage,
+}: {
+  orgId: string;
+  taskId: string;
+  canManage: boolean;
+}) {
+  const [{ data: assigneesRaw }, employees] = await Promise.all([
+    supabaseAdmin
+      .from("task_assignees")
+      .select(
+        `id, employee_id, role_type, team_manager_employee_id,
+         employee:employee_profiles!task_assignees_employee_id_fkey (
+           id, full_name, job_title, avatar_url,
+           department:departments!employee_profiles_department_id_fkey ( name )
+         ),
+         team_manager:employee_profiles!task_assignees_team_manager_employee_id_fkey (
+           id, full_name
+         )`,
+      )
+      .eq("organization_id", orgId)
+      .eq("task_id", taskId)
+      .order("created_at", { ascending: true }),
+    getEmployees(orgId),
+  ]);
+
+  type RawRow = {
+    id: string;
+    employee_id: string;
+    role_type: import("./task-assignees-panel").AssigneeRoleType;
+    team_manager_employee_id: string | null;
+    employee:
+      | {
+          id: string;
+          full_name: string;
+          job_title: string | null;
+          avatar_url: string | null;
+          department: { name: string } | { name: string }[] | null;
+        }
+      | {
+          id: string;
+          full_name: string;
+          job_title: string | null;
+          avatar_url: string | null;
+          department: { name: string } | { name: string }[] | null;
+        }[]
+      | null;
+    team_manager:
+      | { id: string; full_name: string }
+      | { id: string; full_name: string }[]
+      | null;
+  };
+
+  const assignees: import("./task-assignees-panel").AssigneeRow[] = (
+    (assigneesRaw ?? []) as RawRow[]
+  )
+    .map((row) => {
+      const emp = Array.isArray(row.employee) ? row.employee[0] : row.employee;
+      const mgr = Array.isArray(row.team_manager)
+        ? row.team_manager[0]
+        : row.team_manager;
+      if (!emp) return null;
+      const dept = Array.isArray(emp.department)
+        ? emp.department[0]
+        : emp.department;
+      return {
+        id: row.id,
+        employee_id: row.employee_id,
+        role_type: row.role_type,
+        team_manager_employee_id: row.team_manager_employee_id,
+        employee: {
+          id: emp.id,
+          full_name: emp.full_name,
+          job_title: emp.job_title ?? null,
+          avatar_url: emp.avatar_url ?? null,
+          department_name: dept?.name ?? null,
+        },
+        team_manager: mgr ? { id: mgr.id, full_name: mgr.full_name } : null,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const employeeOptions: import("./task-assignees-panel").EmployeeOption[] =
+    employees
+      .filter((e) => e.employment_status === "active")
+      .map((e) => {
+        const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+        return {
+          id: e.id,
+          full_name: e.full_name,
+          job_title: e.job_title ?? null,
+          avatar_url: e.avatar_url ?? null,
+          department_name: dept?.name ?? null,
+        };
+      });
+
+  return (
+    <TaskAssigneesPanel
+      taskId={taskId}
+      assignees={assignees}
+      employees={employeeOptions}
+      canManage={canManage}
+    />
+  );
+}
+
 async function TaskFollowersSection({
   orgId,
   taskId,
@@ -760,8 +921,12 @@ async function TaskFollowersSection({
 
 function TaskFormSection({
   task,
+  canEditCounts,
+  canEditDeadline,
 }: {
   task: NonNullable<Awaited<ReturnType<typeof getTaskSummary>>>;
+  canEditCounts: boolean;
+  canEditDeadline: boolean;
 }) {
   // Renders synchronously from the eager getTaskSummary result the parent
   // already awaited — the previous version did its own getTask() round trip
@@ -786,6 +951,7 @@ function TaskFormSection({
   return (
     <TaskFormCard
       task={{
+        id: task.id,
         priority: task.priority,
         planned_date: task.planned_date ?? null,
         due_date: task.due_date ?? null,
@@ -803,6 +969,8 @@ function TaskFormSection({
         delay_days: storedDelay,
         hold_reason: (task as { hold_reason?: string | null }).hold_reason ?? null,
         hold_since: (task as { hold_since?: string | null }).hold_since ?? null,
+        design_count: (task as { design_count?: number | null }).design_count ?? 0,
+        revision_count: (task as { revision_count?: number | null }).revision_count ?? 0,
       }}
       project={project ? { id: project.id, name: project.name } : null}
       client={client ? { id: client.id, name: client.name } : null}
@@ -810,6 +978,8 @@ function TaskFormSection({
       computedDelayDays={delayDays}
       overdue={overdue}
       formattedCompletedAt={formattedCompletedAt}
+      canEditCounts={canEditCounts}
+      canEditDeadline={canEditDeadline}
     />
   );
 }

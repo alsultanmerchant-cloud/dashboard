@@ -5,6 +5,7 @@ import { listServices } from "@/lib/data/employees";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { CategoriesAdmin } from "./categories-admin";
+import { SyncOdooButton } from "./sync-odoo-button";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ export default async function ServiceCategoriesPage() {
       <PageHeader
         title="تصنيفات الخدمات"
         description="إدارة باقات الخدمات (Onboarding، السوشيال ميديا، الإعلانات الممولة، SEO، التصميم…) والقوالب المرتبطة بها."
+        actions={<SyncOdooButton />}
       />
 
       {categories.length === 0 ? (

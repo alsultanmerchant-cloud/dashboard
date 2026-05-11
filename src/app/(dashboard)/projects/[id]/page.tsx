@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import {
   Briefcase, Calendar, User, ListTodo, PauseCircle,
 } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
-import { getProject, getProjectHoldActor, getProjectTaskSummary } from "@/lib/data/projects";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import { getProject, getProjectHoldActor, getProjectTaskSummary, getProjectTagsForProject } from "@/lib/data/projects";
+import { ProjectTagsPanel } from "./project-tags-panel";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
@@ -23,25 +24,46 @@ import { listEmployees } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { MessageButton } from "@/components/dm/message-button";
 import { listServiceCategories } from "@/lib/data/service-categories";
-import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate } from "./services-panel";
+import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate, type EmployeePickOption } from "./services-panel";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
 import { ProjectHolidaysPanel, type ProjectHolidayRow } from "./project-holidays-panel";
 import { AttachmentsTab, type AttachmentRow } from "../../tasks/[id]/attachments-tab";
+import { ProjectNotesPanel, type ProjectNoteRow } from "./project-notes-panel";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
 import { listProjectRenewalCycles, daysUntilRenewal } from "@/lib/data/renewals";
 import { RenewalsPanel } from "./renewals/renewals-panel";
 import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
+import { buildTaskFiltersFromParams } from "../../tasks/_filter_params";
+import { SmartSearchBar } from "../../tasks/smart-search-bar";
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    view?: string;
+    f?: string;
+    d?: string;
+    filter?: string;
+    q?: string;
+    groupBy?: string;
+  }>;
 }) {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
   const session = await requirePagePermission("projects.view");
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
+  // Same filter surface as the global /tasks page, but scoped to this
+  // project. The chip menu (SmartSearchBar) reads + writes URL params; we
+  // parse those into TaskFilters here and pass them to the loader.
+  const { filters: projectTaskFilters, activeKeys } = buildTaskFiltersFromParams(sp, {
+    userId: session.userId,
+    employeeId: session.employeeId ?? null,
+    projectId: id,
+  });
 
   const [summary, holdActor] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
@@ -264,6 +286,22 @@ export default async function ProjectDetailPage({
         ))}
       </div>
 
+      <SectionTitle
+        title="الوسوم"
+        description="ضع وسومًا سريعة على المشروع (مثل HOLD أو Urgent) — مشتركة بين كل المشاريع."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <Suspense fallback={<p className="text-xs text-muted-foreground">جاري تحميل الوسوم...</p>}>
+            <ProjectTagsSection
+              orgId={session.orgId}
+              projectId={project.id}
+              canManage={session.permissions.has("projects.manage") || session.isOwner}
+            />
+          </Suspense>
+        </CardContent>
+      </Card>
+
       {/* Sky Light feedback #12: editable multi-package list. The chip
           row mirrors the wizard's behavior post-creation; uses the same
           services catalog seeded by the Odoo importer (project.category_ids
@@ -326,6 +364,26 @@ export default async function ProjectDetailPage({
           Odoo `rwasem_document_management_project`'s smart-button — pulls
           attachments from the project itself AND every task under it, then
           lists them with task code so the operator can see what belongs where. */}
+      <SectionTitle
+        title="ملاحظات المشروع"
+        description="سجل ملاحظات المشروع — اجتماعات، قرارات، عوائق، وأي سياق عام لا ينتمي لمهمة بعينها."
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <Suspense
+            fallback={<div className="text-sm text-muted-foreground">جاري تحميل الملاحظات...</div>}
+          >
+            <ProjectNotesSection
+              orgId={session.orgId}
+              projectId={project.id}
+              currentUserId={session.userId}
+              canCreate={hasPermission(session, "projects.view")}
+              canManage={hasPermission(session, "projects.manage")}
+            />
+          </Suspense>
+        </CardContent>
+      </Card>
+
       <SectionTitle
         title="المرفقات"
         description="كل الملفات المرفقة بالمشروع وكل مهامه (تطابق smart-button «All Documents» في Odoo)."
@@ -405,6 +463,16 @@ export default async function ProjectDetailPage({
         title="لوحة المهام"
         description={`${summary.total} مهمة — اسحب البطاقة بين الأعمدة لتغيير المرحلة`}
       />
+      {/* Project-scoped filter chip menu. Same surface as /tasks; URL params
+          stay on this route so the filters affect only this project's task
+          board. */}
+      <div className="mb-3">
+        <SmartSearchBar
+          initialQuery={sp.q ?? ""}
+          filterKey={activeKeys.size === 1 ? Array.from(activeKeys)[0] : undefined}
+          view={sp.view ?? "kanban"}
+        />
+      </div>
       <Suspense
         fallback={
           <Card>
@@ -414,7 +482,12 @@ export default async function ProjectDetailPage({
           </Card>
         }
       >
-        <ProjectTaskBoardSection orgId={session.orgId} projectId={project.id} />
+        <ProjectTaskBoardSection
+          orgId={session.orgId}
+          projectId={project.id}
+          filterSignature={JSON.stringify(projectTaskFilters)}
+          taskFilters={projectTaskFilters}
+        />
       </Suspense>
     </div>
   );
@@ -422,17 +495,21 @@ export default async function ProjectDetailPage({
 
 async function ProjectTaskBoardSection({
   orgId,
-  projectId,
+  taskFilters,
 }: {
   orgId: string;
   projectId: string;
+  // filterSignature is passed as part of the key by the parent Suspense so a
+  // filter change re-runs this server fetch; we don't read it here.
+  filterSignature: string;
+  taskFilters: Parameters<typeof loadTaskBoardForGlobalView>[1];
 }) {
-  const tasks = await loadTaskBoardForGlobalView(orgId, { projectId });
+  const tasks = await loadTaskBoardForGlobalView(orgId, taskFilters);
   if (tasks.length === 0) {
     return (
       <EmptyState
-        title="لا توجد مهام بعد"
-        description="ستظهر هنا تلقائيًا عند ربط خدمة لها قالب مهام."
+        title="لا توجد مهام مطابقة"
+        description="جرّب إزالة بعض الفلاتر، أو أضف خدمة لها قالب مهام."
         variant="compact"
       />
     );
@@ -589,6 +666,26 @@ async function ProjectRenewalsSection({
 // async server component so the catalog query lives off the main project
 // loader (the chip strip is below the fold and shouldn't block above-the-fold
 // metrics).
+async function ProjectTagsSection({
+  orgId,
+  projectId,
+  canManage,
+}: {
+  orgId: string;
+  projectId: string;
+  canManage: boolean;
+}) {
+  const { attached, all } = await getProjectTagsForProject(orgId, projectId);
+  return (
+    <ProjectTagsPanel
+      projectId={projectId}
+      attached={attached}
+      candidates={all}
+      canManage={canManage}
+    />
+  );
+}
+
 async function ProjectServicesSection({
   project,
   orgId,
@@ -611,16 +708,29 @@ async function ProjectServicesSection({
     return s ? [{ id: ps.id, service_id: ps.service_id, service: s }] : [];
   });
 
-  const { data: catalog } = await supabaseAdmin
-    .from("services")
-    .select("id, name, slug")
-    .eq("organization_id", orgId)
-    .order("name");
+  const [{ data: catalog }, employees] = await Promise.all([
+    supabaseAdmin
+      .from("services")
+      .select("id, name, slug")
+      .eq("organization_id", orgId)
+      .order("name"),
+    listEmployees(orgId),
+  ]);
   const candidates: ServiceCandidate[] = (catalog ?? []).map((s) => ({
     id: s.id as string,
     name: s.name as string,
     slug: s.slug as string,
   }));
+  const employeeOptions: EmployeePickOption[] = employees
+    .filter((e) => e.employment_status === "active")
+    .map((e) => {
+      const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+      return {
+        id: e.id,
+        full_name: e.full_name,
+        department_name: dept?.name ?? null,
+      };
+    });
 
   if (attached.length === 0 && !canManage) {
     return <p className="text-sm text-muted-foreground">لا توجد خدمات مرتبطة بعد.</p>;
@@ -630,7 +740,90 @@ async function ProjectServicesSection({
       projectId={project.id}
       attached={attached}
       candidates={candidates}
+      employees={employeeOptions}
       canManage={canManage}
+    />
+  );
+}
+
+async function ProjectNotesSection({
+  orgId,
+  projectId,
+  currentUserId,
+  canCreate,
+  canManage,
+}: {
+  orgId: string;
+  projectId: string;
+  currentUserId: string;
+  canCreate: boolean;
+  canManage: boolean;
+}) {
+  // FK author_user_id → auth.users can't be embedded (PostgREST doesn't
+  // span schemas). Resolve author names via employee_profiles.user_id in a
+  // second query — cheap, one IN-clause for all authors on this project.
+  const { data } = await supabaseAdmin
+    .from("project_log_notes")
+    .select("id, body, created_at, updated_at, author_user_id")
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+
+  type Row = {
+    id: string;
+    body: string;
+    created_at: string;
+    updated_at: string;
+    author_user_id: string;
+  };
+  const rows = (data ?? []) as Row[];
+  const authorIds = Array.from(new Set(rows.map((r) => r.author_user_id)));
+  let lookup = new Map<
+    string,
+    { full_name: string; avatar_url: string | null }
+  >();
+  if (authorIds.length > 0) {
+    const { data: emps } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("user_id, full_name, avatar_url")
+      .eq("organization_id", orgId)
+      .in("user_id", authorIds);
+    lookup = new Map(
+      (emps ?? []).map((e) => [
+        e.user_id as string,
+        {
+          full_name: (e.full_name as string) ?? "—",
+          avatar_url: (e.avatar_url as string | null) ?? null,
+        },
+      ]),
+    );
+  }
+
+  const notes: ProjectNoteRow[] = rows.map((r) => {
+    const author = lookup.get(r.author_user_id) ?? {
+      full_name: "—",
+      avatar_url: null,
+    };
+    return {
+      id: r.id,
+      body: r.body,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      edited: r.updated_at !== r.created_at,
+      author: {
+        user_id: r.author_user_id,
+        full_name: author.full_name,
+        avatar_url: author.avatar_url,
+      },
+      can_edit: canManage || r.author_user_id === currentUserId,
+    };
+  });
+
+  return (
+    <ProjectNotesPanel
+      projectId={projectId}
+      notes={notes}
+      canCreate={canCreate}
     />
   );
 }

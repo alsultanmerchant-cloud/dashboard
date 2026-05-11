@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useActionState } from "react";
+import { useEffect, useMemo, useRef, useState, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Loader2, Check, CalendarClock, Users, Eye, AlertCircle,
   ChevronLeft, ChevronRight, User as UserIcon, Briefcase, ClipboardList,
-  UserPlus,
+  UserPlus, Plus, X, Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
+import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { cn } from "@/lib/utils";
 import { expandTemplates, type GeneratedTask, type TemplateInput } from "@/lib/projects/offsets";
 import { createProjectAction, createClientQuickAction, type ProjectFormState } from "../_actions";
@@ -109,6 +110,14 @@ export function NewProjectForm({
   const [showQuickClient, setShowQuickClient] = useState(false);
   const [quickClient, setQuickClient] = useState({ name: "", phone: "", email: "" });
   const [creatingClient, setCreatingClient] = useState(false);
+  // Step 2 searchable services picker. Mirrors the project detail page
+  // "إضافة باقة" UX (services-panel.tsx) so the multi-select pattern is
+  // identical across project creation and edit-after-the-fact.
+  const [picking, setPicking] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerActive, setPickerActive] = useState(0);
+  const pickerTriggerRef = useRef<HTMLSpanElement | null>(null);
+  const pickerInputRef = useRef<HTMLInputElement | null>(null);
 
   const [state, formAction, pending] = useActionState<ProjectFormState | undefined, FormData>(
     createProjectAction,
@@ -223,6 +232,60 @@ export function NewProjectForm({
   }, [selectedServices, splits]);
 
   const selectedClient = clients.find((c) => c.id === clientId);
+
+  // Available services filtered by search query, excluding already-selected
+  // ones. Empty query returns everything not yet attached.
+  const pickerCandidates = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    return services
+      .filter((s) => !selectedServices.has(s.id))
+      .filter(
+        (s) =>
+          !q ||
+          s.name.toLowerCase().includes(q) ||
+          s.slug.toLowerCase().includes(q),
+      );
+  }, [services, selectedServices, pickerQuery]);
+
+  useEffect(() => {
+    setPickerActive((i) =>
+      Math.min(Math.max(0, i), Math.max(0, pickerCandidates.length - 1)),
+    );
+  }, [pickerCandidates.length]);
+
+  useEffect(() => {
+    if (picking) pickerInputRef.current?.focus();
+  }, [picking]);
+
+  function pickerKeyDown(e: React.KeyboardEvent) {
+    if (pickerCandidates.length === 0) {
+      if (e.key === "Escape") {
+        setPicking(false);
+        setPickerQuery("");
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setPickerActive((i) => (i + 1) % pickerCandidates.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setPickerActive(
+        (i) => (i - 1 + pickerCandidates.length) % pickerCandidates.length,
+      );
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const target = pickerCandidates[pickerActive];
+      if (target) {
+        toggleService(target.id);
+        setPickerQuery("");
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setPicking(false);
+      setPickerQuery("");
+    }
+  }
 
   // Searchable-select options.
   const clientOptions: SearchableOption[] = clients.map((c) => ({
@@ -485,32 +548,136 @@ export function NewProjectForm({
           <Card>
             <CardContent className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <Label className="m-0">الخدمات المتفق عليها</Label>
+                <Label className="m-0">الخدمات (الباقات) المتفق عليها</Label>
                 <span className="text-[11px] text-muted-foreground">
-                  {selectedServices.size} مختارة
+                  {selectedServices.size} مختارة من {services.length}
                 </span>
               </div>
-              <div className="grid sm:grid-cols-2 gap-2">
-                {services.map((s) => {
-                  const active = selectedServices.has(s.id);
+
+              {/* Chip strip of currently-selected services + searchable add
+                  picker. Same pattern as services-panel.tsx on the project
+                  detail page so the multi-select UX is identical end-to-end. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {Array.from(selectedServices).map((sid) => {
+                  const svc = services.find((x) => x.id === sid);
+                  if (!svc) return null;
                   return (
-                    <button
-                      type="button"
-                      key={s.id}
-                      onClick={() => toggleService(s.id)}
-                      className={cn(
-                        "flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium transition-colors",
-                        active
-                          ? "border-cyan/40 bg-cyan-dim text-cyan"
-                          : "border-soft bg-card text-muted-foreground hover:text-foreground",
-                      )}
+                    <span
+                      key={sid}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-cyan/40 bg-cyan-dim px-2.5 py-1 text-xs font-medium text-cyan"
                     >
-                      <span className="text-start truncate">{s.name}</span>
-                      {active && <Check className="size-3.5 shrink-0" />}
-                    </button>
+                      {svc.name}
+                      <button
+                        type="button"
+                        onClick={() => toggleService(sid)}
+                        aria-label={`إزالة ${svc.name}`}
+                        className="rounded-full p-0.5 text-cyan/80 hover:bg-cyan/10 hover:text-cyan transition-colors"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
                   );
                 })}
+
+                <span ref={pickerTriggerRef} className="inline-block">
+                  <button
+                    type="button"
+                    onClick={() => setPicking((v) => !v)}
+                    disabled={pickerCandidates.length === 0 && pickerQuery === ""}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border border-dashed border-soft px-2.5 py-1 text-xs",
+                      "text-muted-foreground hover:text-foreground hover:border-cyan/40 hover:bg-cyan-dim/30 transition-colors",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                    )}
+                    aria-haspopup="dialog"
+                    aria-expanded={picking}
+                  >
+                    <Plus className="size-3" />
+                    إضافة باقة
+                  </button>
+                </span>
+
+                <AnchoredPopover
+                  anchorRef={pickerTriggerRef}
+                  open={picking}
+                  onClose={() => {
+                    setPicking(false);
+                    setPickerQuery("");
+                  }}
+                  className="z-50 w-72 max-w-[90vw] min-h-[14rem] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
+                >
+                  <div role="dialog" aria-label="اختر باقة">
+                    <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
+                      <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                      <input
+                        ref={pickerInputRef}
+                        value={pickerQuery}
+                        onChange={(e) => setPickerQuery(e.target.value)}
+                        onKeyDown={pickerKeyDown}
+                        placeholder="ابحث عن باقة..."
+                        className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                      />
+                      {pickerQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setPickerQuery("")}
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label="مسح البحث"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      )}
+                    </div>
+                    <ul
+                      role="listbox"
+                      className="min-h-[10rem] max-h-64 overflow-y-auto py-1"
+                    >
+                      {pickerCandidates.length === 0 ? (
+                        <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                          {selectedServices.size === services.length
+                            ? "كل الباقات مضافة"
+                            : "لا نتائج"}
+                        </li>
+                      ) : (
+                        pickerCandidates.map((c, idx) => {
+                          const isActive = idx === pickerActive;
+                          return (
+                            <li key={c.id} role="option" aria-selected={isActive}>
+                              <button
+                                type="button"
+                                onMouseEnter={() => setPickerActive(idx)}
+                                onClick={() => {
+                                  toggleService(c.id);
+                                  setPickerQuery("");
+                                }}
+                                className={cn(
+                                  "flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-start text-xs transition-colors",
+                                  isActive
+                                    ? "bg-cyan-dim/60 text-foreground"
+                                    : "hover:bg-soft-2",
+                                )}
+                              >
+                                <span className="truncate">{c.name}</span>
+                              </button>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                    <div className="border-t border-soft px-2.5 py-1.5 text-[10px] text-muted-foreground">
+                      {pickerCandidates.length} متاح · {selectedServices.size}{" "}
+                      مختارة
+                    </div>
+                  </div>
+                </AnchoredPopover>
               </div>
+
+              {selectedServices.size === 0 && (
+                <p className="rounded-lg border border-dashed border-soft-2 bg-soft-1/40 px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  لم تُختَر باقات بعد. اضغط «إضافة باقة» لاختيار خدمة واحدة أو
+                  أكثر.
+                </p>
+              )}
 
               {Array.from(selectedServices).map((sid) => {
                 const svc = services.find((x) => x.id === sid);

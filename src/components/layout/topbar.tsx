@@ -4,7 +4,9 @@ import { memo, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Bell, RefreshCw, Menu, CalendarDays } from "lucide-react";
+import Link from "next/link";
+import { Bell, RefreshCw, Menu, MessageCircle, CalendarDays } from "lucide-react";
+import { TopbarCalendarPopover } from "./topbar-calendar-popover";
 import { Button } from "@/components/ui/button";
 import { useTopbarControls } from "@/components/layout/topbar-context";
 import { PAGE_TITLE_KEYS } from "@/lib/nav";
@@ -32,15 +34,10 @@ const ProjectsSearchBar = dynamic(
   },
 );
 
-const ProjectsDateFilterButton = dynamic(
-  () =>
-    import("@/app/(dashboard)/projects/projects-date-filter-button").then((mod) => ({
-      default: mod.ProjectsDateFilterButton,
-    })),
-);
-
 interface TopbarProps {
   unreadCount?: number;
+  /** Unread direct-message count — shown as a badge on the chat icon. */
+  dmUnreadCount?: number;
   onBellClick?: () => void;
   onMenuClick?: () => void;
   notificationPanel?: React.ReactNode;
@@ -89,6 +86,7 @@ const TopbarClock = memo(function TopbarClock({
 export function Topbar({
   unreadCount = 0,
   onBellClick,
+  dmUnreadCount = 0,
   onMenuClick,
   notificationPanel,
 }: TopbarProps) {
@@ -180,21 +178,40 @@ export function Topbar({
             <QuickCreateTrigger className={primaryCreateClass} />
           </div>
 
+          {/* Clock is desktop-only (tight on phones); calendar always shows
+              so the user can reach scheduled-activities from any viewport. */}
           <div className="hidden lg:flex items-center gap-2">
             <TopbarClock
               locale={locale}
               className={`${utilityChip} px-3 py-1.5 text-xs font-mono`}
             />
-            {showProjectSearch ? (
-              <ProjectsDateFilterButton className={iconChip} />
-            ) : (
-              <Button variant="ghost" size="icon" className={iconChip}>
-                <CalendarDays className="w-4 h-4 text-white/88 dark:text-muted-foreground" />
-              </Button>
-            )}
           </div>
 
+          {/* Calendar icon opens an inline mini-calendar popover with
+              day-highlights for the current user's scheduled activities.
+              Replaces the old plain Link to /my-activities so the user can
+              scan their week without leaving the current page. */}
+          <TopbarCalendarPopover className={iconChip} />
+
           <ThemeToggle className={iconChip} />
+
+          {/* Direct messages — quick link so the user doesn't have to dive
+              into a project → task to find a chat with a colleague. The
+              project's Button doesn't support asChild, so render a styled
+              anchor that mirrors the icon-chip look used by the other
+              topbar buttons. */}
+          <Link
+            href="/messages"
+            aria-label="المحادثات"
+            className={`inline-flex h-9 w-9 items-center justify-center relative sm:rounded-2xl ${iconChip}`}
+          >
+            <MessageCircle className="w-4 h-4 text-cyan" />
+            {dmUnreadCount > 0 && (
+              <span className="absolute -top-0.5 -start-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
+                {dmUnreadCount}
+              </span>
+            )}
+          </Link>
 
           <div className="relative shrink-0">
             <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>

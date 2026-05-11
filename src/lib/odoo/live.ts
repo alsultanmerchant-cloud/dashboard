@@ -26,6 +26,10 @@ export interface LiveProject {
   isFavorite: boolean;
   tagIds: number[];
   tagNames: string[];
+  // Native project_tags (HOLD, Urgent, …) attached via the project detail
+  // panel. Separate from tagNames above, which still refers to the legacy
+  // Odoo "tag_ids" — repurposed in this project to display services.
+  customTags?: { id: string; name: string; color: number }[];
   lastUpdateStatus: string | null;
   lastUpdateColor: number | null;
   description: string | null;

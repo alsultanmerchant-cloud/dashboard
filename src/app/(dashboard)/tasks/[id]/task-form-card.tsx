@@ -3,6 +3,8 @@ import { Briefcase } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PriorityBadge, ServiceBadge } from "@/components/status-badges";
 import { cn } from "@/lib/utils";
+import { DesignCountsRow } from "./design-counts-row";
+import { DeadlineEditor } from "./deadline-editor";
 
 type Project = {
   id: string;
@@ -21,6 +23,7 @@ type Service = {
 } | null | undefined;
 
 type TaskFormData = {
+  id: string;
   priority: string;
   planned_date: string | null;
   due_date: string | null;
@@ -33,6 +36,8 @@ type TaskFormData = {
   delay_days: number | null;
   hold_reason: string | null;
   hold_since: string | null;
+  design_count: number;
+  revision_count: number;
 };
 
 function formatMinutes(min: number | null): string {
@@ -76,6 +81,8 @@ export function TaskFormCard({
   computedDelayDays,
   overdue,
   formattedCompletedAt,
+  canEditCounts,
+  canEditDeadline,
 }: {
   task: TaskFormData;
   project: Project;
@@ -84,6 +91,8 @@ export function TaskFormCard({
   computedDelayDays: number | null;
   overdue: boolean;
   formattedCompletedAt: string | null;
+  canEditCounts: boolean;
+  canEditDeadline: boolean;
 }) {
   const progress = task.progress_percent;
   const progressNum =
@@ -175,12 +184,12 @@ export function TaskFormCard({
             </span>
           </Row>
           <Row label="الموعد النهائي">
-            <span
-              className={cn("tabular-nums", overdue && "text-cc-red font-semibold")}
-              dir="ltr"
-            >
-              {task.planned_date ?? task.due_date ?? "—"}
-            </span>
+            <DeadlineEditor
+              taskId={task.id}
+              initialDate={task.planned_date ?? task.due_date ?? null}
+              overdue={overdue}
+              canEdit={canEditDeadline}
+            />
           </Row>
           {task.due_date &&
             task.planned_date &&
@@ -221,6 +230,15 @@ export function TaskFormCard({
               <span className="text-amber-300">{task.hold_reason}</span>
             </Row>
           )}
+          {/* Designer output — pair of integers used by the monthly closing
+              report. Inline-editable so the agent can update them without
+              leaving the task page; Odoo parity (project_customization). */}
+          <DesignCountsRow
+            taskId={task.id}
+            initialDesignCount={task.design_count}
+            initialRevisionCount={task.revision_count}
+            canEdit={canEditCounts}
+          />
         </dl>
       </CardContent>
     </Card>

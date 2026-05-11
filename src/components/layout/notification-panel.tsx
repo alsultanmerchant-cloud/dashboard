@@ -86,7 +86,13 @@ export function NotificationPanel({
         onClick={onClose}
       />
 
-      <div className="fixed z-50 top-16 left-3 right-3 w-auto max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200 sm:absolute sm:top-[calc(100%+12px)] sm:w-96 ltr:sm:right-0 ltr:sm:left-auto rtl:sm:left-0 rtl:sm:right-auto">
+      {/* Positioning: on mobile the panel goes full-width with side gutters.
+          On ≥sm it anchors to the bell button's inline-end edge using the
+          logical `end-0` (right in LTR, left in RTL — Tailwind handles dir
+          automatically), which keeps the same visual result in both
+          directions without the prior ltr/rtl variant pair. max-w prevents
+          overflow on small screens. */}
+      <div className="fixed z-50 top-16 start-3 end-3 max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200 sm:absolute sm:top-[calc(100%+12px)] sm:start-auto sm:end-0 sm:w-96 sm:max-w-[calc(100vw-1.5rem)]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">

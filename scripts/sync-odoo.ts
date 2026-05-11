@@ -17,15 +17,17 @@ const odoo = odooFromEnv();
 const summary = await runImport(odoo, slug);
 
 console.log("[odoo-sync] summary:");
-console.log(`  employees:       ${summary.employees}`);
-console.log(`  clients:         ${summary.clients}`);
-console.log(`  services:        ${summary.services}`);
-console.log(`  tags:            ${summary.tags}`);
-console.log(`  projects:        ${summary.projects}`);
-console.log(`  tasks:           ${summary.tasks}`);
-console.log(`  task assignees:  ${summary.taskAssignees}`);
-console.log(`  task comments:   ${summary.taskComments}`);
-console.log(`  project comments:${summary.projectComments}`);
+console.log(`  employees:        ${summary.employees}`);
+console.log(`  departments:      ${summary.departments}`);
+console.log(`  employees w/ HR:  ${summary.employeesHydrated}`);
+console.log(`  clients:          ${summary.clients}`);
+console.log(`  services:         ${summary.services}`);
+console.log(`  tags:             ${summary.tags}`);
+console.log(`  projects:         ${summary.projects}`);
+console.log(`  tasks:            ${summary.tasks}`);
+console.log(`  task assignees:   ${summary.taskAssignees}`);
+console.log(`  task comments:    ${summary.taskComments}`);
+console.log(`  project comments: ${summary.projectComments}`);
 if (summary.errors.length) {
   console.log("[odoo-sync] errors:");
   for (const e of summary.errors) console.log(`  - ${e}`);

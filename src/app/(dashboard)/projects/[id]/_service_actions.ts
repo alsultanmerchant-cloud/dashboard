@@ -112,6 +112,23 @@ const CreateServiceTaskSchema = z.object({
   title: z.string().trim().min(2, { message: "عنوان المهمة قصير" }).max(200),
   due_date: z.string().optional().nullable(),
   priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
+  // ≥1 assignee required (Sky Light spec). Each row carries role + optional
+  // team manager so the team lead is captured per-task, not derived from the
+  // employee's department head.
+  assignees: z
+    .array(
+      z.object({
+        employee_id: z.string().uuid(),
+        role_type: z.enum([
+          "specialist",
+          "manager",
+          "agent",
+          "account_manager",
+        ]),
+        team_manager_employee_id: z.string().uuid().nullable().optional(),
+      }),
+    )
+    .min(1, { message: "يلزم إضافة مُسنَد واحد على الأقل" }),
 });
 
 export async function createServiceTaskAction(input: {
@@ -120,6 +137,11 @@ export async function createServiceTaskAction(input: {
   title: string;
   dueDate?: string | null;
   priority?: "low" | "medium" | "high" | "urgent";
+  assignees: Array<{
+    employeeId: string;
+    roleType: "specialist" | "manager" | "agent" | "account_manager";
+    teamManagerEmployeeId?: string | null;
+  }>;
 }): Promise<ActionResult> {
   let session;
   try {
@@ -134,6 +156,11 @@ export async function createServiceTaskAction(input: {
     title: input.title,
     due_date: input.dueDate || null,
     priority: input.priority ?? "medium",
+    assignees: input.assignees.map((a) => ({
+      employee_id: a.employeeId,
+      role_type: a.roleType,
+      team_manager_employee_id: a.teamManagerEmployeeId ?? null,
+    })),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -173,6 +200,28 @@ export async function createServiceTaskAction(input: {
     .select("id, task_code")
     .single();
   if (error) return { error: error.message };
+
+  // Insert assignee rows. Use the admin client so RLS doesn't block — the
+  // permission check above (tasks.manage) already gated this.
+  const { supabaseAdmin } = await import("@/lib/supabase/admin");
+  const { error: aerr } = await supabaseAdmin
+    .from("task_assignees")
+    .insert(
+      parsed.data.assignees.map((a) => ({
+        organization_id: session.orgId,
+        task_id: inserted.id,
+        employee_id: a.employee_id,
+        role_type: a.role_type,
+        team_manager_employee_id: a.team_manager_employee_id ?? null,
+        assigned_by: session.userId,
+      })),
+    );
+  if (aerr) {
+    // Roll back the orphan task — keeps the "every task has ≥1 assignee"
+    // invariant intact even if the assignee insert fails mid-flight.
+    await supabaseAdmin.from("tasks").delete().eq("id", inserted.id);
+    return { error: aerr.message };
+  }
 
   await logAudit({
     organizationId: session.orgId,

@@ -8,6 +8,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";

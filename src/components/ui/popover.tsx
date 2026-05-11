@@ -10,7 +10,19 @@ function Popover({ ...props }: PopoverPrimitive.Root.Props) {
 }
 
 function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
+  // base-ui's Trigger renders a <button>. Inside a <form>, a <button> without
+  // an explicit type defaults to "submit" — that's how a click on the
+  // searchable-select trigger inside the new-project wizard was silently
+  // submitting the form on step 3 (every <SearchableSelect> opens via this
+  // popover, and step 3 has 8 of them). Force type="button" at the wrapper
+  // so no consumer can accidentally regress this.
+  return (
+    <PopoverPrimitive.Trigger
+      type="button"
+      data-slot="popover-trigger"
+      {...props}
+    />
+  )
 }
 
 function PopoverContent({

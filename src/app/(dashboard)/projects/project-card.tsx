@@ -115,12 +115,18 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             />
           </button>
 
-          <span
-            className="min-w-0 flex-1 truncate text-[15px] font-bold leading-snug text-foreground group-hover:text-primary"
+          {/* Title is a real <Link> so cmd/ctrl/middle-click opens the project
+              info page in a new tab — parity with the tasks list. stopPropagation
+              keeps the parent <article onClick> from also firing router.push in
+              the current tab when the user explicitly meant "new tab". */}
+          <Link
+            href={href}
+            onClick={(e) => e.stopPropagation()}
+            className="min-w-0 flex-1 truncate text-[15px] font-bold leading-snug text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded"
             title={p.name}
           >
             {p.name}
-          </span>
+          </Link>
 
           <button
             type="button"
@@ -159,6 +165,24 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             {t("completePercent", { percent: progress })}
           </div>
         </div>
+
+        {/* Project tags (HOLD, Urgent, …) attached on the detail page.
+            Rendered as colored pills above the service chips so they read as
+            status markers (HOLD pops in red, Urgent in violet, …). */}
+        {p.customTags && p.customTags.length > 0 && (
+          <ul className="mt-2 flex flex-wrap items-center gap-1">
+            {p.customTags.map((tag) => (
+              <li
+                key={tag.id}
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                style={{ backgroundColor: odooColor(tag.color) }}
+                title={tag.name}
+              >
+                {tag.name}
+              </li>
+            ))}
+          </ul>
+        )}
 
         {/* Service category chips — names already include the emoji prefix
             (e.g. "🟢Renewal Media Buying") so no extra color dot needed. */}

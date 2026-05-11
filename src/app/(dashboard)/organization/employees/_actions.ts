@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
+import { z } from "zod";
 import { EmployeeInviteSchema } from "@/lib/schemas";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -134,4 +135,235 @@ export async function inviteEmployeeAction(
   revalidatePath("/handover");
   revalidatePath("/projects");
   return { ok: true, employeeId: profile.id, generatedPassword: password };
+}
+
+// =========================================================================
+// Edit / soft-delete / restore / hard-delete actions for the owner-admin
+// employee management page. All gated on `employees.manage`.
+// =========================================================================
+
+type ActionResult = { ok: true } | { error: string };
+
+const UpdateSchema = z.object({
+  id: z.string().uuid(),
+  full_name: z.string().trim().min(2, "الاسم قصير جدًا").max(160),
+  email: z.string().trim().email("بريد غير صالح").nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  job_title: z.string().trim().max(160).nullable().optional(),
+  department_id: z.string().uuid().nullable().optional(),
+  manager_employee_id: z.string().uuid().nullable().optional(),
+  position: z.string().trim().max(40).nullable().optional(),
+});
+
+export async function updateEmployeeAction(input: {
+  id: string;
+  fullName: string;
+  email?: string | null;
+  phone?: string | null;
+  jobTitle?: string | null;
+  departmentId?: string | null;
+  managerEmployeeId?: string | null;
+  position?: string | null;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = UpdateSchema.safeParse({
+    id: input.id,
+    full_name: input.fullName,
+    email: input.email ?? null,
+    phone: input.phone ?? null,
+    job_title: input.jobTitle ?? null,
+    department_id: input.departmentId ?? null,
+    manager_employee_id: input.managerEmployeeId ?? null,
+    position: input.position ?? null,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+  // Self-reference guard: can't be your own manager.
+  if (parsed.data.manager_employee_id === parsed.data.id) {
+    return { error: "لا يمكن أن يكون الموظف مديرًا لنفسه" };
+  }
+
+  const { data: existing } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, organization_id, full_name, email")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+  if (!existing) return { error: "الموظف غير موجود" };
+
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({
+      full_name: parsed.data.full_name,
+      email: parsed.data.email,
+      phone: parsed.data.phone,
+      job_title: parsed.data.job_title,
+      department_id: parsed.data.department_id,
+      manager_employee_id: parsed.data.manager_employee_id,
+      position: parsed.data.position,
+    })
+    .eq("id", parsed.data.id);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.update",
+    entityType: "employee",
+    entityId: parsed.data.id,
+    metadata: {
+      from: { full_name: existing.full_name, email: existing.email },
+      to: { full_name: parsed.data.full_name, email: parsed.data.email },
+    },
+  });
+
+  revalidatePath("/organization/employees");
+  return { ok: true };
+}
+
+export async function terminateEmployeeAction(input: {
+  id: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = z.string().uuid().safeParse(input.id);
+  if (!parsed.success) return { error: "معرف غير صالح" };
+
+  const { data: existing } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, employment_status")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data)
+    .maybeSingle();
+  if (!existing) return { error: "الموظف غير موجود" };
+  if (existing.employment_status === "terminated") {
+    return { error: "هذا الموظف منتهي الخدمة بالفعل" };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({ employment_status: "terminated" })
+    .eq("id", parsed.data);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.terminate",
+    entityType: "employee",
+    entityId: parsed.data,
+    metadata: { full_name: existing.full_name },
+  });
+
+  revalidatePath("/organization/employees");
+  return { ok: true };
+}
+
+export async function restoreEmployeeAction(input: {
+  id: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = z.string().uuid().safeParse(input.id);
+  if (!parsed.success) return { error: "معرف غير صالح" };
+
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({ employment_status: "active" })
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.restore",
+    entityType: "employee",
+    entityId: parsed.data,
+    metadata: {},
+  });
+
+  revalidatePath("/organization/employees");
+  return { ok: true };
+}
+
+// HARD delete — irreversible. UI must show typed-confirmation modal.
+// Requires the caller to pass `confirmationName` equal to the employee's
+// current `full_name` as a defensive measure even though RLS + permissions
+// already gate this.
+export async function hardDeleteEmployeeAction(input: {
+  id: string;
+  confirmationName: string;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = z.string().uuid().safeParse(input.id);
+  if (!parsed.success) return { error: "معرف غير صالح" };
+
+  const { data: existing } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, user_id")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data)
+    .maybeSingle();
+  if (!existing) return { error: "الموظف غير موجود" };
+
+  // Anti-typo guard: the caller must type the current full_name verbatim.
+  if (input.confirmationName.trim() !== existing.full_name) {
+    return { error: "اسم التأكيد لا يطابق اسم الموظف" };
+  }
+
+  // Self-protection: don't let the owner accidentally delete their own row.
+  if (existing.user_id && existing.user_id === session.userId) {
+    return { error: "لا يمكنك حذف ملفك الخاص" };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .delete()
+    .eq("id", parsed.data);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.hard_delete",
+    entityType: "employee",
+    entityId: parsed.data,
+    metadata: { full_name: existing.full_name, user_id: existing.user_id },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "EMPLOYEE_HARD_DELETED",
+    entityType: "employee",
+    entityId: parsed.data,
+    payload: { full_name: existing.full_name },
+    importance: "high",
+  });
+
+  revalidatePath("/organization/employees");
+  return { ok: true };
 }

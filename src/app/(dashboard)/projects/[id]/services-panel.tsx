@@ -11,6 +11,7 @@ import { Plus, X, Loader2, Check, Search, ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { ServiceBadge } from "@/components/status-badges";
+import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { cn } from "@/lib/utils";
 import {
   attachProjectServiceAction,
@@ -30,15 +31,33 @@ export type ServiceCandidate = {
   slug: string;
 };
 
+export type EmployeePickOption = {
+  id: string;
+  full_name: string;
+  department_name: string | null;
+};
+
+const ROLE_OPTIONS: Array<{
+  value: "specialist" | "manager" | "agent" | "account_manager";
+  label: string;
+}> = [
+  { value: "agent", label: "منفِّذ" },
+  { value: "specialist", label: "متخصص" },
+  { value: "manager", label: "مدير القسم" },
+  { value: "account_manager", label: "مدير الحساب" },
+];
+
 export function ProjectServicesPanel({
   projectId,
   attached,
   candidates,
+  employees,
   canManage,
 }: {
   projectId: string;
   attached: ServiceLink[];
   candidates: ServiceCandidate[];
+  employees: EmployeePickOption[];
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -47,7 +66,7 @@ export function ProjectServicesPanel({
   const [activeIndex, setActiveIndex] = useState(0);
   const [busyServiceId, setBusyServiceId] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Sky Light feedback #10: per-chip "create task" form. Only one expands at
   // a time. State is { serviceId, title, dueDate, priority } or null.
@@ -57,6 +76,9 @@ export function ProjectServicesPanel({
     title: string;
     dueDate: string;
     priority: "low" | "medium" | "high" | "urgent";
+    assigneeEmployeeId: string;
+    assigneeRole: "specialist" | "manager" | "agent" | "account_manager";
+    teamManagerEmployeeId: string;
   } | null>(null);
   const taskTitleRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -65,6 +87,10 @@ export function ProjectServicesPanel({
 
   function submitTask() {
     if (!taskForm) return;
+    if (!taskForm.assigneeEmployeeId) {
+      toast.error("اختر مُسنَدًا للمهمة");
+      return;
+    }
     setBusyServiceId(taskForm.serviceId);
     start(async () => {
       const res = await createServiceTaskAction({
@@ -73,6 +99,13 @@ export function ProjectServicesPanel({
         title: taskForm.title,
         dueDate: taskForm.dueDate || null,
         priority: taskForm.priority,
+        assignees: [
+          {
+            employeeId: taskForm.assigneeEmployeeId,
+            roleType: taskForm.assigneeRole,
+            teamManagerEmployeeId: taskForm.teamManagerEmployeeId || null,
+          },
+        ],
       });
       setBusyServiceId(null);
       if ("error" in res) {
@@ -105,18 +138,12 @@ export function ProjectServicesPanel({
     setActiveIndex((i) => Math.min(Math.max(0, i), Math.max(0, filtered.length - 1)));
   }, [filtered.length]);
 
+  // Outside-click + Esc handled by AnchoredPopover; we only focus the
+  // search input on open. The previous scrollIntoView trick is unnecessary
+  // now that the popover renders via portal (always visible at the trigger
+  // bottom regardless of the trigger's parent scroll).
   useEffect(() => {
-    if (!adding) return;
-    inputRef.current?.focus();
-    function onPointerDown(e: PointerEvent) {
-      if (!popoverRef.current) return;
-      if (!popoverRef.current.contains(e.target as Node)) {
-        setAdding(false);
-        setQuery("");
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    if (adding) inputRef.current?.focus();
   }, [adding]);
 
   function attach(serviceId: string) {
@@ -197,6 +224,9 @@ export function ProjectServicesPanel({
                             title: "",
                             dueDate: "",
                             priority: "medium",
+                            assigneeEmployeeId: "",
+                            assigneeRole: "agent",
+                            teamManagerEmployeeId: "",
                           },
                     )
                   }
@@ -227,29 +257,35 @@ export function ProjectServicesPanel({
       })}
 
       {canManage && (
-        <div className="relative" ref={popoverRef}>
-          <button
-            type="button"
-            onClick={() => setAdding((v) => !v)}
-            disabled={candidates.length === 0 || candidates.length === attached.length}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full border border-dashed border-soft px-2.5 py-1 text-xs",
-              "text-muted-foreground hover:text-foreground hover:border-cyan/40 hover:bg-cyan-dim/30 transition-colors",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-            )}
-            aria-haspopup="listbox"
-            aria-expanded={adding}
-          >
-            <Plus className="size-3" />
-            إضافة باقة
-          </button>
-
-          {adding && (
-            <div
-              className="absolute z-30 mt-1.5 w-72 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
-              role="dialog"
-              aria-label="اختر باقة"
+        <div>
+          <span ref={triggerRef} className="inline-block">
+            <button
+              type="button"
+              onClick={() => setAdding((v) => !v)}
+              disabled={candidates.length === 0 || candidates.length === attached.length}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border border-dashed border-soft px-2.5 py-1 text-xs",
+                "text-muted-foreground hover:text-foreground hover:border-cyan/40 hover:bg-cyan-dim/30 transition-colors",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              )}
+              aria-haspopup="listbox"
+              aria-expanded={adding}
             >
+              <Plus className="size-3" />
+              إضافة باقة
+            </button>
+          </span>
+
+          <AnchoredPopover
+            anchorRef={triggerRef}
+            open={adding}
+            onClose={() => {
+              setAdding(false);
+              setQuery("");
+            }}
+            className="z-50 w-72 max-w-[90vw] min-h-[14rem] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
+          >
+            <div role="dialog" aria-label="اختر باقة">
               <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
                 <Search className="size-3.5 shrink-0 text-muted-foreground" />
                 <input
@@ -261,7 +297,7 @@ export function ProjectServicesPanel({
                   className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
                 />
               </div>
-              <ul role="listbox" className="max-h-64 overflow-y-auto py-1">
+              <ul role="listbox" className="min-h-[10rem] max-h-64 overflow-y-auto py-1">
                 {filtered.length === 0 ? (
                   <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
                     لا نتائج
@@ -299,7 +335,7 @@ export function ProjectServicesPanel({
                 {filtered.length} متاح
               </div>
             </div>
-          )}
+          </AnchoredPopover>
         </div>
       )}
     </div>
@@ -377,7 +413,11 @@ export function ProjectServicesPanel({
             <button
               type="button"
               onClick={submitTask}
-              disabled={pending || taskForm.title.trim().length < 2}
+              disabled={
+                pending ||
+                taskForm.title.trim().length < 2 ||
+                !taskForm.assigneeEmployeeId
+              }
               className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-cyan px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {pending ? (
@@ -387,6 +427,77 @@ export function ProjectServicesPanel({
               )}
               إنشاء
             </button>
+          </div>
+
+          {/* Required assignee row — task creation is blocked until an
+              employee is picked (Sky Light spec). Role + optional team
+              manager keep parity with the per-task assignees panel. */}
+          <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr]">
+            <select
+              value={taskForm.assigneeEmployeeId}
+              onChange={(e) =>
+                setTaskForm((f) =>
+                  f ? { ...f, assigneeEmployeeId: e.target.value } : f,
+                )
+              }
+              disabled={pending}
+              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
+              aria-label="المُسنَد"
+            >
+              <option value="">— اختر مُسنَدًا (إلزامي) —</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.full_name}
+                  {e.department_name ? ` · ${e.department_name}` : ""}
+                </option>
+              ))}
+            </select>
+            <select
+              value={taskForm.assigneeRole}
+              onChange={(e) =>
+                setTaskForm((f) =>
+                  f
+                    ? {
+                        ...f,
+                        assigneeRole: e.target.value as
+                          | "specialist"
+                          | "manager"
+                          | "agent"
+                          | "account_manager",
+                      }
+                    : f,
+                )
+              }
+              disabled={pending}
+              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
+              aria-label="الدور"
+            >
+              {ROLE_OPTIONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={taskForm.teamManagerEmployeeId}
+              onChange={(e) =>
+                setTaskForm((f) =>
+                  f ? { ...f, teamManagerEmployeeId: e.target.value } : f,
+                )
+              }
+              disabled={pending}
+              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
+              aria-label="مدير الفريق (اختياري)"
+            >
+              <option value="">— مدير الفريق (اختياري) —</option>
+              {employees
+                .filter((e) => e.id !== taskForm.assigneeEmployeeId)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.full_name}
+                  </option>
+                ))}
+            </select>
           </div>
         </div>
       )}

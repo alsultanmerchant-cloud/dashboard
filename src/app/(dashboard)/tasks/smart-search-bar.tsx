@@ -57,7 +57,8 @@ type FilterKey =
   | "starred"
   | "followed"
   | "has_start_date"
-  | "has_end_date";
+  | "has_end_date"
+  | "no_deadline";
 type GroupBy =
   | "stage"
   | "project"
@@ -96,6 +97,7 @@ const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
   // end = due_date in our schema.
   { key: "has_start_date", label: "لها تاريخ بدء", group: "جدولة" },
   { key: "has_end_date", label: "لها تاريخ انتهاء", group: "جدولة" },
+  { key: "no_deadline", label: "بدون موعد", group: "جدولة" },
 ];
 
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";

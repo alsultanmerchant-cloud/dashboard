@@ -163,3 +163,68 @@ export async function reorderCategoryAction(input: z.infer<typeof ReorderSchema>
   revalidatePath("/service-categories");
   return { ok: true };
 }
+
+// =========================================================================
+// "Sync from Odoo" — pulls the project.category list from the Sky Light
+// Odoo deployment and upserts each one as a row in `services`. Idempotent:
+// re-running just refreshes names/colors for existing categories and adds
+// new ones. Behind the same `category.manage_templates` permission used by
+// the rest of this page.
+// =========================================================================
+
+import { odooFromEnv } from "@/lib/odoo/client";
+import { runServicesImport } from "@/lib/odoo/importer";
+
+export type SyncOdooState =
+  | { ok: true; servicesImported: number; errors: string[] }
+  | { error: string };
+
+export async function syncOdooServicesAction(): Promise<SyncOdooState> {
+  let session;
+  try {
+    session = await requirePermission("category.manage_templates");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  // Resolve the org's slug; the importer takes a slug rather than uuid.
+  const { data: org } = await supabaseAdmin
+    .from("organizations")
+    .select("slug")
+    .eq("id", session.orgId)
+    .maybeSingle();
+  if (!org?.slug) return { error: "تعذر تحديد بيانات المنظمة" };
+
+  let result: { services: number; errors: string[] };
+  try {
+    const odoo = odooFromEnv();
+    result = await runServicesImport(odoo, org.slug);
+  } catch (e) {
+    return { error: `تعذر الاتصال بـ Odoo: ${(e as Error).message}` };
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "service_category.sync_odoo",
+    entityType: "service_category",
+    entityId: null,
+    metadata: { imported: result.services, errors: result.errors.length },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "ODOO_SERVICES_SYNCED",
+    entityType: "organization",
+    entityId: session.orgId,
+    payload: { imported: result.services, errors: result.errors },
+    importance: "normal",
+  });
+
+  revalidatePath("/service-categories");
+  return {
+    ok: true,
+    servicesImported: result.services,
+    errors: result.errors,
+  };
+}

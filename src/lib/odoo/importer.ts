@@ -34,6 +34,8 @@ export interface ImportContext {
   projectIdMap: Map<number, string>;
   serviceIdMap: Map<number, string>;
   tagIdMap: Map<number, string>;
+  /** Maps Odoo hr.department.id → Supabase departments.id. */
+  departmentIdMap: Map<number, string>;
   stageNameById: Map<number, string>;
   unassignedClientId: string | null;
   /** Maps Odoo res.users.id → Supabase employee_profiles.id via hr.employee.user_id. */
@@ -53,6 +55,9 @@ export interface ImportSummary {
   tagAssignments: number;
   taskComments: number;
   projectComments: number;
+  departments: number;
+  /** Number of employee_profiles rows whose dept/position/manager was filled in from hr.employee. */
+  employeesHydrated: number;
   errors: string[];
 }
 
@@ -133,6 +138,199 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
   }
 
   return users.length;
+}
+
+// Pull hr.department → public.departments. Keyed on (org, source, ext_id) so
+// re-runs upsert in place. parent_department_id is wired in a second pass once
+// every row has its uuid.
+async function importDepartments(ctx: ImportContext): Promise<number> {
+  type OdooDepartment = {
+    id: number;
+    name: string;
+    parent_id: OdooMany2one;
+    manager_id: OdooMany2one;
+    active: boolean;
+  };
+  console.log("[odoo-import] fetching hr.department…");
+  const rows = await ctx.odoo.searchRead<OdooDepartment>(
+    "hr.department",
+    [["active", "=", true]],
+    ["id", "name", "parent_id", "manager_id", "active"],
+    { limit: 500 },
+  );
+  console.log(`[odoo-import] hr.department → ${rows.length} rows`);
+
+  // Pass 1: upsert each department; kind defaults to 'other' since Odoo's
+  // hr.department has no equivalent semantic kind we can map 1:1.
+  for (const d of rows) {
+    const slug = `odoo-dept-${d.id}`;
+    const { data, error } = await supabaseAdmin
+      .from("departments")
+      .upsert(
+        {
+          organization_id: ctx.organizationId,
+          external_source: SOURCE,
+          external_id: String(d.id),
+          name: d.name,
+          slug,
+          kind: "other",
+        },
+        { onConflict: "organization_id,external_source,external_id" },
+      )
+      .select("id")
+      .single();
+    if (error) throw new Error(`department ${d.id} (${d.name}): ${error.message}`);
+    ctx.departmentIdMap.set(d.id, data.id);
+  }
+
+  // Pass 2: wire parent_department_id once every row's uuid is known.
+  for (const d of rows) {
+    const parentOdooId = d.parent_id ? d.parent_id[0] : null;
+    if (!parentOdooId) continue;
+    const childId = ctx.departmentIdMap.get(d.id);
+    const parentId = ctx.departmentIdMap.get(parentOdooId);
+    if (!childId || !parentId) continue;
+    await supabaseAdmin
+      .from("departments")
+      .update({ parent_department_id: parentId })
+      .eq("id", childId);
+  }
+
+  // Pass 3: head_employee_id, resolved via hr.employee.user_id → employee_profiles.
+  // Skipped here — we set it inside importEmployeeHR once odooUserToEmployee
+  // covers the manager_id user.
+  return rows.length;
+}
+
+// Walk hr.employee → backfill department_id + position (from hr.job) +
+// manager_employee_id on existing employee_profiles. The earlier importer
+// keys employee_profiles by res.users.id, so we join hr.employee.user_id
+// onto that map. Employees without a user_id (rare in Sky Light's Odoo)
+// are skipped — there's no record on our side to update.
+async function importEmployeeHR(ctx: ImportContext): Promise<number> {
+  type OdooHrEmployee = {
+    id: number;
+    name: string;
+    user_id: OdooMany2one;
+    department_id: OdooMany2one;
+    job_id: OdooMany2one;
+    parent_id: OdooMany2one; // direct manager (hr.employee)
+    work_phone: string | false;
+    work_email: string | false;
+    active: boolean;
+  };
+  console.log("[odoo-import] fetching hr.employee…");
+  const employees = await ctx.odoo.searchRead<OdooHrEmployee>(
+    "hr.employee",
+    [["active", "=", true]],
+    [
+      "id", "name", "user_id", "department_id", "job_id", "parent_id",
+      "work_phone", "work_email", "active",
+    ],
+    { limit: 1000 },
+  );
+  console.log(`[odoo-import] hr.employee → ${employees.length} rows`);
+
+  // Pull hr.job for canonical position names. job_id many2one only carries
+  // [id, name], but Odoo sometimes appends "(Department)" to the name —
+  // hr.job.name is the clean string we want for `position`.
+  const jobIds = employees.map((e) => e.job_id?.[0]).filter((x): x is number => Boolean(x));
+  type OdooJob = { id: number; name: string };
+  const jobs = jobIds.length
+    ? await ctx.odoo.searchRead<OdooJob>(
+        "hr.job",
+        [["id", "in", Array.from(new Set(jobIds))]],
+        ["id", "name"],
+        { limit: 500 },
+      )
+    : [];
+  const jobNameById = new Map(jobs.map((j) => [j.id, j.name]));
+
+  // First pass: backfill department_id + position on each employee_profile
+  // matched via res.users.id. Build a map of Odoo hr.employee.id → Supabase
+  // employee_profiles.id so we can stitch manager_employee_id in pass 2.
+  const hrIdToEmpProfile = new Map<number, string>();
+  let updated = 0;
+  for (const e of employees) {
+    const userOdooId = e.user_id ? e.user_id[0] : null;
+    if (!userOdooId) continue;
+    const empProfileId = ctx.odooUserToEmployee.get(userOdooId);
+    if (!empProfileId) continue;
+
+    hrIdToEmpProfile.set(e.id, empProfileId);
+
+    const deptOdooId = e.department_id ? e.department_id[0] : null;
+    const deptId = deptOdooId ? (ctx.departmentIdMap.get(deptOdooId) ?? null) : null;
+    const jobId = e.job_id ? e.job_id[0] : null;
+    const jobName = jobId
+      ? (jobNameById.get(jobId) ?? (e.job_id ? e.job_id[1] : null))
+      : null;
+
+    // `employee_profiles.position` is an enum-style text column gated by a
+    // CHECK constraint ('head'|'team_lead'|'specialist'|'agent'|'admin') — it
+    // tracks the role tier the dashboard uses for stage-owner gating. The
+    // free-text job title from hr.job lands in `job_title`; mapping a string
+    // like "Social Media Specialist" into the tier enum would need rules the
+    // team hasn't defined yet, so leave `position` alone.
+    const update: Record<string, unknown> = {
+      department_id: deptId,
+    };
+    // Refresh phone / job_title too — these come from partner.function in
+    // importEmployees, but hr.employee.work_phone is more authoritative.
+    if (e.work_phone) update.phone = e.work_phone;
+    if (jobName && jobName.length > 0) update.job_title = jobName;
+
+    const { error } = await supabaseAdmin
+      .from("employee_profiles")
+      .update(update)
+      .eq("id", empProfileId);
+    if (error) {
+      // Don't fail the whole import on one bad row.
+      console.warn(`[odoo-import] employee_hr ${e.id} (${e.name}): ${error.message}`);
+      continue;
+    }
+    updated += 1;
+  }
+
+  // Pass 2: stitch manager_employee_id once every hr.employee → emp_profile
+  // mapping is in hand.
+  for (const e of employees) {
+    const empProfileId = hrIdToEmpProfile.get(e.id);
+    if (!empProfileId) continue;
+    const managerOdooId = e.parent_id ? e.parent_id[0] : null;
+    if (!managerOdooId) continue;
+    const managerProfileId = hrIdToEmpProfile.get(managerOdooId);
+    if (!managerProfileId) continue;
+    await supabaseAdmin
+      .from("employee_profiles")
+      .update({ manager_employee_id: managerProfileId })
+      .eq("id", empProfileId);
+  }
+
+  // Pass 3: department heads — once we know every hr.employee → emp_profile,
+  // backfill departments.head_employee_id from hr.department.manager_id.
+  type OdooDepartmentManager = { id: number; manager_id: OdooMany2one };
+  const depRows = await ctx.odoo.searchRead<OdooDepartmentManager>(
+    "hr.department",
+    [["active", "=", true]],
+    ["id", "manager_id"],
+    { limit: 500 },
+  );
+  for (const d of depRows) {
+    if (!d.manager_id) continue;
+    const deptId = ctx.departmentIdMap.get(d.id);
+    if (!deptId) continue;
+    // manager_id on hr.department points at an hr.employee — resolve via the
+    // local hr.employee.id → empProfile map built in pass 1.
+    const headProfileId = hrIdToEmpProfile.get(d.manager_id[0]);
+    if (!headProfileId) continue;
+    await supabaseAdmin
+      .from("departments")
+      .update({ head_employee_id: headProfileId })
+      .eq("id", deptId);
+  }
+
+  return updated;
 }
 
 async function ensureUnassignedClient(ctx: ImportContext): Promise<string> {
@@ -1332,6 +1530,7 @@ export async function runImport(
     projectIdMap: new Map(),
     serviceIdMap: new Map(),
     tagIdMap: new Map(),
+    departmentIdMap: new Map(),
     stageNameById: new Map(),
     unassignedClientId: null,
     odooUserToEmployee: new Map(),
@@ -1349,6 +1548,8 @@ export async function runImport(
     tagAssignments: 0,
     taskComments: 0,
     projectComments: 0,
+    departments: 0,
+    employeesHydrated: 0,
     errors: [],
   };
 
@@ -1359,6 +1560,20 @@ export async function runImport(
     summary.employees = await importEmployees(ctx);
   } catch (e) {
     summary.errors.push(`employees: ${(e as Error).message}`);
+  }
+  // Departments + HR records: order is departments → employee-HR backfill so
+  // emp_profile.department_id can resolve a uuid. Both before clients/projects
+  // since neither downstream entity depends on hr data, but having dept and
+  // position populated keeps the rest of the import logging more useful.
+  try {
+    summary.departments = await importDepartments(ctx);
+  } catch (e) {
+    summary.errors.push(`departments: ${(e as Error).message}`);
+  }
+  try {
+    summary.employeesHydrated = await importEmployeeHR(ctx);
+  } catch (e) {
+    summary.errors.push(`employee_hr: ${(e as Error).message}`);
   }
   try {
     summary.clients = await importClients(ctx);
@@ -1401,6 +1616,39 @@ export async function runImport(
   return summary;
 }
 
+// Lightweight wrapper for the /service-categories "Sync from Odoo" button.
+// Only runs the project.category → services import path (~14 rows for Sky
+// Light) instead of the full multi-minute pipeline. Returns the row count so
+// the UI can show a clear summary toast.
+export async function runServicesImport(
+  odoo: OdooClient,
+  organizationSlug: string,
+): Promise<{ services: number; errors: string[] }> {
+  const organizationId = await resolveOrganizationId(organizationSlug);
+  const ctx: ImportContext = {
+    organizationId,
+    odoo,
+    employeeIdMap: new Map(),
+    clientIdMap: new Map(),
+    projectIdMap: new Map(),
+    serviceIdMap: new Map(),
+    tagIdMap: new Map(),
+    departmentIdMap: new Map(),
+    stageNameById: new Map(),
+    unassignedClientId: null,
+    odooUserToEmployee: new Map(),
+    assigneeCount: 0,
+  };
+  const errors: string[] = [];
+  let count = 0;
+  try {
+    count = await importServices(ctx);
+  } catch (e) {
+    errors.push((e as Error).message);
+  }
+  return { services: count, errors };
+}
+
 async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
   const tables = [
     { name: "employee_profiles", map: ctx.employeeIdMap },
@@ -1408,6 +1656,7 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
     { name: "projects", map: ctx.projectIdMap },
     { name: "services", map: ctx.serviceIdMap },
     { name: "project_tags", map: ctx.tagIdMap },
+    { name: "departments", map: ctx.departmentIdMap },
   ] as const;
   for (const { name, map } of tables) {
     const { data } = await supabaseAdmin

@@ -315,7 +315,13 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
                         )}
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300"
+                        title="هذه المهمة بدون موعد نهائي"
+                      >
+                        <Calendar className="size-3" />
+                        بدون موعد
+                      </span>
                     )}
                   </DataTableCell>
                   <DataTableCell className="text-center tabular-nums">
