@@ -562,6 +562,8 @@ const TASK_TABS = [
   "activities",
   "documents",
   "history",
+  "gantt",
+  "extra",
 ] as const;
 type TaskTab = (typeof TASK_TABS)[number];
 
@@ -828,6 +830,8 @@ function TaskTabNav({
     { key: "activities", label: "أنشطة مجدولة" },
     { key: "documents", label: "المرفقات" },
     { key: "history", label: "تاريخ المراحل" },
+    { key: "gantt", label: "جانت المهمة" },
+    { key: "extra", label: "معلومات إضافية" },
   ];
 
   return (
@@ -1134,6 +1138,26 @@ async function TaskTabPanelSection({
     );
   }
 
+  if (activeTab === "gantt") {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <TaskGanttDetailPanel orgId={orgId} taskId={taskId} projectId={projectId} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeTab === "extra") {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <TaskExtraInfoPanel orgId={orgId} taskId={taskId} />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل سجل النشاط...</CardContent></Card>}>
@@ -1191,5 +1215,258 @@ async function TaskCommentComposerSection({
       mentionable={mentionable}
       floating
     />
+  );
+}
+
+// Sky Light feedback (Rwasem screenshot parity): per-task Gantt slice. Shows
+// the task's planned→due window as a single bar plus its dependency neighbors,
+// and links out to the full project Gantt. Cheap one-shot read; we only need
+// the dates + the link rows.
+async function TaskGanttDetailPanel({
+  orgId,
+  taskId,
+  projectId,
+}: {
+  orgId: string;
+  taskId: string;
+  projectId: string | null;
+}) {
+  if (!projectId) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        المهمة غير مرتبطة بمشروع — لا يمكن عرض المخطط.
+      </p>
+    );
+  }
+
+  const [{ data: thisTask }, { data: outgoing }, { data: incoming }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("tasks")
+        .select("planned_date, due_date, stage, task_code, title")
+        .eq("organization_id", orgId)
+        .eq("id", taskId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("task_links")
+        .select(
+          "dependency_type, lag_days, target:tasks!task_links_target_task_id_fkey ( id, task_code, title, planned_date, due_date )",
+        )
+        .eq("organization_id", orgId)
+        .eq("source_task_id", taskId),
+      supabaseAdmin
+        .from("task_links")
+        .select(
+          "dependency_type, lag_days, source:tasks!task_links_source_task_id_fkey ( id, task_code, title, planned_date, due_date )",
+        )
+        .eq("organization_id", orgId)
+        .eq("target_task_id", taskId),
+    ]);
+
+  const start = thisTask?.planned_date ?? thisTask?.due_date ?? null;
+  const end = thisTask?.due_date ?? thisTask?.planned_date ?? null;
+
+  type Neighbor = {
+    id: string;
+    task_code: string | null;
+    title: string;
+    planned_date: string | null;
+    due_date: string | null;
+    dependency_type: string;
+    lag_days: number;
+    direction: "predecessor" | "successor";
+  };
+  const neighbors: Neighbor[] = [];
+  for (const row of (incoming ?? []) as Array<{
+    dependency_type: string;
+    lag_days: number;
+    source: {
+      id: string;
+      task_code: string | null;
+      title: string;
+      planned_date: string | null;
+      due_date: string | null;
+    } | { id: string; task_code: string | null; title: string; planned_date: string | null; due_date: string | null }[] | null;
+  }>) {
+    const s = Array.isArray(row.source) ? row.source[0] : row.source;
+    if (s) neighbors.push({ ...s, dependency_type: row.dependency_type, lag_days: row.lag_days, direction: "predecessor" });
+  }
+  for (const row of (outgoing ?? []) as Array<{
+    dependency_type: string;
+    lag_days: number;
+    target: {
+      id: string;
+      task_code: string | null;
+      title: string;
+      planned_date: string | null;
+      due_date: string | null;
+    } | { id: string; task_code: string | null; title: string; planned_date: string | null; due_date: string | null }[] | null;
+  }>) {
+    const t = Array.isArray(row.target) ? row.target[0] : row.target;
+    if (t) neighbors.push({ ...t, dependency_type: row.dependency_type, lag_days: row.lag_days, direction: "successor" });
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs text-muted-foreground">
+          نظرة موجزة على هذه المهمة وعلاقاتها داخل المشروع
+        </div>
+        <Link
+          href={`/projects/${projectId}/gantt`}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim/30 px-2.5 py-1 text-xs font-medium text-cyan hover:bg-cyan-dim/50 transition-colors"
+        >
+          فتح المخطط الكامل للمشروع
+        </Link>
+      </div>
+
+      <div className="rounded-xl border border-soft bg-soft-1 p-4">
+        <div className="text-xs text-muted-foreground mb-1">المهمة الحالية</div>
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div className="text-sm font-medium truncate">
+            {thisTask?.task_code ? `${thisTask.task_code} · ` : ""}{thisTask?.title}
+          </div>
+          <div className="text-[11px] text-muted-foreground tabular-nums" dir="ltr">
+            {start ?? "—"} → {end ?? "—"}
+          </div>
+        </div>
+      </div>
+
+      {neighbors.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          لا توجد روابط تبعية — أضف من تبويب «ربط المهام».
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold">روابط التبعية ({neighbors.length})</div>
+          <ul className="space-y-1.5">
+            {neighbors.map((n, i) => (
+              <li
+                key={`${n.direction}-${n.id}-${i}`}
+                className="flex items-baseline justify-between gap-3 rounded-lg border border-soft bg-card px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className={cn(
+                    "me-2 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                    n.direction === "predecessor" ? "bg-amber-dim text-amber" : "bg-cyan-dim/40 text-cyan",
+                  )}>
+                    {n.direction === "predecessor" ? "سابقة" : "لاحقة"}
+                  </span>
+                  <Link href={`/tasks/${n.id}`} className="text-xs font-medium hover:text-cyan truncate">
+                    {n.task_code ? `${n.task_code} · ` : ""}{n.title}
+                  </Link>
+                  <span className="ms-2 text-[10px] text-muted-foreground">
+                    {n.dependency_type}{n.lag_days ? ` · ${n.lag_days}ي تأخير` : ""}
+                  </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground tabular-nums" dir="ltr">
+                  {n.planned_date ?? n.due_date ?? "—"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sky Light feedback (Rwasem screenshot parity): "معلومات إضافية" tab. Surfaces
+// the metadata that doesn't fit cleanly elsewhere — Odoo source/id, approval
+// flags, hold reason, raw progress numbers, audit timestamps.
+async function TaskExtraInfoPanel({
+  orgId,
+  taskId,
+}: {
+  orgId: string;
+  taskId: string;
+}) {
+  const { data } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      `id, task_code, created_at, updated_at, created_by,
+       external_source, external_id,
+       approval_required, approval_status, approval_requested_at, approval_decided_at,
+       hold_reason, hold_since,
+       allocated_time_minutes, progress_percent, expected_progress_percent,
+       progress_slip_percent, delay_days, actual_done_date`,
+    )
+    .eq("organization_id", orgId)
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!data) {
+    return <p className="text-xs text-muted-foreground">لم يتم العثور على المهمة.</p>;
+  }
+
+  // tasks.created_by → auth.users.id; resolve via employee_profiles.user_id.
+  let creatorName: string | null = null;
+  if (data.created_by) {
+    const { data: emp } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("full_name")
+      .eq("organization_id", orgId)
+      .eq("user_id", data.created_by)
+      .maybeSingle();
+    creatorName = emp?.full_name ?? null;
+  }
+  const fmt = (v: string | null | undefined) =>
+    v ? formatArabicDateTime(v) : "—";
+  const fmtNum = (v: number | null | undefined, suffix = "") =>
+    v === null || v === undefined ? "—" : `${v}${suffix}`;
+
+  const rows: Array<{ label: string; value: React.ReactNode }> = [
+    { label: "كود المهمة", value: data.task_code ?? "—" },
+    { label: "أُنشئت", value: fmt(data.created_at) },
+    { label: "آخر تحديث", value: fmt(data.updated_at) },
+    { label: "أنشأها", value: creatorName ?? "—" },
+    {
+      label: "المصدر",
+      value:
+        data.external_source === "odoo"
+          ? `Odoo · ${data.external_id ?? "—"}`
+          : "محلي (Dashboard)",
+    },
+    {
+      label: "بوابة الاعتماد",
+      value: data.approval_required ? `مطلوب · ${data.approval_status ?? "—"}` : "—",
+    },
+    {
+      label: "طُلب الاعتماد في",
+      value: fmt(data.approval_requested_at),
+    },
+    {
+      label: "تم اعتماده في",
+      value: fmt(data.approval_decided_at),
+    },
+    { label: "سبب الإيقاف", value: data.hold_reason ?? "—" },
+    { label: "موقوف منذ", value: fmt(data.hold_since) },
+    {
+      label: "الوقت المخصص",
+      value: data.allocated_time_minutes
+        ? `${Math.floor(data.allocated_time_minutes / 60)}س ${data.allocated_time_minutes % 60}د`
+        : "—",
+    },
+    { label: "التقدم", value: fmtNum(data.progress_percent, "%") },
+    { label: "التقدم المتوقع", value: fmtNum(data.expected_progress_percent, "%") },
+    { label: "انحراف التقدم", value: fmtNum(data.progress_slip_percent, "%") },
+    { label: "أيام التأخير", value: fmtNum(data.delay_days) },
+    {
+      label: "اليوم الفعلي للإنجاز",
+      value: data.actual_done_date ?? "—",
+    },
+  ];
+
+  return (
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+      {rows.map((r) => (
+        <div key={r.label} className="flex items-baseline justify-between border-b border-soft/50 py-1.5">
+          <dt className="text-xs text-muted-foreground">{r.label}</dt>
+          <dd className="text-xs text-foreground/90 tabular-nums" dir="auto">
+            {r.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
