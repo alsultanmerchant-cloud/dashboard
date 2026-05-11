@@ -340,6 +340,14 @@ export function NewProjectForm({
     <form
       action={formAction}
       className="grid gap-4 lg:grid-cols-2"
+      onSubmit={(e) => {
+        const nativeEvent = e.nativeEvent as SubmitEvent;
+        const submitter = nativeEvent.submitter as HTMLElement | null;
+        const explicitSubmit = submitter?.hasAttribute("data-project-submit");
+        if (!explicitSubmit || step !== 3 || validation.length > 0 || pending) {
+          e.preventDefault();
+        }
+      }}
       onKeyDown={(e) => {
         // Defensive: prevent any single-input Enter (project name, package
         // search, employee search, etc.) from submitting the wizard. The
@@ -1004,6 +1012,7 @@ export function NewProjectForm({
           ) : (
             <Button
               type="submit"
+              data-project-submit="true"
               disabled={pending || selectedServices.size === 0 || validation.length > 0}
             >
               {pending && <Loader2 className="size-4 animate-spin" />}

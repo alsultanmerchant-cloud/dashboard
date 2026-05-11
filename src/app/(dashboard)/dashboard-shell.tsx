@@ -12,13 +12,6 @@ import { OrgProvider } from "@/lib/org-context";
 import { createClient } from "@/lib/supabase/client";
 import type { AppNotification } from "@/types";
 
-const NotificationPanel = dynamic(
-  () =>
-    import("@/components/layout/notification-panel").then((mod) => ({
-      default: mod.NotificationPanel,
-    })),
-);
-
 const AIChatFAB = dynamic(
   () =>
     import("@/components/ai/ai-chat-fab").then((mod) => ({
@@ -162,7 +155,6 @@ export function DashboardShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [notifOpen, setNotifOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
@@ -196,25 +188,8 @@ export function DashboardShell({
               <Topbar
                 unreadCount={unreadCount}
                 dmUnreadCount={dmUnreadCount}
-                onBellClick={() => setNotifOpen((p) => !p)}
+                onBellClick={() => router.push("/notifications")}
                 onMenuClick={() => setSidebarOpen(true)}
-                notificationPanel={
-                  notifOpen ? (
-                    <NotificationPanel
-                      notifications={notifications}
-                      onClose={() => setNotifOpen(false)}
-                      onMarkAllRead={() =>
-                        setNotifications((prev) =>
-                          prev.map((n) => ({ ...n, isRead: true })),
-                        )
-                      }
-                      onClearAll={() => {
-                        setNotifications([]);
-                        setNotifOpen(false);
-                      }}
-                    />
-                  ) : null
-                }
               />
               <ModuleTabs />
               <main className="px-4 sm:px-6 pb-12 pt-4">

@@ -72,6 +72,7 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
         <tbody className="divide-y divide-border">
           {items.map((p) => {
             const stripe = odooColor(p.color || 11);
+            const href = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
             return (
               <tr key={p.odooId || p.ref} className="group hover:bg-muted/40">
                 <td className="px-2 py-2 align-middle">
@@ -84,7 +85,7 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                 </td>
                 <td className="px-2 py-2 align-middle">
                   <Link
-                    href={`/projects/odoo/${p.odooId}`}
+                    href={href}
                     className="flex items-center gap-2 text-foreground hover:text-primary"
                   >
                     <span

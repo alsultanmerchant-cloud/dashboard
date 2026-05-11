@@ -70,11 +70,9 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
   const t = useTranslations("ProjectCard");
   const progress = progressOf(p);
   const stripe = odooColor(p.color || 11);
-  // Prefer the Supabase project page when we know the UUID — it scopes tasks
-  // to the project. Native (non-Odoo) projects only have a Supabase id; old
-  // odoo-only callers fall back to the legacy /tasks?odooProjectId=… link
-  // which used to silently leak to the global task list when odooId was 0.
-  const href = p.id ? `/projects/${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
+  // Project entry should land on the scoped tasks view first. We still expose
+  // project details from there via the "معلومات المشروع" action in /tasks.
+  const href = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
 
   return (
     <article
