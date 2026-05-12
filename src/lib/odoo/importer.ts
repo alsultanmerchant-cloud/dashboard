@@ -915,6 +915,9 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       design_count: typeof t.design_count === "number" ? t.design_count : 0,
       document_count: typeof t.document_count === "number" ? t.document_count : 0,
       email_cc: nullable(t.email_cc),
+      // §5.2: mirror Odoo's archive flag. Existing rows that flip from
+      // archived → active on a later sync get archived_at nulled back out.
+      archived_at: t.active === false ? new Date().toISOString() : null,
     };
     const { data: taskRow, error } = await supabaseAdmin
       .from("tasks")
@@ -1617,13 +1620,13 @@ export async function runImport(
 }
 
 // Lightweight wrapper for the /service-categories "Sync from Odoo" button.
-// Only runs the project.category → services import path (~14 rows for Sky
-// Light) instead of the full multi-minute pipeline. Returns the row count so
-// the UI can show a clear summary toast.
+// Runs project.category → services AND mirrors each row into
+// service_categories so the page UI (which reads service_categories) reflects
+// the sync. Idempotent on both tables.
 export async function runServicesImport(
   odoo: OdooClient,
   organizationSlug: string,
-): Promise<{ services: number; errors: string[] }> {
+): Promise<{ services: number; categories: number; errors: string[] }> {
   const organizationId = await resolveOrganizationId(organizationSlug);
   const ctx: ImportContext = {
     organizationId,
@@ -1640,13 +1643,52 @@ export async function runServicesImport(
     assigneeCount: 0,
   };
   const errors: string[] = [];
-  let count = 0;
+  let serviceCount = 0;
+  let categoryCount = 0;
   try {
-    count = await importServices(ctx);
+    serviceCount = await importServices(ctx);
   } catch (e) {
-    errors.push((e as Error).message);
+    errors.push(`services: ${(e as Error).message}`);
+    return { services: 0, categories: 0, errors };
   }
-  return { services: count, errors };
+  try {
+    categoryCount = await mirrorServicesToCategories(ctx);
+  } catch (e) {
+    errors.push(`categories: ${(e as Error).message}`);
+  }
+  return { services: serviceCount, categories: categoryCount, errors };
+}
+
+// For each Odoo-sourced row in `services`, ensure there's a matching row in
+// `service_categories` so the /service-categories page surfaces it. Uses the
+// service's slug as the unique `key` and copies name + color. Existing rows
+// keyed on (organization_id, key) are updated in place; new rows are inserted.
+async function mirrorServicesToCategories(
+  ctx: ImportContext,
+): Promise<number> {
+  const { data: services, error } = await supabaseAdmin
+    .from("services")
+    .select("id, name, slug, external_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE);
+  if (error) throw new Error(error.message);
+
+  const rows = (services ?? []).map((s) => ({
+    organization_id: ctx.organizationId,
+    service_id: s.id,
+    key: s.slug as string,
+    name_ar: s.name as string,
+    is_active: true,
+    external_source: SOURCE,
+    external_id: s.external_id ?? null,
+  }));
+  if (rows.length === 0) return 0;
+
+  const { error: upErr } = await supabaseAdmin
+    .from("service_categories")
+    .upsert(rows, { onConflict: "organization_id,key" });
+  if (upErr) throw new Error(upErr.message);
+  return rows.length;
 }
 
 async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {

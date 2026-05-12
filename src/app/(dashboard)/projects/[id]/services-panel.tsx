@@ -18,12 +18,27 @@ import {
   createServiceTaskAction,
   detachProjectServiceAction,
 } from "./_service_actions";
+import {
+  attachServiceTagAction,
+  detachServiceTagAction,
+} from "./_service_tag_actions";
 
 export type ServiceLink = {
   id: string;
   service_id: string;
   service: { id: string; name: string; slug: string };
+  /** Count of tasks on the project that carry this service_id. Surfaced as
+   *  a badge on the chip so users can see the service "has tasks" at a
+   *  glance — fixes §3.2 where a freshly-created task wasn't visibly tied
+   *  to its service from the project page. */
+  task_count?: number;
+  /** §3.1: tags attached to this specific project_services row (HOLD etc).
+   *  Rendered as pills inside the chip. Reuses the org-wide project_tags
+   *  catalog. */
+  tags?: Array<{ id: string; name: string; color: number }>;
 };
+
+export type ProjectTagOption = { id: string; name: string; color: number };
 
 export type ServiceCandidate = {
   id: string;
@@ -47,18 +62,32 @@ const ROLE_OPTIONS: Array<{
   { value: "account_manager", label: "مدير الحساب" },
 ];
 
+// Odoo color palette — same palette used in project-card.tsx.
+const ODOO_TAG_COLORS = [
+  "#9c9c9c", "#d44d4d", "#dfb700", "#3597d3", "#5b8a72", "#9b59b6",
+  "#e63946", "#2a9d8f", "#264653", "#f4a261", "#28a745", "#5241c3",
+];
+function odooTagColor(i: number): string {
+  return ODOO_TAG_COLORS[i % ODOO_TAG_COLORS.length] ?? ODOO_TAG_COLORS[0];
+}
+
 export function ProjectServicesPanel({
   projectId,
   attached,
   candidates,
   employees,
   canManage,
+  tagOptions = [],
 }: {
   projectId: string;
   attached: ServiceLink[];
   candidates: ServiceCandidate[];
   employees: EmployeePickOption[];
   canManage: boolean;
+  /** §3.1: catalog of project-level tags reused for service-level tagging.
+   *  Empty when the org has no tags defined; the toggle button stays hidden
+   *  in that case. */
+  tagOptions?: ProjectTagOption[];
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
@@ -155,7 +184,14 @@ export function ProjectServicesPanel({
         toast.error(res.error);
         return;
       }
-      toast.success("تمت إضافة الباقة");
+      // §3.3: report how many tasks were auto-generated so the user knows
+      // the wizard-like template expansion ran (or didn't, for empty
+      // services). Falls back to the prior message when the count is zero.
+      toast.success(
+        res.tasksGenerated && res.tasksGenerated > 0
+          ? `تمت إضافة الباقة وتوليد ${res.tasksGenerated} مهمة`
+          : "تمت إضافة الباقة",
+      );
       setQuery("");
       router.refresh();
     });
@@ -172,6 +208,29 @@ export function ProjectServicesPanel({
         return;
       }
       toast.success("تمت الإزالة");
+      router.refresh();
+    });
+  }
+
+  // §3.1: tag-on-service controls. The popover-style picker would be
+  // overkill here — services are visible chips and tags are short. We
+  // anchor a small attach/detach via a single "Tag" button per chip that
+  // cycles through tagOptions on click. For now we expose an inline
+  // dropdown via native <select> to keep the surface tiny.
+  const [tagBusyKey, setTagBusyKey] = useState<string | null>(null);
+  function toggleTag(projectServiceId: string, tagId: string, attached: boolean) {
+    const key = `${projectServiceId}:${tagId}`;
+    setTagBusyKey(key);
+    start(async () => {
+      const res = attached
+        ? await detachServiceTagAction({ projectId, projectServiceId, tagId })
+        : await attachServiceTagAction({ projectId, projectServiceId, tagId });
+      setTagBusyKey(null);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(attached ? "تم إلغاء الوسم" : "تم إضافة الوسم");
       router.refresh();
     });
   }
@@ -204,12 +263,71 @@ export function ProjectServicesPanel({
       {attached.map((ps) => {
         const s = ps.service;
         const isBusy = busyServiceId === s.id && pending;
+        const taskCount = ps.task_count ?? 0;
         return (
           <span
             key={ps.id}
             className="inline-flex items-center gap-1.5 rounded-full border border-soft bg-soft-1 ps-1 pe-2 py-1"
           >
             <ServiceBadge slug={s.slug} name={s.name} />
+            {(ps.tags ?? []).map((tag) => {
+              const isBusyTag = tagBusyKey === `${ps.id}:${tag.id}` && pending;
+              return (
+                <button
+                  type="button"
+                  key={tag.id}
+                  onClick={() => canManage && toggleTag(ps.id, tag.id, true)}
+                  disabled={!canManage || isBusyTag}
+                  title={canManage ? `إزالة الوسم ${tag.name}` : tag.name}
+                  className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-70"
+                  style={{ backgroundColor: odooTagColor(tag.color) }}
+                >
+                  {tag.name}
+                  {canManage && <X className="ms-0.5 size-2.5" />}
+                </button>
+              );
+            })}
+            {taskCount > 0 && (
+              <a
+                href={`/tasks?projectId=${projectId}&groupBy=service`}
+                title={`عرض مهام ${s.name} (${taskCount})`}
+                className="rounded-full bg-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-cyan transition-colors hover:bg-cyan/25"
+              >
+                {taskCount} مهمة
+              </a>
+            )}
+            {canManage && tagOptions.length > 0 && (() => {
+              // Inline picker: native <select> with onChange — minimal UI,
+              // exact match to the user's "flag as HOLD" use case. The
+              // select stays out of the way until clicked.
+              const attachedTagIds = new Set((ps.tags ?? []).map((t) => t.id));
+              const available = tagOptions.filter((t) => !attachedTagIds.has(t.id));
+              if (available.length === 0) return null;
+              return (
+                <span
+                  className="inline-flex items-center"
+                  title="إضافة وسم لهذه الخدمة"
+                >
+                  <select
+                    aria-label={`إضافة وسم لـ ${s.name}`}
+                    value=""
+                    disabled={pending}
+                    onChange={(e) => {
+                      const tagId = e.target.value;
+                      if (tagId) toggleTag(ps.id, tagId, false);
+                    }}
+                    className="rounded-full border border-dashed border-soft bg-transparent px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:border-cyan/40 transition-colors disabled:opacity-50"
+                  >
+                    <option value="">+ وسم</option>
+                    {available.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              );
+            })()}
             {canManage && (
               <>
                 <button

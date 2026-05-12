@@ -14,9 +14,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth-server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
+import { generateTasksForProjectFromServices } from "@/lib/workflows/generate-tasks";
 
-type ActionResult = { ok: true } | { error: string };
+type ActionResult = { ok: true; tasksGenerated?: number } | { error: string };
 
 const AttachSchema = z.object({
   project_id: z.string().uuid(),
@@ -51,7 +53,7 @@ export async function attachProjectServiceAction(input: {
   // friendlier message helps).
   const { data: project } = await supa
     .from("projects")
-    .select("id, organization_id, name")
+    .select("id, organization_id, name, start_date, account_manager_employee_id")
     .eq("id", parsed.data.project_id)
     .maybeSingle();
   if (!project || project.organization_id !== session.orgId) {
@@ -72,13 +74,10 @@ export async function attachProjectServiceAction(input: {
     service_id: parsed.data.service_id,
     status: "active",
   });
-  if (error) {
-    if (error.code === "23505") {
-      // Unique violation — already linked, treat as success.
-      return { ok: true };
-    }
+  if (error && error.code !== "23505") {
     return { error: error.message };
   }
+  const alreadyLinked = error?.code === "23505";
 
   await logAudit({
     organizationId: session.orgId,
@@ -98,8 +97,31 @@ export async function attachProjectServiceAction(input: {
     importance: "low",
   });
 
+  // §3.3: auto-generate the service's template tasks so attaching a service
+  // mirrors the new-project wizard behaviour. Skip when the link already
+  // existed (idempotent unique violation) — those tasks are already in place.
+  // Skip silently if the service has no templates; the user can still create
+  // ad-hoc tasks via the chip's "+task" form.
+  let tasksGenerated = 0;
+  if (!alreadyLinked) {
+    try {
+      tasksGenerated = await generateTasksForProjectFromServices({
+        organizationId: session.orgId,
+        projectId: parsed.data.project_id,
+        serviceIds: [parsed.data.service_id],
+        projectStartDate: project.start_date ?? null,
+        accountManagerEmployeeId: project.account_manager_employee_id ?? null,
+        createdByUserId: session.userId,
+      });
+    } catch (e) {
+      console.warn(
+        `attachProjectServiceAction: task generation failed: ${(e as Error).message}`,
+      );
+    }
+  }
+
   revalidatePath(`/projects/${parsed.data.project_id}`);
-  return { ok: true };
+  return { ok: true, tasksGenerated };
 }
 
 // Sky Light feedback #10: ad-hoc "create new task" inside a service chip on

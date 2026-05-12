@@ -49,7 +49,7 @@ export async function getSpecialistLoad(
       employee_id,
       role_type,
       task:tasks!inner ( id, stage, allocated_time_minutes ),
-      employee:employee_profiles ( id, full_name )
+      employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name )
     `)
     .eq("organization_id", orgId)
     .eq("role_type", "agent");
@@ -193,7 +193,9 @@ export async function getDesignerMonthlyOutput(
   // Pull every assignee on those tasks.
   const { data: assignees, error: aErr } = await supabaseAdmin
     .from("task_assignees")
-    .select("task_id, employee:employee_profiles ( id, full_name, job_title )")
+    .select(
+      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, job_title )",
+    )
     .eq("organization_id", orgId)
     .in("task_id", taskIds);
   if (aErr) throw aErr;

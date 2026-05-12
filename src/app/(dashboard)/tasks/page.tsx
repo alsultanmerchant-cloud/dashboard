@@ -105,12 +105,18 @@ type FilterKey =
   | "followed"
   | "has_start_date"
   | "has_end_date"
-  | "no_deadline";
+  | "no_deadline"
+  | "unassigned"
+  | "over_timesheets"
+  | "near_timesheets"
+  | "archived";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
   "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
   "has_start_date", "has_end_date", "no_deadline",
+  "unassigned", "over_timesheets", "near_timesheets",
+  "archived",
 ]);
 
 function parseFilterKeys(raw: string | undefined, legacy: string | undefined): Set<FilterKey> {
@@ -151,6 +157,8 @@ export default async function TasksPage({
     "assignee", "customer", "service", "last_stage_update",
     // #18 — Odoo parity additions.
     "progress", "status", "start_date",
+    // §5.2 — Rwasem parity additions.
+    "tags", "created_at",
   ] as const;
   type GroupKey = (typeof VALID_GROUPS)[number];
   // Comma-separated group-by stack (Rwasem-style "Stage > Assignee"). Pass the
@@ -223,6 +231,10 @@ export default async function TasksPage({
     hasStartDate: active.has("has_start_date"),
     hasEndDate: active.has("has_end_date"),
     noDeadline: active.has("no_deadline"),
+    unassigned: active.has("unassigned"),
+    overTimesheets: active.has("over_timesheets"),
+    nearTimesheets: active.has("near_timesheets"),
+    archived: active.has("archived"),
     followedByUserId: active.has("followed") ? session.userId : undefined,
     assignedToEmployeeId: active.has("mine") ? session.employeeId : undefined,
     projectId: resolvedProjectId,
@@ -239,20 +251,63 @@ export default async function TasksPage({
       ? []
       : await loadTasksForGlobalView(session.orgId, taskFilters);
 
+  // Project-scoped task count for the banner — only computed when projectId
+  // is set. Cheap (count head) and clearly communicates "view is filtered".
+  let scopedTaskCount: number | null = null;
+  if (projectInfo) {
+    const { count } = await supabaseAdmin
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", session.orgId)
+      .eq("project_id", projectInfo.id);
+    scopedTaskCount = count ?? 0;
+  }
+
   return (
     <div>
+      {/* Sky Light §2.5: when /tasks is project-scoped via ?projectId=, render
+          a prominent banner so the user knows the view is filtered (the prior
+          tiny "Project Info" link was easy to miss; users reported the kanban
+          looking like the global list). */}
+      {projectInfo && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan/30 bg-cyan-dim/30 px-4 py-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Briefcase className="size-4 text-cyan shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-wide text-cyan/80">
+                مهام مشروع
+              </p>
+              <p className="text-sm font-semibold truncate">
+                {projectInfo.name}
+                {scopedTaskCount !== null && (
+                  <span className="ms-2 text-xs font-normal text-muted-foreground">
+                    ({scopedTaskCount} مهمة)
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/projects/${projectInfo.id}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Briefcase className="size-3.5" />
+              معلومات المشروع
+            </Link>
+            <Link
+              href="/tasks"
+              className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              عرض كل المهام
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Top toolbar — Rwasem-style smart search bar (Filters / Group By /
           Favorites in a single dropdown) on the right, view switcher on the left. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
-        {projectInfo && (
-          <Link
-            href={`/projects/${projectInfo.id}`}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Briefcase className="size-4" />
-            معلومات المشروع
-          </Link>
-        )}
         <ViewSwitcher current={view} />
         <MonthQuickPick />
       </div>

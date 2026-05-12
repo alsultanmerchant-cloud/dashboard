@@ -210,15 +210,30 @@ export default async function TaskDetailPage({
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader
-        title={
-          ((task as { task_code?: string | null }).task_code
-            ? `${(task as { task_code?: string | null }).task_code} · `
-            : "") + task.title
-        }
-        breadcrumbs={[
-          { label: "المهام", href: "/tasks" },
-          { label: task.title },
-        ]}
+        title={(() => {
+          // §2.1: lead with the project name (what the operator recognises),
+          // then the task title. task_code (PRJ-NNN-NNN) moves to a small
+          // badge in the breadcrumb area where it doesn't dominate the
+          // headline. Falls back gracefully if either piece is missing.
+          const proj = Array.isArray(task.project)
+            ? task.project[0]
+            : (task as { project?: { id: string; name: string } | null }).project;
+          const projectName = proj?.name ?? null;
+          return projectName ? `${projectName} — ${task.title}` : task.title;
+        })()}
+        breadcrumbs={(() => {
+          const proj = Array.isArray(task.project)
+            ? task.project[0]
+            : (task as { project?: { id: string; name: string } | null }).project;
+          const taskCode = (task as { task_code?: string | null }).task_code;
+          return [
+            { label: "المهام", href: "/tasks" },
+            ...(proj
+              ? [{ label: proj.name, href: `/projects/${proj.id}` }]
+              : []),
+            { label: taskCode ? `${taskCode} — ${task.title}` : task.title },
+          ];
+        })()}
         actions={
           <div className="flex items-center gap-2">
             <Suspense fallback={null}>
@@ -254,9 +269,26 @@ export default async function TaskDetailPage({
                 ) : null}
               </div>
               <div className="space-y-1">
-                <p className="text-[11px] font-medium tracking-[0.18em] text-muted-foreground uppercase">
-                  {(task as { task_code?: string | null }).task_code ?? "TASK"}
-                </p>
+                {/* §2.1: project name leads, task_code moves to a small chip
+                    beside it. Users recognise their project name; "PRJ-036"
+                    is meaningless on first glance. */}
+                <div className="flex items-center gap-2 flex-wrap text-[11px] font-medium text-muted-foreground">
+                  {project ? (
+                    <Link
+                      href={`/projects/${project.id}`}
+                      className="text-cyan hover:text-cyan/80 hover:underline transition-colors"
+                    >
+                      {project.name}
+                    </Link>
+                  ) : (
+                    <span>—</span>
+                  )}
+                  {(task as { task_code?: string | null }).task_code && (
+                    <span className="inline-flex items-center rounded-md bg-soft px-1.5 py-0.5 font-mono tracking-tight text-[10px] text-muted-foreground">
+                      {(task as { task_code?: string | null }).task_code}
+                    </span>
+                  )}
+                </div>
                 <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
                   {task.title}
                 </h1>
@@ -480,6 +512,11 @@ export default async function TaskDetailPage({
                 task.created_by === session.userId ||
                 hasPermission(session, "tasks.manage") ||
                 hasPermission(session, "task.view_all")
+              }
+              currentStage={task.stage ?? null}
+              stageOwnerPositions={
+                (task as { stage_owner_positions?: Record<string, string | null> | null })
+                  .stage_owner_positions ?? null
               }
             />
           </Suspense>
@@ -778,10 +815,14 @@ async function TaskAssigneesSection({
   orgId,
   taskId,
   canManage,
+  currentStage,
+  stageOwnerPositions,
 }: {
   orgId: string;
   taskId: string;
   canManage: boolean;
+  currentStage: string | null;
+  stageOwnerPositions: Record<string, string | null> | null;
 }) {
   const [{ data: assigneesRaw }, employees] = await Promise.all([
     supabaseAdmin
@@ -878,6 +919,8 @@ async function TaskAssigneesSection({
       assignees={assignees}
       employees={employeeOptions}
       canManage={canManage}
+      currentStage={currentStage}
+      stageOwnerPositions={stageOwnerPositions}
     />
   );
 }
@@ -899,14 +942,30 @@ async function TaskFollowersSection({
   const inheritedFollowers = projectId
     ? await getCachedInheritedProjectFollowers(orgId, projectId)
     : [];
-  const explicitUserIds = new Set(followers.map((f) => f.user_id));
+  // After §8.1 / migration 0101 a follower may identify by employee_id OR
+  // user_id. Dedupe inherited rows by either, so we don't show a project
+  // follower twice if they're also explicit on the task.
+  const explicitKeys = new Set<string>();
+  for (const f of followers) {
+    if (f.employee_id) explicitKeys.add(`emp:${f.employee_id}`);
+    if (f.user_id) explicitKeys.add(`user:${f.user_id}`);
+  }
   const mergedFollowers = [
     ...followers,
-    ...inheritedFollowers.filter((follower) => !explicitUserIds.has(follower.user_id)),
+    ...inheritedFollowers.filter(
+      (f) =>
+        !(f.employee_id && explicitKeys.has(`emp:${f.employee_id}`)) &&
+        !(f.user_id && explicitKeys.has(`user:${f.user_id}`)),
+    ),
   ];
+  const followerCandidateExcludeKeys: string[] = [];
+  for (const f of mergedFollowers) {
+    if (f.employee_id) followerCandidateExcludeKeys.push(`emp:${f.employee_id}`);
+    if (f.user_id) followerCandidateExcludeKeys.push(`user:${f.user_id}`);
+  }
   const followerCandidates = await listFollowerCandidates(
     orgId,
-    mergedFollowers.map((follower) => follower.user_id),
+    followerCandidateExcludeKeys,
   );
 
   return (
@@ -1254,29 +1313,51 @@ async function TaskTabPanelSection({
   if (activeTab === "documents") {
     // #14 — pull task_attachments AND comment-attached files (uploaded via
     // the chatter). Both share the same table; the comment-attached rows have
-    // task_comment_id set. We surface every row that points at this task.
-    // Children sub-tasks: not aggregated here — they have their own page.
+    // task_comment_id set. We surface every row that points at this task
+    // AND every row attached to any of its sub-tasks (Rwasem-parity —
+    // matches their "All Documents" smart-button which aggregates the task
+    // plus its sub-tasks).
+    const { data: subtasks } = await supabaseAdmin
+      .from("tasks")
+      .select("id, task_code, title")
+      .eq("organization_id", orgId)
+      .eq("parent_task_id", taskId);
+    const subtaskById = new Map<
+      string,
+      { task_code: string | null; title: string | null }
+    >();
+    for (const s of subtasks ?? []) {
+      subtaskById.set(s.id as string, {
+        task_code: (s.task_code as string | null) ?? null,
+        title: (s.title as string | null) ?? null,
+      });
+    }
+    const taskIds = [taskId, ...subtaskById.keys()];
     const { data } = await supabaseAdmin
       .from("task_attachments")
       .select(
         "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at",
       )
       .eq("organization_id", orgId)
-      .eq("task_id", taskId)
+      .in("task_id", taskIds)
       .order("created_at", { ascending: false });
 
-    const rows = (data ?? []).map((r) => ({
-      id: r.id as string,
-      task_id: r.task_id as string,
-      task_code: null,
-      task_title: null,
-      filename: r.filename as string,
-      mimetype: (r.mimetype as string | null) ?? null,
-      size_bytes: (r.size_bytes as number | null) ?? null,
-      storage_path: (r.storage_path as string | null) ?? null,
-      source_url: (r.source_url as string | null) ?? null,
-      created_at: r.created_at as string,
-    }));
+    const rows = (data ?? []).map((r) => {
+      const rTaskId = r.task_id as string;
+      const sub = rTaskId === taskId ? null : subtaskById.get(rTaskId) ?? null;
+      return {
+        id: r.id as string,
+        task_id: rTaskId,
+        task_code: sub?.task_code ?? null,
+        task_title: sub?.title ?? null,
+        filename: r.filename as string,
+        mimetype: (r.mimetype as string | null) ?? null,
+        size_bytes: (r.size_bytes as number | null) ?? null,
+        storage_path: (r.storage_path as string | null) ?? null,
+        source_url: (r.source_url as string | null) ?? null,
+        created_at: r.created_at as string,
+      };
+    });
 
     return (
       <Card>

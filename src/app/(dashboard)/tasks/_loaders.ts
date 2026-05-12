@@ -132,5 +132,7 @@ export async function loadTaskBoardForGlobalView(
     >,
     design_count: t.design_count,
     closed_subtask_count: t.closed_subtask_count,
+    tags: t.tags,
+    created_at: t.created_at,
   }));
 }

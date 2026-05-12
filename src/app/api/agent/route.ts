@@ -2,6 +2,11 @@ import { streamText, generateText, convertToModelMessages, tool, stepCountIs } f
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+
+// §9.1: cap the function runtime so a hung tool call or stuck Gemini
+// stream surfaces as an error to the client instead of spinning forever.
+// Vercel ignores this in dev; in prod it bounds the serverless invocation.
+export const maxDuration = 60;
 import {
   listLiveProjects,
   listLiveClients,
@@ -246,10 +251,45 @@ export async function POST(req: Request) {
       );
     }
 
-    const { messages } = await req.json();
+    const { messages, conversationId } = (await req.json()) as {
+      messages: unknown[];
+      conversationId?: string | null;
+    };
     const orgId = session.orgId;
     const snapshot = await buildOrgSnapshot(orgId);
     const modelMessages = await convertToModelMessages(messages);
+
+    // §9.2: persist the latest user message into the DB-backed conversation
+    // so threads survive logout / tab close. We only persist when the client
+    // passes a conversationId — the page bootstraps one on first send.
+    if (conversationId && Array.isArray(messages) && messages.length > 0) {
+      const last = messages[messages.length - 1] as {
+        role?: string;
+        content?: unknown;
+      };
+      if (last?.role === "user") {
+        try {
+          // Sanity-check the conversation belongs to the caller before
+          // writing — RLS is on but we use the admin client server-side.
+          const { data: conv } = await supabaseAdmin
+            .from("ai_conversations")
+            .select("id, user_id")
+            .eq("id", conversationId)
+            .maybeSingle();
+          if (conv && conv.user_id === session.userId) {
+            await supabaseAdmin.from("ai_messages").insert({
+              conversation_id: conversationId,
+              role: "user",
+              content: last as unknown as object,
+            });
+          }
+        } catch (e) {
+          console.warn(
+            `agent: persist user message failed: ${(e as Error).message}`,
+          );
+        }
+      }
+    }
 
     const queryDbParams = z.object({
       table: z.enum(ALLOWED_TABLES).describe("The table to query (auto-scoped to current organization)"),
@@ -270,6 +310,11 @@ export async function POST(req: Request) {
       system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
       stopWhen: stepCountIs(8),
+      // §9.1: surface stream/tool errors instead of letting them deadlock
+      // the client. The UI shows a generic toast on stream error.
+      onError: ({ error }) => {
+        console.error("Agent stream error:", error);
+      },
       tools: {
         webSearch: tool({
           description: "Search the web for current information (industry news, competitor info, marketing trends, agency tools).",
@@ -552,7 +597,31 @@ export async function POST(req: Request) {
       },
     });
 
-    return result.toUIMessageStreamResponse();
+    return result.toUIMessageStreamResponse({
+      // §9.2: tell the SDK what the prior turns were so it knows which
+      // message in the onFinish payload is "new". Without this, parts
+      // can come back empty because the SDK can't distinguish.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      originalMessages: messages as any,
+      // Persist the assistant turn once the UI stream completes. Uses
+      // `responseMessage` (the just-generated UIMessage with its full
+      // parts array) so tool turns + markdown are preserved verbatim.
+      onFinish: async ({ responseMessage }) => {
+        if (!conversationId) return;
+        try {
+          if (!responseMessage || responseMessage.role !== "assistant") return;
+          await supabaseAdmin.from("ai_messages").insert({
+            conversation_id: conversationId,
+            role: "assistant",
+            content: responseMessage as unknown as object,
+          });
+        } catch (e) {
+          console.warn(
+            `agent: persist assistant message failed: ${(e as Error).message}`,
+          );
+        }
+      },
+    });
   } catch (error) {
     console.error("Agent error:", error);
     return new Response(JSON.stringify({ error: "فشل في الاتصال بالمساعد الذكي" }), {

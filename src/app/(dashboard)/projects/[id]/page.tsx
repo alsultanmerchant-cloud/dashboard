@@ -703,19 +703,72 @@ async function ProjectServicesSection({
       | { id: string; name: string; slug: string }[]
       | null;
   }>;
-  const attached: ServiceLink[] = rawLinks.flatMap((ps) => {
+  const rawAttached: ServiceLink[] = rawLinks.flatMap((ps) => {
     const s = Array.isArray(ps.service) ? ps.service[0] : ps.service;
     return s ? [{ id: ps.id, service_id: ps.service_id, service: s }] : [];
   });
 
-  const [{ data: catalog }, employees] = await Promise.all([
+  // §3.2: count tasks per service so each chip can surface a live badge.
+  // One round-trip — RLS scopes to the project automatically through the
+  // org filter + project_id check.
+  const taskCountByService = new Map<string, number>();
+  if (rawAttached.length > 0) {
+    const { data: serviceTaskRows } = await supabaseAdmin
+      .from("tasks")
+      .select("service_id")
+      .eq("organization_id", orgId)
+      .eq("project_id", project.id)
+      .not("service_id", "is", null);
+    for (const row of serviceTaskRows ?? []) {
+      const sid = (row as { service_id: string | null }).service_id;
+      if (!sid) continue;
+      taskCountByService.set(sid, (taskCountByService.get(sid) ?? 0) + 1);
+    }
+  }
+  // §3.1: pull tag assignments per project_services row. One round-trip,
+  // ids only — the catalog of project_tags is fetched separately and
+  // joined client-side via the tag_id.
+  const tagsByPs = new Map<string, Array<{ id: string; name: string; color: number }>>();
+  if (rawAttached.length > 0) {
+    const psIds = rawAttached.map((r) => r.id);
+    const { data: assigns } = await supabaseAdmin
+      .from("project_service_tag_assignments")
+      .select("project_service_id, tag:project_tags ( id, name, color )")
+      .eq("organization_id", orgId)
+      .in("project_service_id", psIds);
+    type Row = {
+      project_service_id: string;
+      tag: { id: string; name: string; color: number } | { id: string; name: string; color: number }[] | null;
+    };
+    for (const row of (assigns ?? []) as Row[]) {
+      const tag = Array.isArray(row.tag) ? row.tag[0] : row.tag;
+      if (!tag) continue;
+      const list = tagsByPs.get(row.project_service_id) ?? [];
+      list.push(tag);
+      tagsByPs.set(row.project_service_id, list);
+    }
+  }
+
+  const attached: ServiceLink[] = rawAttached.map((link) => ({
+    ...link,
+    task_count: taskCountByService.get(link.service_id) ?? 0,
+    tags: tagsByPs.get(link.id) ?? [],
+  }));
+
+  const [{ data: catalog }, employees, { data: tagCatalog }] = await Promise.all([
     supabaseAdmin
       .from("services")
       .select("id, name, slug")
       .eq("organization_id", orgId)
       .order("name"),
     listEmployees(orgId),
+    supabaseAdmin
+      .from("project_tags")
+      .select("id, name, color")
+      .eq("organization_id", orgId)
+      .order("name"),
   ]);
+  const tagOptions = ((tagCatalog ?? []) as Array<{ id: string; name: string; color: number }>);
   const candidates: ServiceCandidate[] = (catalog ?? []).map((s) => ({
     id: s.id as string,
     name: s.name as string,
@@ -742,6 +795,7 @@ async function ProjectServicesSection({
       candidates={candidates}
       employees={employeeOptions}
       canManage={canManage}
+      tagOptions={tagOptions}
     />
   );
 }

@@ -99,7 +99,11 @@ export async function listTaskStageHistory(
 }
 
 export type TaskFollower = {
-  user_id: string;
+  /** Either user_id (auth-linked employee) or employee_id (Odoo-only) is
+   *  always set; both may be set when the row was created for someone who
+   *  later got an auth account. */
+  user_id: string | null;
+  employee_id: string | null;
   full_name: string;
   avatar_url: string | null;
   job_title: string | null;
@@ -298,9 +302,8 @@ export async function listInheritedProjectFollowers(
     const emp = Array.isArray(r.employee) ? r.employee[0] : r.employee;
     if (!emp) continue;
     rows.push({
-      // Use auth user_id when available, else fall back to employee_profile id
-      // so the UI key is stable even for Odoo employees without auth records.
-      user_id: emp.user_id ?? emp.id,
+      user_id: emp.user_id ?? null,
+      employee_id: emp.id,
       full_name: emp.full_name,
       avatar_url: emp.avatar_url ?? null,
       job_title: emp.job_title ?? null,
@@ -316,38 +319,62 @@ export async function listTaskFollowers(
   orgId: string,
   taskId: string,
 ): Promise<TaskFollower[]> {
+  // Two follower flavours after migration 0101:
+  //   • user_id only  → legacy rows (linked to auth.users)
+  //   • employee_id   → new path for Odoo-imported employees with no login
+  //   • both          → set by current addFollowerAction when both are known
+  // The select pulls everything; we resolve the name/avatar via either
+  // path (employee_id wins when present, falls back to user_id).
   const { data, error } = await supabaseAdmin
     .from("task_followers")
-    .select("user_id, added_by, added_at")
+    .select("user_id, employee_id, added_by, added_at")
     .eq("task_id", taskId)
     .order("added_at", { ascending: true });
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
-  const userIds = Array.from(new Set(data.map((r) => r.user_id)));
-  const { data: emps } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("user_id, full_name, avatar_url, job_title")
-    .eq("organization_id", orgId)
-    .in("user_id", userIds);
-  const empByUserId = new Map<
-    string,
-    { full_name: string; avatar_url: string | null; job_title: string | null }
-  >();
-  for (const e of emps ?? []) {
-    if (e.user_id) {
-      empByUserId.set(e.user_id, {
-        full_name: e.full_name,
-        avatar_url: e.avatar_url,
-        job_title: e.job_title,
-      });
+  const employeeIds = Array.from(
+    new Set(data.map((r) => r.employee_id).filter((v): v is string => !!v)),
+  );
+  const userIds = Array.from(
+    new Set(data.map((r) => r.user_id).filter((v): v is string => !!v)),
+  );
+
+  type EmpRow = {
+    id: string;
+    user_id: string | null;
+    full_name: string;
+    avatar_url: string | null;
+    job_title: string | null;
+  };
+  const empById = new Map<string, EmpRow>();
+  const empByUserId = new Map<string, EmpRow>();
+  if (employeeIds.length || userIds.length) {
+    const { data: emps } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id, user_id, full_name, avatar_url, job_title")
+      .eq("organization_id", orgId)
+      .or(
+        [
+          employeeIds.length ? `id.in.(${employeeIds.join(",")})` : null,
+          userIds.length ? `user_id.in.(${userIds.join(",")})` : null,
+        ]
+          .filter(Boolean)
+          .join(","),
+      );
+    for (const e of (emps ?? []) as EmpRow[]) {
+      empById.set(e.id, e);
+      if (e.user_id) empByUserId.set(e.user_id, e);
     }
   }
 
   return data.map((r) => {
-    const emp = empByUserId.get(r.user_id);
+    const emp =
+      (r.employee_id ? empById.get(r.employee_id) : null) ??
+      (r.user_id ? empByUserId.get(r.user_id) : null);
     return {
       user_id: r.user_id,
+      employee_id: r.employee_id ?? emp?.id ?? null,
       full_name: emp?.full_name ?? "موظف غير معروف",
       avatar_url: emp?.avatar_url ?? null,
       job_title: emp?.job_title ?? null,
@@ -357,30 +384,37 @@ export async function listTaskFollowers(
   });
 }
 
-// Compact list of followable employees (active employees with a user_id),
-// for the "add follower" picker. Excludes anyone already on the followers
-// list.
+// Compact list of followable employees for the "add follower" picker.
+// Returns all active employees regardless of whether they have a linked
+// auth user (113 of 115 Odoo-imported employees have user_id=NULL, but the
+// dashboard still wants them follow-able — see migration 0101 + §8.1).
+//
+// `excludeKeys` filters out rows already followed. The key matches whatever
+// the caller already has from `getTaskFollowers`: either `user:<uuid>` or
+// `emp:<uuid>` (matching the addFollowerAction identifier surface).
 export async function listFollowerCandidates(
   orgId: string,
-  excludeUserIds: string[] = [],
+  excludeKeys: string[] = [],
 ) {
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
-    .select("user_id, full_name, job_title, avatar_url, employment_status")
+    .select("id, user_id, full_name, job_title, avatar_url, employment_status")
     .eq("organization_id", orgId)
     .eq("employment_status", "active")
-    .not("user_id", "is", null)
     .order("full_name", { ascending: true });
   if (error) throw error;
-  const exclude = new Set(excludeUserIds);
+  const exclude = new Set(excludeKeys);
   return (data ?? [])
-    .filter((e): e is typeof e & { user_id: string } =>
-      typeof e.user_id === "string" && !exclude.has(e.user_id),
-    )
     .map((e) => ({
-      user_id: e.user_id,
-      full_name: e.full_name,
-      job_title: e.job_title ?? null,
-      avatar_url: e.avatar_url ?? null,
-    }));
+      employee_id: e.id as string,
+      user_id: (e.user_id as string | null) ?? null,
+      full_name: e.full_name as string,
+      job_title: (e.job_title as string | null) ?? null,
+      avatar_url: (e.avatar_url as string | null) ?? null,
+    }))
+    .filter(
+      (e) =>
+        !exclude.has(`emp:${e.employee_id}`) &&
+        !(e.user_id && exclude.has(`user:${e.user_id}`)),
+    );
 }

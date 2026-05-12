@@ -269,7 +269,7 @@ export function ProjectsBoard({
           </div>
           <div className="flex flex-col gap-2">
             {b.items.map((p) => (
-              <ProjectCard key={p.odooId || p.ref} project={p} />
+              <ProjectCard key={p.id ?? `odoo-${p.odooId}`} project={p} />
             ))}
           </div>
         </div>

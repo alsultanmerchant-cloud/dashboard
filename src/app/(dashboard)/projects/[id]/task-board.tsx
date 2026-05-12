@@ -105,6 +105,10 @@ export type BoardTask = {
   role_slots: Partial<
     Record<TaskRoleType, { id: string; full_name: string; avatar_url: string | null }>
   >;
+  // §5.2: project tags + created_at surfaced so the kanban can group by
+  // them (Rwasem parity).
+  tags?: Array<{ id: string; name: string; color: number }>;
+  created_at?: string;
 };
 
 // -------- helpers --------------------------------------------------------
@@ -856,7 +860,10 @@ export type TaskGroupKey =
   // status, and start-date (planned_date) month groupings.
   | "progress"
   | "status"
-  | "start_date";
+  | "start_date"
+  // §5.2 (Rwasem parity): project-tags + creation-date week groupings.
+  | "tags"
+  | "created_at";
 
 type TaskBucket = { id: string; name: string; tasks: BoardTask[] };
 
@@ -1025,19 +1032,32 @@ function bucketTasksBy(tasks: BoardTask[], key: TaskGroupKey): TaskBucket[] {
       .filter((c) => c.tasks.length > 0);
   }
 
-  // assignee / customer / service / last_stage_update — same shape as the
-  // existing `customColumns` memo, count-desc with a "بدون …" fallback last.
+  // assignee / customer / service / last_stage_update / tags / created_at
+  // — same shape as the existing `customColumns` memo, count-desc with a
+  // "بدون …" fallback last.
   const noneLabel =
     key === "assignee" ? "بدون مسؤول"
       : key === "customer" ? "بدون عميل"
         : key === "service" ? "بدون خدمة"
-          : "بدون تاريخ";
+          : key === "tags" ? "بدون وسم"
+            : "بدون تاريخ";
   const map = new Map<string, TaskBucket>();
   const push = (id: string, name: string, t: BoardTask) => {
     const col = map.get(id) ?? { id, name, tasks: [] };
     col.tasks.push(t);
     map.set(id, col);
   };
+  function weekBucketLocal(rawDate: string | undefined | null) {
+    if (!rawDate) return null;
+    const d = new Date(rawDate);
+    if (Number.isNaN(d.getTime())) return null;
+    const monday = new Date(d);
+    const dow = (monday.getDay() + 6) % 7;
+    monday.setDate(monday.getDate() - dow);
+    monday.setHours(0, 0, 0, 0);
+    const id = monday.toISOString().slice(0, 10);
+    return { id, label: `أسبوع ${id}` };
+  }
   for (const t of tasks) {
     if (key === "assignee") {
       const slots = Object.values(t.role_slots ?? {});
@@ -1051,23 +1071,18 @@ function bucketTasksBy(tasks: BoardTask[], key: TaskGroupKey): TaskBucket[] {
     } else if (key === "service") {
       if (t.service?.id) push(t.service.id, t.service.name, t);
       else push(NONE, noneLabel, t);
+    } else if (key === "tags") {
+      const tagList = t.tags ?? [];
+      if (tagList.length === 0) push(NONE, noneLabel, t);
+      else for (const tag of tagList) push(`tag:${tag.id}`, tag.name, t);
+    } else if (key === "created_at") {
+      const bucket = weekBucketLocal(t.created_at);
+      if (!bucket) push(NONE, noneLabel, t);
+      else push(bucket.id, bucket.label, t);
     } else {
-      const raw = t.stage_entered_at;
-      if (!raw) {
-        push(NONE, noneLabel, t);
-        continue;
-      }
-      const d = new Date(raw);
-      if (Number.isNaN(d.getTime())) {
-        push(NONE, noneLabel, t);
-        continue;
-      }
-      const monday = new Date(d);
-      const dow = (monday.getDay() + 6) % 7;
-      monday.setDate(monday.getDate() - dow);
-      monday.setHours(0, 0, 0, 0);
-      const id = monday.toISOString().slice(0, 10);
-      push(id, `أسبوع ${id}`, t);
+      const bucket = weekBucketLocal(t.stage_entered_at);
+      if (!bucket) push(NONE, noneLabel, t);
+      else push(bucket.id, bucket.label, t);
     }
   }
   return [...map.values()].sort((a, b) => {
@@ -1242,7 +1257,9 @@ export function TaskBoard({
       outerKey !== "assignee" &&
       outerKey !== "customer" &&
       outerKey !== "service" &&
-      outerKey !== "last_stage_update"
+      outerKey !== "last_stage_update" &&
+      outerKey !== "tags" &&
+      outerKey !== "created_at"
     ) {
       return [];
     }
@@ -1255,13 +1272,26 @@ export function TaskBoard({
           ? "بدون عميل"
           : outerKey === "service"
             ? "بدون خدمة"
-            : "بدون تاريخ";
+            : outerKey === "tags"
+              ? "بدون وسم"
+              : "بدون تاريخ";
     const map = new Map<string, Col>();
     const push = (id: string, name: string, t: BoardTask) => {
       const col = map.get(id) ?? { id, name, tasks: [] };
       col.tasks.push(t);
       map.set(id, col);
     };
+    function weekBucket(rawDate: string | undefined | null) {
+      if (!rawDate) return null;
+      const d = new Date(rawDate);
+      if (Number.isNaN(d.getTime())) return null;
+      const monday = new Date(d);
+      const day = (monday.getDay() + 6) % 7;
+      monday.setDate(monday.getDate() - day);
+      monday.setHours(0, 0, 0, 0);
+      const id = monday.toISOString().slice(0, 10);
+      return { id, label: `أسبوع ${id}` };
+    }
     for (const t of tasks) {
       if (outerKey === "assignee") {
         const slots = Object.values(t.role_slots ?? {});
@@ -1275,25 +1305,18 @@ export function TaskBoard({
       } else if (outerKey === "service") {
         if (t.service?.id) push(t.service.id, t.service.name, t);
         else push(NONE, noneLabel, t);
+      } else if (outerKey === "tags") {
+        const tagList = t.tags ?? [];
+        if (tagList.length === 0) push(NONE, noneLabel, t);
+        else for (const tag of tagList) push(`tag:${tag.id}`, tag.name, t);
+      } else if (outerKey === "created_at") {
+        const bucket = weekBucket(t.created_at);
+        if (!bucket) push(NONE, noneLabel, t);
+        else push(bucket.id, bucket.label, t);
       } else {
-        // last_stage_update: bucket by ISO week of stage_entered_at
-        const raw = t.stage_entered_at;
-        if (!raw) {
-          push(NONE, noneLabel, t);
-          continue;
-        }
-        const d = new Date(raw);
-        if (Number.isNaN(d.getTime())) {
-          push(NONE, noneLabel, t);
-          continue;
-        }
-        const monday = new Date(d);
-        const day = (monday.getDay() + 6) % 7; // 0 = Monday
-        monday.setDate(monday.getDate() - day);
-        monday.setHours(0, 0, 0, 0);
-        const id = monday.toISOString().slice(0, 10);
-        const label = `أسبوع ${id}`;
-        push(id, label, t);
+        const bucket = weekBucket(t.stage_entered_at);
+        if (!bucket) push(NONE, noneLabel, t);
+        else push(bucket.id, bucket.label, t);
       }
     }
     const out = [...map.values()].sort((a, b) => {

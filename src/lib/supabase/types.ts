@@ -3496,20 +3496,26 @@ export type Database = {
         Row: {
           added_at: string
           added_by: string | null
+          employee_id: string | null
+          id: string
           task_id: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           added_at?: string
           added_by?: string | null
+          employee_id?: string | null
+          id?: string
           task_id: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           added_at?: string
           added_by?: string | null
+          employee_id?: string | null
+          id?: string
           task_id?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {

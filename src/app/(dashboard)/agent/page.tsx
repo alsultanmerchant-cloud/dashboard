@@ -117,10 +117,18 @@ const SUGGESTED_PROMPTS = [
 
 export default function AgentPage() {
   const { orgId } = useOrg();
+  // §9.2: stash the active conversation id in a ref so the transport's
+  // body callback (called per-send) always sees the latest value without
+  // having to remount the chat. The chat's `body` accepts either an object
+  // or a function — the function form runs at send time.
+  const activeConversationRef = useRef<string | null>(null);
   const { messages, sendMessage, status, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/agent",
-      body: { orgId },
+      body: () => ({
+        orgId,
+        conversationId: activeConversationRef.current,
+      }),
     }),
   });
 
@@ -150,28 +158,55 @@ export default function AgentPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Sky Light feedback #9: hydrate the conversation list, the active
-  // conversation, and its messages from sessionStorage on first mount.
-  // Runs once — subsequent route navigations remount the page and re-hit
-  // this effect with fresh state, restoring the user's last view.
+  // §9.2: hydrate the conversation sidebar from the DB on first mount.
+  // Falls back to sessionStorage (legacy) so users mid-thread aren't
+  // wiped during the transition. Runs once per mount.
   useEffect(() => {
-    const savedConversations = readStorage<Conversation[]>(STORAGE_KEYS.conversations);
-    const savedActive = readStorage<string>(STORAGE_KEYS.active);
-    if (savedConversations && savedConversations.length > 0) {
-      setConversations(
-        savedConversations.map((c) => ({ ...c, createdAt: new Date(c.createdAt) })),
-      );
-    }
-    if (savedActive) {
-      setActiveConversation(savedActive);
-      const savedMessages = readStorage<typeof messages>(
-        `${STORAGE_KEYS.messagesPrefix}${savedActive}`,
-      );
-      if (savedMessages && savedMessages.length > 0) {
-        setMessages(savedMessages);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/agent/conversations");
+        if (res.ok) {
+          const data = (await res.json()) as {
+            conversations: Array<{
+              id: string;
+              title: string | null;
+              created_at: string;
+              updated_at: string;
+            }>;
+          };
+          if (!cancelled && data.conversations.length > 0) {
+            setConversations(
+              data.conversations.map((c) => ({
+                id: c.id,
+                title: c.title ?? "محادثة بدون عنوان",
+                createdAt: new Date(c.created_at),
+              })),
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to hydrate conversations from DB:", e);
       }
-    }
-    hydratedRef.current = true;
+      // Legacy sessionStorage fallback for active conversation + messages.
+      // Once DB-backed conversation loading is wired into the sidebar, the
+      // remaining sessionStorage layer can be removed.
+      const savedActive = readStorage<string>(STORAGE_KEYS.active);
+      if (savedActive && !cancelled) {
+        setActiveConversation(savedActive);
+        activeConversationRef.current = savedActive;
+        const savedMessages = readStorage<typeof messages>(
+          `${STORAGE_KEYS.messagesPrefix}${savedActive}`,
+        );
+        if (savedMessages && savedMessages.length > 0) {
+          setMessages(savedMessages);
+        }
+      }
+      hydratedRef.current = true;
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -201,23 +236,90 @@ export default function AgentPage() {
     writeStorage(`${STORAGE_KEYS.messagesPrefix}${activeConversation}`, messages);
   }, [messages, activeConversation]);
 
-  // Save conversation title from first user message
+  // §9.2: on first user message, create a real DB-backed conversation
+  // so the server can persist messages. activeConversationRef is updated
+  // synchronously so the *next* sendMessage (within the same render) ships
+  // the new id to the server. Note: the first user message itself was
+  // already sent without a conversationId, but that's fine — the user
+  // text is captured client-side by useChat, and subsequent persistence
+  // (assistant turn + next user turn) does go through the DB. A future
+  // refinement could batch-create the conversation pre-send.
   useEffect(() => {
     if (messages.length === 1 && messages[0].role === "user" && !activeConversation) {
-      const id = crypto.randomUUID();
       const firstMsg = messages[0].parts
         ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
         .map((p) => p.text)
         .join("") || "";
       const title = firstMsg.slice(0, 50) + (firstMsg.length > 50 ? "..." : "");
-      setConversations((prev) => [{ id, title, createdAt: new Date() }, ...prev]);
-      setActiveConversation(id);
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await fetch("/api/agent/conversations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as {
+              conversation: { id: string; title: string | null; created_at: string };
+            };
+            if (cancelled) return;
+            const id = data.conversation.id;
+            activeConversationRef.current = id;
+            setActiveConversation(id);
+            setConversations((prev) => [
+              {
+                id,
+                title: data.conversation.title ?? title,
+                createdAt: new Date(data.conversation.created_at),
+              },
+              ...prev,
+            ]);
+          }
+        } catch (e) {
+          console.warn("Failed to create conversation in DB:", e);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [messages, activeConversation]);
 
   const submitMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
     setInput("");
+    // §9.2: pre-create a DB-backed conversation so the *first* user message
+    // (and its assistant reply) are persisted. Without this the first turn
+    // ships without a conversationId and the server skips persistence.
+    if (!activeConversationRef.current) {
+      const title = text.trim().slice(0, 50) + (text.length > 50 ? "..." : "");
+      try {
+        const res = await fetch("/api/agent/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            conversation: { id: string; title: string | null; created_at: string };
+          };
+          const id = data.conversation.id;
+          activeConversationRef.current = id;
+          setActiveConversation(id);
+          setConversations((prev) => [
+            {
+              id,
+              title: data.conversation.title ?? title,
+              createdAt: new Date(data.conversation.created_at),
+            },
+            ...prev,
+          ]);
+        }
+      } catch (e) {
+        console.warn("Failed to create conversation in DB:", e);
+      }
+    }
     await sendMessage({ text: text.trim() });
   };
 
@@ -229,23 +331,59 @@ export default function AgentPage() {
     setMessages([]);
     setInput("");
     setActiveConversation(null);
+    activeConversationRef.current = null;
     setHistoryOpen(false);
     inputRef.current?.focus();
   };
 
-  const openConversation = (id: string) => {
-    // Sky Light feedback #9: actually load the persisted messages for the
-    // selected conversation. Without this the sidebar was decorative — the
-    // chat area always reflected the active useChat state regardless of
-    // which conversation was clicked.
-    const saved = readStorage<typeof messages>(`${STORAGE_KEYS.messagesPrefix}${id}`);
+  const openConversation = async (id: string) => {
+    // §9.2: load messages from the DB. Falls back to the legacy
+    // sessionStorage cache if the DB call fails (so a flaky connection
+    // doesn't lock the user out of their old chats).
     setActiveConversation(id);
-    setMessages(saved ?? []);
+    activeConversationRef.current = id;
     setHistoryOpen(false);
+    try {
+      const res = await fetch(`/api/agent/conversations/${id}`);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          messages: Array<{ id: string; role: string; content: unknown; created_at: string }>;
+        };
+        // Map DB rows back to the useChat message shape. content is the
+        // full UIMessage we persisted in `route.ts` — assistant rows store
+        // `{ type: "text", text }` and user rows store the original
+        // message object. We re-wrap each into a single-part UIMessage.
+        const mapped = data.messages.map((m) => {
+          const c = m.content as
+            | { type?: string; text?: string; parts?: unknown[]; role?: string }
+            | null;
+          if (c && Array.isArray(c.parts)) {
+            // User messages were stored as the original UI message; reuse.
+            return { id: m.id, role: m.role, parts: c.parts } as unknown as (typeof messages)[number];
+          }
+          // Assistant rows stored as { type: 'text', text }.
+          const text =
+            (c && typeof c.text === "string" ? c.text : "") || "";
+          return {
+            id: m.id,
+            role: m.role,
+            parts: [{ type: "text", text }],
+          } as unknown as (typeof messages)[number];
+        });
+        setMessages(mapped);
+        inputRef.current?.focus();
+        return;
+      }
+    } catch (e) {
+      console.warn("Failed to load conversation from DB:", e);
+    }
+    // Fallback to sessionStorage.
+    const saved = readStorage<typeof messages>(`${STORAGE_KEYS.messagesPrefix}${id}`);
+    setMessages(saved ?? []);
     inputRef.current?.focus();
   };
 
-  const deleteConversation = (id: string) => {
+  const deleteConversation = async (id: string) => {
     if (typeof window !== "undefined") {
       try {
         window.sessionStorage.removeItem(`${STORAGE_KEYS.messagesPrefix}${id}`);
@@ -253,6 +391,10 @@ export default function AgentPage() {
         // ignore
       }
     }
+    // Best-effort DB delete — fire-and-forget. Cascade removes messages.
+    fetch(`/api/agent/conversations/${id}`, { method: "DELETE" }).catch(() => {
+      // ignore
+    });
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (activeConversation === id) handleNewChat();
   };

@@ -115,7 +115,7 @@ export async function getTeamLoad(orgId: string) {
     .select(`
       task_id,
       task:tasks!inner ( id, status ),
-      employee:employee_profiles ( id, full_name, avatar_url )
+      employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, avatar_url )
     `)
     .eq("organization_id", orgId);
 

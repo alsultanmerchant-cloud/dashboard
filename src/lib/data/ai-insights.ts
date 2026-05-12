@@ -224,7 +224,7 @@ export async function getTeamLoad(orgId: string): Promise<TeamMemberLoad[]> {
       `
       task_id,
       task:tasks!inner ( id, status, due_date ),
-      employee:employee_profiles ( id, full_name )
+      employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name )
     `,
     )
     .eq("organization_id", orgId);

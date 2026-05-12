@@ -21,13 +21,13 @@ export function SyncOdooButton() {
         toast.error(res.error);
         return;
       }
+      const detail = `${res.servicesImported} خدمة · ${res.categoriesUpserted} تصنيف`;
       if (res.errors.length > 0) {
-        toast.warning(
-          `استُورِد ${res.servicesImported} باقة من Odoo · ${res.errors.length} خطأ`,
-          { duration: 8000 },
-        );
+        toast.warning(`تمت المزامنة (${detail}) مع ${res.errors.length} خطأ`, {
+          duration: 8000,
+        });
       } else {
-        toast.success(`تمت مزامنة ${res.servicesImported} باقة من Odoo`);
+        toast.success(`تمت المزامنة من Odoo: ${detail}`);
       }
       router.refresh();
     });

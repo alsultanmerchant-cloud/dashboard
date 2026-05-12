@@ -34,12 +34,18 @@ export type FilterKey =
   | "followed"
   | "has_start_date"
   | "has_end_date"
-  | "no_deadline";
+  | "no_deadline"
+  | "unassigned"
+  | "over_timesheets"
+  | "near_timesheets"
+  | "archived";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
   "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
   "has_start_date", "has_end_date", "no_deadline",
+  "unassigned", "over_timesheets", "near_timesheets",
+  "archived",
 ]);
 
 export function parseFilterKeys(
@@ -154,6 +160,10 @@ export function buildTaskFiltersFromParams(
     hasStartDate: active.has("has_start_date"),
     hasEndDate: active.has("has_end_date"),
     noDeadline: active.has("no_deadline"),
+    unassigned: active.has("unassigned"),
+    overTimesheets: active.has("over_timesheets"),
+    nearTimesheets: active.has("near_timesheets"),
+    archived: active.has("archived"),
     followedByUserId: active.has("followed") ? opts.userId : undefined,
     assignedToEmployeeId: active.has("mine") ? (opts.employeeId ?? undefined) : undefined,
     projectId: opts.projectId,

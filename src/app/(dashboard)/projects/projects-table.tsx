@@ -74,7 +74,7 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
             const stripe = odooColor(p.color || 11);
             const href = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
             return (
-              <tr key={p.odooId || p.ref} className="group hover:bg-muted/40">
+              <tr key={p.id ?? `odoo-${p.odooId}`} className="group hover:bg-muted/40">
                 <td className="px-2 py-2 align-middle">
                   <Star
                     className={cn(

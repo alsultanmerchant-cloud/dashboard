@@ -62,12 +62,27 @@ export function TaskAssigneesPanel({
   assignees,
   employees,
   canManage,
+  currentStage,
+  stageOwnerPositions,
 }: {
   taskId: string;
   assignees: AssigneeRow[];
   employees: EmployeeOption[];
   canManage: boolean;
+  /** §1.4: the current stage drives "who is responsible right now". The
+   *  row whose role_type matches stageOwnerPositions[currentStage] gets a
+   *  cyan ring + "المسؤول الحالي" badge so the operator can see at a glance
+   *  who owns the next move. Pass null when the task is in a terminal
+   *  stage (e.g. done) or owner is undefined. */
+  currentStage?: string | null;
+  stageOwnerPositions?: Record<string, string | null> | null;
 }) {
+  // Resolve which role owns the current stage (null = no highlight).
+  const currentOwnerRole = (() => {
+    if (!currentStage || !stageOwnerPositions) return null;
+    const role = stageOwnerPositions[currentStage];
+    return (role as AssigneeRoleType | null) ?? null;
+  })();
   const router = useRouter();
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
@@ -177,10 +192,18 @@ export function TaskAssigneesPanel({
         </div>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
-          {assignees.map((a) => (
+          {assignees.map((a) => {
+            const isCurrentOwner =
+              currentOwnerRole !== null && a.role_type === currentOwnerRole;
+            return (
             <li
               key={a.id}
-              className="flex items-start gap-3 rounded-xl border border-soft bg-soft-1 p-3"
+              className={cn(
+                "flex items-start gap-3 rounded-xl border p-3 transition-colors",
+                isCurrentOwner
+                  ? "border-cyan/50 bg-cyan-dim/30 ring-1 ring-cyan/30"
+                  : "border-soft bg-soft-1",
+              )}
             >
               <Avatar size="md" className="shrink-0">
                 {a.employee.avatar_url ? (
@@ -196,6 +219,14 @@ export function TaskAssigneesPanel({
                   <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-[10px] font-semibold text-cyan">
                     {ROLE_LABELS[a.role_type]}
                   </span>
+                  {isCurrentOwner && (
+                    <span
+                      className="inline-flex items-center rounded-full border border-cyan bg-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan"
+                      title="مسؤول المرحلة الحالية — هذا الشخص الذي يجب أن يحرك المهمة إلى المرحلة التالية"
+                    >
+                      المسؤول الحالي
+                    </span>
+                  )}
                 </div>
                 {(a.employee.job_title || a.employee.department_name) && (
                   <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
@@ -237,7 +268,8 @@ export function TaskAssigneesPanel({
                 </button>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 

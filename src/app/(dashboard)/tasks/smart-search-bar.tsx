@@ -58,7 +58,11 @@ type FilterKey =
   | "followed"
   | "has_start_date"
   | "has_end_date"
-  | "no_deadline";
+  | "no_deadline"
+  | "unassigned"
+  | "over_timesheets"
+  | "near_timesheets"
+  | "archived";
 type GroupBy =
   | "stage"
   | "project"
@@ -70,7 +74,9 @@ type GroupBy =
   | "last_stage_update"
   | "progress"
   | "status"
-  | "start_date";
+  | "start_date"
+  | "tags"
+  | "created_at";
 type SearchSuggestion = {
   id: string;
   projectName: string;
@@ -84,6 +90,7 @@ const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
   { key: "all", label: "كل المهام", group: "الحالة" },
   { key: "mine", label: "مهامي", group: "ملكية" },
   { key: "followed", label: "متابَعة", group: "ملكية" },
+  { key: "unassigned", label: "بلا مسؤول", group: "ملكية" },
   { key: "starred", label: "مميَّزة", group: "ملكية" },
   { key: "not_started", label: "لم تبدأ (0%)", group: "تقدّم" },
   { key: "in_progress_pct", label: "قيد التنفيذ", group: "تقدّم" },
@@ -98,6 +105,11 @@ const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
   { key: "has_start_date", label: "لها تاريخ بدء", group: "جدولة" },
   { key: "has_end_date", label: "لها تاريخ انتهاء", group: "جدولة" },
   { key: "no_deadline", label: "بدون موعد", group: "جدولة" },
+  // Rwasem timesheet filters (§5.2 parity).
+  { key: "near_timesheets", label: "تجاوزت 80% من الوقت", group: "الوقت" },
+  { key: "over_timesheets", label: "تجاوزت 100% من الوقت", group: "الوقت" },
+  // Rwasem "Archived" pill — shows ONLY archived tasks (active=false in Odoo).
+  { key: "archived", label: "المؤرشفة", group: "الأرشيف" },
 ];
 
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
@@ -137,6 +149,8 @@ const GROUPBY_DEFS: { key: GroupBy; label: string; available?: boolean }[] = [
   { key: "assignee", label: "حسب المسؤول" },
   { key: "customer", label: "حسب العميل" },
   { key: "service", label: "حسب الخدمة" },
+  { key: "tags", label: "حسب الوسوم" },
+  { key: "created_at", label: "حسب تاريخ الإنشاء" },
   { key: "last_stage_update", label: "حسب آخر تحديث للمرحلة" },
 ];
 
@@ -352,8 +366,11 @@ export function SmartSearchBar({
     setOpen(false);
   };
 
+  // min-w-0 lets the label truncate instead of wrapping; whitespace-nowrap
+  // keeps multi-word labels (e.g. "حسب المرحلة") on a single line so the
+  // pill height stays consistent across the column.
   const itemBase =
-    "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-right text-xs transition-colors rtl:flex-row-reverse";
+    "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-right text-xs whitespace-nowrap transition-colors rtl:flex-row-reverse";
 
   // Memoize column pills so re-renders don't churn on every keystroke.
   const filterColumn = useMemo(() => {
@@ -430,13 +447,13 @@ export function SmartSearchBar({
                 : !disabled && "text-foreground hover:bg-soft-1",
             )}
           >
-            <span>{g.label}</span>
+            <span className="min-w-0 truncate">{g.label}</span>
             {active && !disabled && (
-              <span className="flex items-center gap-1">
-                <span className="rounded-full bg-cyan/30 px-1.5 text-[9px] tabular-nums text-cyan">
+              <span className="flex shrink-0 items-center gap-1">
+                <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-cyan/30 px-1 text-[9px] font-semibold leading-none tabular-nums text-cyan">
                   {idx + 1}
                 </span>
-                <Check className="size-3.5" />
+                <Check className="size-3" />
               </span>
             )}
             {disabled && (
@@ -603,9 +620,18 @@ export function SmartSearchBar({
         </button>
       </div>
 
-      {/* Smart-search dropdown — 3 columns: Filters / Group By / Favorites */}
+      {/* Smart-search dropdown — 3 columns: Filters / Group By / Favorites.
+          Constrains height to the viewport (minus the trigger + a small
+          margin) and scrolls internally, so the long "التواريخ" date list
+          at the bottom of the Filters column doesn't get clipped below
+          the fold. */}
       {open && (
-        <div className={cn("absolute end-0 start-0 top-[calc(100%+6px)] z-30 rounded-2xl border p-3 text-right shadow-2xl", dropdownClassName)}>
+        <div
+          className={cn(
+            "absolute end-0 start-0 top-[calc(100%+6px)] z-30 max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain rounded-2xl border p-3 text-right shadow-2xl",
+            dropdownClassName,
+          )}
+        >
           {(loadingSuggestions || suggestions.length > 0) && (
             <div className="mb-3 rounded-xl border border-soft bg-soft-1/40 p-2">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
@@ -641,7 +667,7 @@ export function SmartSearchBar({
             </div>
           )}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
+            <div className="min-w-0">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Filter className="size-3.5" />
                 الفلاتر
@@ -682,14 +708,14 @@ export function SmartSearchBar({
                 ))}
               </div>
             </div>
-            <div className="md:border-s md:border-soft md:ps-3">
+            <div className="min-w-0 md:border-s md:border-soft md:ps-3">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Layers className="size-3.5" />
                 التجميع
               </div>
               <div className="flex flex-col gap-0.5">{groupColumn}</div>
             </div>
-            <div className="md:border-s md:border-soft md:ps-3">
+            <div className="min-w-0 md:border-s md:border-soft md:ps-3">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Star className="size-3.5" />
                 المفضلة
@@ -784,59 +810,65 @@ function SavedFiltersColumn({
     });
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1 rtl:flex-row-reverse">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleSave();
-            }
-          }}
-          placeholder="اسم الفلتر…"
-          maxLength={80}
-          disabled={pending}
-          className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-        />
+    <div className="space-y-1.5">
+      {/* Save form: input on top so it has full width; small button beneath
+          with the two flags inline. Previously the input+button shared one
+          row and the input collapsed to ~2 chars wide in RTL Arabic. */}
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            handleSave();
+          }
+        }}
+        placeholder="اسم الفلتر الجديد…"
+        maxLength={80}
+        disabled={pending}
+        className="h-8 w-full rounded-md border border-soft bg-background px-2 text-xs placeholder:text-muted-foreground/60"
+      />
+      <div className="flex items-center justify-between gap-2 rtl:flex-row-reverse">
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground rtl:flex-row-reverse">
+          <label className="inline-flex items-center gap-1 rtl:flex-row-reverse cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isDefault}
+              onChange={(e) => setIsDefault(e.target.checked)}
+              disabled={pending}
+              className="size-3 accent-cyan"
+            />
+            افتراضي
+          </label>
+          <label className="inline-flex items-center gap-1 rtl:flex-row-reverse cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isShared}
+              onChange={(e) => setIsShared(e.target.checked)}
+              disabled={pending}
+              className="size-3 accent-cyan"
+            />
+            مُشارَك
+          </label>
+        </div>
         <button
           type="button"
           onClick={handleSave}
           disabled={pending || !name.trim()}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-2 py-1.5 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:opacity-40"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-2.5 py-1 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
           title="حفظ الفلتر الحالي"
         >
           {pending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
           حفظ
         </button>
       </div>
-      <div className="flex items-center gap-3 px-1 text-[10px] text-muted-foreground rtl:flex-row-reverse">
-        <label className="flex items-center gap-1 rtl:flex-row-reverse">
-          <input
-            type="checkbox"
-            checked={isDefault}
-            onChange={(e) => setIsDefault(e.target.checked)}
-            disabled={pending}
-            className="size-3 accent-cyan"
-          />
-          افتراضي
-        </label>
-        <label className="flex items-center gap-1 rtl:flex-row-reverse">
-          <input
-            type="checkbox"
-            checked={isShared}
-            onChange={(e) => setIsShared(e.target.checked)}
-            disabled={pending}
-            className="size-3 accent-cyan"
-          />
-          مُشارَك
-        </label>
-      </div>
       {items.length === 0 ? (
-        <div className="rounded-md border border-dashed border-soft px-2 py-3 text-center text-[11px] text-muted-foreground/80">
-          لا توجد فلاتر محفوظة
+        <div className="mt-1 rounded-md border border-dashed border-soft/70 bg-soft/20 px-2 py-3 text-center text-[10.5px] leading-tight text-muted-foreground/70">
+          لا توجد فلاتر محفوظة بعد
+          <div className="mt-0.5 text-[9.5px] text-muted-foreground/50">
+            اكتب اسمًا ثم اضغط «حفظ»
+          </div>
         </div>
       ) : (
         <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">

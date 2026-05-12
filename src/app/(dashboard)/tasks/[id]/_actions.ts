@@ -29,10 +29,16 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { logAudit, logAiEvent, createNotification } from "@/lib/audit";
 
-const FollowerInputSchema = z.object({
-  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
-  user_id: z.string().uuid({ message: "معرف المستخدم غير صالح" }),
-});
+const FollowerInputSchema = z
+  .object({
+    task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+    user_id: z.string().uuid().optional(),
+    employee_id: z.string().uuid().optional(),
+  })
+  .refine((v) => !!(v.user_id || v.employee_id), {
+    message: "يتطلب معرف موظف أو مستخدم",
+    path: ["employee_id"],
+  });
 
 const HoldTaskSchema = z.object({
   task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
@@ -78,7 +84,11 @@ function taskNotificationBody(task: {
 
 export async function addFollowerAction(input: {
   taskId: string;
-  userId: string;
+  // Accepts either identifier (§8.1 + migration 0101). Pass employee_id for
+  // Odoo-imported employees without a dashboard login; pass user_id for
+  // legacy callers. Both is fine — the action will resolve the missing one.
+  userId?: string;
+  employeeId?: string;
 }): Promise<ActionResult> {
   let session;
   try {
@@ -90,6 +100,7 @@ export async function addFollowerAction(input: {
   const parsed = FollowerInputSchema.safeParse({
     task_id: input.taskId,
     user_id: input.userId,
+    employee_id: input.employeeId,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -109,22 +120,35 @@ export async function addFollowerAction(input: {
     };
   }
 
-  // Verify the user being added belongs to this org.
-  const { data: targetEmp } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("id, full_name, user_id")
-    .eq("user_id", parsed.data.user_id)
-    .eq("organization_id", session.orgId)
-    .maybeSingle();
-  if (!targetEmp || !targetEmp.user_id) {
-    return { error: "المستخدم غير موجود في هذه المنظمة" };
+  // Resolve the target employee. Lookup by whichever identifier was given;
+  // we always end up with both (employee_id always; user_id only if linked).
+  const lookup = parsed.data.employee_id
+    ? supabaseAdmin
+        .from("employee_profiles")
+        .select("id, full_name, user_id")
+        .eq("id", parsed.data.employee_id)
+        .eq("organization_id", session.orgId)
+        .maybeSingle()
+    : supabaseAdmin
+        .from("employee_profiles")
+        .select("id, full_name, user_id")
+        .eq("user_id", parsed.data.user_id!)
+        .eq("organization_id", session.orgId)
+        .maybeSingle();
+  const { data: targetEmp } = await lookup;
+  if (!targetEmp) {
+    return { error: "الموظف غير موجود في هذه المنظمة" };
   }
+
+  const userId = parsed.data.user_id ?? (targetEmp.user_id as string | null);
+  const employeeId = targetEmp.id as string;
 
   const { error } = await supabaseAdmin
     .from("task_followers")
     .insert({
       task_id: parsed.data.task_id,
-      user_id: parsed.data.user_id,
+      user_id: userId,
+      employee_id: employeeId,
       added_by: session.userId,
     });
   if (error) {
@@ -142,8 +166,8 @@ export async function addFollowerAction(input: {
     entityType: "task",
     entityId: parsed.data.task_id,
     metadata: {
-      added_user_id: parsed.data.user_id,
-      added_employee_id: targetEmp.id,
+      added_user_id: userId,
+      added_employee_id: employeeId,
     },
   });
   await logAiEvent({
@@ -153,25 +177,28 @@ export async function addFollowerAction(input: {
     entityType: "task",
     entityId: parsed.data.task_id,
     payload: {
-      followed_user_id: parsed.data.user_id,
-      followed_employee_id: targetEmp.id,
+      followed_user_id: userId,
+      followed_employee_id: employeeId,
       task_title: task.title,
     },
     importance: "low",
   });
 
-  // Notify the new follower so they know they were added. Body carries the
-  // project + task_code context (Sky Light parity, feedback #5).
-  await createNotification({
-    organizationId: session.orgId,
-    recipientUserId: parsed.data.user_id,
-    recipientEmployeeId: targetEmp.id,
-    type: "TASK_FOLLOWER",
-    title: `${session.fullName} أضافك كمتابع للمهمة`,
-    body: taskNotificationBody(task),
-    entityType: "task",
-    entityId: parsed.data.task_id,
-  });
+  // Notify only when the follower has a login. Employees without a user_id
+  // (Odoo-imported, no dashboard account yet) get tracked silently — they'll
+  // catch up via the email/WhatsApp digests once those wire to followers.
+  if (userId) {
+    await createNotification({
+      organizationId: session.orgId,
+      recipientUserId: userId,
+      recipientEmployeeId: employeeId,
+      type: "TASK_FOLLOWER",
+      title: `${session.fullName} أضافك كمتابع للمهمة`,
+      body: taskNotificationBody(task),
+      entityType: "task",
+      entityId: parsed.data.task_id,
+    });
+  }
 
   revalidatePath(`/tasks/${parsed.data.task_id}`);
   return { ok: true };
@@ -179,7 +206,8 @@ export async function addFollowerAction(input: {
 
 export async function removeFollowerAction(input: {
   taskId: string;
-  userId: string;
+  userId?: string;
+  employeeId?: string;
 }): Promise<ActionResult> {
   let session;
   try {
@@ -191,6 +219,7 @@ export async function removeFollowerAction(input: {
   const parsed = FollowerInputSchema.safeParse({
     task_id: input.taskId,
     user_id: input.userId,
+    employee_id: input.employeeId,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -200,7 +229,8 @@ export async function removeFollowerAction(input: {
   if (!task) return { error: "المهمة غير موجودة" };
 
   const isCreator = task.created_by === session.userId;
-  const isSelf = parsed.data.user_id === session.userId;
+  const isSelf =
+    !!parsed.data.user_id && parsed.data.user_id === session.userId;
   const canManage =
     isCreator ||
     isSelf ||
@@ -212,11 +242,15 @@ export async function removeFollowerAction(input: {
     };
   }
 
-  const { error } = await supabaseAdmin
+  // Delete by whichever identifier was given. After migration 0101, rows
+  // can be keyed by either user_id or employee_id (or both).
+  const baseDelete = supabaseAdmin
     .from("task_followers")
     .delete()
-    .eq("task_id", parsed.data.task_id)
-    .eq("user_id", parsed.data.user_id);
+    .eq("task_id", parsed.data.task_id);
+  const { error } = parsed.data.employee_id
+    ? await baseDelete.eq("employee_id", parsed.data.employee_id)
+    : await baseDelete.eq("user_id", parsed.data.user_id!);
   if (error) return { error: error.message };
 
   await logAudit({
@@ -225,7 +259,10 @@ export async function removeFollowerAction(input: {
     action: "task.follower_remove",
     entityType: "task",
     entityId: parsed.data.task_id,
-    metadata: { removed_user_id: parsed.data.user_id },
+    metadata: {
+      removed_user_id: parsed.data.user_id ?? null,
+      removed_employee_id: parsed.data.employee_id ?? null,
+    },
   });
   await logAiEvent({
     organizationId: session.orgId,
@@ -233,7 +270,11 @@ export async function removeFollowerAction(input: {
     eventType: "TASK_FOLLOWER_REMOVED",
     entityType: "task",
     entityId: parsed.data.task_id,
-    payload: { removed_user_id: parsed.data.user_id, task_title: task.title },
+    payload: {
+      removed_user_id: parsed.data.user_id ?? null,
+      removed_employee_id: parsed.data.employee_id ?? null,
+      task_title: task.title,
+    },
     importance: "low",
   });
 

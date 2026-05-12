@@ -28,6 +28,20 @@ export type TaskFilters = {
   // without a deadline" filter. Applied post-fetch so we don't need a new
   // RPC parameter; cheap because the bundle is already capped at LIMIT.
   noDeadline?: boolean;
+  // Rwasem-parity additions (migration 0105):
+  //   unassigned       — no task_assignees rows
+  //   overTimesheets   — logged hours × 60 > allocated_time_minutes
+  //   nearTimesheets   — 80% ≤ logged × 60 / allocated < 100%
+  unassigned?: boolean;
+  overTimesheets?: boolean;
+  nearTimesheets?: boolean;
+  // Migration 0106 — Rwasem "Archived" pill.
+  //   archived         — when true, return ONLY archived tasks
+  //                      (default false hides archived everywhere else)
+  //   includeArchived  — when true, ignore the archive filter entirely
+  //                      (useful for admin/audit views)
+  archived?: boolean;
+  includeArchived?: boolean;
   // Auth user id whose followed tasks should be included.
   followedByUserId?: string;
   assignedToEmployeeId?: string;
@@ -74,6 +88,9 @@ export type BoardTaskData = {
   // #19: design / edit counts (Sky Light parity).
   design_count: number | null;
   closed_subtask_count: number | null;
+  // §5.2: project tags surfaced for client-side group-by.
+  tags: Array<{ id: string; name: string; color: number }>;
+  created_at: string;
 };
 
 const GLOBAL_BOARD_LIMIT = 120;
@@ -115,6 +132,7 @@ type TaskBundleRow = {
       }
     | null;
   service: { id: string; name: string; slug: string } | null;
+  tags?: Array<{ id: string; name: string; color: number }>;
   task_assignees: Array<{
     role_type: string;
     employee: { id: string; full_name: string; avatar_url: string | null };
@@ -161,6 +179,11 @@ async function fetchTaskBundle(
     p_date_filters: filters.dateFilters?.length ? filters.dateFilters : null,
     p_has_start_date: !!filters.hasStartDate,
     p_has_end_date: !!filters.hasEndDate,
+    p_unassigned: !!filters.unassigned,
+    p_over_timesheets: !!filters.overTimesheets,
+    p_near_timesheets: !!filters.nearTimesheets,
+    p_archived: !!filters.archived,
+    p_include_archived: !!filters.includeArchived,
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [] }) as TaskBundleResult;
@@ -229,6 +252,8 @@ export async function listBoardTasks(
       role_slots,
       design_count: t.design_count ?? 0,
       closed_subtask_count: t.closed_subtask_count ?? 0,
+      tags: t.tags ?? [],
+      created_at: t.created_at,
     };
   });
 }

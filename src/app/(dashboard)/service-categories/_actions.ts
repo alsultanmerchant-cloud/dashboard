@@ -176,7 +176,12 @@ import { odooFromEnv } from "@/lib/odoo/client";
 import { runServicesImport } from "@/lib/odoo/importer";
 
 export type SyncOdooState =
-  | { ok: true; servicesImported: number; errors: string[] }
+  | {
+      ok: true;
+      servicesImported: number;
+      categoriesUpserted: number;
+      errors: string[];
+    }
   | { error: string };
 
 export async function syncOdooServicesAction(): Promise<SyncOdooState> {
@@ -195,7 +200,7 @@ export async function syncOdooServicesAction(): Promise<SyncOdooState> {
     .maybeSingle();
   if (!org?.slug) return { error: "تعذر تحديد بيانات المنظمة" };
 
-  let result: { services: number; errors: string[] };
+  let result: { services: number; categories: number; errors: string[] };
   try {
     const odoo = odooFromEnv();
     result = await runServicesImport(odoo, org.slug);
@@ -225,6 +230,7 @@ export async function syncOdooServicesAction(): Promise<SyncOdooState> {
   return {
     ok: true,
     servicesImported: result.services,
+    categoriesUpserted: result.categories,
     errors: result.errors,
   };
 }

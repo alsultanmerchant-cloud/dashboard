@@ -97,7 +97,9 @@ async function buildAnalysisSnapshot(orgId: string): Promise<string> {
       .limit(10),
     supabaseAdmin
       .from("task_assignees")
-      .select("task_id, task:tasks!inner(id, status, due_date), employee:employee_profiles(id, full_name, job_title)")
+      .select(
+        "task_id, task:tasks!inner(id, status, due_date), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name, job_title)",
+      )
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("ai_events")

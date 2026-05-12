@@ -45,6 +45,13 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const reqIdRef = useRef(0);
+  // Synchronous guards. `loading` (React state) lags behind by a render, which
+  // lets a sentinel that's still in view trigger loadMore twice before the
+  // first call has flipped state — causing the same page to be fetched and
+  // appended twice (duplicate cards, React duplicate-key errors). The refs
+  // are read-write in the same tick so the guard fires reliably.
+  const loadingRef = useRef(false);
+  const lastLoadedPageRef = useRef(1);
   const search = (params.get("q") ?? "").trim();
   const groupBy = params.get("groupBy") || undefined;
   const view = params.get("view") === "list" ? "list" : "kanban";
@@ -71,22 +78,33 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
 
   // Infinite scroll: observe the sentinel and pull the next page.
   const loadMore = useCallback(() => {
-    if (loading || !hasMore) return;
+    if (loadingRef.current || !hasMore) return;
+    const nextPage = lastLoadedPageRef.current + 1;
+    loadingRef.current = true;
+    lastLoadedPageRef.current = nextPage;
     const id = ++reqIdRef.current;
-    const nextPage = page + 1;
     setLoading(true);
     startTransition(async () => {
       try {
         const res = await loadMoreProjectsAction(nextPage, search, pageSize, filters);
         if (reqIdRef.current !== id) return;
-        setItems((prev) => [...prev, ...res.rows]);
+        // Dedupe by id (Supabase UUID, falls back to odooId) so a late or
+        // retried fetch can't introduce duplicates.
+        setItems((prev) => {
+          const seen = new Set(prev.map((p) => p.id ?? `odoo-${p.odooId}`));
+          const fresh = res.rows.filter(
+            (p) => !seen.has(p.id ?? `odoo-${p.odooId}`),
+          );
+          return fresh.length ? [...prev, ...fresh] : prev;
+        });
         setTotal(res.total);
         setPage(nextPage);
       } finally {
+        loadingRef.current = false;
         if (reqIdRef.current === id) setLoading(false);
       }
     });
-  }, [loading, hasMore, page, search, pageSize, filters]);
+  }, [hasMore, search, pageSize, filters]);
 
   useEffect(() => {
     const node = sentinelRef.current;
@@ -120,7 +138,7 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       ) : view === "kanban" ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {items.map((p) => (
-            <ProjectCard key={p.odooId || p.ref} project={p} />
+            <ProjectCard key={p.id ?? `odoo-${p.odooId}`} project={p} />
           ))}
         </div>
       ) : (

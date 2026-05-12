@@ -19,7 +19,8 @@ import { cn } from "@/lib/utils";
 import { addFollowerAction, removeFollowerAction } from "./_actions";
 
 export type FollowerRow = {
-  user_id: string;
+  user_id: string | null;
+  employee_id: string | null;
   full_name: string;
   avatar_url: string | null;
   job_title: string | null;
@@ -29,7 +30,8 @@ export type FollowerRow = {
 };
 
 export type FollowerCandidate = {
-  user_id: string;
+  employee_id: string;
+  user_id: string | null;
   full_name: string;
   job_title: string | null;
   avatar_url: string | null;
@@ -50,7 +52,7 @@ export function FollowersPanel({
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -77,11 +79,16 @@ export function FollowersPanel({
     if (picking) inputRef.current?.focus();
   }, [picking]);
 
-  function add(userId: string) {
-    setBusyUserId(userId);
+  function add(candidate: FollowerCandidate) {
+    const key = `emp:${candidate.employee_id}`;
+    setBusyKey(key);
     start(async () => {
-      const res = await addFollowerAction({ taskId, userId });
-      setBusyUserId(null);
+      const res = await addFollowerAction({
+        taskId,
+        employeeId: candidate.employee_id,
+        userId: candidate.user_id ?? undefined,
+      });
+      setBusyKey(null);
       if ("error" in res) {
         toast.error(res.error);
         return;
@@ -94,9 +101,13 @@ export function FollowersPanel({
     });
   }
 
-  function remove(userId: string) {
+  function remove(row: FollowerRow) {
     start(async () => {
-      const res = await removeFollowerAction({ taskId, userId });
+      const res = await removeFollowerAction({
+        taskId,
+        employeeId: row.employee_id ?? undefined,
+        userId: row.user_id ?? undefined,
+      });
       if ("error" in res) {
         toast.error(res.error);
         return;
@@ -117,7 +128,7 @@ export function FollowersPanel({
     } else if (e.key === "Enter") {
       e.preventDefault();
       const target = filtered[activeIndex];
-      if (target) add(target.user_id);
+      if (target) add(target);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setPicking(false);
@@ -143,7 +154,7 @@ export function FollowersPanel({
         <ul className="flex flex-wrap gap-2">
           {followers.map((f) => (
             <li
-              key={f.user_id}
+              key={f.employee_id ?? f.user_id ?? `${f.full_name}-${f.added_at}`}
               className={
                 f.inherited
                   ? "flex items-center gap-2 rounded-full border border-cyan/30 bg-cyan-dim/40 py-1 ps-1 pe-2"
@@ -164,7 +175,7 @@ export function FollowersPanel({
               {canManage && !f.inherited && (
                 <button
                   type="button"
-                  onClick={() => remove(f.user_id)}
+                  onClick={() => remove(f)}
                   disabled={pending}
                   aria-label={`إزالة ${f.full_name} من المتابعين`}
                   className="text-muted-foreground hover:text-cc-red transition-colors disabled:opacity-50"
@@ -246,15 +257,15 @@ export function FollowersPanel({
                   </li>
                 ) : (
                   filtered.map((c, idx) => {
-                    const isBusy = busyUserId === c.user_id && pending;
+                    const isBusy = busyKey === `emp:${c.employee_id}` && pending;
                     const isActive = idx === activeIndex;
                     return (
-                      <li key={c.user_id} role="option" aria-selected={isActive}>
+                      <li key={c.employee_id} role="option" aria-selected={isActive}>
                         <button
                           type="button"
                           disabled={pending}
                           onMouseEnter={() => setActiveIndex(idx)}
-                          onClick={() => add(c.user_id)}
+                          onClick={() => add(c)}
                           className={cn(
                             "flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-xs transition-colors disabled:opacity-60",
                             isActive
