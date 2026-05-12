@@ -16,7 +16,6 @@ import {
   useRef,
   useState,
   useTransition,
-  type ReactNode,
 } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -32,6 +31,8 @@ import {
   Save,
   Trash2,
   Loader2,
+  SlidersHorizontal,
+  CalendarRange,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -112,6 +113,20 @@ const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
   { key: "archived", label: "المؤرشفة", group: "الأرشيف" },
 ];
 
+const FILTER_GROUPS = FILTER_DEFS.reduce<Array<{ group: string; items: typeof FILTER_DEFS }>>(
+  (acc, item) => {
+    const group = item.group ?? "أخرى";
+    const last = acc[acc.length - 1];
+    if (!last || last.group !== group) {
+      acc.push({ group, items: [item] as typeof FILTER_DEFS });
+    } else {
+      last.items.push(item);
+    }
+    return acc;
+  },
+  [],
+);
+
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
 
 const DATE_FIELD_DEFS: { key: DateField; label: string }[] = [
@@ -125,6 +140,9 @@ const MONTHS_AR = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
+
+const sectionCardClassName =
+  "rounded-2xl border border-soft/80 bg-background/80 p-3 shadow-[0_10px_30px_rgba(82,65,195,0.06)]";
 
 function tokenLabel(token: string): string {
   // `due_date:2026q3` → `Q3 2026` style label for chips
@@ -220,7 +238,6 @@ export function SmartSearchBar({
       .filter((s): s is GroupBy => GROUPBY_DEFS.some((g) => g.key === s));
     return parts.length ? parts : ["stage"];
   }, [params, groupBy]);
-  const currentGroupBy = currentGroupKeys[0];
   const currentQuery = initialQuery ?? params.get("q") ?? "";
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(currentQuery);
@@ -346,10 +363,6 @@ export function SmartSearchBar({
     setOpen(false);
   };
 
-  const clearAllFilters = () => {
-    navigate(buildHref({ filters: new Set() }));
-  };
-
   const clearQuery = () => {
     setQuery("");
     navigate(buildHref({ q: null, projectId: null }));
@@ -366,52 +379,45 @@ export function SmartSearchBar({
     setOpen(false);
   };
 
-  // min-w-0 lets the label truncate instead of wrapping; whitespace-nowrap
-  // keeps multi-word labels (e.g. "حسب المرحلة") on a single line so the
-  // pill height stays consistent across the column.
-  const itemBase =
-    "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-right text-xs whitespace-nowrap transition-colors rtl:flex-row-reverse";
+  const chipButtonClassName =
+    "inline-flex items-center justify-between gap-1 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors rtl:flex-row-reverse";
 
-  // Memoize column pills so re-renders don't churn on every keystroke.
-  const filterColumn = useMemo(() => {
-    const out: ReactNode[] = [];
-    let lastGroup: string | undefined;
-    for (const f of FILTER_DEFS) {
-      if (f.group && f.group !== lastGroup) {
-        out.push(
-          <div
-            key={`grp-${f.group}`}
-            className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 first:pt-0"
-          >
-            {f.group}
-          </div>,
-        );
-        lastGroup = f.group;
-      }
-      const active = currentActive.has(f.key);
-      out.push(
-        <button
-          key={f.key}
-          type="button"
-          onClick={() => {
-            toggleFilter(f.key);
-            // Keep popover open so users can stack filters Odoo-style.
-          }}
-          className={cn(
-            itemBase,
-            active
-              ? "bg-cyan-dim text-cyan"
-              : "text-foreground hover:bg-soft-1",
-          )}
-        >
-          <span>{f.label}</span>
-          {active && <Check className="size-3.5" />}
-        </button>,
-      );
-    }
-    return out;
+  const filterColumn = useMemo(
+    () =>
+      FILTER_GROUPS.map((group) => (
+        <section key={group.group} className={sectionCardClassName}>
+          <div className="mb-2 flex items-center justify-between gap-2 rtl:flex-row-reverse">
+            <div className="text-[11px] font-semibold text-foreground">{group.group}</div>
+            <div className="text-[10px] tabular-nums text-muted-foreground">
+              {group.items.filter((item) => currentActive.has(item.key)).length}/{group.items.length}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {group.items.map((f) => {
+              const active = currentActive.has(f.key);
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => toggleFilter(f.key)}
+                  className={cn(
+                    chipButtonClassName,
+                    active
+                      ? "border-cyan/30 bg-cyan-dim text-cyan"
+                      : "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
+                  )}
+                >
+                  <span>{f.label}</span>
+                  {active && <Check className="size-3.5" />}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentActive, params.toString()]);
+    [currentActive, params.toString()],
+  );
 
   const toggleGroup = (key: GroupBy) => {
     // Click to add to the chain; click again to remove. Order is the click
@@ -440,11 +446,11 @@ export function SmartSearchBar({
               toggleGroup(g.key);
             }}
             className={cn(
-              itemBase,
+              "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-right text-xs transition-colors rtl:flex-row-reverse",
               disabled && "cursor-not-allowed opacity-40",
               !disabled && active
-                ? "bg-cyan-dim text-cyan"
-                : !disabled && "text-foreground hover:bg-soft-1",
+                ? "border-cyan/30 bg-cyan-dim text-cyan"
+                : !disabled && "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
             )}
           >
             <span className="min-w-0 truncate">{g.label}</span>
@@ -470,12 +476,12 @@ export function SmartSearchBar({
 
   const shellClassName =
     variant === "topbar"
-      ? "border-white/45 bg-white/8 text-white backdrop-blur-md"
-      : "border-soft bg-card";
+      ? "border-white/40 bg-white/8 text-white shadow-[0_14px_34px_rgba(20,16,60,0.18)] backdrop-blur-xl"
+      : "border-soft/90 bg-card/95 shadow-[0_12px_28px_rgba(82,65,195,0.08)]";
   const shellOpenClassName =
     variant === "topbar"
-      ? "border-white/60 ring-2 ring-white/20"
-      : "border-cyan/40 ring-2 ring-cyan/20";
+      ? "border-white/65 ring-2 ring-white/20"
+      : "border-cyan/40 ring-2 ring-cyan/15";
   const iconClassName =
     variant === "topbar" ? "text-white/80" : "text-muted-foreground";
   const inputClassName =
@@ -490,24 +496,42 @@ export function SmartSearchBar({
       : "hover:text-foreground";
   const dropdownClassName =
     variant === "topbar"
-      ? "border-white/20 bg-card/98 backdrop-blur-xl"
-      : "border-soft bg-popover";
+      ? "border-white/15 bg-popover/98 backdrop-blur-xl"
+      : "border-soft/80 bg-popover/98 backdrop-blur-xl";
 
   return (
     <div ref={wrapperRef} className="relative min-w-0 flex-1">
       {/* Input shell — search icon, active-filter chip, query input, chevron */}
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors rtl:flex-row-reverse",
+          "flex min-h-12 items-center gap-2 rounded-[1.6rem] border px-3 py-2 text-xs transition-colors rtl:flex-row-reverse",
           shellClassName,
           open && shellOpenClassName,
         )}
       >
-        <Search className={cn("size-3.5 shrink-0", iconClassName)} />
+        <div
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-full",
+            variant === "topbar" ? "bg-white/10" : "bg-soft-1",
+          )}
+        >
+          <Search className={cn("size-3.5 shrink-0", iconClassName)} />
+        </div>
+        {(activeChips.length > 0 || currentDates.length > 0 || currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
+          <div
+            className={cn(
+              "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold md:inline-flex rtl:flex-row-reverse",
+              variant === "topbar" ? "bg-white/10 text-white/85" : "bg-soft-1 text-muted-foreground",
+            )}
+          >
+            <SlidersHorizontal className="size-3" />
+            {activeChips.length + currentDates.length + (currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage" ? 1 : 0)} مفعّل
+          </div>
+        )}
         {activeChips.map((f) => (
           <span
             key={f.key}
-            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
+            className="inline-flex items-center gap-1 rounded-full border border-cyan/20 bg-cyan/12 px-2.5 py-1 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
           >
             <Filter className="size-2.5" />
             {f.label}
@@ -524,7 +548,7 @@ export function SmartSearchBar({
         {currentDates.map((token) => (
           <span
             key={token}
-            className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
+            className="inline-flex items-center gap-1 rounded-full border border-cyan/20 bg-cyan/12 px-2.5 py-1 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
           >
             <Filter className="size-2.5" />
             {tokenLabel(token)}
@@ -541,7 +565,7 @@ export function SmartSearchBar({
         {/* Group-by chain chip — only render when something other than the
             implicit default ("stage" alone) is active. Chain joined with "›". */}
         {(currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-violet/15 px-2 py-0.5 text-[11px] font-medium text-violet rtl:flex-row-reverse">
+          <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/8 px-2.5 py-1 text-[11px] font-medium text-primary rtl:flex-row-reverse">
             <Layers className="size-2.5" />
             {currentGroupKeys
               .map((k) => GROUPBY_DEFS.find((g) => g.key === k)?.label.replace(/^حسب\s+/, ""))
@@ -565,7 +589,7 @@ export function SmartSearchBar({
             onClick={() => {
               navigate(buildHref({ filters: new Set(), dates: [] }));
             }}
-            className="text-[10px] text-muted-foreground hover:text-foreground"
+            className="text-[10px] font-medium text-muted-foreground hover:text-foreground"
           >
             مسح الكل
           </button>
@@ -605,10 +629,10 @@ export function SmartSearchBar({
           onClick={() => setOpen((v) => !v)}
           aria-label="فتح خيارات البحث"
           className={cn(
-            "rounded p-0.5 transition-colors",
+            "rounded-full p-1 transition-colors",
             iconClassName,
             chevronClassName,
-            open && "text-cyan",
+            open && (variant === "topbar" ? "bg-white/10 text-white" : "bg-soft-1 text-cyan"),
           )}
         >
           <ChevronDown
@@ -628,13 +652,32 @@ export function SmartSearchBar({
       {open && (
         <div
           className={cn(
-            "absolute end-0 start-0 top-[calc(100%+6px)] z-30 max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain rounded-2xl border p-3 text-right shadow-2xl",
+            "absolute end-0 start-0 top-[calc(100%+10px)] z-30 max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain rounded-[1.75rem] border p-4 text-right shadow-[0_28px_80px_rgba(23,18,70,0.18)]",
             dropdownClassName,
           )}
         >
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-soft/80 pb-3 rtl:flex-row-reverse">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground rtl:flex-row-reverse">
+                <SlidersHorizontal className="size-4 text-cyan" />
+                تخصيص عرض المهام
+              </div>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                اختر ما تريد رؤيته الآن، ثم احفظه كعرض ثابت إذا كان يتكرر.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-soft-1 px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                {activeChips.length + currentDates.length} فلتر
+              </span>
+              <span className="rounded-full bg-soft-1 px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                {currentGroupKeys.length} تجميع
+              </span>
+            </div>
+          </div>
           {(loadingSuggestions || suggestions.length > 0) && (
-            <div className="mb-3 rounded-xl border border-soft bg-soft-1/40 p-2">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+            <div className="mb-4 rounded-2xl border border-soft/80 bg-soft-1/40 p-3">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Search className="size-3.5" />
                 اقتراحات المشروع والمتجر
               </div>
@@ -644,7 +687,7 @@ export function SmartSearchBar({
                     key={item.id}
                     type="button"
                     onClick={() => chooseSuggestion(item)}
-                    className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-right text-xs transition-colors hover:border-cyan/15 hover:bg-background rtl:flex-row-reverse"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
@@ -666,16 +709,17 @@ export function SmartSearchBar({
               </div>
             </div>
           )}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="min-w-0">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <div className="min-w-0 lg:col-span-8">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
                 <Filter className="size-3.5" />
-                الفلاتر
+                الفلاتر السريعة
               </div>
-              <div className="flex flex-col gap-0.5">{filterColumn}</div>
-              <div className="mt-2 border-t border-soft pt-1.5">
-                <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                  التواريخ
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{filterColumn}</div>
+              <div className={cn("mt-3", sectionCardClassName)}>
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                  <CalendarRange className="size-3.5" />
+                  فلاتر التاريخ
                 </div>
                 {/* #18 — Odoo "This Month" preset on due_date. One-click
                     deadline-of-current-month filter. The existing per-field
@@ -689,8 +733,10 @@ export function SmartSearchBar({
                       type="button"
                       onClick={() => toggleDateToken(token)}
                       className={cn(
-                        itemBase,
-                        active ? "bg-cyan-dim text-cyan" : "text-foreground hover:bg-soft-1",
+                        "mb-2 flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs transition-colors rtl:flex-row-reverse",
+                        active
+                          ? "border-cyan/30 bg-cyan-dim text-cyan"
+                          : "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
                       )}
                     >
                       <span>هذا الشهر — الموعد النهائي</span>
@@ -708,43 +754,43 @@ export function SmartSearchBar({
                 ))}
               </div>
             </div>
-            <div className="min-w-0 md:border-s md:border-soft md:ps-3">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                <Layers className="size-3.5" />
-                التجميع
+            <div className="min-w-0 lg:col-span-4">
+              <div className={cn("mb-3", sectionCardClassName)}>
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                  <Layers className="size-3.5" />
+                  التجميع
+                </div>
+                <div className="mb-2 text-[11px] leading-5 text-muted-foreground">
+                  رتّب لوحة الكانبان من الخارج للداخل. أول اختيار هو المستوى الرئيسي.
+                </div>
+                <div className="flex flex-col gap-2">{groupColumn}</div>
               </div>
-              <div className="flex flex-col gap-0.5">{groupColumn}</div>
-            </div>
-            <div className="min-w-0 md:border-s md:border-soft md:ps-3">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                <Star className="size-3.5" />
-                المفضلة
+              <div className={sectionCardClassName}>
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                  <Star className="size-3.5" />
+                  المفضلة
+                </div>
+                <SavedFiltersColumn
+                  items={filters}
+                  currentDefinition={{
+                    filter: [...currentActive].join(",") || undefined,
+                    q: currentQuery || undefined,
+                    view: currentView,
+                    groupBy: currentGroupKeys.join(","),
+                    projectId: params.get("projectId") || undefined,
+                  }}
+                  onApply={(def) => {
+                    const url = new URLSearchParams();
+                    if (def.filter) url.set("f", def.filter);
+                    if (def.q) url.set("q", def.q);
+                    if (def.view) url.set("view", def.view);
+                    if (def.groupBy) url.set("groupBy", def.groupBy);
+                    if (def.projectId) url.set("projectId", def.projectId);
+                    start(() => router.push(`${pathname}?${url.toString()}`));
+                    setOpen(false);
+                  }}
+                />
               </div>
-              <SavedFiltersColumn
-                items={filters}
-                currentDefinition={{
-                  // Comma-joined active filter set. Legacy single-key entries
-                  // (saved before multi-select) still parse correctly because
-                  // a single key is a valid degenerate case of the join.
-                  filter: [...currentActive].join(",") || undefined,
-                  q: currentQuery || undefined,
-                  view: currentView,
-                  // Comma-joined group-by chain. A single key is the
-                  // degenerate case so legacy single-key entries still apply.
-                  groupBy: currentGroupKeys.join(","),
-                  projectId: params.get("projectId") || undefined,
-                }}
-                onApply={(def) => {
-                  const url = new URLSearchParams();
-                  if (def.filter) url.set("f", def.filter);
-                  if (def.q) url.set("q", def.q);
-                  if (def.view) url.set("view", def.view);
-                  if (def.groupBy) url.set("groupBy", def.groupBy);
-                  if (def.projectId) url.set("projectId", def.projectId);
-                  start(() => router.push(`${pathname}?${url.toString()}`));
-                  setOpen(false);
-                }}
-              />
             </div>
           </div>
           {pending && (
@@ -810,7 +856,7 @@ function SavedFiltersColumn({
     });
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {/* Save form: input on top so it has full width; small button beneath
           with the two flags inline. Previously the input+button shared one
           row and the input collapsed to ~2 chars wide in RTL Arabic. */}
@@ -827,11 +873,11 @@ function SavedFiltersColumn({
         placeholder="اسم الفلتر الجديد…"
         maxLength={80}
         disabled={pending}
-        className="h-8 w-full rounded-md border border-soft bg-background px-2 text-xs placeholder:text-muted-foreground/60"
+        className="h-10 w-full rounded-xl border border-soft bg-background px-3 text-xs placeholder:text-muted-foreground/60"
       />
       <div className="flex items-center justify-between gap-2 rtl:flex-row-reverse">
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground rtl:flex-row-reverse">
-          <label className="inline-flex items-center gap-1 rtl:flex-row-reverse cursor-pointer">
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground rtl:flex-row-reverse">
+          <label className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-soft bg-card px-2 py-1 rtl:flex-row-reverse">
             <input
               type="checkbox"
               checked={isDefault}
@@ -841,7 +887,7 @@ function SavedFiltersColumn({
             />
             افتراضي
           </label>
-          <label className="inline-flex items-center gap-1 rtl:flex-row-reverse cursor-pointer">
+          <label className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-soft bg-card px-2 py-1 rtl:flex-row-reverse">
             <input
               type="checkbox"
               checked={isShared}
@@ -856,7 +902,7 @@ function SavedFiltersColumn({
           type="button"
           onClick={handleSave}
           disabled={pending || !name.trim()}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-2.5 py-1 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan/30 bg-cyan/10 px-3 py-1.5 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
           title="حفظ الفلتر الحالي"
         >
           {pending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
@@ -864,19 +910,19 @@ function SavedFiltersColumn({
         </button>
       </div>
       {items.length === 0 ? (
-        <div className="mt-1 rounded-md border border-dashed border-soft/70 bg-soft/20 px-2 py-3 text-center text-[10.5px] leading-tight text-muted-foreground/70">
+        <div className="mt-1 rounded-2xl border border-dashed border-soft/70 bg-soft/20 px-3 py-4 text-center text-[10.5px] leading-tight text-muted-foreground/70">
           لا توجد فلاتر محفوظة بعد
           <div className="mt-0.5 text-[9.5px] text-muted-foreground/50">
             اكتب اسمًا ثم اضغط «حفظ»
           </div>
         </div>
       ) : (
-        <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+        <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
           {items.map((it) => (
             <li
               key={it.id}
-            className="group flex items-center gap-1 rounded-md px-1 py-1 text-xs hover:bg-soft-1 rtl:flex-row-reverse"
-          >
+              className="group flex items-center gap-1 rounded-xl border border-transparent bg-card/70 px-2 py-2 text-xs transition-colors hover:border-cyan/15 hover:bg-soft-1 rtl:flex-row-reverse"
+            >
               <button
                 type="button"
                 onClick={() => onApply(it.definition)}
@@ -903,7 +949,7 @@ function SavedFiltersColumn({
                     : it.is_default ? "افتراضي" : "اجعله افتراضيًا"
                 }
                 className={cn(
-                  "shrink-0 rounded p-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40",
+                  "shrink-0 rounded-full p-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40",
                   it.is_default ? "text-amber" : "text-muted-foreground/60",
                 )}
               >
@@ -915,7 +961,7 @@ function SavedFiltersColumn({
                   onClick={() => handleDelete(it.id)}
                   disabled={pending}
                   title="حذف"
-                  className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
+                  className="shrink-0 rounded-full p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -950,8 +996,8 @@ function DateFieldRow({
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse",
-          fieldActive && "text-cyan",
+          "flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-xs transition-colors hover:border-cyan/15 hover:bg-soft-1 rtl:flex-row-reverse",
+          fieldActive && "border-cyan/20 bg-cyan-dim/70 text-cyan",
         )}
       >
         <span className="flex items-center gap-1.5 rtl:flex-row-reverse">
@@ -961,7 +1007,7 @@ function DateFieldRow({
         <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
       </button>
       {expanded && (
-        <div className="me-4 ms-2 mt-0.5 flex flex-col gap-0.5 border-e border-soft pe-2">
+        <div className="me-2 ms-2 mt-1 flex flex-col gap-1 border-e border-soft pe-3">
           {/* Months of current year (most recent 3) */}
           {[currentMonth, currentMonth - 1, currentMonth - 2]
             .filter((m) => m >= 1)
@@ -1022,8 +1068,10 @@ function DateBucketBtn({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[11px] transition-colors",
-        active ? "bg-cyan-dim text-cyan" : "text-foreground hover:bg-soft-1",
+        "flex items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-[11px] transition-colors",
+        active
+          ? "border-cyan/30 bg-cyan-dim text-cyan"
+          : "border-soft/80 bg-card text-foreground hover:border-cyan/15 hover:bg-soft-1",
       )}
     >
       <span>{label}</span>

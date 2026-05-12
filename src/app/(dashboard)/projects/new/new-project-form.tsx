@@ -97,7 +97,25 @@ export function NewProjectForm({
   const [clients, setClients] = useState<ClientOpt[]>(initialClients);
   const [clientId, setClientId] = useState<string>("");
   const [name, setName] = useState<string>("");
-  const [packageName, setPackageName] = useState<string>("");
+  // Multi-select package names. Stored as a Set client-side, joined with
+  // " + " when shipped to the server (kept as a single text column in DB).
+  const [packageNames, setPackageNames] = useState<Set<string>>(new Set());
+  const [packagePicking, setPackagePicking] = useState(false);
+  const [packageQuery, setPackageQuery] = useState("");
+  const [packageCustom, setPackageCustom] = useState("");
+  const packageTriggerRef = useRef<HTMLSpanElement | null>(null);
+  const packageInputRef = useRef<HTMLInputElement | null>(null);
+  const togglePackage = (value: string) =>
+    setPackageNames((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  const packageNamesJoined = useMemo(
+    () => Array.from(packageNames).join(" + "),
+    [packageNames],
+  );
   const [accountManagerId, setAccountManagerId] = useState<string>("");
   const [socialId, setSocialId] = useState<string>("");
   const [mediaId, setMediaId] = useState<string>("");
@@ -371,7 +389,7 @@ export function NewProjectForm({
       <input type="hidden" name="service_week_splits" value={JSON.stringify(splitsForForm)} />
       <input type="hidden" name="generate_tasks" value={generateTasks ? "true" : "false"} />
       <input type="hidden" name="client_id" value={clientId} />
-      <input type="hidden" name="package_name" value={packageName} />
+      <input type="hidden" name="package_name" value={packageNamesJoined} />
       <input type="hidden" name="duration_label" value={activeDuration} />
       <input type="hidden" name="account_manager_employee_id" value={accountManagerId} />
       <input type="hidden" name="social_specialist_id" value={socialId} />
@@ -530,18 +548,163 @@ export function NewProjectForm({
               </div>
 
               <div className="space-y-1.5">
-                <Label>الباقة</Label>
-                <SearchableSelect
-                  value={packageName}
-                  onValueChange={setPackageName}
-                  options={PACKAGE_OPTIONS}
-                  placeholder="اختر الباقة (اختياري)"
-                  searchPlaceholder="ابحث في الباقات…"
-                  onCreateNew={(q) => {
-                    if (q) setPackageName(q);
-                  }}
-                  createLabel="استخدام نص حر"
-                />
+                <Label>الباقات</Label>
+                {/* Multi-select: a project can combine packages
+                    (Nova + Ads, Social + SEO, …). Selected names render
+                    as removable chips; the "+ إضافة باقة" popover lists
+                    PACKAGE_OPTIONS minus already-selected ones plus a
+                    free-text fallback. Server stores them joined with
+                    " + " in projects.package_name (no schema change). */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {Array.from(packageNames).map((name) => {
+                    const opt = PACKAGE_OPTIONS.find((o) => o.value === name);
+                    return (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-cyan/40 bg-cyan-dim px-2.5 py-1 text-xs font-medium text-cyan"
+                      >
+                        {opt?.label ?? name}
+                        <button
+                          type="button"
+                          onClick={() => togglePackage(name)}
+                          aria-label={`إزالة ${name}`}
+                          className="rounded-full p-0.5 text-cyan/80 hover:bg-cyan/10 hover:text-cyan transition-colors"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <span ref={packageTriggerRef} className="inline-block">
+                    <button
+                      type="button"
+                      onClick={() => setPackagePicking((v) => !v)}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border border-dashed border-soft px-2.5 py-1 text-xs",
+                        "text-muted-foreground hover:text-foreground hover:border-cyan/40 hover:bg-cyan-dim/30 transition-colors",
+                      )}
+                      aria-haspopup="listbox"
+                      aria-expanded={packagePicking}
+                    >
+                      <Plus className="size-3" />
+                      {packageNames.size === 0 ? "اختر باقة" : "إضافة باقة"}
+                    </button>
+                  </span>
+                  <AnchoredPopover
+                    anchorRef={packageTriggerRef}
+                    open={packagePicking}
+                    onClose={() => {
+                      setPackagePicking(false);
+                      setPackageQuery("");
+                      setPackageCustom("");
+                    }}
+                    className="z-50 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
+                  >
+                    <div role="dialog" aria-label="اختر باقة">
+                      <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
+                        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                        <input
+                          ref={packageInputRef}
+                          value={packageQuery}
+                          onChange={(e) => setPackageQuery(e.target.value)}
+                          placeholder="ابحث في الباقات…"
+                          className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                          aria-label="بحث الباقات"
+                        />
+                      </div>
+                      <ul
+                        role="listbox"
+                        aria-label="الباقات المتاحة"
+                        className="max-h-64 overflow-y-auto py-1"
+                      >
+                        {(() => {
+                          const q = packageQuery.trim().toLowerCase();
+                          const available = PACKAGE_OPTIONS.filter(
+                            (o) => !packageNames.has(o.value),
+                          ).filter(
+                            (o) =>
+                              !q ||
+                              o.label.toLowerCase().includes(q) ||
+                              o.value.toLowerCase().includes(q) ||
+                              (o.hint ?? "").toLowerCase().includes(q),
+                          );
+                          if (available.length === 0) {
+                            return (
+                              <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                                لا نتائج
+                              </li>
+                            );
+                          }
+                          return available.map((opt) => (
+                            <li key={opt.value} role="option" aria-selected={false}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  togglePackage(opt.value);
+                                  setPackageQuery("");
+                                }}
+                                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-xs hover:bg-soft-2 transition-colors"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate font-medium">{opt.label}</div>
+                                  {opt.hint && (
+                                    <div className="truncate text-[10px] text-muted-foreground">
+                                      {opt.hint}
+                                    </div>
+                                  )}
+                                </div>
+                                <Check className="size-3.5 shrink-0 opacity-0 group-hover:opacity-100" />
+                              </button>
+                            </li>
+                          ));
+                        })()}
+                      </ul>
+                      <div className="border-t border-soft p-2 space-y-1.5">
+                        <input
+                          type="text"
+                          value={packageCustom}
+                          onChange={(e) => setPackageCustom(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const v = packageCustom.trim();
+                              if (v && !packageNames.has(v)) {
+                                togglePackage(v);
+                                setPackageCustom("");
+                              }
+                            }
+                          }}
+                          placeholder="باقة مخصصة (اختياري)…"
+                          maxLength={80}
+                          className="h-7 w-full rounded-md border border-soft bg-background px-2 text-[11px]"
+                        />
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            disabled={
+                              !packageCustom.trim() ||
+                              packageNames.has(packageCustom.trim())
+                            }
+                            onClick={() => {
+                              const v = packageCustom.trim();
+                              if (v && !packageNames.has(v)) {
+                                togglePackage(v);
+                                setPackageCustom("");
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md bg-cyan px-2 py-1 text-[10px] font-medium text-white hover:bg-cyan/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Plus className="size-3" />
+                            إضافة نص حر
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </AnchoredPopover>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  يمكنك اختيار أكثر من باقة — مثل «نوفا + حملات إعلانية».
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -967,7 +1130,7 @@ export function NewProjectForm({
                 <dt className="text-muted-foreground">اسم المشروع:</dt>
                 <dd className="font-medium">{name || "—"}</dd>
                 <dt className="text-muted-foreground">الباقة:</dt>
-                <dd className="font-medium">{packageName || "—"}</dd>
+                <dd className="font-medium">{packageNamesJoined || "—"}</dd>
                 <dt className="text-muted-foreground">المدة:</dt>
                 <dd className="font-medium">{activeDuration || "—"}</dd>
                 <dt className="text-muted-foreground">عدد الخدمات:</dt>
