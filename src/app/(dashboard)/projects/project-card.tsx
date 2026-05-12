@@ -8,9 +8,15 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Star, MoreVertical, User, Hash, Timer } from "lucide-react";
+import { Star, MoreVertical, User, Hash, Timer, Info, ExternalLink, ListChecks } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 // Rwasem prints datetimes as `MM/DD/YYYY HH:MM:SS`. Source values are
@@ -73,6 +79,7 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
   // Project entry should land on the scoped tasks view first. We still expose
   // project details from there via the "معلومات المشروع" action in /tasks.
   const href = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
+  const infoHref = p.id ? `/projects/${p.id}` : `/projects/odoo/${p.odooId}`;
 
   return (
     <article
@@ -126,15 +133,38 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             {p.name}
           </Link>
 
-          <button
-            type="button"
-            onClick={(e) => e.stopPropagation()}
-            className="relative shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="إجراءات"
-            title="المزيد"
-          >
-            <MoreVertical className="size-4" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => e.stopPropagation()}
+                className="relative shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="إجراءات"
+                title="المزيد"
+              >
+                <MoreVertical className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <DropdownMenuItem onSelect={() => router.push(infoHref)}>
+                <Info className="size-4" />
+                <span>معلومات المشروع</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => window.open(infoHref, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink className="size-4" />
+                <span>فتح في تبويب جديد</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => router.push(href)}>
+                <ListChecks className="size-4" />
+                <span>المهام</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Ref code */}
