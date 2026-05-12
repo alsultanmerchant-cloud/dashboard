@@ -156,6 +156,7 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 - قروب داخلي: التنسيق بين الفريق
 
 ## قواعد الرد
+0. **إلزامي:** بعد كل استدعاء أداة (queryDatabase, odoo*, dashboard*, webSearch) يجب عليك إصدار رسالة نصية ملخّصة باللغة العربية تشرح ما وجدته. لا تنهِ ردك بعد استدعاء أداة دون نص. حتى لو لم تجد بيانات، اكتب صراحة "لم أجد …".
 1. أجب بالعربية الفصحى الواضحة
 2. استخدم الأرقام الفعلية من البيانات — لا تختلق
 3. نسّق بـ Markdown (عناوين، قوائم، جداول)
@@ -309,7 +310,7 @@ export async function POST(req: Request) {
       model: google("gemini-3-flash-preview"),
       system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
-      stopWhen: stepCountIs(8),
+      stopWhen: stepCountIs(20),
       // §9.1: surface stream/tool errors instead of letting them deadlock
       // the client. The UI shows a generic toast on stream error.
       onError: ({ error }) => {
