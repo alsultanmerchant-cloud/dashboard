@@ -148,18 +148,33 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             <DropdownMenuContent
               align="end"
               onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
             >
-              <DropdownMenuItem onSelect={() => router.push(infoHref)}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(infoHref);
+                }}
+              >
                 <Info className="size-4" />
                 <span>معلومات المشروع</span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => window.open(infoHref, "_blank", "noopener,noreferrer")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(infoHref, "_blank", "noopener,noreferrer");
+                }}
               >
                 <ExternalLink className="size-4" />
                 <span>فتح في تبويب جديد</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => router.push(href)}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(href);
+                }}
+              >
                 <ListChecks className="size-4" />
                 <span>المهام</span>
               </DropdownMenuItem>
