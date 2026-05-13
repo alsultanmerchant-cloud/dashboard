@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Loader2, ShieldCheck, ShieldAlert, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -45,6 +46,8 @@ export function TaskApprovalPanel({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const t = useTranslations("TaskDetailPage.approval");
   const [pending, start] = useTransition();
   const [approverId, setApproverId] = useState<string>(firstApproverId ?? "");
   const [notes, setNotes] = useState("");
@@ -54,7 +57,7 @@ export function TaskApprovalPanel({
   const canDecide = approvalRequired && approvalStatus !== "approved" && (isApprover || canManage);
 
   const formatDate = (iso: string | null) =>
-    iso ? new Date(iso).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" }) : null;
+    iso ? new Date(iso).toLocaleString(locale === "ar" ? "ar-SA" : "en-US", { dateStyle: "medium", timeStyle: "short" }) : null;
 
   const onRequest = () =>
     start(async () => {
@@ -63,8 +66,11 @@ export function TaskApprovalPanel({
         approverEmployeeId: approverId || null,
         notes: notes.trim() || undefined,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم إرسال طلب الاعتماد");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.requested"));
       setNotes("");
       router.refresh();
     });
@@ -72,8 +78,11 @@ export function TaskApprovalPanel({
   const onApprove = () =>
     start(async () => {
       const res = await approveTaskAction({ taskId, notes: notes.trim() || undefined });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم اعتماد المهمة");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.approved"));
       setNotes("");
       router.refresh();
     });
@@ -81,8 +90,11 @@ export function TaskApprovalPanel({
   const onReject = () =>
     start(async () => {
       const res = await rejectTaskAction({ taskId, notes: notes.trim() || undefined });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم رفض المهمة");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.rejected"));
       setNotes("");
       router.refresh();
     });
@@ -90,27 +102,33 @@ export function TaskApprovalPanel({
   const onReset = () =>
     start(async () => {
       const res = await resetTaskApprovalAction({ taskId, clearRequirement: false });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("أُعيد طلب الاعتماد");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.resent"));
       router.refresh();
     });
 
   const onClear = () =>
     start(async () => {
       const res = await resetTaskApprovalAction({ taskId, clearRequirement: true });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("ألغيت متطلب الاعتماد");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.cleared"));
       router.refresh();
     });
 
   const status: { label: string; tone: string; Icon: typeof ShieldCheck } =
     approvalStatus === "approved"
-      ? { label: "معتمد", tone: "text-cc-green border-cc-green/40 bg-cc-green/10", Icon: CheckCircle2 }
+      ? { label: t("status.approved"), tone: "text-cc-green border-cc-green/40 bg-cc-green/10", Icon: CheckCircle2 }
       : approvalStatus === "rejected"
-        ? { label: "مرفوض", tone: "text-cc-red border-cc-red/40 bg-cc-red/10", Icon: XCircle }
+        ? { label: t("status.rejected"), tone: "text-cc-red border-cc-red/40 bg-cc-red/10", Icon: XCircle }
         : approvalStatus === "pending"
-          ? { label: "بانتظار الاعتماد", tone: "text-cc-amber border-cc-amber/40 bg-cc-amber/10", Icon: ShieldAlert }
-          : { label: "لا يتطلب اعتمادًا", tone: "text-muted-foreground border-border bg-muted/30", Icon: ShieldCheck };
+          ? { label: t("status.pending"), tone: "text-cc-amber border-cc-amber/40 bg-cc-amber/10", Icon: ShieldAlert }
+          : { label: t("status.notRequired"), tone: "text-muted-foreground border-border bg-muted/30", Icon: ShieldCheck };
 
   return (
     <Card>
@@ -118,7 +136,7 @@ export function TaskApprovalPanel({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ShieldCheck className="size-4 text-muted-foreground" />
-            بوابة الاعتماد
+            {t("title")}
           </div>
           <span
             className={cn(
@@ -134,29 +152,29 @@ export function TaskApprovalPanel({
         {approvalRequired ? (
           <div className="grid gap-2 text-xs text-muted-foreground">
             <div>
-              المعتمد: <span className="font-medium text-foreground">{approver?.full_name ?? "غير محدد"}</span>
+              {t("approver")}: <span className="font-medium text-foreground">{approver?.full_name ?? t("unassigned")}</span>
               {approver?.job_title ? <span className="opacity-70"> — {approver.job_title}</span> : null}
             </div>
-            {approvalRequestedAt ? <div>طُلب الاعتماد: {formatDate(approvalRequestedAt)}</div> : null}
-            {approvalDecidedAt ? <div>تاريخ القرار: {formatDate(approvalDecidedAt)}</div> : null}
+            {approvalRequestedAt ? <div>{t("requestedAt")}: {formatDate(approvalRequestedAt)}</div> : null}
+            {approvalDecidedAt ? <div>{t("decidedAt")}: {formatDate(approvalDecidedAt)}</div> : null}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            عند تفعيل بوابة الاعتماد لن يتمكن أحد من نقل المهمة إلى المرحلة التالية حتى يعتمدها المعتمد المختار.
+            {t("description")}
           </p>
         )}
 
         {/* Approver picker visible to managers when configuring */}
         {(canManage || !approvalRequired) && (
           <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">اختر المعتمد</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("pickApprover")}</label>
             <select
               value={approverId}
               onChange={(e) => setApproverId(e.target.value)}
               className="h-9 rounded-md border bg-background px-2 text-sm"
               disabled={pending}
             >
-              <option value="">— بدون معتمد محدد —</option>
+              <option value="">{t("noApprover")}</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.full_name}
@@ -170,12 +188,12 @@ export function TaskApprovalPanel({
         {/* Notes textarea — used by every action */}
         {(canDecide || canManage || !approvalRequired) && (
           <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">ملاحظات (اختياري)</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("notes")}</label>
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              placeholder="سبب الاعتماد أو الرفض…"
+              placeholder={t("notesPlaceholder")}
               disabled={pending}
               maxLength={1000}
             />
@@ -186,14 +204,14 @@ export function TaskApprovalPanel({
           {!approvalRequired && canManage && (
             <Button onClick={onRequest} disabled={pending} size="sm">
               {pending ? <Loader2 className="ml-1 size-3.5 animate-spin" /> : <ShieldAlert className="ml-1 size-3.5" />}
-              تفعيل البوابة وطلب الاعتماد
+              {t("actions.enableAndRequest")}
             </Button>
           )}
 
           {approvalRequired && approvalStatus !== "approved" && canManage && (
             <Button onClick={onRequest} disabled={pending} size="sm" variant="secondary">
               {pending ? <Loader2 className="ml-1 size-3.5 animate-spin" /> : null}
-              إعادة إرسال الطلب
+              {t("actions.resend")}
             </Button>
           )}
 
@@ -206,7 +224,7 @@ export function TaskApprovalPanel({
                 className="bg-cc-green text-white hover:bg-cc-green/90"
               >
                 {pending ? <Loader2 className="ml-1 size-3.5 animate-spin" /> : <CheckCircle2 className="ml-1 size-3.5" />}
-                اعتماد
+                {t("actions.approve")}
               </Button>
               <Button
                 onClick={onReject}
@@ -215,7 +233,7 @@ export function TaskApprovalPanel({
                 variant="destructive"
               >
                 {pending ? <Loader2 className="ml-1 size-3.5 animate-spin" /> : <XCircle className="ml-1 size-3.5" />}
-                رفض
+                {t("actions.reject")}
               </Button>
             </>
           )}
@@ -223,13 +241,13 @@ export function TaskApprovalPanel({
           {approvalRequired && approvalStatus === "approved" && canManage && (
             <Button onClick={onReset} disabled={pending} size="sm" variant="outline">
               <RotateCcw className="ml-1 size-3.5" />
-              إعادة طلب الاعتماد
+              {t("actions.requestAgain")}
             </Button>
           )}
 
           {approvalRequired && canManage && (
             <Button onClick={onClear} disabled={pending} size="sm" variant="ghost">
-              إلغاء متطلب الاعتماد
+              {t("actions.clearRequirement")}
             </Button>
           )}
         </div>

@@ -704,6 +704,244 @@
       "done": "Done"
     }
   },
+  "TaskDetailPage": {
+    "breadcrumbs": {
+      "tasks": "Tasks"
+    },
+    "delayPill": "{count}d delayed",
+    "summary": {
+      "project": "Project",
+      "noClient": "No client",
+      "deadline": "Deadline",
+      "lastCompletion": "Last completion"
+    },
+    "delayBanner": {
+      "done": "Completed {count} day(s) late",
+      "open": "Running {count} day(s) late",
+      "description": "This task has passed its planned deadline."
+    },
+    "roles": {
+      "account_manager": "Account manager",
+      "specialist": "Specialist",
+      "manager": "Manager",
+      "agent": "Agent",
+      "supporting_lead": "Supporting lead",
+      "supporting_agent": "Supporting agent"
+    },
+    "stages": {
+      "new": "New",
+      "in_progress": "In Progress",
+      "manager_review": "Manager Review",
+      "specialist_review": "Specialist Review",
+      "ready_to_send": "Ready to Send",
+      "sent_to_client": "Sent to Client",
+      "client_changes": "Client Changes",
+      "done": "Done"
+    },
+    "currentStageOwner": "Current stage owner",
+    "noStageOwnerPrefix": "No assignee mapped for",
+    "noStageOwnerSuffix": "yet.",
+    "sections": {
+      "assignees": {
+        "title": "Assignees",
+        "description": "Team members responsible for delivering this task."
+      },
+      "followers": {
+        "title": "Followers",
+        "description": "People kept in the loop without execution ownership."
+      }
+    },
+    "loading": {
+      "approvals": "Loading approvals…",
+      "assignees": "Loading assignees…",
+      "followers": "Loading followers…",
+      "section": "Loading section…",
+      "activityFeed": "Loading activity feed…"
+    },
+    "tabs": {
+      "activity": "Activity",
+      "description": "Description",
+      "subtasks": "Subtasks",
+      "links": "Links",
+      "timesheets": "Timesheets",
+      "activities": "Activities",
+      "documents": "Documents",
+      "history": "History",
+      "gantt": "Gantt",
+      "extra": "Extra info"
+    },
+    "notLinkedToProject": "Task is not linked to a project.",
+    "smartButtons": {
+      "subtasks": "Subtasks",
+      "links": "Links",
+      "timesheets": "Timesheets",
+      "comments": "Comments",
+      "activities": "Activities",
+      "documents": "Documents"
+    },
+    "form": {
+      "project": "Project",
+      "service": "Service",
+      "priority": "Priority",
+      "progress": "Progress",
+      "expectedProgress": "Expected progress",
+      "progressVariance": "Progress variance",
+      "allocatedTime": "Allocated time",
+      "deadline": "Deadline",
+      "plannedDeadline": "Planned deadline",
+      "actualDoneDate": "Actual completion date",
+      "completedAt": "Completed at",
+      "delayDays": "Delay days",
+      "holdReason": "Hold reason"
+    },
+    "descriptionTab": {
+      "empty": "No description."
+    },
+    "stepper": {
+      "now": "now",
+      "cannotMoveBack": "Tasks cannot be moved back to an earlier stage",
+      "movedTo": "Moved to {stage}",
+      "ariaLabel": "Task stages",
+      "confirmTitle": "Confirm stage move",
+      "confirmFrom": "Move task from",
+      "confirmTo": "to",
+      "confirmWarning": "? This action cannot be undone.",
+      "confirmAction": "Move"
+    },
+    "approval": {
+      "title": "Approval gate",
+      "approver": "Approver",
+      "unassigned": "Unassigned",
+      "requestedAt": "Requested",
+      "decidedAt": "Decision date",
+      "description": "When approval is required, nobody can move the task to the next stage until the selected approver approves it.",
+      "pickApprover": "Choose approver",
+      "noApprover": "— No specific approver —",
+      "notes": "Notes (optional)",
+      "notesPlaceholder": "Reason for approval or rejection…",
+      "status": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "pending": "Pending approval",
+        "notRequired": "No approval required"
+      },
+      "actions": {
+        "enableAndRequest": "Enable gate and request approval",
+        "resend": "Resend request",
+        "approve": "Approve",
+        "reject": "Reject",
+        "requestAgain": "Request approval again",
+        "clearRequirement": "Clear approval requirement"
+      },
+      "toasts": {
+        "requested": "Approval request sent",
+        "approved": "Task approved",
+        "rejected": "Task rejected",
+        "resent": "Approval requested again",
+        "cleared": "Approval requirement cleared"
+      }
+    },
+    "composer": {
+      "tabs": {
+        "message": "Send message",
+        "note": "Internal note"
+      },
+      "kinds": {
+        "note": "Note",
+        "requirements": "Requirements",
+        "modification": "Client change"
+      },
+      "hints": {
+        "requirements": "Write the initial task requirements. They will stay pinned at the top of the thread.",
+        "modification": "Log the client changes. They will appear in the modifications section."
+      },
+      "placeholders": {
+        "message": "Write a message for followers… use @name to mention someone",
+        "note": "Write an internal note… use @name to mention a teammate"
+      },
+      "mentionSuggestions": "Mention suggestions",
+      "matches": "{count} employee matches",
+      "forQuery": "for “{query}”",
+      "removeAttachment": "Remove attachment",
+      "attachFiles": "Attach file",
+      "attach": "Attach",
+      "shortcut": "Cmd+Enter to send quickly",
+      "uploading": "Uploading…",
+      "send": "Send",
+      "post": "Post",
+      "maxFiles": "Maximum {count} files",
+      "fileTooLarge": "“{name}” is larger than 25MB",
+      "uploadFailed": "Failed to upload files",
+      "attachmentsOnly": "(Attachments)",
+      "toasts": {
+        "messageSent": "Message sent",
+        "notePosted": "Note posted",
+        "messageWithMentions": "Message sent and {count} employee(s) notified",
+        "noteWithMentions": "Note posted and {count} employee(s) notified"
+      }
+    },
+    "gantt": {
+      "noProject": "Task is not linked to a project, so the chart cannot be shown.",
+      "summary": "Quick view of this task and its dependencies inside the project.",
+      "openProjectGantt": "Open full project chart",
+      "currentTask": "Current task",
+      "noDependencies": "No dependency links yet. Add them from the Links tab.",
+      "dependencyLinks": "Dependency links ({count})",
+      "predecessor": "Predecessor",
+      "successor": "Successor",
+      "lagDays": "{count}d lag"
+    },
+    "extra": {
+      "notFound": "Task not found.",
+      "taskCode": "Task code",
+      "createdAt": "Created",
+      "updatedAt": "Last updated",
+      "createdBy": "Created by",
+      "source": "Source",
+      "localSource": "Local (Dashboard)",
+      "approvalGate": "Approval gate",
+      "required": "Required",
+      "approvalRequestedAt": "Approval requested at",
+      "approvalDecidedAt": "Approval decided at",
+      "holdReason": "Hold reason",
+      "heldSince": "On hold since",
+      "allocatedTime": "Allocated time",
+      "progress": "Progress",
+      "expectedProgress": "Expected progress",
+      "progressVariance": "Progress variance",
+      "delayDays": "Delay days",
+      "actualDoneDate": "Actual completion date",
+      "hoursOnly": "{count}h",
+      "minutesOnly": "{count}m",
+      "hoursMinutes": "{hours}h {minutes}m"
+    }
+  },
+  "TaskLabels": {
+    "status": {
+      "todo": "To do",
+      "in_progress": "In progress",
+      "review": "In review",
+      "blocked": "Blocked",
+      "done": "Done",
+      "cancelled": "Cancelled"
+    },
+    "stage": {
+      "new": "New",
+      "in_progress": "In Progress",
+      "manager_review": "Manager Review",
+      "specialist_review": "Specialist Review",
+      "ready_to_send": "Ready to Send",
+      "sent_to_client": "Sent to Client",
+      "client_changes": "Client Changes",
+      "done": "Done"
+    },
+    "priority": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "urgent": "Urgent"
+    }
+  },
   "PageTitles": {
     "dashboardTitle": "Overview",
     "dashboardSubtitle": "Executive dashboard focused on the most important signals right now",

@@ -1,6 +1,9 @@
-// Domain status badges. Each one accepts the raw enum value and renders the
-// appropriate Arabic label with a color treatment matching the command-center palette.
+"use client";
 
+// Domain status badges. Each one accepts the raw enum value and renders the
+// appropriate locale label with a color treatment matching the command-center palette.
+
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import {
   TASK_STATUS_LABELS,
@@ -60,7 +63,10 @@ const taskTone: Record<TaskStatus, keyof typeof tones> = {
 
 export function TaskStatusBadge({ status, className }: { status: TaskStatus | string; className?: string }) {
   const t = taskTone[status as TaskStatus] ?? "muted";
-  const label = TASK_STATUS_LABELS[status as TaskStatus] ?? status;
+  const i18n = useTranslations("TaskLabels.status");
+  const label = i18n.has(status as TaskStatus)
+    ? i18n(status as TaskStatus)
+    : TASK_STATUS_LABELS[status as TaskStatus] ?? status;
   return (
     <span className={cn(baseChip, tones[t], className)}>
       <Dot tone={t} />
@@ -83,7 +89,10 @@ const stageTone: Record<TaskStage, keyof typeof tones> = {
 
 export function TaskStageBadge({ stage, className }: { stage: TaskStage | string; className?: string }) {
   const t = stageTone[stage as TaskStage] ?? "muted";
-  const label = TASK_STAGE_LABELS[stage as TaskStage] ?? stage;
+  const i18n = useTranslations("TaskLabels.stage");
+  const label = i18n.has(stage as TaskStage)
+    ? i18n(stage as TaskStage)
+    : TASK_STAGE_LABELS[stage as TaskStage] ?? stage;
   return (
     <span className={cn(baseChip, tones[t], className)}>
       <Dot tone={t} />
@@ -101,7 +110,10 @@ const priorityTone: Record<Priority, keyof typeof tones> = {
 
 export function PriorityBadge({ priority, className }: { priority: Priority | string; className?: string }) {
   const t = priorityTone[priority as Priority] ?? "muted";
-  const label = PRIORITY_LABELS[priority as Priority] ?? priority;
+  const i18n = useTranslations("TaskLabels.priority");
+  const label = i18n.has(priority as Priority)
+    ? i18n(priority as Priority)
+    : PRIORITY_LABELS[priority as Priority] ?? priority;
   const isUrgent = priority === "urgent";
   return (
     <span className={cn(baseChip, tones[t], isUrgent && "animate-[pulse_2.4s_ease-in-out_infinite]", className)}>

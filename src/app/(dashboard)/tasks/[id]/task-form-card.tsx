@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Briefcase } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PriorityBadge, ServiceBadge } from "@/components/status-badges";
@@ -41,13 +41,15 @@ type TaskFormData = {
   revision_count: number;
 };
 
-function formatMinutes(min: number | null): string {
+function formatMinutes(min: number | null, locale: string): string {
   if (min == null || min <= 0) return "—";
   const h = Math.floor(min / 60);
   const m = min % 60;
-  if (h === 0) return `${m}د`;
-  if (m === 0) return `${h}س`;
-  return `${h}س ${m}د`;
+  const hourUnit = locale === "ar" ? "س" : "h";
+  const minuteUnit = locale === "ar" ? "د" : "m";
+  if (h === 0) return `${m}${minuteUnit}`;
+  if (m === 0) return `${h}${hourUnit}`;
+  return `${h}${hourUnit} ${m}${minuteUnit}`;
 }
 
 function formatPct(v: number | string | null): string {
@@ -97,6 +99,7 @@ export function TaskFormCard({
 }) {
   const progress = task.progress_percent;
   const t = useTranslations("TaskDetailPage.form");
+  const locale = useLocale();
   const progressNum =
     progress == null
       ? 0
@@ -182,7 +185,7 @@ export function TaskFormCard({
         <dl className="divide-y divide-soft/40">
           <Row label={t("allocatedTime")}>
             <span className="tabular-nums">
-              {formatMinutes(task.allocated_time_minutes)}
+              {formatMinutes(task.allocated_time_minutes, locale)}
             </span>
           </Row>
           <Row label={t("deadline")}>

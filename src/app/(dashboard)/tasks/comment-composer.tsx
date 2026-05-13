@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Send, MessageSquare, FileText, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -78,12 +79,6 @@ function fuzzyScore(name: string, query: string): number {
   return 0;
 }
 
-const KIND_OPTIONS: { value: CommentKind; label: string }[] = [
-  { value: "note", label: "ملاحظة" },
-  { value: "requirements", label: "متطلبات" },
-  { value: "modification", label: "تعديل من العميل" },
-];
-
 function defaultKindFor(
   stage: TaskStage | undefined,
   hasRequirements: boolean,
@@ -107,6 +102,7 @@ export function CommentComposer({
   mentionable?: Mentionable[];
 }) {
   const router = useRouter();
+  const t = useTranslations("TaskDetailPage.composer");
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -128,6 +124,11 @@ export function CommentComposer({
   );
   const [kind, setKind] = useState<CommentKind>(initialKind);
   const [pending, start] = useTransition();
+  const kindOptions: { value: CommentKind; label: string }[] = [
+    { value: "note", label: t("kinds.note") },
+    { value: "requirements", label: t("kinds.requirements") },
+    { value: "modification", label: t("kinds.modification") },
+  ];
   const hasBody = body.trim().length > 0;
   const hasFiles = files.length > 0;
   const expanded = !floating || hovered || focusedWithin || hasBody || hasFiles;
@@ -139,11 +140,11 @@ export function CommentComposer({
     const accepted: PendingAttachment[] = [];
     for (const f of list) {
       if (files.length + accepted.length >= MAX_FILES) {
-        toast.error(`الحد الأقصى ${MAX_FILES} ملفات`);
+        toast.error(t("maxFiles", { count: MAX_FILES }));
         break;
       }
       if (f.size > MAX_FILE_BYTES) {
-        toast.error(`«${f.name}» أكبر من 25MB`);
+        toast.error(t("fileTooLarge", { name: f.name }));
         continue;
       }
       accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, file: f });
@@ -235,9 +236,9 @@ export function CommentComposer({
 
   const hint =
     mode === "note" && kind === "requirements" && currentStage === "new" && !hasRequirements
-      ? "اكتب متطلبات المهمة الأولية — ستُثبت في أعلى الخيط"
+      ? t("hints.requirements")
       : mode === "note" && kind === "modification" && currentStage === "client_changes"
-        ? "سجل تعديلات العميل — ستظهر في قسم التعديلات"
+        ? t("hints.modification")
         : null;
 
   function submit() {
@@ -282,7 +283,7 @@ export function CommentComposer({
           uploadedAttachments = uploads;
         } catch (err) {
           setUploading(false);
-          toast.error((err as Error).message || "تعذر رفع الملفات");
+          toast.error((err as Error).message || t("uploadFailed"));
           return;
         }
         setUploading(false);
@@ -290,7 +291,7 @@ export function CommentComposer({
 
       const res = await addTaskCommentAction({
         taskId,
-        body: trimmed.length > 0 ? trimmed : "(مرفقات)",
+        body: trimmed.length > 0 ? trimmed : t("attachmentsOnly"),
         kind: submitKind,
         isInternal,
         attachments: uploadedAttachments,
@@ -301,10 +302,12 @@ export function CommentComposer({
       }
       toast.success(
         res.mentionsResolved > 0
-          ? `${mode === "message" ? "أُرسلت الرسالة" : "نُشرت الملاحظة"} وأُشعر ${res.mentionsResolved} موظف`
+          ? mode === "message"
+            ? t("toasts.messageWithMentions", { count: res.mentionsResolved })
+            : t("toasts.noteWithMentions", { count: res.mentionsResolved })
           : mode === "message"
-            ? "أُرسلت الرسالة"
-            : "نُشرت الملاحظة",
+            ? t("toasts.messageSent")
+            : t("toasts.notePosted"),
       );
       setBody("");
       setFiles([]);
@@ -335,8 +338,8 @@ export function CommentComposer({
       <div className="flex items-center gap-0 border-b border-soft bg-soft-1/40 px-2">
         {(
           [
-            { value: "message" as const, label: "إرسال رسالة", icon: MessageSquare },
-            { value: "note" as const, label: "ملاحظة داخلية", icon: FileText },
+            { value: "message" as const, label: t("tabs.message"), icon: MessageSquare },
+            { value: "note" as const, label: t("tabs.note"), icon: FileText },
           ]
         ).map(({ value, label, icon: Icon }) => {
           const active = mode === value;
@@ -371,7 +374,7 @@ export function CommentComposer({
         >
           {mode === "note" && (
             <div className="flex flex-wrap items-center gap-1.5">
-              {KIND_OPTIONS.map((opt) => {
+              {kindOptions.map((opt) => {
                 const active = kind === opt.value;
                 return (
                   <button
@@ -469,19 +472,20 @@ export function CommentComposer({
             )}
             placeholder={
               mode === "message"
-                ? "اكتب رسالة للمتابعين… استخدم @الاسم للإشارة"
-                : "اكتب ملاحظة داخلية… استخدم @الاسم للإشارة لزميل"
+                ? t("placeholders.message")
+                : t("placeholders.note")
             }
           />
 
           {mentionState && mentionMatches.length > 0 && (
             <div
               role="listbox"
-              aria-label="اقتراحات الإشارة"
+              aria-label={t("mentionSuggestions")}
               className="absolute bottom-full start-0 mb-1 max-h-96 w-80 overflow-y-auto rounded-lg border border-soft-2 bg-popover shadow-lg z-50"
             >
               <div className="sticky top-0 border-b border-soft bg-popover/95 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
-                {mentionMatches.length} موظف{mentionState.query ? ` يطابق «${mentionState.query}»` : ""}
+                {t("matches", { count: mentionMatches.length })}
+                {mentionState.query ? ` ${t("forQuery", { query: mentionState.query })}` : ""}
               </div>
               {mentionMatches.map((emp, idx) => {
                 const active = idx === mentionState.activeIndex;
@@ -541,7 +545,7 @@ export function CommentComposer({
                   type="button"
                   onClick={() => removeFile(f.id)}
                   className="text-muted-foreground hover:text-foreground"
-                  aria-label="إزالة المرفق"
+                  aria-label={t("removeAttachment")}
                 >
                   <X className="size-3" />
                 </button>
@@ -572,13 +576,13 @@ export function CommentComposer({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={pending || uploading || files.length >= MAX_FILES}
                 className="inline-flex items-center gap-1 rounded-full border border-soft-2 bg-card px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-cyan/30 hover:text-cyan disabled:opacity-50"
-                aria-label="إرفاق ملف"
+                aria-label={t("attachFiles")}
               >
                 <Paperclip className="size-3.5" />
-                إرفاق
+                {t("attach")}
               </button>
               <p className="text-[11px] text-muted-foreground">
-                ⌘+Enter للإرسال السريع
+                {t("shortcut")}
               </p>
             </div>
             <Button
@@ -592,10 +596,10 @@ export function CommentComposer({
                 <Send className="size-4" />
               )}
               {uploading
-                ? "جارٍ الرفع…"
+                ? t("uploading")
                 : mode === "message"
-                  ? "إرسال"
-                  : "نشر"}
+                  ? t("send")
+                  : t("post")}
             </Button>
           </div>
         </div>

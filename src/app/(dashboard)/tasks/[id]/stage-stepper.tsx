@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Loader2, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   TASK_STAGES,
-  TASK_STAGE_LABELS,
   isForwardStageMove,
   type TaskStage,
 } from "@/lib/labels";
@@ -14,15 +14,19 @@ import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { moveTaskStageAction } from "../_actions";
 
-function formatStageDuration(fromIso: string): string {
+function formatStageDuration(
+  fromIso: string,
+  locale: string,
+  t: ReturnType<typeof useTranslations<"TaskDetailPage.stepper">>,
+): string {
   const ms = Date.now() - new Date(fromIso).getTime();
-  if (ms < 60_000) return "الآن";
+  if (ms < 60_000) return t("now");
   const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${minutes}د`;
+  if (minutes < 60) return locale === "ar" ? `${minutes}د` : `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}س`;
+  if (hours < 48) return locale === "ar" ? `${hours}س` : `${hours}h`;
   const days = Math.floor(hours / 24);
-  return `${days}ي`;
+  return locale === "ar" ? `${days}ي` : `${days}d`;
 }
 
 export function StageStepper({
@@ -35,15 +39,19 @@ export function StageStepper({
   stageEnteredAt: string | null;
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const t = useTranslations("TaskDetailPage.stepper");
+  const stageT = useTranslations("TaskLabels.stage");
   const [pending, start] = useTransition();
   const [target, setTarget] = useState<TaskStage | null>(null);
   const currentIdx = TASK_STAGES.indexOf(currentStage);
-  const elapsed = stageEnteredAt ? formatStageDuration(stageEnteredAt) : null;
+  const elapsed = stageEnteredAt ? formatStageDuration(stageEnteredAt, locale, t) : null;
+  const labelForStage = (stage: TaskStage) => (stageT.has(stage) ? stageT(stage) : stage);
 
   const handleClick = (stage: TaskStage) => {
     if (stage === currentStage || pending) return;
     if (!isForwardStageMove(currentStage, stage)) {
-      toast.error("لا يمكن إرجاع المهمة إلى مرحلة سابقة");
+      toast.error(t("cannotMoveBack"));
       return;
     }
     setTarget(stage);
@@ -57,7 +65,7 @@ export function StageStepper({
       if ("error" in res) {
         toast.error(res.error);
       } else {
-        toast.success(`نُقلت إلى ${TASK_STAGE_LABELS[stage]}`);
+        toast.success(t("movedTo", { stage: labelForStage(stage) }));
         router.refresh();
       }
       setTarget(null);
@@ -69,7 +77,7 @@ export function StageStepper({
       <div
         className="flex flex-wrap items-stretch gap-1 rounded-2xl border border-soft bg-card/60 p-1"
         role="tablist"
-        aria-label="مراحل المهمة"
+        aria-label={t("ariaLabel")}
       >
         {TASK_STAGES.map((stage, idx) => {
           const isCurrent = idx === currentIdx;
@@ -94,12 +102,12 @@ export function StageStepper({
                   "text-muted-foreground/60 hover:bg-soft-1 hover:text-foreground",
                 pending && "cursor-wait opacity-70",
               )}
-              title={isPast ? "لا يمكن إرجاع المهمة إلى مرحلة سابقة" : undefined}
+              title={isPast ? t("cannotMoveBack") : undefined}
             >
               {isPast && (
                 <Check className="size-3 shrink-0 opacity-70" aria-hidden />
               )}
-              <span className="truncate">{TASK_STAGE_LABELS[stage]}</span>
+              <span className="truncate">{labelForStage(stage)}</span>
               {isCurrent && elapsed && (
                 <span className="rounded bg-cyan/10 px-1 py-0.5 text-[10px] tabular-nums">
                   {elapsed}
@@ -117,23 +125,23 @@ export function StageStepper({
         onOpenChange={(o) => {
           if (!o && !pending) setTarget(null);
         }}
-        title="تأكيد نقل المرحلة"
+        title={t("confirmTitle")}
         description={
           target ? (
             <>
-              نقل المهمة من{" "}
+              {t("confirmFrom")}{" "}
               <span className="font-semibold text-foreground">
-                {TASK_STAGE_LABELS[currentStage]}
+                {labelForStage(currentStage)}
               </span>{" "}
-              إلى{" "}
+              {t("confirmTo")}{" "}
               <span className="font-semibold text-foreground">
-                {TASK_STAGE_LABELS[target]}
+                {labelForStage(target)}
               </span>
-              ؟ لا يمكن التراجع عن هذه الخطوة.
+              {t("confirmWarning")}
             </>
           ) : null
         }
-        confirmLabel="نقل"
+        confirmLabel={t("confirmAction")}
         onConfirm={handleConfirm}
         pending={pending}
       />

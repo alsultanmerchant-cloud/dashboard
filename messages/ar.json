@@ -704,6 +704,244 @@
       "done": "مكتملة"
     }
   },
+  "TaskDetailPage": {
+    "breadcrumbs": {
+      "tasks": "المهام"
+    },
+    "delayPill": "متأخرة {count} يوم",
+    "summary": {
+      "project": "المشروع",
+      "noClient": "بدون عميل",
+      "deadline": "الموعد النهائي",
+      "lastCompletion": "آخر إنجاز"
+    },
+    "delayBanner": {
+      "done": "اكتملت متأخرة {count} يوم",
+      "open": "متأخرة حاليًا {count} يوم",
+      "description": "هذه المهمة تجاوزت موعدها المخطط."
+    },
+    "roles": {
+      "account_manager": "مدير الحساب",
+      "specialist": "متخصص",
+      "manager": "مدير",
+      "agent": "منفّذ",
+      "supporting_lead": "قائد مساند",
+      "supporting_agent": "منفّذ مساند"
+    },
+    "stages": {
+      "new": "جديدة",
+      "in_progress": "قيد التنفيذ",
+      "manager_review": "مراجعة المدير",
+      "specialist_review": "مراجعة المتخصص",
+      "ready_to_send": "جاهزة للإرسال",
+      "sent_to_client": "أرسلت للعميل",
+      "client_changes": "تعديلات العميل",
+      "done": "مكتملة"
+    },
+    "currentStageOwner": "مسؤول المرحلة الحالية",
+    "noStageOwnerPrefix": "لا يوجد مُسنَد مرتبط بدور",
+    "noStageOwnerSuffix": "حتى الآن.",
+    "sections": {
+      "assignees": {
+        "title": "المُسنَدون",
+        "description": "أعضاء الفريق المسؤولون عن تنفيذ هذه المهمة."
+      },
+      "followers": {
+        "title": "المتابعون",
+        "description": "أشخاص على اطلاع بالمهمة دون ملكية تنفيذية."
+      }
+    },
+    "loading": {
+      "approvals": "جاري تحميل الاعتمادات…",
+      "assignees": "جاري تحميل المُسنَدين…",
+      "followers": "جاري تحميل المتابعين…",
+      "section": "جاري تحميل القسم…",
+      "activityFeed": "جاري تحميل سجل النشاط…"
+    },
+    "tabs": {
+      "activity": "النشاط",
+      "description": "الوصف",
+      "subtasks": "المهام الفرعية",
+      "links": "ربط المهام",
+      "timesheets": "سجلات الوقت",
+      "activities": "الأنشطة",
+      "documents": "الملفات",
+      "history": "تاريخ المراحل",
+      "gantt": "المخطط",
+      "extra": "معلومات إضافية"
+    },
+    "notLinkedToProject": "المهمة غير مرتبطة بمشروع.",
+    "smartButtons": {
+      "subtasks": "المهام الفرعية",
+      "links": "ربط المهام",
+      "timesheets": "سجلات الوقت",
+      "comments": "التعليقات",
+      "activities": "الأنشطة",
+      "documents": "الملفات"
+    },
+    "form": {
+      "project": "المشروع",
+      "service": "الخدمة",
+      "priority": "الأولوية",
+      "progress": "التقدم",
+      "expectedProgress": "التقدم المتوقع",
+      "progressVariance": "انحراف التقدم",
+      "allocatedTime": "الوقت المخصص",
+      "deadline": "الموعد النهائي",
+      "plannedDeadline": "الموعد المخطط",
+      "actualDoneDate": "اليوم الفعلي للإنجاز",
+      "completedAt": "تم الإنجاز في",
+      "delayDays": "أيام التأخير",
+      "holdReason": "سبب الإيقاف"
+    },
+    "descriptionTab": {
+      "empty": "لا يوجد وصف."
+    },
+    "stepper": {
+      "now": "الآن",
+      "cannotMoveBack": "لا يمكن إرجاع المهمة إلى مرحلة سابقة",
+      "movedTo": "نُقلت إلى {stage}",
+      "ariaLabel": "مراحل المهمة",
+      "confirmTitle": "تأكيد نقل المرحلة",
+      "confirmFrom": "نقل المهمة من",
+      "confirmTo": "إلى",
+      "confirmWarning": "؟ لا يمكن التراجع عن هذه الخطوة.",
+      "confirmAction": "نقل"
+    },
+    "approval": {
+      "title": "بوابة الاعتماد",
+      "approver": "المعتمد",
+      "unassigned": "غير محدد",
+      "requestedAt": "طُلب الاعتماد",
+      "decidedAt": "تاريخ القرار",
+      "description": "عند تفعيل بوابة الاعتماد لن يتمكن أحد من نقل المهمة إلى المرحلة التالية حتى يعتمدها المعتمد المختار.",
+      "pickApprover": "اختر المعتمد",
+      "noApprover": "— بدون معتمد محدد —",
+      "notes": "ملاحظات (اختياري)",
+      "notesPlaceholder": "سبب الاعتماد أو الرفض…",
+      "status": {
+        "approved": "معتمد",
+        "rejected": "مرفوض",
+        "pending": "بانتظار الاعتماد",
+        "notRequired": "لا يتطلب اعتمادًا"
+      },
+      "actions": {
+        "enableAndRequest": "تفعيل البوابة وطلب الاعتماد",
+        "resend": "إعادة إرسال الطلب",
+        "approve": "اعتماد",
+        "reject": "رفض",
+        "requestAgain": "إعادة طلب الاعتماد",
+        "clearRequirement": "إلغاء متطلب الاعتماد"
+      },
+      "toasts": {
+        "requested": "تم إرسال طلب الاعتماد",
+        "approved": "تم اعتماد المهمة",
+        "rejected": "تم رفض المهمة",
+        "resent": "أُعيد طلب الاعتماد",
+        "cleared": "ألغيت متطلب الاعتماد"
+      }
+    },
+    "composer": {
+      "tabs": {
+        "message": "إرسال رسالة",
+        "note": "ملاحظة داخلية"
+      },
+      "kinds": {
+        "note": "ملاحظة",
+        "requirements": "متطلبات",
+        "modification": "تعديل من العميل"
+      },
+      "hints": {
+        "requirements": "اكتب متطلبات المهمة الأولية — ستُثبت في أعلى الخيط",
+        "modification": "سجل تعديلات العميل — ستظهر في قسم التعديلات"
+      },
+      "placeholders": {
+        "message": "اكتب رسالة للمتابعين… استخدم @الاسم للإشارة",
+        "note": "اكتب ملاحظة داخلية… استخدم @الاسم للإشارة لزميل"
+      },
+      "mentionSuggestions": "اقتراحات الإشارة",
+      "matches": "{count} موظف",
+      "forQuery": "يطابق «{query}»",
+      "removeAttachment": "إزالة المرفق",
+      "attachFiles": "إرفاق ملف",
+      "attach": "إرفاق",
+      "shortcut": "⌘+Enter للإرسال السريع",
+      "uploading": "جارٍ الرفع…",
+      "send": "إرسال",
+      "post": "نشر",
+      "maxFiles": "الحد الأقصى {count} ملفات",
+      "fileTooLarge": "«{name}» أكبر من 25MB",
+      "uploadFailed": "تعذر رفع الملفات",
+      "attachmentsOnly": "(مرفقات)",
+      "toasts": {
+        "messageSent": "أُرسلت الرسالة",
+        "notePosted": "نُشرت الملاحظة",
+        "messageWithMentions": "أُرسلت الرسالة وأُشعر {count} موظف",
+        "noteWithMentions": "نُشرت الملاحظة وأُشعر {count} موظف"
+      }
+    },
+    "gantt": {
+      "noProject": "المهمة غير مرتبطة بمشروع، لذلك لا يمكن عرض المخطط.",
+      "summary": "نظرة موجزة على هذه المهمة وعلاقاتها داخل المشروع.",
+      "openProjectGantt": "فتح المخطط الكامل للمشروع",
+      "currentTask": "المهمة الحالية",
+      "noDependencies": "لا توجد روابط تبعية بعد. أضفها من تبويب ربط المهام.",
+      "dependencyLinks": "روابط التبعية ({count})",
+      "predecessor": "سابقة",
+      "successor": "لاحقة",
+      "lagDays": "تأخير {count} يوم"
+    },
+    "extra": {
+      "notFound": "لم يتم العثور على المهمة.",
+      "taskCode": "كود المهمة",
+      "createdAt": "أُنشئت",
+      "updatedAt": "آخر تحديث",
+      "createdBy": "أنشأها",
+      "source": "المصدر",
+      "localSource": "محلي (Dashboard)",
+      "approvalGate": "بوابة الاعتماد",
+      "required": "مطلوب",
+      "approvalRequestedAt": "طُلب الاعتماد في",
+      "approvalDecidedAt": "تم اعتماده في",
+      "holdReason": "سبب الإيقاف",
+      "heldSince": "موقوف منذ",
+      "allocatedTime": "الوقت المخصص",
+      "progress": "التقدم",
+      "expectedProgress": "التقدم المتوقع",
+      "progressVariance": "انحراف التقدم",
+      "delayDays": "أيام التأخير",
+      "actualDoneDate": "اليوم الفعلي للإنجاز",
+      "hoursOnly": "{count}س",
+      "minutesOnly": "{count}د",
+      "hoursMinutes": "{hours}س {minutes}د"
+    }
+  },
+  "TaskLabels": {
+    "status": {
+      "todo": "قيد الانتظار",
+      "in_progress": "قيد التنفيذ",
+      "review": "قيد المراجعة",
+      "blocked": "متوقفة",
+      "done": "مكتملة",
+      "cancelled": "ملغاة"
+    },
+    "stage": {
+      "new": "جديدة",
+      "in_progress": "قيد التنفيذ",
+      "manager_review": "مراجعة المدير",
+      "specialist_review": "مراجعة المتخصص",
+      "ready_to_send": "جاهزة للإرسال",
+      "sent_to_client": "أرسلت للعميل",
+      "client_changes": "تعديلات العميل",
+      "done": "مكتملة"
+    },
+    "priority": {
+      "low": "منخفضة",
+      "medium": "متوسطة",
+      "high": "عالية",
+      "urgent": "عاجلة"
+    }
+  },
   "PageTitles": {
     "dashboardTitle": "لوحة التحكم",
     "dashboardSubtitle": "مركز قيادة الوكالة",

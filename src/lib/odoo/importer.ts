@@ -872,7 +872,20 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     }
   }
 
-  let imported = 0;
+  // ── Bulk path ────────────────────────────────────────────────────────
+  // The previous version did 1 upsert + 1-2 delete/insert + 1 select-then-
+  // insert PER task. With ~11k tasks that's >35k round-trips and ~30 min
+  // wall-clock. Below: chunked upsert of tasks (200/req), then chunked
+  // bulk operations on task_assignees keyed by Odoo task_id.
+  type TaskRowInput = {
+    odoo_id: number;
+    projectUuid: string;
+    row: Record<string, unknown>;
+    agentEmployeeIds: string[];
+    amEmployeeId: string | null;
+  };
+
+  const stagedRows: TaskRowInput[] = [];
   for (const t of tasks) {
     if (!t.project_id) continue;
     const projectUuid = ctx.projectIdMap.get(t.project_id[0]);
@@ -880,126 +893,162 @@ async function importTasks(ctx: ImportContext): Promise<number> {
 
     const stageName = t.stage_id ? ctx.stageNameById.get(t.stage_id[0]) : "New";
     const stage = mapStageName(stageName);
-
     const serviceUuid =
       t.category_id ? ctx.serviceIdMap.get(t.category_id[0]) ?? null : null;
 
-    const row = {
-      organization_id: ctx.organizationId,
-      external_source: SOURCE,
-      external_id: t.id,
-      project_id: projectUuid,
-      service_id: serviceUuid,
-      title: t.name,
-      description: nullable(t.description),
-      stage,
-      planned_date: nullable(t.date_deadline),
-      progress_percent: t.progress_percentage ?? 0,
-      expected_progress_percent: t.expected_progress ?? 0,
-      progress_slip_percent: t.progress_slip ?? 0,
-      status: stage === "done" ? "done" : "in_progress",
-      priority: t.priority === "1" ? "high" : "medium",
-      completed_at: stage === "done" ? nullable(t.date_end) : null,
-      // 0069 fields. Note: actual_done_date is a `date` column in Supabase
-      // but Odoo gives a datetime — slice to YYYY-MM-DD.
-      date_assign: nullable(t.date_assign),
-      start_date: nullable(t.date_start),
-      duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
-      working_days_open: typeof t.working_days_open === "number" ? t.working_days_open : null,
-      working_days_close: typeof t.working_days_close === "number" ? t.working_days_close : null,
-      duration_tracking:
-        t.duration_tracking && typeof t.duration_tracking === "object"
-          ? t.duration_tracking
-          : null,
-      actual_done_date:
-        typeof t.actual_done_date === "string"
-          ? t.actual_done_date.slice(0, 10)
-          : null,
-      delay_days: typeof t.delay_days === "number" ? t.delay_days : null,
-      is_overdue: typeof t.is_overdue === "boolean" ? t.is_overdue : null,
-      design_count: typeof t.design_count === "number" ? t.design_count : 0,
-      document_count: typeof t.document_count === "number" ? t.document_count : 0,
-      email_cc: nullable(t.email_cc),
-      // §5.2: mirror Odoo's archive flag. Existing rows that flip from
-      // archived → active on a later sync get archived_at nulled back out.
-      archived_at: t.active === false ? new Date().toISOString() : null,
-    };
-    const { data: taskRow, error } = await supabaseAdmin
-      .from("tasks")
-      .upsert(row, { onConflict: "organization_id,external_source,external_id" })
-      .select("id")
-      .single();
-    if (error || !taskRow) throw new Error(`task ${t.id}: ${error?.message}`);
-
-    // task_assignees: insert each user as 'agent' role (best-guess default).
-    // Owner can re-slot via dashboard. We delete the existing 'agent' rows
-    // for this task before reinserting so re-imports don't pile up duplicates.
-    const userIds = Array.isArray(t.user_ids) ? t.user_ids : [];
-    if (userIds.length > 0) {
-      const employeeIds = userIds
+    stagedRows.push({
+      odoo_id: t.id,
+      projectUuid,
+      row: {
+        organization_id: ctx.organizationId,
+        external_source: SOURCE,
+        external_id: t.id,
+        project_id: projectUuid,
+        service_id: serviceUuid,
+        title: t.name,
+        description: nullable(t.description),
+        stage,
+        planned_date: nullable(t.date_deadline),
+        progress_percent: t.progress_percentage ?? 0,
+        expected_progress_percent: t.expected_progress ?? 0,
+        progress_slip_percent: t.progress_slip ?? 0,
+        status: stage === "done" ? "done" : "in_progress",
+        priority: t.priority === "1" ? "high" : "medium",
+        completed_at: stage === "done" ? nullable(t.date_end) : null,
+        date_assign: nullable(t.date_assign),
+        start_date: nullable(t.date_start),
+        duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
+        working_days_open:
+          typeof t.working_days_open === "number" ? t.working_days_open : null,
+        working_days_close:
+          typeof t.working_days_close === "number" ? t.working_days_close : null,
+        duration_tracking:
+          t.duration_tracking && typeof t.duration_tracking === "object"
+            ? t.duration_tracking
+            : null,
+        actual_done_date:
+          typeof t.actual_done_date === "string"
+            ? t.actual_done_date.slice(0, 10)
+            : null,
+        delay_days: typeof t.delay_days === "number" ? t.delay_days : null,
+        is_overdue: typeof t.is_overdue === "boolean" ? t.is_overdue : null,
+        design_count: typeof t.design_count === "number" ? t.design_count : 0,
+        document_count: typeof t.document_count === "number" ? t.document_count : 0,
+        email_cc: nullable(t.email_cc),
+        archived_at: t.active === false ? new Date().toISOString() : null,
+      },
+      agentEmployeeIds: (Array.isArray(t.user_ids) ? t.user_ids : [])
         .map((uid) => ctx.odooUserToEmployee.get(uid))
-        .filter((x): x is string => Boolean(x));
-
-      // Wipe prior 'agent' rows for this task (keep specialist/manager/AM
-      // assignments the owner may have set in the dashboard).
-      await supabaseAdmin
-        .from("task_assignees")
-        .delete()
-        .eq("task_id", taskRow.id)
-        .eq("role_type", "agent");
-
-      if (employeeIds.length > 0) {
-        const assigneeRows = employeeIds.map((eid) => ({
-          organization_id: ctx.organizationId,
-          task_id: taskRow.id,
-          employee_id: eid,
-          role_type: "agent" as const,
-        }));
-        const { error: assignError } = await supabaseAdmin
-          .from("task_assignees")
-          .insert(assigneeRows);
-        if (assignError) {
-          // Don't fail the whole import on a single assignee conflict —
-          // log + continue.
-          console.warn(`task ${t.id} assignees: ${assignError.message}`);
-        } else {
-          ctx.assigneeCount += assigneeRows.length;
-        }
-      }
-    }
-
-    // Auto-assign account_manager slot from the project's AM. Only do this
-    // when no AM assignee already exists, so dashboard users can override.
-    const amEmployeeId = amByProject.get(projectUuid);
-    if (amEmployeeId) {
-      const { data: existingAM } = await supabaseAdmin
-        .from("task_assignees")
-        .select("id")
-        .eq("task_id", taskRow.id)
-        .eq("role_type", "account_manager")
-        .limit(1)
-        .maybeSingle();
-      if (!existingAM) {
-        const { error: amErr } = await supabaseAdmin
-          .from("task_assignees")
-          .insert({
-            organization_id: ctx.organizationId,
-            task_id: taskRow.id,
-            employee_id: amEmployeeId,
-            role_type: "account_manager" as const,
-          });
-        if (amErr) {
-          console.warn(`task ${t.id} AM auto-assign: ${amErr.message}`);
-        } else {
-          ctx.assigneeCount += 1;
-        }
-      }
-    }
-
-    imported++;
+        .filter((x): x is string => Boolean(x)),
+      amEmployeeId: amByProject.get(projectUuid) ?? null,
+    });
   }
 
-  return imported;
+  if (stagedRows.length === 0) return 0;
+
+  // 1) Bulk-upsert tasks in chunks of 200.
+  const TASK_CHUNK = 200;
+  const odooToTaskUuid = new Map<number, string>();
+  for (let i = 0; i < stagedRows.length; i += TASK_CHUNK) {
+    const chunk = stagedRows.slice(i, i + TASK_CHUNK);
+    const { data, error } = await supabaseAdmin
+      .from("tasks")
+      .upsert(
+        chunk.map((s) => s.row),
+        { onConflict: "organization_id,external_source,external_id" },
+      )
+      .select("id, external_id");
+    if (error) throw new Error(`tasks bulk upsert: ${error.message}`);
+    for (const r of data ?? []) {
+      const ext = Number(r.external_id);
+      if (Number.isFinite(ext)) odooToTaskUuid.set(ext, r.id as string);
+    }
+    console.log(
+      `[odoo-import] tasks upserted ${Math.min(i + TASK_CHUNK, stagedRows.length)}/${stagedRows.length}`,
+    );
+  }
+
+  // 2) Re-key staged rows by Supabase task UUID for the assignee phase.
+  const stagedByTaskUuid = new Map<string, TaskRowInput>();
+  for (const s of stagedRows) {
+    const uuid = odooToTaskUuid.get(s.odoo_id);
+    if (uuid) stagedByTaskUuid.set(uuid, s);
+  }
+
+  // 3) Bulk-wipe existing `agent` assignees for these tasks (re-import path).
+  const allTaskUuids = [...stagedByTaskUuid.keys()];
+  const DEL_CHUNK = 500;
+  for (let i = 0; i < allTaskUuids.length; i += DEL_CHUNK) {
+    const slice = allTaskUuids.slice(i, i + DEL_CHUNK);
+    const { error } = await supabaseAdmin
+      .from("task_assignees")
+      .delete()
+      .in("task_id", slice)
+      .eq("role_type", "agent");
+    if (error) console.warn(`task_assignees delete batch: ${error.message}`);
+  }
+
+  // 4) Snapshot existing `account_manager` rows so we don't overwrite
+  //    dashboard-assigned AMs that already exist.
+  const existingAMSet = new Set<string>();
+  for (let i = 0; i < allTaskUuids.length; i += DEL_CHUNK) {
+    const slice = allTaskUuids.slice(i, i + DEL_CHUNK);
+    const { data, error } = await supabaseAdmin
+      .from("task_assignees")
+      .select("task_id")
+      .in("task_id", slice)
+      .eq("role_type", "account_manager");
+    if (error) {
+      console.warn(`task_assignees AM scan: ${error.message}`);
+      continue;
+    }
+    for (const r of data ?? []) existingAMSet.add(r.task_id as string);
+  }
+
+  // 5) Build the bulk-insert payload for both `agent` and `account_manager`.
+  const assigneeInserts: {
+    organization_id: string;
+    task_id: string;
+    employee_id: string;
+    role_type: "agent" | "account_manager";
+  }[] = [];
+  for (const [taskUuid, s] of stagedByTaskUuid) {
+    for (const eid of s.agentEmployeeIds) {
+      assigneeInserts.push({
+        organization_id: ctx.organizationId,
+        task_id: taskUuid,
+        employee_id: eid,
+        role_type: "agent",
+      });
+    }
+    if (s.amEmployeeId && !existingAMSet.has(taskUuid)) {
+      assigneeInserts.push({
+        organization_id: ctx.organizationId,
+        task_id: taskUuid,
+        employee_id: s.amEmployeeId,
+        role_type: "account_manager",
+      });
+    }
+  }
+
+  // 6) Bulk-insert assignees in chunks of 500.
+  const INS_CHUNK = 500;
+  let assigneesInserted = 0;
+  for (let i = 0; i < assigneeInserts.length; i += INS_CHUNK) {
+    const slice = assigneeInserts.slice(i, i + INS_CHUNK);
+    const { error } = await supabaseAdmin.from("task_assignees").insert(slice);
+    if (error) {
+      console.warn(`task_assignees bulk insert: ${error.message}`);
+    } else {
+      assigneesInserted += slice.length;
+    }
+  }
+  ctx.assigneeCount += assigneesInserted;
+  console.log(
+    `[odoo-import] task_assignees inserted: ${assigneesInserted}`,
+  );
+
+  return stagedRows.length;
 }
 
 // Mirror Odoo task chatter (mail.message) into task_comments so notes are

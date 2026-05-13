@@ -1043,14 +1043,14 @@ function TaskFormSection({
   );
 }
 
-function TaskTabNav({
+async function TaskTabNav({
   taskId,
   activeTab,
 }: {
   taskId: string;
   activeTab: TaskTab;
 }) {
-  const t = useTranslations("TaskDetailPage.tabs");
+  const t = await getTranslations("TaskDetailPage.tabs");
   const tabs: Array<{ key: TaskTab; label: string }> = [
     { key: "activity", label: t("activity") },
     { key: "description", label: t("description") },
@@ -1108,6 +1108,8 @@ async function TaskTabPanelSection({
   canEnterTimesheets: boolean;
   projectId: string | null;
 }) {
+  const t = await getTranslations("TaskDetailPage");
+
   if (activeTab === "description") {
     return (
       <Card>
@@ -1144,7 +1146,7 @@ async function TaskTabPanelSection({
       return (
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Task is not linked to a project.</p>
+            <p className="text-xs text-muted-foreground">{t("notLinkedToProject")}</p>
           </CardContent>
         </Card>
       );
@@ -1412,7 +1414,7 @@ async function TaskTabPanelSection({
 
   return (
     <div className="space-y-4">
-      <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">Loading activity feed...</CardContent></Card>}>
+      <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.activityFeed")}</CardContent></Card>}>
         <TaskActivityFeedSection orgId={orgId} taskId={taskId} />
       </Suspense>
       <Suspense fallback={null}>
@@ -1483,10 +1485,12 @@ async function TaskGanttDetailPanel({
   taskId: string;
   projectId: string | null;
 }) {
+  const t = await getTranslations("TaskDetailPage.gantt");
+
   if (!projectId) {
     return (
       <p className="text-xs text-muted-foreground">
-        المهمة غير مرتبطة بمشروع — لا يمكن عرض المخطط.
+        {t("noProject")}
       </p>
     );
   }
@@ -1562,18 +1566,18 @@ async function TaskGanttDetailPanel({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-xs text-muted-foreground">
-          نظرة موجزة على هذه المهمة وعلاقاتها داخل المشروع
+          {t("summary")}
         </div>
         <Link
           href={`/projects/${projectId}/gantt`}
           className="inline-flex items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim/30 px-2.5 py-1 text-xs font-medium text-cyan hover:bg-cyan-dim/50 transition-colors"
         >
-          فتح المخطط الكامل للمشروع
+          {t("openProjectGantt")}
         </Link>
       </div>
 
       <div className="rounded-xl border border-soft bg-soft-1 p-4">
-        <div className="text-xs text-muted-foreground mb-1">المهمة الحالية</div>
+        <div className="text-xs text-muted-foreground mb-1">{t("currentTask")}</div>
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <div className="text-sm font-medium truncate">
             {thisTask?.task_code ? `${thisTask.task_code} · ` : ""}{thisTask?.title}
@@ -1586,11 +1590,11 @@ async function TaskGanttDetailPanel({
 
       {neighbors.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          لا توجد روابط تبعية — أضف من تبويب «ربط المهام».
+          {t("noDependencies")}
         </p>
       ) : (
         <div className="space-y-2">
-          <div className="text-xs font-semibold">روابط التبعية ({neighbors.length})</div>
+          <div className="text-xs font-semibold">{t("dependencyLinks", { count: neighbors.length })}</div>
           <ul className="space-y-1.5">
             {neighbors.map((n, i) => (
               <li
@@ -1602,13 +1606,14 @@ async function TaskGanttDetailPanel({
                     "me-2 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
                     n.direction === "predecessor" ? "bg-amber-dim text-amber" : "bg-cyan-dim/40 text-cyan",
                   )}>
-                    {n.direction === "predecessor" ? "سابقة" : "لاحقة"}
+                    {n.direction === "predecessor" ? t("predecessor") : t("successor")}
                   </span>
                   <Link href={`/tasks/${n.id}`} className="text-xs font-medium hover:text-cyan truncate">
                     {n.task_code ? `${n.task_code} · ` : ""}{n.title}
                   </Link>
                   <span className="ms-2 text-[10px] text-muted-foreground">
-                    {n.dependency_type}{n.lag_days ? ` · ${n.lag_days}ي تأخير` : ""}
+                    {n.dependency_type}
+                    {n.lag_days ? ` · ${t("lagDays", { count: n.lag_days })}` : ""}
                   </span>
                 </div>
                 <div className="text-[10px] text-muted-foreground tabular-nums" dir="ltr">
@@ -1633,6 +1638,7 @@ async function TaskExtraInfoPanel({
   orgId: string;
   taskId: string;
 }) {
+  const t = await getTranslations("TaskDetailPage.extra");
   const { data } = await supabaseAdmin
     .from("tasks")
     .select(
@@ -1648,7 +1654,7 @@ async function TaskExtraInfoPanel({
     .maybeSingle();
 
   if (!data) {
-    return <p className="text-xs text-muted-foreground">لم يتم العثور على المهمة.</p>;
+    return <p className="text-xs text-muted-foreground">{t("notFound")}</p>;
   }
 
   // tasks.created_by → auth.users.id; resolve via employee_profiles.user_id.
@@ -1666,45 +1672,51 @@ async function TaskExtraInfoPanel({
     v ? formatArabicDateTime(v) : "—";
   const fmtNum = (v: number | null | undefined, suffix = "") =>
     v === null || v === undefined ? "—" : `${v}${suffix}`;
+  const fmtMinutes = (minutes: number | null | undefined) => {
+    if (minutes == null || minutes <= 0) return "—";
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) return t("minutesOnly", { count: mins });
+    if (mins === 0) return t("hoursOnly", { count: hours });
+    return t("hoursMinutes", { hours, minutes: mins });
+  };
 
   const rows: Array<{ label: string; value: React.ReactNode }> = [
-    { label: "كود المهمة", value: data.task_code ?? "—" },
-    { label: "أُنشئت", value: fmt(data.created_at) },
-    { label: "آخر تحديث", value: fmt(data.updated_at) },
-    { label: "أنشأها", value: creatorName ?? "—" },
+    { label: t("taskCode"), value: data.task_code ?? "—" },
+    { label: t("createdAt"), value: fmt(data.created_at) },
+    { label: t("updatedAt"), value: fmt(data.updated_at) },
+    { label: t("createdBy"), value: creatorName ?? "—" },
     {
-      label: "المصدر",
+      label: t("source"),
       value:
         data.external_source === "odoo"
           ? `Odoo · ${data.external_id ?? "—"}`
-          : "محلي (Dashboard)",
+          : t("localSource"),
     },
     {
-      label: "بوابة الاعتماد",
-      value: data.approval_required ? `مطلوب · ${data.approval_status ?? "—"}` : "—",
+      label: t("approvalGate"),
+      value: data.approval_required ? `${t("required")} · ${data.approval_status ?? "—"}` : "—",
     },
     {
-      label: "طُلب الاعتماد في",
+      label: t("approvalRequestedAt"),
       value: fmt(data.approval_requested_at),
     },
     {
-      label: "تم اعتماده في",
+      label: t("approvalDecidedAt"),
       value: fmt(data.approval_decided_at),
     },
-    { label: "سبب الإيقاف", value: data.hold_reason ?? "—" },
-    { label: "موقوف منذ", value: fmt(data.hold_since) },
+    { label: t("holdReason"), value: data.hold_reason ?? "—" },
+    { label: t("heldSince"), value: fmt(data.hold_since) },
     {
-      label: "الوقت المخصص",
-      value: data.allocated_time_minutes
-        ? `${Math.floor(data.allocated_time_minutes / 60)}س ${data.allocated_time_minutes % 60}د`
-        : "—",
+      label: t("allocatedTime"),
+      value: fmtMinutes(data.allocated_time_minutes),
     },
-    { label: "التقدم", value: fmtNum(data.progress_percent, "%") },
-    { label: "التقدم المتوقع", value: fmtNum(data.expected_progress_percent, "%") },
-    { label: "انحراف التقدم", value: fmtNum(data.progress_slip_percent, "%") },
-    { label: "أيام التأخير", value: fmtNum(data.delay_days) },
+    { label: t("progress"), value: fmtNum(data.progress_percent, "%") },
+    { label: t("expectedProgress"), value: fmtNum(data.expected_progress_percent, "%") },
+    { label: t("progressVariance"), value: fmtNum(data.progress_slip_percent, "%") },
+    { label: t("delayDays"), value: fmtNum(data.delay_days) },
     {
-      label: "اليوم الفعلي للإنجاز",
+      label: t("actualDoneDate"),
       value: data.actual_done_date ?? "—",
     },
   ];
