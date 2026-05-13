@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -29,6 +30,7 @@ export function TimesheetsTab({
   canEnter: boolean;
   canManage: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.timesheets");
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [hours, setHours] = useState<string>("");
@@ -41,15 +43,21 @@ export function TimesheetsTab({
   const onAdd = () =>
     start(async () => {
       const h = Number(hours);
-      if (!Number.isFinite(h) || h <= 0) return toast.error("اكتب عدد ساعات صالح");
+      if (!Number.isFinite(h) || h <= 0) {
+        toast.error(t("enterValidHours"));
+        return;
+      }
       const res = await addTimesheetAction({
         taskId,
         hours: h,
         spentOn,
         description: desc || undefined,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("أُضيف السجل");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.added"));
       setHours("");
       setDesc("");
       setAdding(false);
@@ -59,8 +67,11 @@ export function TimesheetsTab({
   const onDelete = (id: string) =>
     start(async () => {
       const res = await deleteTimesheetAction({ id, taskId });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("حُذف السجل");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.deleted"));
       router.refresh();
     });
 
@@ -68,12 +79,12 @@ export function TimesheetsTab({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          مجموع الساعات: <span className="font-semibold text-foreground tabular-nums">{total.toFixed(2)}</span>
+          {t("total")} <span className="font-semibold text-foreground tabular-nums">{total.toFixed(2)}</span>
         </p>
         {canEnter && !adding && (
           <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
             <Plus className="ml-1 size-3.5" />
-            تسجيل ساعات
+            {t("logHours")}
           </Button>
         )}
       </div>
@@ -81,11 +92,11 @@ export function TimesheetsTab({
       {adding && (
         <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[auto_auto_1fr_auto]">
           <div className="grid gap-1">
-            <label className="text-xs font-medium text-muted-foreground">التاريخ</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("date")}</label>
             <Input type="date" value={spentOn} onChange={(e) => setSpentOn(e.target.value)} className="h-9" disabled={pending} />
           </div>
           <div className="grid gap-1">
-            <label className="text-xs font-medium text-muted-foreground">الساعات</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("hours")}</label>
             <Input
               type="number"
               step="0.25"
@@ -98,7 +109,7 @@ export function TimesheetsTab({
             />
           </div>
           <div className="grid gap-1">
-            <label className="text-xs font-medium text-muted-foreground">الوصف (اختياري)</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("descriptionOptional")}</label>
             <Textarea
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
@@ -111,10 +122,10 @@ export function TimesheetsTab({
           <div className="flex gap-2 self-end">
             <Button onClick={onAdd} disabled={pending} size="sm">
               {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              حفظ
+              {t("save")}
             </Button>
             <Button onClick={() => setAdding(false)} disabled={pending} size="sm" variant="ghost">
-              إلغاء
+              {t("cancel")}
             </Button>
           </div>
         </div>
@@ -122,7 +133,7 @@ export function TimesheetsTab({
 
       {rows.length === 0 ? (
         <p className="rounded-md border bg-muted/20 px-3 py-4 text-center text-xs text-muted-foreground">
-          لا توجد سجلات وقت.
+          {t("empty")}
         </p>
       ) : (
         <ul className="grid gap-1.5">
@@ -137,7 +148,7 @@ export function TimesheetsTab({
                   {r.spent_on}
                 </span>
                 <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
-                  {Number(r.hours).toFixed(2)} س
+                  {t("hoursValue", { count: Number(r.hours).toFixed(2) })}
                 </span>
                 <span className="min-w-0 truncate">
                   {r.description ? (

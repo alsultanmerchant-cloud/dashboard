@@ -2,7 +2,7 @@ import { cache, Suspense } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask, getTaskSummary } from "@/lib/data/tasks";
@@ -29,9 +29,10 @@ import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { MessageButton } from "@/components/dm/message-button";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
-import { formatArabicDateTime, isOverdue } from "@/lib/utils-format";
+import { isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { listEmployees } from "@/lib/data/employees";
+import { loadOrgChart } from "@/lib/data/org-chart";
 import { CommentComposer } from "../comment-composer";
 import { TaskSmartButtons } from "./task-smart-buttons";
 
@@ -93,6 +94,13 @@ const getCachedTaskStageHistory = cache(listTaskStageHistory);
 const getCachedTaskFollowers = cache(listTaskFollowers);
 const getCachedInheritedProjectFollowers = cache(listInheritedProjectFollowers);
 
+function formatDateTime(value: string, locale: string): string {
+  return new Date(value).toLocaleString(locale === "ar" ? "ar-SA" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 export default async function TaskDetailPage({
   params,
   searchParams,
@@ -104,6 +112,7 @@ export default async function TaskDetailPage({
   const sp = await searchParams;
   const session = await requirePagePermission("tasks.view");
   const t = await getTranslations("TaskDetailPage");
+  const locale = await getLocale();
   const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
 
   const [task, followingRes, openExc] = await Promise.all([
@@ -206,7 +215,7 @@ export default async function TaskDetailPage({
       : null;
   const showDelayBanner = delayDays !== null && delayDays > 0;
   const formattedCompletedAt = task.completed_at
-    ? formatArabicDateTime(task.completed_at)
+    ? formatDateTime(task.completed_at, locale)
     : null;
 
   return (
@@ -405,6 +414,7 @@ export default async function TaskDetailPage({
             hasPermission(session, "tasks.manage") ||
             hasPermission(session, "task.view_all")
           }
+          locale={locale}
         />
       </div>
 
@@ -824,16 +834,19 @@ async function TaskAssigneesSection({
   currentStage: string | null;
   stageOwnerPositions: Record<string, string | null> | null;
 }) {
-  const [{ data: assigneesRaw }, employees] = await Promise.all([
+  const [{ data: assigneesRaw }, employees, orgChart] = await Promise.all([
     supabaseAdmin
       .from("task_assignees")
       .select(
-        `id, employee_id, role_type, team_manager_employee_id,
+        `id, employee_id, role_type, team_manager_employee_id, head_of_dept_employee_id,
          employee:employee_profiles!task_assignees_employee_id_fkey (
            id, full_name, job_title, avatar_url,
            department:departments!employee_profiles_department_id_fkey ( name )
          ),
          team_manager:employee_profiles!task_assignees_team_manager_employee_id_fkey (
+           id, full_name
+         ),
+         head_of_dept:employee_profiles!task_assignees_head_of_dept_employee_id_fkey (
            id, full_name
          )`,
       )
@@ -841,6 +854,7 @@ async function TaskAssigneesSection({
       .eq("task_id", taskId)
       .order("created_at", { ascending: true }),
     getEmployees(orgId),
+    loadOrgChart(orgId),
   ]);
 
   type RawRow = {
@@ -848,6 +862,7 @@ async function TaskAssigneesSection({
     employee_id: string;
     role_type: import("./task-assignees-panel").AssigneeRoleType;
     team_manager_employee_id: string | null;
+    head_of_dept_employee_id: string | null;
     employee:
       | {
           id: string;
@@ -868,25 +883,88 @@ async function TaskAssigneesSection({
       | { id: string; full_name: string }
       | { id: string; full_name: string }[]
       | null;
+    head_of_dept:
+      | { id: string; full_name: string }
+      | { id: string; full_name: string }[]
+      | null;
   };
+
+  // Source of truth for the assignee hierarchy:
+  //   Team leader   = employee_profiles.manager_employee_id (managed via
+  //                   /organization/employees).
+  //   Head of dept  = walk the department_id tree (parent chain) and take
+  //                   the first head_employee_id that isn't the employee
+  //                   themselves (so dept heads see their own manager, not
+  //                   their own name, in this field).
+  const empById = new Map(orgChart.employees.map((e) => [e.id, e]));
+
+  function headOfDeptForEmp(empId: string | null): string | null {
+    if (!empId) return null;
+    const e = empById.get(empId);
+    let cur = e?.department_id ? orgChart.byId.get(e.department_id) : null;
+    while (cur) {
+      if (cur.head_employee_id && cur.head_employee_id !== empId) return cur.head_employee_id;
+      cur = cur.parent_department_id
+        ? (orgChart.byId.get(cur.parent_department_id) ?? null)
+        : null;
+    }
+    // No dept head found above this person (they're the top of the chain
+    // or have no department) — fall back to their direct manager so the
+    // field is still meaningful for execs / dept heads.
+    return e?.manager_employee_id ?? null;
+  }
+
+  const empHierarchy = new Map<string, { team_leader_id: string | null; head_of_dept_id: string | null }>();
+  for (const emp of orgChart.employees) {
+    empHierarchy.set(emp.id, {
+      team_leader_id: emp.manager_employee_id,
+      head_of_dept_id: headOfDeptForEmp(emp.id),
+    });
+  }
 
   const assignees: import("./task-assignees-panel").AssigneeRow[] = (
     (assigneesRaw ?? []) as RawRow[]
   )
     .map((row) => {
       const emp = Array.isArray(row.employee) ? row.employee[0] : row.employee;
-      const mgr = Array.isArray(row.team_manager)
+      const mgrRaw = Array.isArray(row.team_manager)
         ? row.team_manager[0]
         : row.team_manager;
+      const hodRaw = Array.isArray(row.head_of_dept)
+        ? row.head_of_dept[0]
+        : row.head_of_dept;
       if (!emp) return null;
       const dept = Array.isArray(emp.department)
         ? emp.department[0]
         : emp.department;
+
+      // Fall back to org chart values when the stored column is null:
+      //   Team leader  = employee_profiles.manager_employee_id
+      //   Head of dept = walk dept tree, skip self-references
+      // /organization/employees and /organization/departments are the
+      // single sources of truth.
+      const hier = empHierarchy.get(row.employee_id);
+      const resolvedLeaderId = row.team_manager_employee_id ?? hier?.team_leader_id ?? null;
+      const resolvedHodId = row.head_of_dept_employee_id ?? hier?.head_of_dept_id ?? null;
+
+      const resolvedMgr = mgrRaw
+        ? { id: mgrRaw.id, full_name: mgrRaw.full_name }
+        : resolvedLeaderId
+          ? (() => { const e = empById.get(resolvedLeaderId); return e ? { id: e.id, full_name: e.full_name } : null; })()
+          : null;
+
+      const resolvedHod = hodRaw
+        ? { id: hodRaw.id, full_name: hodRaw.full_name }
+        : resolvedHodId
+          ? (() => { const e = empById.get(resolvedHodId); return e ? { id: e.id, full_name: e.full_name } : null; })()
+          : null;
+
       return {
         id: row.id,
         employee_id: row.employee_id,
         role_type: row.role_type,
-        team_manager_employee_id: row.team_manager_employee_id,
+        team_manager_employee_id: resolvedLeaderId,
+        head_of_dept_employee_id: resolvedHodId,
         employee: {
           id: emp.id,
           full_name: emp.full_name,
@@ -894,7 +972,8 @@ async function TaskAssigneesSection({
           avatar_url: emp.avatar_url ?? null,
           department_name: dept?.name ?? null,
         },
-        team_manager: mgr ? { id: mgr.id, full_name: mgr.full_name } : null,
+        team_manager: resolvedMgr,
+        head_of_dept: resolvedHod,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -904,12 +983,15 @@ async function TaskAssigneesSection({
       .filter((e) => e.employment_status === "active")
       .map((e) => {
         const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+        const hier = empHierarchy.get(e.id);
         return {
           id: e.id,
           full_name: e.full_name,
           job_title: e.job_title ?? null,
           avatar_url: e.avatar_url ?? null,
           department_name: dept?.name ?? null,
+          default_team_leader_id: hier?.team_leader_id ?? null,
+          default_head_of_dept_id: hier?.head_of_dept_id ?? null,
         };
       });
 
@@ -982,10 +1064,12 @@ function TaskFormSection({
   task,
   canEditCounts,
   canEditDeadline,
+  locale,
 }: {
   task: NonNullable<Awaited<ReturnType<typeof getTaskSummary>>>;
   canEditCounts: boolean;
   canEditDeadline: boolean;
+  locale: string;
 }) {
   // Renders synchronously from the eager getTaskSummary result the parent
   // already awaited — the previous version did its own getTask() round trip
@@ -1004,7 +1088,7 @@ function TaskFormSection({
       ? diffDaysFromNow(deadline)
       : null;
   const formattedCompletedAt = task.completed_at
-    ? formatArabicDateTime(task.completed_at)
+    ? formatDateTime(task.completed_at, locale)
     : null;
 
   return (
@@ -1639,6 +1723,7 @@ async function TaskExtraInfoPanel({
   taskId: string;
 }) {
   const t = await getTranslations("TaskDetailPage.extra");
+  const locale = await getLocale();
   const { data } = await supabaseAdmin
     .from("tasks")
     .select(
@@ -1669,7 +1754,7 @@ async function TaskExtraInfoPanel({
     creatorName = emp?.full_name ?? null;
   }
   const fmt = (v: string | null | undefined) =>
-    v ? formatArabicDateTime(v) : "—";
+    v ? formatDateTime(v, locale) : "—";
   const fmtNum = (v: number | null | undefined, suffix = "") =>
     v === null || v === undefined ? "—" : `${v}${suffix}`;
   const fmtMinutes = (minutes: number | null | undefined) => {

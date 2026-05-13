@@ -1,11 +1,15 @@
 "use client";
 
-// Multi-assignee panel for the task detail page (migration 0097).
-// Many assignees per task, each with role + optional team manager.
-// Mirrors the followers-panel popover pattern for the searchable picker.
+// Multi-assignee panel for the task detail page (migration 0097 + 0109).
+// Each assignee carries a team_leader (team_manager_employee_id) and a
+// head_of_dept (head_of_dept_employee_id), both linked to the org chart.
+// When adding a new assignee the two fields are auto-populated from the
+// employee's department defaults (EmployeeOption.default_team_leader_id /
+// default_head_of_dept_id) and can be overridden before saving.
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Loader2, UserPlus, X, Search, ChevronDown, UserCog } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Loader2, UserPlus, X, Search, Users, Building2, ChevronDown, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,6 +20,7 @@ import {
   addTaskAssigneeAction,
   removeTaskAssigneeAction,
   setAssigneeTeamManagerAction,
+  setAssigneeHeadOfDeptAction,
 } from "./_assignee_actions";
 
 export type AssigneeRoleType =
@@ -24,18 +29,12 @@ export type AssigneeRoleType =
   | "agent"
   | "account_manager";
 
-const ROLE_LABELS: Record<AssigneeRoleType, string> = {
-  account_manager: "مدير الحساب",
-  specialist: "متخصص",
-  manager: "مدير القسم",
-  agent: "منفِّذ",
-};
-
 export type AssigneeRow = {
   id: string;
   employee_id: string;
   role_type: AssigneeRoleType;
   team_manager_employee_id: string | null;
+  head_of_dept_employee_id: string | null;
   employee: {
     id: string;
     full_name: string;
@@ -47,6 +46,10 @@ export type AssigneeRow = {
     id: string;
     full_name: string;
   } | null;
+  head_of_dept: {
+    id: string;
+    full_name: string;
+  } | null;
 };
 
 export type EmployeeOption = {
@@ -55,6 +58,10 @@ export type EmployeeOption = {
   job_title: string | null;
   avatar_url: string | null;
   department_name: string | null;
+  /** Auto-populated from the employee's department team leads (org chart). */
+  default_team_leader_id: string | null;
+  /** Auto-populated from the department head_employee_id (org chart). */
+  default_head_of_dept_id: string | null;
 };
 
 export function TaskAssigneesPanel({
@@ -69,25 +76,29 @@ export function TaskAssigneesPanel({
   assignees: AssigneeRow[];
   employees: EmployeeOption[];
   canManage: boolean;
-  /** §1.4: the current stage drives "who is responsible right now". The
-   *  row whose role_type matches stageOwnerPositions[currentStage] gets a
-   *  cyan ring + "المسؤول الحالي" badge so the operator can see at a glance
-   *  who owns the next move. Pass null when the task is in a terminal
-   *  stage (e.g. done) or owner is undefined. */
   currentStage?: string | null;
   stageOwnerPositions?: Record<string, string | null> | null;
 }) {
-  // Resolve which role owns the current stage (null = no highlight).
+  const t = useTranslations("TaskDetailPage.assigneesPanel");
+  const roleLabels: Record<AssigneeRoleType, string> = {
+    account_manager: t("roles.account_manager"),
+    specialist: t("roles.specialist"),
+    manager: t("roles.manager"),
+    agent: t("roles.agent"),
+  };
+
   const currentOwnerRole = (() => {
     if (!currentStage || !stageOwnerPositions) return null;
     const role = stageOwnerPositions[currentStage];
     return (role as AssigneeRoleType | null) ?? null;
   })();
+
   const router = useRouter();
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
   const [role, setRole] = useState<AssigneeRoleType>("agent");
   const [managerId, setManagerId] = useState<string | null>(null);
+  const [headOfDeptId, setHeadOfDeptId] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [pending, start] = useTransition();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
@@ -115,20 +126,27 @@ export function TaskAssigneesPanel({
   }, [picking]);
 
   function add(employeeId: string) {
+    // Auto-populate from employee's department defaults if not manually set.
+    const emp = employees.find((e) => e.id === employeeId);
+    const resolvedManagerId = managerId ?? emp?.default_team_leader_id ?? null;
+    const resolvedHodId = headOfDeptId ?? emp?.default_head_of_dept_id ?? null;
+
     start(async () => {
       const res = await addTaskAssigneeAction({
         taskId,
         employeeId,
         roleType: role,
-        teamManagerEmployeeId: managerId,
+        teamManagerEmployeeId: resolvedManagerId,
+        headOfDeptEmployeeId: resolvedHodId,
       });
       if ("error" in res) {
         toast.error(res.error);
         return;
       }
-      toast.success("تم إسناد المهمة");
+      toast.success(t("toasts.assigned"));
       setQuery("");
       setManagerId(null);
+      setHeadOfDeptId(null);
       router.refresh();
     });
   }
@@ -140,12 +158,12 @@ export function TaskAssigneesPanel({
         toast.error(res.error);
         return;
       }
-      toast.success("تمت الإزالة");
+      toast.success(t("toasts.removed"));
       router.refresh();
     });
   }
 
-  function setManager(assigneeId: string, employeeId: string | null) {
+  function setTeamLeader(assigneeId: string, employeeId: string | null) {
     start(async () => {
       const res = await setAssigneeTeamManagerAction({
         assigneeId,
@@ -155,7 +173,22 @@ export function TaskAssigneesPanel({
         toast.error(res.error);
         return;
       }
-      toast.success("تم تحديث مدير الفريق");
+      toast.success(t("toasts.teamLeaderUpdated"));
+      router.refresh();
+    });
+  }
+
+  function setHeadOfDept(assigneeId: string, employeeId: string | null) {
+    start(async () => {
+      const res = await setAssigneeHeadOfDeptAction({
+        assigneeId,
+        headOfDeptEmployeeId: employeeId,
+      });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.hodUpdated"));
       router.refresh();
     });
   }
@@ -183,11 +216,9 @@ export function TaskAssigneesPanel({
     <div className="space-y-3">
       {assignees.length === 0 ? (
         <div className="rounded-xl border border-dashed border-soft-2 bg-soft-1/40 px-4 py-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            لا يوجد مُسنَدون بعد
-          </p>
+          <p className="text-sm text-muted-foreground">{t("empty.title")}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            كل مهمة تحتاج لمُسنَد واحد على الأقل قبل البدء.
+            {t("empty.description")}
           </p>
         </div>
       ) : (
@@ -196,78 +227,98 @@ export function TaskAssigneesPanel({
             const isCurrentOwner =
               currentOwnerRole !== null && a.role_type === currentOwnerRole;
             return (
-            <li
-              key={a.id}
-              className={cn(
-                "flex items-start gap-3 rounded-xl border p-3 transition-colors",
-                isCurrentOwner
-                  ? "border-cyan/50 bg-cyan-dim/30 ring-1 ring-cyan/30"
-                  : "border-soft bg-soft-1",
-              )}
-            >
-              <Avatar size="md" className="shrink-0">
-                {a.employee.avatar_url ? (
-                  <AvatarImage src={a.employee.avatar_url} alt="" />
-                ) : null}
-                <AvatarFallback>{a.employee.full_name[0]}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="truncate text-sm font-medium">
-                    {a.employee.full_name}
-                  </span>
-                  <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-[10px] font-semibold text-cyan">
-                    {ROLE_LABELS[a.role_type]}
-                  </span>
-                  {isCurrentOwner && (
-                    <span
-                      className="inline-flex items-center rounded-full border border-cyan bg-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan"
-                      title="مسؤول المرحلة الحالية — هذا الشخص الذي يجب أن يحرك المهمة إلى المرحلة التالية"
-                    >
-                      المسؤول الحالي
-                    </span>
-                  )}
-                </div>
-                {(a.employee.job_title || a.employee.department_name) && (
-                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {a.employee.job_title}
-                    {a.employee.job_title && a.employee.department_name
-                      ? " · "
-                      : ""}
-                    {a.employee.department_name}
-                  </p>
+              <li
+                key={a.id}
+                className={cn(
+                  "flex items-start gap-3 rounded-xl border p-3 transition-colors",
+                  isCurrentOwner
+                    ? "border-cyan/50 bg-cyan-dim/30 ring-1 ring-cyan/30"
+                    : "border-soft bg-soft-1",
                 )}
-                <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
-                  <UserCog className="size-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">مدير الفريق:</span>
-                  {canManage ? (
-                    <ManagerSelect
-                      employees={employees.filter(
-                        (e) => e.id !== a.employee_id,
-                      )}
-                      value={a.team_manager_employee_id}
-                      onChange={(v) => setManager(a.id, v)}
-                      disabled={pending}
-                    />
-                  ) : (
-                    <span className="font-medium">
-                      {a.team_manager?.full_name ?? "—"}
+              >
+                <Avatar className="size-10 shrink-0">
+                  {a.employee.avatar_url ? (
+                    <AvatarImage src={a.employee.avatar_url} alt="" />
+                  ) : null}
+                  <AvatarFallback>{a.employee.full_name[0]}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-sm font-medium">
+                      {a.employee.full_name}
                     </span>
+                    <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-[10px] font-semibold text-cyan">
+                      {roleLabels[a.role_type]}
+                    </span>
+                    {isCurrentOwner && (
+                      <span
+                        className="inline-flex items-center rounded-full border border-cyan bg-cyan/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan"
+                        title={t("currentOwnerTitle")}
+                      >
+                        {t("currentOwner")}
+                      </span>
+                    )}
+                  </div>
+                  {(a.employee.job_title || a.employee.department_name) && (
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {a.employee.job_title}
+                      {a.employee.job_title && a.employee.department_name
+                        ? " · "
+                        : ""}
+                      {a.employee.department_name}
+                    </p>
                   )}
+
+                  {/* Team Leader */}
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                    <Users className="size-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">{t("teamLeader")}</span>
+                    {canManage ? (
+                      <ManagerSelect
+                        employees={employees.filter((e) => e.id !== a.employee_id)}
+                        value={a.team_manager_employee_id}
+                        onChange={(v) => setTeamLeader(a.id, v)}
+                        disabled={pending}
+                      />
+                    ) : (
+                      <span className="font-medium">
+                        {a.team_manager?.full_name ?? t("none")}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Head of Department */}
+                  <div className="mt-1 flex items-center gap-1.5 text-[11px]">
+                    <Building2 className="size-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">{t("headOfDept")}</span>
+                    {canManage ? (
+                      <ManagerSelect
+                        employees={employees.filter((e) => e.id !== a.employee_id)}
+                        value={a.head_of_dept_employee_id}
+                        onChange={(v) => setHeadOfDept(a.id, v)}
+                        disabled={pending}
+                      />
+                    ) : (
+                      <span className="font-medium">
+                        {a.head_of_dept?.full_name ?? t("none")}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={() => remove(a.id)}
-                  disabled={pending}
-                  aria-label={`إزالة ${a.employee.full_name}`}
-                  className="text-muted-foreground transition-colors hover:text-cc-red disabled:opacity-50"
-                >
-                  <X className="size-4" />
-                </button>
-              )}
-            </li>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => remove(a.id)}
+                    disabled={pending}
+                    aria-label={t("removeAssignee", {
+                      name: a.employee.full_name,
+                    })}
+                    className="text-muted-foreground transition-colors hover:text-cc-red disabled:opacity-50"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
+              </li>
             );
           })}
         </ul>
@@ -285,7 +336,7 @@ export function TaskAssigneesPanel({
               aria-expanded={picking}
             >
               <UserPlus className="size-3.5" />
-              إضافة مُسنَد
+              {t("addAssignee")}
             </Button>
           </span>
 
@@ -298,14 +349,14 @@ export function TaskAssigneesPanel({
             }}
             className="z-50 w-80 max-w-[92vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
           >
-            <div role="dialog" aria-label="إضافة مُسنَد">
-              {/* Role + optional team manager pickers */}
+            <div role="dialog" aria-label={t("addAssignee")}>
+              {/* Role + team leader + head of dept pickers */}
               <div className="space-y-2 border-b border-soft px-3 py-2.5">
                 <label className="block text-[11px] font-medium text-muted-foreground">
-                  الدور
+                  {t("role")}
                 </label>
                 <div className="flex flex-wrap gap-1">
-                  {(Object.keys(ROLE_LABELS) as AssigneeRoleType[]).map((r) => (
+                  {(Object.keys(roleLabels) as AssigneeRoleType[]).map((r) => (
                     <button
                       key={r}
                       type="button"
@@ -317,17 +368,30 @@ export function TaskAssigneesPanel({
                           : "border-soft-2 bg-soft-1 text-muted-foreground hover:bg-soft-2",
                       )}
                     >
-                      {ROLE_LABELS[r]}
+                      {roleLabels[r]}
                     </button>
                   ))}
                 </div>
-                <label className="mt-1.5 block text-[11px] font-medium text-muted-foreground">
-                  مدير الفريق (اختياري)
+
+                <label className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                  <Users className="size-3" />
+                  {t("teamLeaderOptional")}
                 </label>
                 <ManagerSelect
                   employees={employees}
                   value={managerId}
                   onChange={setManagerId}
+                  disabled={pending}
+                />
+
+                <label className="mt-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                  <Building2 className="size-3" />
+                  {t("headOfDeptOptional")}
+                </label>
+                <ManagerSelect
+                  employees={employees}
+                  value={headOfDeptId}
+                  onChange={setHeadOfDeptId}
                   disabled={pending}
                 />
               </div>
@@ -340,16 +404,16 @@ export function TaskAssigneesPanel({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onKeyDown}
-                  placeholder="ابحث بالاسم أو الوظيفة أو القسم..."
+                  placeholder={t("searchPlaceholder")}
                   className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-                  aria-label="بحث الموظفين"
+                  aria-label={t("search")}
                 />
                 {query && (
                   <button
                     type="button"
                     onClick={() => setQuery("")}
                     className="text-muted-foreground hover:text-foreground"
-                    aria-label="مسح البحث"
+                    aria-label={t("clearSearch")}
                   >
                     <X className="size-3" />
                   </button>
@@ -358,12 +422,12 @@ export function TaskAssigneesPanel({
 
               <ul
                 role="listbox"
-                className="max-h-56 overflow-y-auto py-1"
-                aria-label="الموظفون"
+                className="max-h-48 overflow-y-auto py-1"
+                aria-label={t("employees")}
               >
                 {filtered.length === 0 ? (
                   <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
-                    لا نتائج
+                    {t("noResults")}
                   </li>
                 ) : (
                   filtered.map((c, idx) => {
@@ -413,7 +477,7 @@ export function TaskAssigneesPanel({
               </ul>
 
               <div className="flex items-center justify-between border-t border-soft px-2.5 py-1.5 text-[10px] text-muted-foreground">
-                <span>{filtered.length} مرشح</span>
+                <span>{t("candidates", { count: filtered.length })}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -422,7 +486,7 @@ export function TaskAssigneesPanel({
                   }}
                   className="hover:text-foreground"
                 >
-                  إغلاق (Esc)
+                  {t("close")}
                 </button>
               </div>
             </div>
@@ -444,23 +508,190 @@ function ManagerSelect({
   onChange: (v: string | null) => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.assigneesPanel");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter(
+      (employee) =>
+        employee.full_name.toLowerCase().includes(q) ||
+        (employee.job_title ?? "").toLowerCase().includes(q) ||
+        (employee.department_name ?? "").toLowerCase().includes(q),
+    );
+  }, [employees, query]);
+
+  const selected = useMemo(
+    () => employees.find((employee) => employee.id === value) ?? null,
+    [employees, value],
+  );
+
+  useEffect(() => {
+    setActiveIndex((i) =>
+      Math.min(Math.max(0, i), Math.max(0, filtered.length - 1)),
+    );
+  }, [filtered.length]);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus({ preventScroll: true });
+  }, [open]);
+
+  function pick(next: string | null) {
+    onChange(next);
+    setOpen(false);
+    setQuery("");
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (filtered.length === 0) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        setQuery("");
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % filtered.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => (i - 1 + filtered.length) % filtered.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const target = filtered[activeIndex];
+      if (target) pick(target.id);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setQuery("");
+    }
+  }
+
   return (
-    <div className="relative">
-      <select
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
+    <div className="relative min-w-44">
+      <button
+        ref={triggerRef}
+        type="button"
         disabled={disabled}
-        className="h-7 w-full appearance-none rounded-md border border-soft-2 bg-card pe-6 ps-2 text-[11px] outline-none focus:border-cyan/40 disabled:opacity-60"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-7 w-full items-center justify-between gap-2 rounded-md border border-soft-2 bg-card pe-2 ps-2 text-[11px] outline-none transition-colors focus:border-cyan/40 disabled:opacity-60"
+        aria-haspopup="dialog"
+        aria-expanded={open}
       >
-        <option value="">— بدون —</option>
-        {employees.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.full_name}
-            {e.department_name ? ` · ${e.department_name}` : ""}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute end-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+        <span
+          className={cn(
+            "truncate text-start",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {selected?.full_name ?? t("noneOption")}
+        </span>
+        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+      </button>
+
+      <AnchoredPopover
+        anchorRef={triggerRef}
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          setQuery("");
+        }}
+        align="start"
+        className="z-50 w-72 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
+      >
+        <div role="dialog">
+          <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={t("searchPlaceholder")}
+              className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              aria-label={t("search")}
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label={t("clearSearch")}
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="border-b border-soft px-2.5 py-1">
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-start text-xs transition-colors hover:bg-soft-2",
+                value === null && "bg-cyan-dim/60 text-foreground",
+              )}
+            >
+              <span className="truncate">{t("noneOption")}</span>
+              {value === null && <Check className="size-3.5 shrink-0" />}
+            </button>
+          </div>
+
+          <ul
+            role="listbox"
+            aria-label={t("employees")}
+            className="max-h-56 overflow-y-auto py-1"
+          >
+            {filtered.length === 0 ? (
+              <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                {t("noResults")}
+              </li>
+            ) : (
+              filtered.map((employee, idx) => {
+                const isActive = idx === activeIndex;
+                const isSelected = employee.id === value;
+                return (
+                  <li key={employee.id} role="option" aria-selected={isSelected}>
+                    <button
+                      type="button"
+                      onMouseEnter={() => setActiveIndex(idx)}
+                      onClick={() => pick(employee.id)}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-start text-xs transition-colors",
+                        isActive
+                          ? "bg-cyan-dim/60 text-foreground"
+                          : "hover:bg-soft-2",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">
+                          {employee.full_name}
+                        </span>
+                        {(employee.job_title || employee.department_name) && (
+                          <span className="block truncate text-[10px] text-muted-foreground">
+                            {employee.job_title}
+                            {employee.job_title && employee.department_name
+                              ? " · "
+                              : ""}
+                            {employee.department_name}
+                          </span>
+                        )}
+                      </span>
+                      {isSelected && <Check className="size-3.5 shrink-0" />}
+                    </button>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
+      </AnchoredPopover>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +16,7 @@ export function RecordPagination({
   nextId: string | null;
   basePath: string;
 }) {
+  const t = useTranslations("TaskDetailPage.pagination");
   const linkClass =
     "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-soft-2 hover:text-foreground";
   const disabledClass = "opacity-30 pointer-events-none";
@@ -25,7 +27,7 @@ export function RecordPagination({
         <Link
           href={`${basePath}/${prevId}`}
           className={linkClass}
-          aria-label="السابق"
+          aria-label={t("previous")}
         >
           <ChevronRight className="size-3.5 icon-flip-rtl" />
         </Link>
@@ -41,7 +43,7 @@ export function RecordPagination({
         <Link
           href={`${basePath}/${nextId}`}
           className={linkClass}
-          aria-label="التالي"
+          aria-label={t("next")}
         >
           <ChevronLeft className="size-3.5 icon-flip-rtl" />
         </Link>

@@ -640,7 +640,9 @@
     "kanban": "Kanban",
     "list": "قائمة",
     "kanbanView": "عرض كانبان",
-    "listView": "عرض قائمة"
+    "listView": "عرض قائمة",
+    "calendar": "تقويم",
+    "calendarView": "عرض التقويم"
   },
   "TasksPage": {
     "projectScope": "مهام مشروع",
@@ -914,6 +916,204 @@
       "hoursOnly": "{count}س",
       "minutesOnly": "{count}د",
       "hoursMinutes": "{hours}س {minutes}د"
+    },
+    "assigneesPanel": {
+      "roles": {
+        "account_manager": "مدير الحساب",
+        "specialist": "متخصص",
+        "manager": "مدير القسم",
+        "agent": "منفذ"
+      },
+      "toasts": {
+        "assigned": "تمت إضافة المسند",
+        "removed": "تمت إزالة المسند",
+        "managerUpdated": "تم تحديث مدير الفريق",
+        "teamLeaderUpdated": "تم تحديث قائد الفريق",
+        "hodUpdated": "تم تحديث رئيس القسم"
+      },
+      "empty": {
+        "title": "لا يوجد مسندون بعد",
+        "description": "كل مهمة تحتاج إلى مسند واحد على الأقل قبل بدء العمل."
+      },
+      "currentOwner": "المسؤول الحالي",
+      "currentOwnerTitle": "مسؤول المرحلة الحالية — هذا الشخص المتوقع أن يحرك المهمة للمرحلة التالية",
+      "teamManager": "مدير الفريق:",
+      "teamManagerOptional": "مدير الفريق (اختياري)",
+      "teamLeader": "قائد الفريق:",
+      "teamLeaderOptional": "قائد الفريق (اختياري)",
+      "headOfDept": "رئيس القسم:",
+      "headOfDeptOptional": "رئيس القسم (اختياري)",
+      "none": "—",
+      "noneOption": "— بدون —",
+      "removeAssignee": "إزالة {name}",
+      "addAssignee": "إضافة مسند",
+      "role": "الدور",
+      "searchPlaceholder": "ابحث بالاسم أو الوظيفة أو القسم...",
+      "search": "بحث الموظفين",
+      "clearSearch": "مسح البحث",
+      "employees": "الموظفون",
+      "noResults": "لا نتائج",
+      "candidates": "{count} مرشح",
+      "close": "إغلاق (Esc)"
+    },
+    "followersPanel": {
+      "toasts": {
+        "added": "تمت إضافة المتابع",
+        "removed": "تمت إزالة المتابع"
+      },
+      "empty": {
+        "title": "لا يوجد متابعون بعد",
+        "description": "أضف الزملاء الذين تريد إبقاءهم على اطلاع دون إسناد دور تنفيذي.",
+        "manageHint": "اضغط «إضافة متابع» أدناه ({count} متاح)."
+      },
+      "inheritedTitle": "متابع موروث من المشروع",
+      "inherited": "من المشروع",
+      "removeFollower": "إزالة {name} من المتابعين",
+      "addFollower": "إضافة متابع",
+      "allAlreadyFollowing": "كل الزملاء النشطين متابعون بالفعل.",
+      "pickFollower": "اختر متابعًا",
+      "searchPlaceholder": "ابحث بالاسم أو الدور...",
+      "search": "بحث المتابعين",
+      "clearSearch": "مسح البحث",
+      "candidatesLabel": "المتابعون المرشحون",
+      "noResults": "لا نتائج",
+      "candidatesCount": "{count} مرشح",
+      "close": "إغلاق (Esc)"
+    },
+    "followToggle": {
+      "follow": "متابعة",
+      "following": "متابِع",
+      "toasts": {
+        "followed": "تمت المتابعة",
+        "unfollowed": "ألغيت المتابعة"
+      }
+    },
+    "comments": {
+      "requirements": "متطلبات المهمة",
+      "modifications": "تعديلات العميل",
+      "modificationNumber": "تعديل #{count}",
+      "employeeFallback": "موظف"
+    },
+    "subtasks": {
+      "description": "المهام الفرعية ترث المشروع من المهمة الأم.",
+      "add": "إضافة مهمة فرعية",
+      "placeholder": "عنوان المهمة الفرعية...",
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "empty": "لا توجد مهام فرعية.",
+      "enterTitle": "اكتب عنوان المهمة الفرعية",
+      "toasts": {
+        "created": "تم إنشاء المهمة الفرعية"
+      }
+    },
+    "timesheets": {
+      "total": "مجموع الساعات:",
+      "logHours": "تسجيل ساعات",
+      "date": "التاريخ",
+      "hours": "الساعات",
+      "descriptionOptional": "الوصف (اختياري)",
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "empty": "لا توجد سجلات وقت.",
+      "hoursValue": "{count} س",
+      "enterValidHours": "اكتب عدد ساعات صالح",
+      "toasts": {
+        "added": "أضيف السجل",
+        "deleted": "حذف السجل"
+      }
+    },
+    "activities": {
+      "types": {
+        "call": "اتصال",
+        "email": "بريد",
+        "review": "مراجعة",
+        "upload": "رفع",
+        "other": "أخرى"
+      },
+      "description": "الأنشطة المجدولة مثل المكالمات والمراجعات ورفع الملفات تُدار بشكل منفصل عن الملاحظات والمهام الفرعية.",
+      "add": "إضافة نشاط",
+      "placeholder": "وصف النشاط...",
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "empty": "لا توجد أنشطة مجدولة.",
+      "overdue": "متأخر",
+      "complete": "إكمال",
+      "delete": "حذف",
+      "done": "مكتمل",
+      "enterSummary": "اكتب وصف النشاط",
+      "toasts": {
+        "added": "أضيف النشاط",
+        "completed": "اكتمل النشاط",
+        "deleted": "حذف النشاط"
+      }
+    },
+    "attachments": {
+      "empty": "لا توجد مرفقات بعد. أضف مرفقًا من شريط التعليقات باستخدام زر دبوس الورق.",
+      "open": "فتح"
+    },
+    "deadlineEditor": {
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "remove": "إزالة",
+      "none": "لا يوجد موعد نهائي",
+      "add": "إضافة موعد",
+      "edit": "تعديل الموعد النهائي"
+    },
+    "pagination": {
+      "previous": "السابق",
+      "next": "التالي"
+    },
+    "stageHistory": {
+      "empty": "لم تنتقل المهمة بين المراحل بعد.",
+      "current": "المرحلة الحالية",
+      "by": "بواسطة",
+      "roleAtMove": "الوظيفة وقت النقل",
+      "seconds": "{count} ثانية",
+      "minutes": "{count} دقيقة",
+      "hours": "{count} ساعة",
+      "hoursMinutes": "{hours} ساعة و{minutes} دقيقة",
+      "days": "{count} يوم",
+      "daysHours": "{days} يوم و{hours} ساعة"
+    },
+    "designCounts": {
+      "error": "أدخل أرقامًا صحيحة غير سالبة",
+      "designCount": "عدد التصاميم",
+      "revisionCount": "عدد التعديلات",
+      "edit": "تعديل الأعداد",
+      "cancel": "إلغاء",
+      "save": "حفظ"
+    },
+    "linksPanel": {
+      "title": "ارتباطات المهمة",
+      "add": "إضافة ربط",
+      "dependentTask": "المهمة المرتبطة",
+      "pick": "— اختر —",
+      "type": "النوع",
+      "lagDays": "إزاحة (أيام)",
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "outgoingTitle": "مهام تتبع هذه المهمة",
+      "outgoingSubtitle": "هذه المهمة هي المرجع، وأي تغيير في تواريخها يدفع التواريخ المرتبطة.",
+      "incomingTitle": "مهام تعتمد عليها هذه المهمة",
+      "incomingSubtitle": "تواريخ هذه المهمة تتأثر بتواريخ تلك المهام.",
+      "empty": "لا توجد ارتباطات.",
+      "pickTask": "اختر المهمة المرتبطة",
+      "types": {
+        "finish_to_start": "FS — انتهاء إلى بدء",
+        "start_to_start": "SS — بدء إلى بدء",
+        "finish_to_finish": "FF — انتهاء إلى انتهاء",
+        "start_to_finish": "SF — بدء إلى انتهاء"
+      },
+      "toasts": {
+        "created": "تم إنشاء الربط",
+        "updated": "تم تحديث الربط",
+        "deleted": "حذف الربط"
+      }
+    },
+    "error": {
+      "title": "تعذر تحميل المهمة",
+      "description": "قد يكون الرابط غير صحيح، أو المهمة محذوفة، أو لا تملك صلاحية الاطلاع عليها.",
+      "back": "الرجوع إلى المهام"
     }
   },
   "TaskLabels": {
@@ -940,6 +1140,285 @@
       "medium": "متوسطة",
       "high": "عالية",
       "urgent": "عاجلة"
+    }
+  },
+  "ReportsPage": {
+    "title": "التقارير",
+    "description": "مؤشّرات أداء الوكالة لهذا الأسبوع، مُحتسبة مباشرة من بيانات Odoo.",
+    "smartDigestBadge": "مرحلة 9 — موجز ذكي",
+    "executiveDigest": {
+      "title": "موجز الأسبوع التنفيذي",
+      "description": "نموذج Gemini مُغذَّى بالتقارير الأربعة فقط — لا يخمّن خارجها."
+    },
+    "sections": {
+      "stageDwell": {
+        "title": "متوسط البقاء في كل مرحلة",
+        "description": "بالأيام، محسوب من المقاطع المُغلقة في سجل المراحل",
+        "empty": "لا بيانات بعد — يحتاج لمهام عبرت أكثر من مرحلة."
+      },
+      "specialistLoad": {
+        "title": "حِمل المتخصصين الحالي",
+        "description": "عدد المهام المفتوحة لكل منفذ، مع مجموع الساعات المخصصة",
+        "empty": "لا توجد مهام مفتوحة مُسندة."
+      },
+      "designerOutput": {
+        "title": "إنتاج المصممين شهريًا",
+        "description": "مجموع التصاميم والتعديلات لكل موظف على المهام المُغلَقة في الشهر المحدد"
+      },
+      "slipHeatmap": {
+        "title": "توزّع التأخّر الزمني",
+        "description": "المهام المفتوحة مصنّفة حسب نسبة الانحراف عن الجدول الزمني"
+      },
+      "renewals": {
+        "title": "توقّع التجديدات — التسعون يومًا القادمة",
+        "description": "مرتَّبة بحسب الأقرب موعدًا",
+        "openProjects": "فتح المشاريع",
+        "empty": "لا تجديدات في الأفق."
+      }
+    },
+    "footerNote": "مؤشرات الأداء (KPIs والمشاريع والأفراد) تُحسب مباشرة من Odoo عند كل فتح للصفحة. التجديدات والموجز الأسبوعي قراءة من قاعدة لوحة التحكم.",
+    "weeklyMetrics": {
+      "title": "مؤشرات الأسبوع",
+      "description": "نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة",
+      "odooUnavailable": "تعذّر الاتصال بـ Odoo حاليًا — مؤشرات الأسبوع المُعتمدة على Odoo غير متاحة. باقي التقارير تعمل من قاعدة لوحة التحكم.",
+      "cards": {
+        "onTime": "التسليم في الموعد",
+        "reviewBacklog": "عُلوق المراجعة",
+        "rework": "إعادة العمل (Client Changes)",
+        "odooTasks": "مهام Odoo (آخر سحب)"
+      },
+      "hints": {
+        "noSample": "لا عيّنة بعد",
+        "sample": "عيّنة {count}",
+        "noDelay": "لا تأخّر",
+        "waitingReview": "بانتظار مراجعة",
+        "affectedProjects": "{count} مشروع متأثّر",
+        "last4Weeks": "إغلاقات آخر 4 أسابيع"
+      }
+    },
+    "projectCompliance": {
+      "title": "التزام الموعد النهائي حسب المشروع",
+      "description": "نسبة المهام المفتوحة التي ما زالت ضمن الموعد — أسوأ 10 مشاريع",
+      "empty": "لا توجد مهام مفتوحة لتقييم الالتزام."
+    },
+    "reworkByProject": {
+      "title": "إعادة العمل حسب المشروع",
+      "description": "عدد المهام في مرحلة Client Changes — يكشف المشاريع الأكثر إرهاقًا",
+      "empty": "لا توجد مهام في مرحلة تعديلات العميل."
+    },
+    "peopleBoard": {
+      "title": "لوحة الأفراد — آخر 4 أسابيع",
+      "description": "عدد المهام المُغلقة + استخدام نسبيّ (من الأعلى إنتاجًا = 100%)",
+      "empty": "لا بيانات إنتاج بعد."
+    },
+    "storedDigest": {
+      "title": "موجز الأسبوع المخزَّن",
+      "generatedAt": "أُنشئ في {date}",
+      "notGenerated": "لم يُنشأ موجز أسبوعي بعد — يصدر تلقائيًا صباح الأحد",
+      "note": "يصل هذا الموجز إلى صندوق التنبيهات داخل التطبيق فقط — البريد و WhatsApp مؤجَّلان للمرحلة T8.",
+      "empty": "سيظهر هنا فور تشغيل أوّل دورة من weekly-digest.",
+      "cards": {
+        "onTime": "تسليم في الموعد",
+        "weekClosures": "إغلاقات الأسبوع",
+        "reviewBacklog": "عُلوق المراجعة",
+        "renewals90d": "تجديدات 90 يومًا"
+      }
+    },
+    "renewalInDays": "بعد {count} يومًا",
+    "loading": "جاري التحميل...",
+    "count": {
+      "task": "{count} مهمة"
+    }
+  },
+  "FinancePage": {
+    "title": "لوحة المدير التنفيذي — مالية",
+    "description": "نظرة شاملة على حركة العقود، الإيرادات المتوقعة والفعلية، وأداء قسمي الأكاونت والمبيعات.",
+    "expenses": "المصروفات",
+    "contractTypes": {
+      "New": "جديد",
+      "Renew": "تجديد",
+      "Lost": "مفقود",
+      "UPSELL": "رفع باقة",
+      "WinBack": "استرجاع",
+      "Hold": "تعليق"
+    },
+    "todayStatus": {
+      "title": "حالة العملاء — اليوم",
+      "description": "إجمالي العقود النشطة في كل فئة",
+      "newContracts": "عقود جديدة",
+      "renewing": "عملاء يتجدّدون",
+      "hold": "معلّقون (Hold)",
+      "totalClients": "إجمالي العملاء",
+      "upsell": "عقود رفع باقة",
+      "winBack": "استرجاع عميل"
+    },
+    "monthMovement": {
+      "title": "حركة الشهر — {month}",
+      "description": "العقود التي بدأت أو أُغلقت خلال هذا الشهر فقط"
+    },
+    "income": {
+      "title": "إيرادات الشركة (NEW + RENEWAL) — {month}",
+      "expected": "الإيراد المتوقع",
+      "expectedHint": "{count} عقد جديد + تجديد",
+      "actual": "الإيراد الفعلي",
+      "actualHint": "{count} دفعة مستلمة",
+      "ofExpected": "{count}% من المتوقع"
+    },
+    "account": {
+      "title": "قسم الأكاونت — {month}",
+      "description": "متابعة عملاء الأكاونت: المتوقع، المتأخر، والفعلي المُحقق",
+      "countOverview": "نظرة على عدد العقود",
+      "salesDeposit": "ودائع المبيعات",
+      "onTarget": "على الموعد",
+      "overdue": "متأخر",
+      "expectedAll": "المتوقع (الكل)",
+      "expectedAllHint": "على الموعد + متأخر",
+      "afterRenewed": "بعد طرح المتجدّدين",
+      "afterRenewedHint": "ما يحتاج متابعة",
+      "actualAchieved": "المُحقَّق فعلياً",
+      "expectedHeader": "المُتوقّع",
+      "overdueInstallmentsAdded": "دفعات متأخرة مضافة للتراكن",
+      "thisMonthInstallments": "دفعات هذا الشهر",
+      "onTargetClients": "عملاء على الموعد",
+      "overdueClients": "عملاء متأخرون",
+      "totalExpected": "إجمالي المتوقع",
+      "actualHeader": "الفعلي المُحصَّل",
+      "collectedOverdueInstallments": "دفعات متأخرة محصَّلة",
+      "upsell": "رفع باقة",
+      "winBack": "استرجاع عميل",
+      "totalIncome": "إجمالي إيراد الأكاونت",
+      "achievement": "نسبة التحقّق",
+      "revenueGap": "فجوة الإيراد"
+    },
+    "sales": {
+      "title": "قسم المبيعات — {month}",
+      "description": "متابعة دفعات عملاء المبيعات الجدد + الإيراد الكلي من المبيعات",
+      "expectedHeader": "المُتوقّع",
+      "overdueInstallments": "دفعات متأخرة",
+      "thisMonthInstallments": "دفعات هذا الشهر",
+      "totalExpected": "إجمالي المتوقع من الدفعات",
+      "actualHeader": "الفعلي",
+      "collectedInstallments": "دفعات مُحصَّلة",
+      "newClientIncome": "إيراد من عملاء جدد",
+      "totalIncome": "إجمالي إيراد المبيعات",
+      "collectionRate": "نسبة تحصيل الدفعات",
+      "gap": "الفجوة"
+    },
+    "help": {
+      "title": "كيف تُحسب هذه الأرقام؟",
+      "items": {
+        "todayStatus": "حالة العملاء اليوم: عدّ العقود النشطة في كل فئة (مستقل عن الشهر).",
+        "monthMovement": "حركة الشهر: العقود التي بدأت أو أُغلقت في الشهر المختار من الزر أعلاه.",
+        "actualIncome": "الإيراد الفعلي: مجموع الدفعات (installments) الفعلية المُسجَّلة بتاريخ هذا الشهر.",
+        "departments": "قسم الأكاونت = العقود التي حقلها target ليس Sales Deposit. قسم المبيعات = العقود ذات target=Sales Deposit."
+      },
+      "contracts": "إدارة العقود",
+      "expenses": "المصروفات والمصاريف التشغيلية"
+    }
+  },
+  "UploadsPage": {
+    "title": "اليوم — رفع المهام",
+    "description": "قائمة المهام التي يجب على المختص رفعها قبل الديدلاين.",
+    "descriptionFull": "مهامك كمختص مرتبة بحسب موعد الرفع. يُحسب الموعد بطرح فترة الرفع المسبقة من الديدلاين.",
+    "specialistsOnly": {
+      "title": "هذه الصفحة مخصصة للمختصين",
+      "description": "تظهر هنا المهام المسندة إليك في خانة المختص. لا يبدو أن لديك ملف موظف مرتبط بحسابك حاليًا."
+    },
+    "empty": {
+      "title": "لا توجد مهام تنتظر الرفع",
+      "description": "عندما تُسند إليك مهمة كمختص وتقترب من الديدلاين، ستظهر هنا تلقائيًا."
+    },
+    "buckets": {
+      "overdue": {
+        "label": "متأخر",
+        "description": "مهام تجاوز موعد رفعها وما زالت غير مكتملة",
+        "empty": "لا توجد مهام متأخرة عن موعد الرفع."
+      },
+      "today": {
+        "label": "اليوم",
+        "description": "يجب رفعها قبل نهاية اليوم",
+        "empty": "لا توجد مهام يجب رفعها اليوم."
+      },
+      "this_week": {
+        "label": "خلال أسبوع",
+        "description": "مهام يستحق رفعها خلال السبعة أيام القادمة",
+        "empty": "لا شيء على جدول الأسبوع المقبل."
+      },
+      "later": {
+        "label": "لاحقًا",
+        "description": "مهام موعد رفعها بعد أكثر من أسبوع",
+        "empty": "لا توجد مهام مجدولة لاحقًا."
+      }
+    },
+    "delta": {
+      "today": "اليوم",
+      "overdueOne": "متأخر يوم واحد",
+      "overdueTwo": "متأخر يومين",
+      "overdueMany": "متأخر {count} أيام",
+      "inOne": "بعد يوم",
+      "inTwo": "بعد يومين",
+      "inMany": "بعد {count} أيام"
+    },
+    "showAll": "عرض الكل ({count})",
+    "backToAll": "العودة لكل المهام",
+    "uploadDue": "موعد الرفع",
+    "openTask": "فتح المهمة"
+  },
+  "ProjectsNewPage": {
+    "title": "مشروع جديد",
+    "description": "اختر العميل والخدمات؛ ستظهر المهام التي سيتم إنشاؤها في لوحة المعاينة على اليسار.",
+    "breadcrumbs": {
+      "projects": "المشاريع",
+      "newProject": "مشروع جديد"
+    },
+    "manageCategories": "إدارة تصنيفات الخدمات وقوالب المهام"
+  },
+  "ProjectsNewForm": {
+    "steps": {
+      "1": "العميل",
+      "2": "الخدمات",
+      "3": "الجدولة والمراجعة"
+    },
+    "validation": {
+      "pickClient": "اختر العميل",
+      "shortName": "اسم المشروع قصير جدًا (3 أحرف على الأقل)",
+      "pickService": "اختر خدمة واحدة على الأقل",
+      "pickStartDate": "اختر تاريخ البدء"
+    },
+    "toasts": {
+      "projectCreated": "تم إنشاء المشروع",
+      "projectCreatedWithTasks": "تم إنشاء المشروع وتوليد {count} مهمة",
+      "clientNameShort": "اسم العميل قصير",
+      "clientAdded": "تم إضافة العميل"
+    },
+    "labels": {
+      "client": "العميل *",
+      "projectName": "اسم المشروع *"
+    },
+    "placeholders": {
+      "pickClient": "اختر العميل",
+      "searchClient": "ابحث بالاسم أو الهاتف…",
+      "projectName": "مثال: حملة رمضان 1447"
+    },
+    "actions": {
+      "hide": "إخفاء",
+      "addClient": "إضافة عميل جديد",
+      "saveClient": "حفظ العميل",
+      "cancel": "إلغاء",
+      "previous": "السابق",
+      "next": "التالي",
+      "createProject": "إنشاء المشروع"
+    },
+    "quickClient": {
+      "title": "عميل جديد",
+      "name": "اسم العميل *",
+      "phone": "هاتف",
+      "email": "بريد"
+    },
+    "preview": {
+      "title": "معاينة المهام التي ستُولَّد",
+      "count": "{count} مهمة",
+      "pickService": "اختر خدمة واحدة على الأقل لعرض المهام المتوقعة."
     }
   },
   "PageTitles": {

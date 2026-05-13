@@ -9,6 +9,7 @@
 // =========================================================================
 
 import { useState, useTransition, useEffect, useMemo, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, UserPlus, X, Search, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -48,6 +49,7 @@ export function FollowersPanel({
   candidates: FollowerCandidate[];
   canManage: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.followersPanel");
   const router = useRouter();
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
@@ -93,7 +95,7 @@ export function FollowersPanel({
         toast.error(res.error);
         return;
       }
-      toast.success("تمت إضافة المتابع");
+      toast.success(t("toasts.added"));
       // Stay open so the user can add more followers in one motion — closes
       // automatically when no candidates are left.
       setQuery("");
@@ -112,7 +114,7 @@ export function FollowersPanel({
         toast.error(res.error);
         return;
       }
-      toast.success("تمت إزالة المتابع");
+      toast.success(t("toasts.removed"));
       router.refresh();
     });
   }
@@ -141,12 +143,12 @@ export function FollowersPanel({
       {followers.length === 0 ? (
         <div className="rounded-xl border border-dashed border-soft-2 bg-soft-1/40 px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">
-            لا يوجد متابعون بعد
+            {t("empty.title")}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            أضف من تريد إبقاءه على اطلاع دون إسناد دور تنفيذي.
+            {t("empty.description")}
             {canManage && candidates.length > 0 && (
-              <> اضغط «إضافة متابع» أدناه ({candidates.length} متاح).</>
+              <> {t("empty.manageHint", { count: candidates.length })}</>
             )}
           </p>
         </div>
@@ -160,7 +162,7 @@ export function FollowersPanel({
                   ? "flex items-center gap-2 rounded-full border border-cyan/30 bg-cyan-dim/40 py-1 ps-1 pe-2"
                   : "flex items-center gap-2 rounded-full border border-soft-2 bg-soft-1 py-1 ps-1 pe-2"
               }
-              title={f.inherited ? "متابع موروث من المشروع" : undefined}
+              title={f.inherited ? t("inheritedTitle") : undefined}
             >
               <Avatar size="sm">
                 {f.avatar_url ? <AvatarImage src={f.avatar_url} alt="" /> : null}
@@ -169,7 +171,7 @@ export function FollowersPanel({
               <span className="text-xs font-medium">{f.full_name}</span>
               {f.inherited && (
                 <span className="rounded-full bg-cyan/20 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
-                  من المشروع
+                  {t("inherited")}
                 </span>
               )}
               {canManage && !f.inherited && (
@@ -177,7 +179,7 @@ export function FollowersPanel({
                   type="button"
                   onClick={() => remove(f)}
                   disabled={pending}
-                  aria-label={`إزالة ${f.full_name} من المتابعين`}
+                  aria-label={t("removeFollower", { name: f.full_name })}
                   className="text-muted-foreground hover:text-cc-red transition-colors disabled:opacity-50"
                 >
                   <X className="size-3.5" />
@@ -201,7 +203,7 @@ export function FollowersPanel({
               aria-expanded={picking}
             >
               <UserPlus className="size-3.5" />
-              إضافة متابع
+              {t("addFollower")}
               {candidates.length > 0 && (
                 <span className="ms-1 rounded-full bg-cyan-dim px-1.5 text-[10px] text-cyan">
                   {candidates.length}
@@ -211,7 +213,7 @@ export function FollowersPanel({
           </span>
           {!picking && candidates.length === 0 && (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              كل الزملاء النشطين متابعون بالفعل.
+              {t("allAlreadyFollowing")}
             </p>
           )}
           <AnchoredPopover
@@ -223,7 +225,7 @@ export function FollowersPanel({
             }}
             className="z-50 w-72 max-w-[90vw] overflow-hidden rounded-xl border border-soft bg-card shadow-2xl shadow-black/30"
           >
-            <div role="dialog" aria-label="اختر متابعًا">
+            <div role="dialog" aria-label={t("pickFollower")}>
               <div className="flex items-center gap-2 border-b border-soft px-2.5 py-2">
                 <Search className="size-3.5 shrink-0 text-muted-foreground" />
                 <input
@@ -231,16 +233,16 @@ export function FollowersPanel({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onKeyDown}
-                  placeholder="ابحث بالاسم أو الدور..."
+                  placeholder={t("searchPlaceholder")}
                   className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-                  aria-label="بحث المتابعين"
+                  aria-label={t("search")}
                 />
                 {query && (
                   <button
                     type="button"
                     onClick={() => setQuery("")}
                     className="text-muted-foreground hover:text-foreground"
-                    aria-label="مسح البحث"
+                    aria-label={t("clearSearch")}
                   >
                     <X className="size-3" />
                   </button>
@@ -248,12 +250,12 @@ export function FollowersPanel({
               </div>
               <ul
                 role="listbox"
-                aria-label="المتابعون المرشحون"
+                aria-label={t("candidatesLabel")}
                 className="max-h-64 overflow-y-auto py-1"
               >
                 {filtered.length === 0 ? (
                   <li className="px-3 py-3 text-center text-[11px] text-muted-foreground">
-                    لا نتائج
+                    {t("noResults")}
                   </li>
                 ) : (
                   filtered.map((c, idx) => {
@@ -299,7 +301,7 @@ export function FollowersPanel({
                 )}
               </ul>
               <div className="flex items-center justify-between border-t border-soft px-2.5 py-1.5 text-[10px] text-muted-foreground">
-                <span>{filtered.length} مرشح</span>
+                <span>{t("candidatesCount", { count: filtered.length })}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -308,7 +310,7 @@ export function FollowersPanel({
                   }}
                   className="hover:text-foreground"
                 >
-                  إغلاق (Esc)
+                  {t("close")}
                 </button>
               </div>
             </div>

@@ -56,6 +56,9 @@ export interface OdooProject {
   // Rwasem custom fields:
   store_name?: string | false;
   account_manager_id?: OdooMany2one;
+  social_specialist_id?: OdooMany2one;
+  media_specialist_id?: OdooMany2one;
+  seo_specialist_id?: OdooMany2one;
   target?: string | false;
   color?: number;
   is_favorite?: boolean;

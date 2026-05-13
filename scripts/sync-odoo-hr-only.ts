@@ -29,6 +29,11 @@ const orgId = org.id as string;
 
 const odoo = odooFromEnv();
 
+function normalizeEmployeeName(name: string | null | undefined): string | null {
+  const value = name?.trim().replace(/\s+/g, " ");
+  return value ? value : null;
+}
+
 // Build res.users.id → employee_profiles.id map from existing rows.
 const { data: empRows } = await supabaseAdmin
   .from("employee_profiles")
@@ -124,6 +129,20 @@ const jobs = jobIds.length
     )
   : [];
 const jobNameById = new Map(jobs.map((j) => [j.id, j.name]));
+
+const { data: existingProfiles } = await supabaseAdmin
+  .from("employee_profiles")
+  .select("id, full_name")
+  .eq("organization_id", orgId)
+  .eq("external_source", SOURCE);
+const profileIdsByName = new Map<string, string[]>();
+for (const profile of existingProfiles ?? []) {
+  const normalized = normalizeEmployeeName(profile.full_name as string | null);
+  if (!normalized) continue;
+  const arr = profileIdsByName.get(normalized) ?? [];
+  arr.push(profile.id as string);
+  profileIdsByName.set(normalized, arr);
+}
 console.log(`[hr-sync] hr.job → ${jobs.length} positions`);
 
 // Pass 1: backfill department_id + position
@@ -132,8 +151,14 @@ let updated = 0;
 let unmatched = 0;
 for (const e of hrEmployees) {
   const uid = e.user_id ? e.user_id[0] : null;
-  if (!uid) { unmatched += 1; continue; }
-  const empId = odooUserToEmp.get(uid);
+  let empId = uid ? (odooUserToEmp.get(uid) ?? null) : null;
+  if (!empId) {
+    const normalizedName = normalizeEmployeeName(e.name);
+    if (normalizedName) {
+      const matches = profileIdsByName.get(normalizedName) ?? [];
+      if (matches.length === 1) empId = matches[0];
+    }
+  }
   if (!empId) { unmatched += 1; continue; }
   hrIdToEmp.set(e.id, empId);
 

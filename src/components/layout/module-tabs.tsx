@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { LayoutGrid, List as ListIcon, Loader2 } from "lucide-react";
+import { LayoutGrid, List as ListIcon, CalendarDays, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTopbarControls } from "@/components/layout/topbar-context";
 
@@ -87,9 +87,14 @@ export function ModuleTabs() {
   const mod = MODULES.find((m) => m.prefixes.test(pathname));
   if (!mod) return null;
   const isProjectsIndex = /^\/projects$/.test(pathname);
-  const projectView = searchParams.get("view") === "list" ? "list" : "kanban";
+  const projectView = ((): "kanban" | "list" | "calendar" => {
+    const v = searchParams.get("view");
+    if (v === "list") return "list";
+    if (v === "calendar") return "calendar";
+    return "kanban";
+  })();
 
-  function setProjectView(nextView: "kanban" | "list") {
+  function setProjectView(nextView: "kanban" | "list" | "calendar") {
     const next = new URLSearchParams(searchParams.toString());
     if (nextView === "kanban") next.delete("view");
     else next.set("view", nextView);
@@ -172,6 +177,18 @@ export function ModuleTabs() {
                 title={t("list")}
               >
                 <ListIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label={t("calendarView") /* falls back to key if missing */}
+                onClick={() => setProjectView("calendar")}
+                className={cn(
+                  "grid size-8 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
+                  projectView === "calendar" && "bg-primary/15 text-primary hover:bg-primary/20",
+                )}
+                title={t("calendar")}
+              >
+                <CalendarDays className="size-3.5" />
               </button>
             </div>
           </div>

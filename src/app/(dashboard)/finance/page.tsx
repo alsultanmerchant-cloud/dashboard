@@ -1,21 +1,30 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
-  Wallet, TrendingUp, TrendingDown, ReceiptText,
+  Wallet, TrendingUp, ReceiptText,
   CircleCheck, RefreshCw, PauseCircle, Users, Sparkles,
-  XCircle, Award, ArrowDown, ArrowUp,
+  XCircle, Award, ArrowUp,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import {
   getCeoDashboardData, currentMonthIso,
-  CONTRACT_TYPE_LABEL, type ContractTypeKey,
+  type ContractTypeKey,
 } from "@/lib/data/ceo-dashboard";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { MonthSelector } from "./month-selector";
 
-const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
+const formatMoney = (n: number, locale: string) =>
+  new Intl.NumberFormat(locale === "ar" ? "ar-SA-u-nu-latn" : "en-US", { maximumFractionDigits: 0 }).format(n);
+
+function monthLabel(monthIso: string, locale: string) {
+  const [year, month] = monthIso.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-US", {
+    month: "long",
+    year: "numeric",
+  });
+}
 
 // Headline tile (small, count-only)
 function StatTile({
@@ -97,13 +106,17 @@ export default async function FinancePage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const session = await requirePagePermission("contract.view");
+  const t = await getTranslations("FinancePage");
+  const locale = await getLocale();
   const sp = await searchParams;
   const monthIso = sp.month && /^\d{4}-\d{2}$/.test(sp.month)
     ? sp.month
     : currentMonthIso();
 
   const data = await getCeoDashboardData(session.orgId, monthIso);
-  const { today, movement, income, account, sales, window } = data;
+  const { today, movement, income, account, sales } = data;
+  const monthText = monthLabel(monthIso, locale);
+  const currency = locale === "ar" ? "ر.س" : "SAR";
 
   const movementOrder: { key: ContractTypeKey; tone: Parameters<typeof StatTile>[0]["tone"]; icon: React.ReactNode }[] = [
     { key: "New", tone: "info", icon: <Sparkles className="size-4" /> },
@@ -117,15 +130,15 @@ export default async function FinancePage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="لوحة المدير التنفيذي — مالية"
-        description="نظرة شاملة على حركة العقود، الإيرادات المتوقعة والفعلية، وأداء قسمي الأكاونت والمبيعات."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Link
             href="/finance/expenses"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-soft-2 bg-card/60 px-3 text-xs font-medium hover:bg-soft-2 transition-colors"
           >
             <ReceiptText className="size-4" />
-            المصروفات
+            {t("expenses")}
           </Link>
         }
       />
@@ -134,43 +147,43 @@ export default async function FinancePage({
       <section>
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold">حالة العملاء — اليوم</h2>
-            <p className="text-xs text-muted-foreground">إجمالي العقود النشطة في كل فئة</p>
+            <h2 className="text-base font-semibold">{t("todayStatus.title")}</h2>
+            <p className="text-xs text-muted-foreground">{t("todayStatus.description")}</p>
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatTile
-            label="عقود جديدة"
+            label={t("todayStatus.newContracts")}
             value={today.newContracts}
             tone="info"
             icon={<Sparkles className="size-4" />}
           />
           <StatTile
-            label="عملاء يتجدّدون"
+            label={t("todayStatus.renewing")}
             value={today.renewing}
             tone="success"
             icon={<RefreshCw className="size-4" />}
           />
           <StatTile
-            label="معلّقون (Hold)"
+            label={t("todayStatus.hold")}
             value={today.hold}
             tone="warning"
             icon={<PauseCircle className="size-4" />}
           />
           <StatTile
-            label="إجمالي العملاء"
+            label={t("todayStatus.totalClients")}
             value={today.totalClients}
             tone="default"
             icon={<Users className="size-4" />}
           />
           <StatTile
-            label="عقود رفع باقة"
+            label={t("todayStatus.upsell")}
             value={today.upsell}
             tone="purple"
             icon={<Award className="size-4" />}
           />
           <StatTile
-            label="استرجاع عميل"
+            label={t("todayStatus.winBack")}
             value={today.winBack}
             tone="warning"
             icon={<ArrowUp className="size-4" />}
@@ -182,8 +195,8 @@ export default async function FinancePage({
       <section>
         <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="text-base font-semibold">حركة الشهر — {window.monthLabel}</h2>
-            <p className="text-xs text-muted-foreground">العقود التي بدأت أو أُغلقت خلال هذا الشهر فقط</p>
+            <h2 className="text-base font-semibold">{t("monthMovement.title", { month: monthText })}</h2>
+            <p className="text-xs text-muted-foreground">{t("monthMovement.description")}</p>
           </div>
           <MonthSelector monthIso={monthIso} />
         </div>
@@ -191,9 +204,9 @@ export default async function FinancePage({
           {movementOrder.map(({ key, tone, icon }) => (
             <StatTile
               key={key}
-              label={CONTRACT_TYPE_LABEL[key]}
+              label={t(`contractTypes.${key}`)}
               value={movement.byType[key].count}
-              hint={movement.byType[key].value > 0 ? sar(movement.byType[key].value) + " ر.س" : undefined}
+              hint={movement.byType[key].value > 0 ? `${formatMoney(movement.byType[key].value, locale)} ${currency}` : undefined}
               tone={tone}
               icon={icon}
             />
@@ -204,7 +217,7 @@ export default async function FinancePage({
       {/* ============ Section 3: Company Income ============ */}
       <section>
         <h2 className="mb-3 text-base font-semibold">
-          إيرادات الشركة (NEW + RENEWAL) — {window.monthLabel}
+          {t("income.title", { month: monthText })}
         </h2>
         <div className="grid gap-3 sm:grid-cols-2">
           <Card className="border-cyan/20">
@@ -212,13 +225,13 @@ export default async function FinancePage({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    الإيراد المتوقع
+                    {t("income.expected")}
                   </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums text-cyan">
-                    {sar(income.expected)} <span className="text-base text-muted-foreground">ر.س</span>
+                    {formatMoney(income.expected, locale)} <span className="text-base text-muted-foreground">{currency}</span>
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {income.expectedCount} عقد جديد + تجديد
+                    {t("income.expectedHint", { count: income.expectedCount })}
                   </p>
                 </div>
                 <TrendingUp className="size-6 text-cyan" />
@@ -230,13 +243,13 @@ export default async function FinancePage({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    الإيراد الفعلي
+                    {t("income.actual")}
                   </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums text-cc-green">
-                    {sar(income.actual)} <span className="text-base text-muted-foreground">ر.س</span>
+                    {formatMoney(income.actual, locale)} <span className="text-base text-muted-foreground">{currency}</span>
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {income.actualCount} دفعة مستلمة
+                    {t("income.actualHint", { count: income.actualCount })}
                   </p>
                 </div>
                 <Wallet className="size-6 text-cc-green" />
@@ -252,7 +265,7 @@ export default async function FinancePage({
                     />
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
-                    {Math.round((income.actual / income.expected) * 100)}% من المتوقع
+                    {t("income.ofExpected", { count: Math.round((income.actual / income.expected) * 100) })}
                   </p>
                 </div>
               )}
@@ -264,9 +277,9 @@ export default async function FinancePage({
       {/* ============ Section 4: Account Department ============ */}
       <section>
         <div className="mb-3">
-          <h2 className="text-base font-semibold">قسم الأكاونت — {window.monthLabel}</h2>
+          <h2 className="text-base font-semibold">{t("account.title", { month: monthText })}</h2>
           <p className="text-xs text-muted-foreground">
-            متابعة عملاء الأكاونت: المتوقع، المتأخر، والفعلي المُحقق
+            {t("account.description")}
           </p>
         </div>
 
@@ -274,25 +287,25 @@ export default async function FinancePage({
         <Card className="mb-3">
           <CardContent className="p-4">
             <p className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">
-              نظرة على عدد العقود
+              {t("account.countOverview")}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-              <StatTile label="ودائع المبيعات" value={account.salesDeposit} />
-              <StatTile label="على الموعد" value={account.onTarget} tone="success" />
-              <StatTile label="متأخر" value={account.overdue} tone="destructive" />
+              <StatTile label={t("account.salesDeposit")} value={account.salesDeposit} />
+              <StatTile label={t("account.onTarget")} value={account.onTarget} tone="success" />
+              <StatTile label={t("account.overdue")} value={account.overdue} tone="destructive" />
               <StatTile
-                label="المتوقع (الكل)"
+                label={t("account.expectedAll")}
                 value={account.expectedOnPlusOverdue}
-                hint="على الموعد + متأخر"
+                hint={t("account.expectedAllHint")}
               />
               <StatTile
-                label="بعد طرح المتجدّدين"
+                label={t("account.afterRenewed")}
                 value={account.expectedRemovingRenewed}
-                hint="ما يحتاج متابعة"
+                hint={t("account.afterRenewedHint")}
                 tone="warning"
               />
               <StatTile
-                label="المُحقَّق فعلياً"
+                label={t("account.actualAchieved")}
                 value={account.actualAchievedThisMonth}
                 tone="success"
                 icon={<CircleCheck className="size-4" />}
@@ -305,62 +318,62 @@ export default async function FinancePage({
         <div className="grid gap-3 lg:grid-cols-2">
           <Card>
             <CardContent className="p-4 space-y-1.5">
-              <MoneyRow label="المُتوقّع" value="" isHeader />
+              <MoneyRow label={t("account.expectedHeader")} value="" isHeader />
               <MoneyRow
-                label="دفعات متأخرة مضافة للتراكن"
-                value={`${sar(account.overdueInstallmentsAmount)} ر.س`}
+                label={t("account.overdueInstallmentsAdded")}
+                value={`${formatMoney(account.overdueInstallmentsAmount, locale)} ${currency}`}
               />
               <MoneyRow
-                label="دفعات هذا الشهر"
-                value={`${sar(account.installmentsAmount)} ر.س`}
+                label={t("account.thisMonthInstallments")}
+                value={`${formatMoney(account.installmentsAmount, locale)} ${currency}`}
               />
               <MoneyRow
-                label="عملاء على الموعد"
-                value={`${sar(account.onTargetClientsAmount)} ر.س`}
+                label={t("account.onTargetClients")}
+                value={`${formatMoney(account.onTargetClientsAmount, locale)} ${currency}`}
               />
               <MoneyRow
-                label="عملاء متأخرون"
-                value={`${sar(account.overdueClientsAmount)} ر.س`}
+                label={t("account.overdueClients")}
+                value={`${formatMoney(account.overdueClientsAmount, locale)} ${currency}`}
               />
               <MoneyRow
-                label="إجمالي المتوقع"
-                value={`${sar(account.totalExpected)} ر.س`}
+                label={t("account.totalExpected")}
+                value={`${formatMoney(account.totalExpected, locale)} ${currency}`}
                 isBig
               />
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4 space-y-1.5">
-              <MoneyRow label="الفعلي المُحصَّل" value="" isHeader />
+              <MoneyRow label={t("account.actualHeader")} value="" isHeader />
               <MoneyRow
-                label="دفعات متأخرة محصَّلة"
-                value={`${sar(account.actualOverdueInstallments)} ر.س`}
+                label={t("account.collectedOverdueInstallments")}
+                value={`${formatMoney(account.actualOverdueInstallments, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="دفعات هذا الشهر"
-                value={`${sar(account.actualInstallments)} ر.س`}
+                label={t("account.thisMonthInstallments")}
+                value={`${formatMoney(account.actualInstallments, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="رفع باقة"
-                value={`${sar(account.upsellAcc)} ر.س`}
+                label={t("account.upsell")}
+                value={`${formatMoney(account.upsellAcc, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="استرجاع عميل"
-                value={`${sar(account.winBackAcc)} ر.س`}
+                label={t("account.winBack")}
+                value={`${formatMoney(account.winBackAcc, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="إجمالي إيراد الأكاونت"
-                value={`${sar(account.totalIncomeFromAccount)} ر.س`}
+                label={t("account.totalIncome")}
+                value={`${formatMoney(account.totalIncomeFromAccount, locale)} ${currency}`}
                 isBig
                 tone="success"
               />
               <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
-                  label="نسبة التحقّق"
+                  label={t("account.achievement")}
                   value={
                     account.revenueAchievementPct === null
                       ? "—"
@@ -377,8 +390,8 @@ export default async function FinancePage({
                   }
                 />
                 <MoneyRow
-                  label="فجوة الإيراد"
-                  value={`${sar(account.revenueGap)} ر.س`}
+                  label={t("account.revenueGap")}
+                  value={`${formatMoney(account.revenueGap, locale)} ${currency}`}
                   tone={account.revenueGap > 0 ? "warning" : "default"}
                 />
               </div>
@@ -390,53 +403,53 @@ export default async function FinancePage({
       {/* ============ Section 5: Sales Department ============ */}
       <section>
         <div className="mb-3">
-          <h2 className="text-base font-semibold">قسم المبيعات — {window.monthLabel}</h2>
+          <h2 className="text-base font-semibold">{t("sales.title", { month: monthText })}</h2>
           <p className="text-xs text-muted-foreground">
-            متابعة دفعات عملاء المبيعات الجدد + الإيراد الكلي من المبيعات
+            {t("sales.description")}
           </p>
         </div>
         <div className="grid gap-3 lg:grid-cols-2">
           <Card>
             <CardContent className="p-4 space-y-1.5">
-              <MoneyRow label="المُتوقّع" value="" isHeader />
+              <MoneyRow label={t("sales.expectedHeader")} value="" isHeader />
               <MoneyRow
-                label="دفعات متأخرة"
-                value={`${sar(sales.overdueInstallments)} ر.س`}
+                label={t("sales.overdueInstallments")}
+                value={`${formatMoney(sales.overdueInstallments, locale)} ${currency}`}
                 tone="warning"
               />
               <MoneyRow
-                label="دفعات هذا الشهر"
-                value={`${sar(sales.expectedInstallments)} ر.س`}
+                label={t("sales.thisMonthInstallments")}
+                value={`${formatMoney(sales.expectedInstallments, locale)} ${currency}`}
               />
               <MoneyRow
-                label="إجمالي المتوقع من الدفعات"
-                value={`${sar(sales.totalExpectedFromInstallments)} ر.س`}
+                label={t("sales.totalExpected")}
+                value={`${formatMoney(sales.totalExpectedFromInstallments, locale)} ${currency}`}
                 isBig
               />
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4 space-y-1.5">
-              <MoneyRow label="الفعلي" value="" isHeader />
+              <MoneyRow label={t("sales.actualHeader")} value="" isHeader />
               <MoneyRow
-                label="دفعات مُحصَّلة"
-                value={`${sar(sales.actualInstallments)} ر.س`}
+                label={t("sales.collectedInstallments")}
+                value={`${formatMoney(sales.actualInstallments, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="إيراد من عملاء جدد"
-                value={`${sar(sales.actualIncomeFromNewClients)} ر.س`}
+                label={t("sales.newClientIncome")}
+                value={`${formatMoney(sales.actualIncomeFromNewClients, locale)} ${currency}`}
                 tone="success"
               />
               <MoneyRow
-                label="إجمالي إيراد المبيعات"
-                value={`${sar(sales.totalIncomeFromSales)} ر.س`}
+                label={t("sales.totalIncome")}
+                value={`${formatMoney(sales.totalIncomeFromSales, locale)} ${currency}`}
                 isBig
                 tone="success"
               />
               <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
-                  label="نسبة تحصيل الدفعات"
+                  label={t("sales.collectionRate")}
                   value={
                     sales.installmentsAchievementPct === null
                       ? "—"
@@ -453,8 +466,8 @@ export default async function FinancePage({
                   }
                 />
                 <MoneyRow
-                  label="الفجوة"
-                  value={`${sar(sales.gap)} ر.س`}
+                  label={t("sales.gap")}
+                  value={`${formatMoney(sales.gap, locale)} ${currency}`}
                   tone={sales.gap > 0 ? "warning" : "default"}
                 />
               </div>
@@ -468,17 +481,17 @@ export default async function FinancePage({
         <CardContent className="p-4 flex items-start gap-3">
           <Sparkles className="size-5 text-cyan shrink-0 mt-0.5" />
           <div className="text-xs text-foreground/90 leading-relaxed">
-            <p className="font-semibold mb-1">كيف تُحسب هذه الأرقام؟</p>
+            <p className="font-semibold mb-1">{t("help.title")}</p>
             <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-              <li>حالة العملاء اليوم: عدّ العقود النشطة في كل فئة (مستقل عن الشهر).</li>
-              <li>حركة الشهر: العقود التي بدأت أو أُغلقت في الشهر المختار من الزر أعلاه.</li>
-              <li>الإيراد الفعلي: مجموع الدفعات (installments) الفعلية المُسجَّلة بتاريخ هذا الشهر.</li>
-              <li>قسم الأكاونت = العقود التي حقلها <code>target</code> ليس &quot;Sales Deposit&quot;. قسم المبيعات = العقود ذات <code>target=Sales Deposit</code>.</li>
+              <li>{t("help.items.todayStatus")}</li>
+              <li>{t("help.items.monthMovement")}</li>
+              <li>{t("help.items.actualIncome")}</li>
+              <li>{t("help.items.departments")}</li>
             </ul>
             <p className="mt-2 text-[11px]">
-              <Link href="/contracts" className="text-cyan hover:underline">إدارة العقود</Link>
+              <Link href="/contracts" className="text-cyan hover:underline">{t("help.contracts")}</Link>
               {" · "}
-              <Link href="/finance/expenses" className="text-cyan hover:underline">المصروفات والمصاريف التشغيلية</Link>
+              <Link href="/finance/expenses" className="text-cyan hover:underline">{t("help.expenses")}</Link>
             </p>
           </div>
         </CardContent>

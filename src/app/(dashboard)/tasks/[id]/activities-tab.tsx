@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Check, Trash2, Phone, Mail, Eye, Upload, Bell } from "lucide-react";
 import { toast } from "sonner";
@@ -22,14 +23,6 @@ export type ActivityRow = {
   due_date: string | null;
   completed_at: string | null;
   assignee_name: string | null;
-};
-
-const TYPE_LABELS: Record<ActivityType, string> = {
-  call:   "اتصال",
-  email:  "بريد",
-  review: "مراجعة",
-  upload: "رفع",
-  other:  "أخرى",
 };
 
 const TYPE_ICONS: Record<ActivityType, React.ElementType> = {
@@ -58,6 +51,14 @@ export function ActivitiesTab({
   rows: ActivityRow[];
   canManage: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.activities");
+  const typeLabels: Record<ActivityType, string> = {
+    call: t("types.call"),
+    email: t("types.email"),
+    review: t("types.review"),
+    upload: t("types.upload"),
+    other: t("types.other"),
+  };
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [type, setType] = useState<ActivityType>("other");
@@ -68,15 +69,21 @@ export function ActivitiesTab({
   const onAdd = () =>
     start(async () => {
       const trimmed = summary.trim();
-      if (!trimmed) return toast.error("اكتب وصف النشاط");
+      if (!trimmed) {
+        toast.error(t("enterSummary"));
+        return;
+      }
       const res = await createActivityAction({
         taskId,
         activityType: type,
         summary: trimmed,
         dueDate: dueDate || undefined,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("أُضيف النشاط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.added"));
       setSummary("");
       setDueDate("");
       setType("other");
@@ -87,16 +94,22 @@ export function ActivitiesTab({
   const onComplete = (id: string) =>
     start(async () => {
       const res = await completeActivityAction({ id, taskId });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("اكتمل النشاط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.completed"));
       router.refresh();
     });
 
   const onDelete = (id: string) =>
     start(async () => {
       const res = await deleteActivityAction({ id, taskId });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("حُذف النشاط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.deleted"));
       router.refresh();
     });
 
@@ -107,12 +120,12 @@ export function ActivitiesTab({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          أنشطة مجدولة (مكالمات، مراجعات، رفع ملفات…) منفصلة عن الوصف والمهام الفرعية.
+          {t("description")}
         </p>
         {canManage && !adding && (
           <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
             <Plus className="ml-1 size-3.5" />
-            إضافة نشاط
+            {t("add")}
           </Button>
         )}
       </div>
@@ -125,9 +138,9 @@ export function ActivitiesTab({
             disabled={pending}
             className="h-9 rounded-md border bg-background px-2 text-xs"
           >
-            {(Object.keys(TYPE_LABELS) as ActivityType[]).map((k) => (
+            {(Object.keys(typeLabels) as ActivityType[]).map((k) => (
               <option key={k} value={k}>
-                {TYPE_LABELS[k]}
+                {typeLabels[k]}
               </option>
             ))}
           </select>
@@ -140,7 +153,7 @@ export function ActivitiesTab({
                 onAdd();
               }
             }}
-            placeholder="وصف النشاط…"
+            placeholder={t("placeholder")}
             disabled={pending}
             maxLength={500}
             className="h-9 min-w-[14rem] flex-1"
@@ -155,17 +168,17 @@ export function ActivitiesTab({
           />
           <Button onClick={onAdd} disabled={pending} size="sm">
             {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            حفظ
+            {t("save")}
           </Button>
           <Button onClick={() => setAdding(false)} size="sm" variant="ghost" disabled={pending}>
-            إلغاء
+            {t("cancel")}
           </Button>
         </div>
       )}
 
       {open.length === 0 && done.length === 0 ? (
         <p className="rounded-md border bg-muted/20 px-3 py-4 text-center text-xs text-muted-foreground">
-          لا توجد أنشطة مجدولة.
+          {t("empty")}
         </p>
       ) : (
         <ul className="grid gap-1.5">
@@ -182,7 +195,7 @@ export function ActivitiesTab({
               >
                 <Icon className={cn("size-3.5 shrink-0", overdue ? "text-red-500" : "text-muted-foreground")} />
                 <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {TYPE_LABELS[a.activity_type]}
+                  {typeLabels[a.activity_type]}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{a.summary}</span>
                 {a.assignee_name && (
@@ -203,7 +216,7 @@ export function ActivitiesTab({
                 )}
                 {overdue && (
                   <span className="shrink-0 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400">
-                    متأخر
+                    {t("overdue")}
                   </span>
                 )}
                 {canManage && (
@@ -212,7 +225,7 @@ export function ActivitiesTab({
                       type="button"
                       onClick={() => onComplete(a.id)}
                       disabled={pending}
-                      title="إكمال"
+                      title={t("complete")}
                       className="shrink-0 rounded p-1 text-emerald-600 hover:bg-emerald-500/10"
                     >
                       <Check className="size-3.5" />
@@ -221,7 +234,7 @@ export function ActivitiesTab({
                       type="button"
                       onClick={() => onDelete(a.id)}
                       disabled={pending}
-                      title="حذف"
+                      title={t("delete")}
                       className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-cc-red"
                     >
                       <Trash2 className="size-3.5" />
@@ -233,7 +246,7 @@ export function ActivitiesTab({
           })}
           {done.length > 0 && (
             <li className="mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              مكتمل
+              {t("done")}
             </li>
           )}
           {done.map((a) => {
@@ -245,7 +258,7 @@ export function ActivitiesTab({
               >
                 <Icon className="size-3.5 shrink-0" />
                 <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px]">
-                  {TYPE_LABELS[a.activity_type]}
+                  {typeLabels[a.activity_type]}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{a.summary}</span>
                 {a.due_date && (
@@ -258,7 +271,7 @@ export function ActivitiesTab({
                     type="button"
                     onClick={() => onDelete(a.id)}
                     disabled={pending}
-                    title="حذف"
+                    title={t("delete")}
                     className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-cc-red"
                   >
                     <Trash2 className="size-3.5" />

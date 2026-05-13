@@ -2,6 +2,7 @@
 
 import { Paperclip, Download, Image as ImageIcon, FileText, FileVideo, File } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 
 export type AttachmentRow = {
@@ -51,6 +52,7 @@ export function AttachmentsTab({
   // Project view aggregates across tasks, so we surface the task column.
   showTaskColumn?: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.attachments");
   // Lazy-resolve a signed URL for a storage_path on demand. Signed URLs are
   // valid for 60s — long enough to click "Download" once.
   const [busy, setBusy] = useState<string | null>(null);
@@ -92,7 +94,7 @@ export function AttachmentsTab({
         className="flex flex-col items-center gap-2 rounded-md border border-dashed border-soft px-3 py-8 text-center text-sm text-muted-foreground"
       >
         <Paperclip className="size-4 opacity-60" />
-        <span>لا توجد مرفقات بعد. أضِف مرفقًا من شريط التعليقات (كبسة دبوس الورق).</span>
+        <span>{t("empty")}</span>
       </div>
     );
   }
@@ -130,7 +132,7 @@ export function AttachmentsTab({
               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-cyan/10 px-2 py-1 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:opacity-40"
             >
               <Download className="size-3" />
-              {busy === row.id ? "..." : "فتح"}
+              {busy === row.id ? "..." : t("open")}
             </button>
           </li>
         );

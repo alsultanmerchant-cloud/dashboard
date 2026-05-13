@@ -312,7 +312,7 @@ export async function POST(req: Request) {
     });
 
     const result = streamText({
-      model: google("gemini-3-flash-preview"),
+      model: google("gemini-2.5-flash"),
       system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
       // Fail fast on transient Gemini errors (esp. 429 rate limits) instead
@@ -333,7 +333,7 @@ export async function POST(req: Request) {
           execute: async ({ query }) => {
             try {
               const r = await generateText({
-                model: google("gemini-3-flash-preview"),
+                model: google("gemini-2.5-flash"),
                 prompt: query,
                 tools: { googleSearch: google.tools.googleSearch({}) },
               });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Pencil, Check, X, Loader2, CalendarPlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ export function DeadlineEditor({
   overdue: boolean;
   canEdit: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.deadlineEditor");
   const [value, setValue] = useState<string | null>(initialDate);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initialDate ?? "");
@@ -65,7 +67,7 @@ export function DeadlineEditor({
           className="h-7 gap-1"
         >
           {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          حفظ
+          {t("save")}
         </Button>
         <Button
           type="button"
@@ -79,7 +81,7 @@ export function DeadlineEditor({
           className="h-7 gap-1"
         >
           <X className="size-3.5" />
-          إلغاء
+          {t("cancel")}
         </Button>
         {value && (
           <Button
@@ -91,7 +93,7 @@ export function DeadlineEditor({
             className="h-7 gap-1 text-cc-red hover:text-cc-red"
           >
             <Trash2 className="size-3.5" />
-            إزالة
+            {t("remove")}
           </Button>
         )}
         {error && <span className="w-full text-[11px] text-cc-red">{error}</span>}
@@ -102,7 +104,7 @@ export function DeadlineEditor({
   if (!value) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">لا يوجد موعد نهائي</span>
+        <span className="text-muted-foreground">{t("none")}</span>
         {canEdit && (
           <button
             type="button"
@@ -110,7 +112,7 @@ export function DeadlineEditor({
             className="inline-flex items-center gap-1 rounded-md border border-cyan/30 bg-cyan-dim/30 px-2 py-0.5 text-[11px] font-medium text-cyan hover:bg-cyan-dim/50"
           >
             <CalendarPlus className="size-3" />
-            إضافة موعد
+            {t("add")}
           </button>
         )}
       </div>
@@ -130,8 +132,8 @@ export function DeadlineEditor({
           type="button"
           onClick={startEdit}
           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="تعديل الموعد النهائي"
-          title="تعديل الموعد النهائي"
+          aria-label={t("edit")}
+          title={t("edit")}
         >
           <Pencil className="size-3.5" />
         </button>

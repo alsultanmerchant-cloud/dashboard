@@ -75,6 +75,11 @@ function nullable<T>(v: T | false | undefined): T | null {
   return v === false || v === undefined ? null : v;
 }
 
+function normalizeEmployeeName(name: string | null | undefined): string | null {
+  const value = name?.trim().replace(/\s+/g, " ");
+  return value ? value : null;
+}
+
 async function importEmployees(ctx: ImportContext): Promise<number> {
   // Sky Light's Odoo has very few hr.employee rows but 112 res.users.
   // Tasks reference users by res.users.id in their user_ids M2M, so we MUST
@@ -187,6 +192,8 @@ async function importDepartments(ctx: ImportContext): Promise<number> {
   }
 
   // Pass 2: wire parent_department_id once every row's uuid is known.
+  // Seed-only: dashboard's /organization/chart owns the dept hierarchy, so we
+  // only set the parent on rows where it hasn't already been chosen locally.
   for (const d of rows) {
     const parentOdooId = d.parent_id ? d.parent_id[0] : null;
     if (!parentOdooId) continue;
@@ -196,7 +203,8 @@ async function importDepartments(ctx: ImportContext): Promise<number> {
     await supabaseAdmin
       .from("departments")
       .update({ parent_department_id: parentId })
-      .eq("id", childId);
+      .eq("id", childId)
+      .is("parent_department_id", null);
   }
 
   // Pass 3: head_employee_id, resolved via hr.employee.user_id → employee_profiles.
@@ -251,6 +259,20 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
     : [];
   const jobNameById = new Map(jobs.map((j) => [j.id, j.name]));
 
+  const { data: existingProfiles } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name")
+    .eq("organization_id", ctx.organizationId)
+    .eq("external_source", SOURCE);
+  const profileIdsByName = new Map<string, string[]>();
+  for (const profile of existingProfiles ?? []) {
+    const normalized = normalizeEmployeeName(profile.full_name as string | null);
+    if (!normalized) continue;
+    const arr = profileIdsByName.get(normalized) ?? [];
+    arr.push(profile.id as string);
+    profileIdsByName.set(normalized, arr);
+  }
+
   // First pass: backfill department_id + position on each employee_profile
   // matched via res.users.id. Build a map of Odoo hr.employee.id → Supabase
   // employee_profiles.id so we can stitch manager_employee_id in pass 2.
@@ -258,8 +280,16 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
   let updated = 0;
   for (const e of employees) {
     const userOdooId = e.user_id ? e.user_id[0] : null;
-    if (!userOdooId) continue;
-    const empProfileId = ctx.odooUserToEmployee.get(userOdooId);
+    let empProfileId = userOdooId ? (ctx.odooUserToEmployee.get(userOdooId) ?? null) : null;
+    if (!empProfileId) {
+      const normalizedName = normalizeEmployeeName(e.name);
+      if (normalizedName) {
+        const matches = profileIdsByName.get(normalizedName) ?? [];
+        if (matches.length === 1) {
+          empProfileId = matches[0];
+        }
+      }
+    }
     if (!empProfileId) continue;
 
     hrIdToEmpProfile.set(e.id, empProfileId);
@@ -277,28 +307,43 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
     // free-text job title from hr.job lands in `job_title`; mapping a string
     // like "Social Media Specialist" into the tier enum would need rules the
     // team hasn't defined yet, so leave `position` alone.
-    const update: Record<string, unknown> = {
-      department_id: deptId,
-    };
-    // Refresh phone / job_title too — these come from partner.function in
-    // importEmployees, but hr.employee.work_phone is more authoritative.
-    if (e.work_phone) update.phone = e.work_phone;
-    if (jobName && jobName.length > 0) update.job_title = jobName;
+    //
+    // Org-chart fields (department_id, manager_employee_id, head_employee_id)
+    // are owned by the dashboard's /organization pages — Odoo's HR data is
+    // sparser than the operations PDF, so we only seed these when the local
+    // row is still null. Once set in the dashboard, Odoo will never overwrite.
+    // Phone / job_title remain always-refreshed; Odoo's hr.employee is the
+    // authoritative source for those.
+    const refreshable: Record<string, unknown> = {};
+    if (e.work_phone) refreshable.phone = e.work_phone;
+    if (jobName && jobName.length > 0) refreshable.job_title = jobName;
 
-    const { error } = await supabaseAdmin
-      .from("employee_profiles")
-      .update(update)
-      .eq("id", empProfileId);
-    if (error) {
-      // Don't fail the whole import on one bad row.
-      console.warn(`[odoo-import] employee_hr ${e.id} (${e.name}): ${error.message}`);
-      continue;
+    if (Object.keys(refreshable).length > 0) {
+      const { error } = await supabaseAdmin
+        .from("employee_profiles")
+        .update(refreshable)
+        .eq("id", empProfileId);
+      if (error) {
+        console.warn(`[odoo-import] employee_hr ${e.id} (${e.name}): ${error.message}`);
+        continue;
+      }
     }
+
+    // Seed department_id only if dashboard hasn't set one.
+    if (deptId) {
+      await supabaseAdmin
+        .from("employee_profiles")
+        .update({ department_id: deptId })
+        .eq("id", empProfileId)
+        .is("department_id", null);
+    }
+
     updated += 1;
   }
 
   // Pass 2: stitch manager_employee_id once every hr.employee → emp_profile
-  // mapping is in hand.
+  // mapping is in hand. Seed-only: dashboard's /organization/employees is the
+  // source of truth, so Odoo never overwrites an already-set manager.
   for (const e of employees) {
     const empProfileId = hrIdToEmpProfile.get(e.id);
     if (!empProfileId) continue;
@@ -309,7 +354,8 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
     await supabaseAdmin
       .from("employee_profiles")
       .update({ manager_employee_id: managerProfileId })
-      .eq("id", empProfileId);
+      .eq("id", empProfileId)
+      .is("manager_employee_id", null);
   }
 
   // Pass 3: department heads — once we know every hr.employee → emp_profile,
@@ -329,10 +375,13 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
     // local hr.employee.id → empProfile map built in pass 1.
     const headProfileId = hrIdToEmpProfile.get(d.manager_id[0]);
     if (!headProfileId) continue;
+    // Seed-only: dashboard's /organization/departments is the source of truth
+    // for who heads a department; Odoo never overwrites an already-set head.
     await supabaseAdmin
       .from("departments")
       .update({ head_employee_id: headProfileId })
-      .eq("id", deptId);
+      .eq("id", deptId)
+      .is("head_employee_id", null);
   }
 
   return updated;
@@ -507,6 +556,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       // Rwasem custom fields used by the projects list UI
       "store_name",
       "account_manager_id",
+      "social_specialist_id",
+      "media_specialist_id",
+      "seo_specialist_id",
       "target",
       "color",
       "is_favorite",
@@ -555,6 +607,18 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       p.account_manager_id && ctx.employeeIdMap.get(p.account_manager_id[0])
         ? ctx.employeeIdMap.get(p.account_manager_id[0])!
         : null;
+    const socialSpecialistUuid =
+      p.social_specialist_id && ctx.employeeIdMap.get(p.social_specialist_id[0])
+        ? ctx.employeeIdMap.get(p.social_specialist_id[0])!
+        : null;
+    const mediaSpecialistUuid =
+      p.media_specialist_id && ctx.employeeIdMap.get(p.media_specialist_id[0])
+        ? ctx.employeeIdMap.get(p.media_specialist_id[0])!
+        : null;
+    const seoSpecialistUuid =
+      p.seo_specialist_id && ctx.employeeIdMap.get(p.seo_specialist_id[0])
+        ? ctx.employeeIdMap.get(p.seo_specialist_id[0])!
+        : null;
 
     const targetRaw = typeof p.target === "string" ? p.target : null;
     const target = targetRaw && ALLOWED_TARGETS.has(targetRaw) ? targetRaw : null;
@@ -567,6 +631,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       client_id: clientUuid,
       project_manager_employee_id: projectManagerUuid,
       account_manager_employee_id: accountManagerUuid,
+      social_specialist_id: socialSpecialistUuid,
+      media_specialist_id: mediaSpecialistUuid,
+      seo_specialist_id: seoSpecialistUuid,
       // Date fields: Sky Light uses ks_project_start/end (Ksolves Gantt
       // addon) as their primary contract dates. date_start/date are
       // filled on only 8/75 active projects. Prefer the ks_* values when
@@ -801,15 +868,62 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   // Project UUID → AM employee UUID map. Used to auto-assign each task's
   // account_manager slot from the project's AM (matches Sky Light's owner
   // system MD: tasks inherit the project's AM unless overridden).
-  const { data: projectAMs } = await supabaseAdmin
+  const { data: projectRoles } = await supabaseAdmin
     .from("projects")
-    .select("id, account_manager_employee_id")
+    .select(
+      "id, account_manager_employee_id, project_manager_employee_id, social_specialist_id, media_specialist_id, seo_specialist_id, social_manager_id, media_manager_id, seo_manager_id",
+    )
     .eq("organization_id", ctx.organizationId);
-  const amByProject = new Map<string, string>();
-  for (const p of projectAMs ?? []) {
-    if (p.account_manager_employee_id) {
-      amByProject.set(p.id as string, p.account_manager_employee_id as string);
+  const projectRoleById = new Map<string, {
+    accountManagerId: string | null;
+    projectManagerId: string | null;
+    socialSpecialistId: string | null;
+    mediaSpecialistId: string | null;
+    seoSpecialistId: string | null;
+    socialManagerId: string | null;
+    mediaManagerId: string | null;
+    seoManagerId: string | null;
+  }>();
+  for (const p of projectRoles ?? []) {
+    projectRoleById.set(p.id as string, {
+      accountManagerId: (p.account_manager_employee_id as string | null) ?? null,
+      projectManagerId: (p.project_manager_employee_id as string | null) ?? null,
+      socialSpecialistId: (p.social_specialist_id as string | null) ?? null,
+      mediaSpecialistId: (p.media_specialist_id as string | null) ?? null,
+      seoSpecialistId: (p.seo_specialist_id as string | null) ?? null,
+      socialManagerId: (p.social_manager_id as string | null) ?? null,
+      mediaManagerId: (p.media_manager_id as string | null) ?? null,
+      seoManagerId: (p.seo_manager_id as string | null) ?? null,
+    });
+  }
+
+  const { data: services } = await supabaseAdmin
+    .from("services")
+    .select("id, external_id, name, slug")
+    .eq("organization_id", ctx.organizationId);
+  const serviceKindById = new Map<string, "social" | "media" | "seo" | null>();
+  for (const s of services ?? []) {
+    const ext = s.external_id ? Number(s.external_id) : null;
+    let kind: "social" | "media" | "seo" | null = null;
+    if (ext === 234 || ext === 158) kind = "social";
+    else if (ext === 134 || ext === 69) kind = "media";
+    else if (ext === 235 || ext === 71) kind = "seo";
+    else {
+      const haystack = `${s.name ?? ""} ${s.slug ?? ""}`.toLowerCase();
+      if (haystack.includes("social") || haystack.includes("سوشيال") || haystack.includes("التواصل")) {
+        kind = "social";
+      } else if (
+        haystack.includes("media") ||
+        haystack.includes("ممولة") ||
+        haystack.includes("إعلانات") ||
+        haystack.includes("ads")
+      ) {
+        kind = "media";
+      } else if (haystack.includes("seo") || haystack.includes("سيو") || haystack.includes("تحسين")) {
+        kind = "seo";
+      }
     }
+    serviceKindById.set(s.id as string, kind);
   }
 
   // Batch the project filter to keep each RPC well under Odoo's read timeout.
@@ -940,7 +1054,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
       agentEmployeeIds: (Array.isArray(t.user_ids) ? t.user_ids : [])
         .map((uid) => ctx.odooUserToEmployee.get(uid))
         .filter((x): x is string => Boolean(x)),
-      amEmployeeId: amByProject.get(projectUuid) ?? null,
+      amEmployeeId: projectRoleById.get(projectUuid)?.accountManagerId ?? null,
     });
   }
 
@@ -1011,14 +1125,38 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     task_id: string;
     employee_id: string;
     role_type: "agent" | "account_manager";
+    team_manager_employee_id: string | null;
   }[] = [];
   for (const [taskUuid, s] of stagedByTaskUuid) {
+    const projectRole = projectRoleById.get(s.projectUuid) ?? null;
+    const serviceId = (s.row.service_id as string | null) ?? null;
+    const serviceKind = serviceId ? (serviceKindById.get(serviceId) ?? null) : null;
     for (const eid of s.agentEmployeeIds) {
+      if (s.amEmployeeId && eid === s.amEmployeeId) continue;
+      const chooseManager = (candidate: string | null): string | null => {
+        if (candidate && candidate !== eid) return candidate;
+        if (projectRole?.projectManagerId && projectRole.projectManagerId !== eid) {
+          return projectRole.projectManagerId;
+        }
+        return null;
+      };
+      const teamManagerEmployeeId =
+        serviceKind === "social"
+          ? chooseManager(projectRole?.socialManagerId ?? null)
+          : serviceKind === "media"
+            ? chooseManager(projectRole?.mediaManagerId ?? null)
+            : serviceKind === "seo"
+              ? chooseManager(projectRole?.seoManagerId ?? null)
+              : chooseManager(projectRole?.projectManagerId ?? null);
       assigneeInserts.push({
         organization_id: ctx.organizationId,
         task_id: taskUuid,
         employee_id: eid,
         role_type: "agent",
+        team_manager_employee_id:
+          teamManagerEmployeeId && teamManagerEmployeeId !== eid
+            ? teamManagerEmployeeId
+            : null,
       });
     }
     if (s.amEmployeeId && !existingAMSet.has(taskUuid)) {
@@ -1027,6 +1165,10 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         task_id: taskUuid,
         employee_id: s.amEmployeeId,
         role_type: "account_manager",
+        team_manager_employee_id:
+          projectRole?.projectManagerId && projectRole.projectManagerId !== s.amEmployeeId
+            ? projectRole.projectManagerId
+            : null,
       });
     }
   }

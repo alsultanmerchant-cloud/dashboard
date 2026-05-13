@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ export function SubtasksTab({
   subtasks: SubtaskRow[];
   canManage: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.subtasks");
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -34,10 +36,16 @@ export function SubtasksTab({
   const onAdd = () =>
     start(async () => {
       const trimmed = title.trim();
-      if (!trimmed) return toast.error("اكتب عنوان المهمة");
+      if (!trimmed) {
+        toast.error(t("enterTitle"));
+        return;
+      }
       const res = await createSubtaskAction({ parentTaskId, title: trimmed });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم إنشاء المهمة الفرعية");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.created"));
       setTitle("");
       setAdding(false);
       router.refresh();
@@ -47,12 +55,12 @@ export function SubtasksTab({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          المهام الفرعية ترث المشروع من المهمة الأم.
+          {t("description")}
         </p>
         {canManage && !adding && (
           <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
             <Plus className="ml-1 size-3.5" />
-            إضافة مهمة فرعية
+            {t("add")}
           </Button>
         )}
       </div>
@@ -68,24 +76,24 @@ export function SubtasksTab({
                 onAdd();
               }
             }}
-            placeholder="عنوان المهمة الفرعية…"
+            placeholder={t("placeholder")}
             disabled={pending}
             maxLength={200}
             className="h-9 flex-1"
           />
           <Button onClick={onAdd} disabled={pending} size="sm">
             {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            حفظ
+            {t("save")}
           </Button>
           <Button onClick={() => setAdding(false)} size="sm" variant="ghost" disabled={pending}>
-            إلغاء
+            {t("cancel")}
           </Button>
         </div>
       )}
 
       {subtasks.length === 0 ? (
         <p className="rounded-md border bg-muted/20 px-3 py-4 text-center text-xs text-muted-foreground">
-          لا توجد مهام فرعية.
+          {t("empty")}
         </p>
       ) : (
         <ul className="grid gap-1.5">

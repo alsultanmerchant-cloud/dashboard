@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
   CalendarClock,
   AlertTriangle,
@@ -18,7 +19,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { Pagination } from "@/components/pagination";
 import { PriorityBadge, ServiceBadge, TaskStageBadge } from "@/components/status-badges";
-import { formatArabicShortDate } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 
 const COLLAPSED_PER_BUCKET = 8;
@@ -35,53 +35,63 @@ type BucketDef = {
   emptyText: string;
 };
 
-const BUCKETS: BucketDef[] = [
-  {
-    key: "overdue",
-    label: "متأخر",
-    description: "مهام تجاوز موعد رفعها وما زالت غير مكتملة",
-    tone: "destructive",
-    icon: <AlertTriangle className="size-5" />,
-    rowAccent: "border-r-2 border-cc-red/60",
-    emptyText: "لا توجد مهام متأخرة عن موعد الرفع.",
-  },
-  {
-    key: "today",
-    label: "اليوم",
-    description: "يجب رفعها قبل نهاية اليوم",
-    tone: "warning",
-    icon: <Clock className="size-5" />,
-    rowAccent: "border-r-2 border-amber/60",
-    emptyText: "لا توجد مهام يجب رفعها اليوم.",
-  },
-  {
-    key: "this_week",
-    label: "خلال أسبوع",
-    description: "مهام يستحق رفعها خلال السبعة أيام القادمة",
-    tone: "info",
-    icon: <CalendarRange className="size-5" />,
-    rowAccent: "border-r-2 border-cc-blue/60",
-    emptyText: "لا شيء على جدول الأسبوع المقبل.",
-  },
-  {
-    key: "later",
-    label: "لاحقًا",
-    description: "مهام موعد رفعها بعد أكثر من أسبوع",
-    tone: "default",
-    icon: <CalendarDays className="size-5" />,
-    rowAccent: "border-r-2 border-soft-2",
-    emptyText: "لا توجد مهام مجدولة لاحقًا.",
-  },
-];
+function buildBuckets(t: Awaited<ReturnType<typeof getTranslations<"UploadsPage">>>): BucketDef[] {
+  return [
+    {
+      key: "overdue",
+      label: t("buckets.overdue.label"),
+      description: t("buckets.overdue.description"),
+      tone: "destructive",
+      icon: <AlertTriangle className="size-5" />,
+      rowAccent: "border-r-2 border-cc-red/60",
+      emptyText: t("buckets.overdue.empty"),
+    },
+    {
+      key: "today",
+      label: t("buckets.today.label"),
+      description: t("buckets.today.description"),
+      tone: "warning",
+      icon: <Clock className="size-5" />,
+      rowAccent: "border-r-2 border-amber/60",
+      emptyText: t("buckets.today.empty"),
+    },
+    {
+      key: "this_week",
+      label: t("buckets.this_week.label"),
+      description: t("buckets.this_week.description"),
+      tone: "info",
+      icon: <CalendarRange className="size-5" />,
+      rowAccent: "border-r-2 border-cc-blue/60",
+      emptyText: t("buckets.this_week.empty"),
+    },
+    {
+      key: "later",
+      label: t("buckets.later.label"),
+      description: t("buckets.later.description"),
+      tone: "default",
+      icon: <CalendarDays className="size-5" />,
+      rowAccent: "border-r-2 border-soft-2",
+      emptyText: t("buckets.later.empty"),
+    },
+  ];
+}
 
-function formatDelta(daysDelta: number): string {
-  if (daysDelta === 0) return "اليوم";
-  if (daysDelta === -1) return "متأخر يوم واحد";
-  if (daysDelta === -2) return "متأخر يومين";
-  if (daysDelta < 0) return `متأخر ${Math.abs(daysDelta)} أيام`;
-  if (daysDelta === 1) return "بعد يوم";
-  if (daysDelta === 2) return "بعد يومين";
-  return `بعد ${daysDelta} أيام`;
+function formatDelta(daysDelta: number, t: Awaited<ReturnType<typeof getTranslations<"UploadsPage">>>): string {
+  if (daysDelta === 0) return t("delta.today");
+  if (daysDelta === -1) return t("delta.overdueOne");
+  if (daysDelta === -2) return t("delta.overdueTwo");
+  if (daysDelta < 0) return t("delta.overdueMany", { count: Math.abs(daysDelta) });
+  if (daysDelta === 1) return t("delta.inOne");
+  if (daysDelta === 2) return t("delta.inTwo");
+  return t("delta.inMany", { count: daysDelta });
+}
+
+function formatShortDate(value: string, locale: string): string {
+  return new Date(value).toLocaleDateString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default async function UploadsPage({
@@ -90,19 +100,22 @@ export default async function UploadsPage({
   searchParams: Promise<{ bucket?: string; page?: string }>;
 }) {
   const session = await requirePagePermission("tasks.view");
+  const t = await getTranslations("UploadsPage");
+  const locale = await getLocale();
+  const buckets = buildBuckets(t);
   const sp = await searchParams;
 
   if (!session.employeeId) {
     return (
       <div>
         <PageHeader
-          title="اليوم — رفع المهام"
-          description="قائمة المهام التي يجب على المختص رفعها قبل الديدلاين."
+          title={t("title")}
+          description={t("description")}
         />
         <EmptyState
           icon={<CalendarClock className="size-6" />}
-          title="هذه الصفحة مخصصة للمختصين"
-          description="تظهر هنا المهام المسندة إليك في خانة المختص. لا يبدو أن لديك ملف موظف مرتبط بحسابك حاليًا."
+          title={t("specialistsOnly.title")}
+          description={t("specialistsOnly.description")}
         />
       </div>
     );
@@ -127,13 +140,13 @@ export default async function UploadsPage({
   return (
     <div className="space-y-8">
       <PageHeader
-        title="اليوم — رفع المهام"
-        description="مهامك كمختص مرتبة بحسب موعد الرفع. يُحسب الموعد بطرح فترة الرفع المسبقة من الديدلاين كما في دليل عمليات Sky Light."
+        title={t("title")}
+        description={t("descriptionFull")}
       />
 
       {/* Metric cards (also act as quick links to expanded views) */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {BUCKETS.map((b) => (
+        {buckets.map((b) => (
           <Link
             key={b.key}
             href={groups[b.key].length > 0 ? `/uploads?bucket=${b.key}` : "/uploads"}
@@ -157,19 +170,21 @@ export default async function UploadsPage({
       {total === 0 ? (
         <EmptyState
           icon={<Inbox className="size-6" />}
-          title="لا توجد مهام تنتظر الرفع"
-          description="عندما تُسند إليك مهمة كمختص وتقترب من الديدلاين، ستظهر هنا تلقائيًا."
+          title={t("empty.title")}
+          description={t("empty.description")}
         />
       ) : expanded ? (
         <ExpandedBucket
-          def={BUCKETS.find((b) => b.key === expanded)!}
+          def={buckets.find((b) => b.key === expanded)!}
           rows={groups[expanded]}
           page={page}
+          locale={locale}
+          t={t}
         />
       ) : (
         <div className="space-y-6">
-          {BUCKETS.map((b) => (
-            <BucketSection key={b.key} def={b} rows={groups[b.key]} />
+          {buckets.map((b) => (
+            <BucketSection key={b.key} def={b} rows={groups[b.key]} locale={locale} t={t} />
           ))}
         </div>
       )}
@@ -177,7 +192,17 @@ export default async function UploadsPage({
   );
 }
 
-function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }) {
+function BucketSection({
+  def,
+  rows,
+  locale,
+  t,
+}: {
+  def: BucketDef;
+  rows: UploadQueueRow[];
+  locale: string;
+  t: Awaited<ReturnType<typeof getTranslations<"UploadsPage">>>;
+}) {
   const visible = rows.slice(0, COLLAPSED_PER_BUCKET);
   const hidden = rows.length - visible.length;
   return (
@@ -201,7 +226,7 @@ function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }
             <>
               <ul className="divide-y divide-white/[0.05]">
                 {visible.map((r) => (
-                  <UploadRow key={r.id} row={r} accent={def.rowAccent} />
+                  <UploadRow key={r.id} row={r} accent={def.rowAccent} locale={locale} t={t} />
                 ))}
               </ul>
               {hidden > 0 && (
@@ -209,7 +234,7 @@ function BucketSection({ def, rows }: { def: BucketDef; rows: UploadQueueRow[] }
                   href={`/uploads?bucket=${def.key}`}
                   className="flex items-center justify-center gap-1.5 border-t border-soft px-4 py-3 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim/30"
                 >
-                  عرض الكل ({rows.length})
+                  {t("showAll", { count: rows.length })}
                   <ArrowRight className="size-3.5 icon-flip-rtl" />
                 </Link>
               )}
@@ -225,10 +250,14 @@ function ExpandedBucket({
   def,
   rows,
   page,
+  locale,
+  t,
 }: {
   def: BucketDef;
   rows: UploadQueueRow[];
   page: number;
+  locale: string;
+  t: Awaited<ReturnType<typeof getTranslations<"UploadsPage">>>;
 }) {
   const total = rows.length;
   const totalPages = Math.max(1, Math.ceil(total / EXPANDED_PAGE_SIZE));
@@ -245,7 +274,7 @@ function ExpandedBucket({
           className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowRight className="size-3.5" />
-          العودة لكل المهام
+          {t("backToAll")}
         </Link>
       </div>
       <Card>
@@ -257,7 +286,7 @@ function ExpandedBucket({
           ) : (
             <ul className="divide-y divide-white/[0.05]">
               {slice.map((r) => (
-                <UploadRow key={r.id} row={r} accent={def.rowAccent} />
+                <UploadRow key={r.id} row={r} accent={def.rowAccent} locale={locale} t={t} />
               ))}
             </ul>
           )}
@@ -268,7 +297,17 @@ function ExpandedBucket({
   );
 }
 
-function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
+function UploadRow({
+  row,
+  accent,
+  locale,
+  t,
+}: {
+  row: UploadQueueRow;
+  accent: string;
+  locale: string;
+  t: Awaited<ReturnType<typeof getTranslations<"UploadsPage">>>;
+}) {
   const isOverdue = row.days_delta < 0;
   const isToday = row.days_delta === 0;
 
@@ -312,10 +351,10 @@ function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
       <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-center sm:gap-1">
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            موعد الرفع
+            {t("uploadDue")}
           </div>
           <div className="text-xs font-medium tabular-nums text-foreground">
-            {formatArabicShortDate(row.upload_due_date)}
+            {formatShortDate(row.upload_due_date, locale)}
           </div>
         </div>
         <span
@@ -326,13 +365,13 @@ function UploadRow({ row, accent }: { row: UploadQueueRow; accent: string }) {
             !isOverdue && !isToday && "border-soft-2 bg-soft-2 text-muted-foreground",
           )}
         >
-          {formatDelta(row.days_delta)}
+          {formatDelta(row.days_delta, t)}
         </span>
       </div>
 
       <Link
         href={`/tasks/${row.id}`}
-        aria-label="فتح المهمة"
+        aria-label={t("openTask")}
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-soft-2 hover:text-foreground"
       >
         <ChevronLeft className="size-3.5 icon-flip-rtl" />

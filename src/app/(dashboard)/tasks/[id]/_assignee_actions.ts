@@ -21,11 +21,17 @@ const AddSchema = z.object({
   employee_id: z.string().uuid({ message: "معرف الموظف غير صالح" }),
   role_type: z.enum(ROLE_TYPES, { message: "دور غير صالح" }),
   team_manager_employee_id: z.string().uuid().nullable().optional(),
+  head_of_dept_employee_id: z.string().uuid().nullable().optional(),
 });
 
 const UpdateManagerSchema = z.object({
   assignee_id: z.string().uuid(),
   team_manager_employee_id: z.string().uuid().nullable(),
+});
+
+const UpdateHodSchema = z.object({
+  assignee_id: z.string().uuid(),
+  head_of_dept_employee_id: z.string().uuid().nullable(),
 });
 
 const RemoveSchema = z.object({
@@ -54,12 +60,14 @@ export async function addTaskAssigneeAction(input: {
   employeeId: string;
   roleType: RoleType;
   teamManagerEmployeeId?: string | null;
+  headOfDeptEmployeeId?: string | null;
 }): Promise<{ ok: true; assigneeId: string } | { error: string }> {
   const parsed = AddSchema.safeParse({
     task_id: input.taskId,
     employee_id: input.employeeId,
     role_type: input.roleType,
     team_manager_employee_id: input.teamManagerEmployeeId ?? null,
+    head_of_dept_employee_id: input.headOfDeptEmployeeId ?? null,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -89,7 +97,42 @@ export async function addTaskAssigneeAction(input: {
       .eq("organization_id", session.orgId)
       .eq("id", parsed.data.team_manager_employee_id)
       .maybeSingle();
-    if (!mgr) return { error: "مدير الفريق غير موجود في هذه المنظمة" };
+    if (!mgr) return { error: "قائد الفريق غير موجود في هذه المنظمة" };
+  }
+
+  if (parsed.data.head_of_dept_employee_id) {
+    const { data: hod } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("id", parsed.data.head_of_dept_employee_id)
+      .maybeSingle();
+    if (!hod) return { error: "رئيس القسم غير موجود في هذه المنظمة" };
+  }
+
+  const conflictingRole =
+    parsed.data.role_type === "agent"
+      ? "account_manager"
+      : parsed.data.role_type === "account_manager"
+        ? "agent"
+        : null;
+  if (conflictingRole) {
+    const { data: conflict } = await supabaseAdmin
+      .from("task_assignees")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("task_id", parsed.data.task_id)
+      .eq("employee_id", parsed.data.employee_id)
+      .eq("role_type", conflictingRole)
+      .maybeSingle();
+    if (conflict) {
+      return {
+        error:
+          conflictingRole === "account_manager"
+            ? "هذا الموظف مُسنَد بالفعل كمدير حساب على هذه المهمة"
+            : "هذا الموظف مُسنَد بالفعل كمنفذ على هذه المهمة",
+      };
+    }
   }
 
   const { data: inserted, error } = await supabaseAdmin
@@ -100,6 +143,7 @@ export async function addTaskAssigneeAction(input: {
       employee_id: parsed.data.employee_id,
       role_type: parsed.data.role_type,
       team_manager_employee_id: parsed.data.team_manager_employee_id ?? null,
+      head_of_dept_employee_id: parsed.data.head_of_dept_employee_id ?? null,
       assigned_by: session.userId,
     })
     .select("id")
@@ -271,6 +315,68 @@ export async function setAssigneeTeamManagerAction(input: {
     metadata: {
       assignee_id: parsed.data.assignee_id,
       team_manager_employee_id: parsed.data.team_manager_employee_id,
+    },
+  });
+
+  revalidatePath(`/tasks/${row.task_id}`);
+  return { ok: true };
+}
+
+export async function setAssigneeHeadOfDeptAction(input: {
+  assigneeId: string;
+  headOfDeptEmployeeId: string | null;
+}): Promise<{ ok: true } | { error: string }> {
+  const parsed = UpdateHodSchema.safeParse({
+    assignee_id: input.assigneeId,
+    head_of_dept_employee_id: input.headOfDeptEmployeeId,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const session = await requirePermission("tasks.view").catch(() => null);
+  if (!session) return { error: "غير مصرح" };
+
+  const { data: row } = await supabaseAdmin
+    .from("task_assignees")
+    .select("id, task_id, task:tasks!task_assignees_task_id_fkey(created_by, project_id)")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data.assignee_id)
+    .maybeSingle();
+  if (!row) return { error: "السجل غير موجود" };
+
+  const taskRow = Array.isArray(row.task) ? row.task[0] : row.task;
+  const canManage =
+    taskRow?.created_by === session.userId ||
+    hasPermission(session, "tasks.manage") ||
+    hasPermission(session, "task.view_all");
+  if (!canManage) return { error: "لا تملك صلاحية التعديل" };
+
+  if (parsed.data.head_of_dept_employee_id) {
+    const { data: hod } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("id", parsed.data.head_of_dept_employee_id)
+      .maybeSingle();
+    if (!hod) return { error: "رئيس القسم غير موجود" };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("task_assignees")
+    .update({ head_of_dept_employee_id: parsed.data.head_of_dept_employee_id })
+    .eq("id", parsed.data.assignee_id);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.assignee_hod_set",
+    entityType: "task",
+    entityId: row.task_id,
+    metadata: {
+      assignee_id: parsed.data.assignee_id,
+      head_of_dept_employee_id: parsed.data.head_of_dept_employee_id,
     },
   });
 

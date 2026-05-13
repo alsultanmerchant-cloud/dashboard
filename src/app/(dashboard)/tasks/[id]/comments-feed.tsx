@@ -5,12 +5,19 @@
 //   - note         → chronological feed (with stage/assignee events)
 
 import { Pin, RefreshCw } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 import sanitizeHtml from "sanitize-html";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatArabicDateTime } from "@/lib/utils-format";
 import { TaskActivityFeed, NoteAttachments } from "../task-activity-feed";
 import type { TaskActivity } from "@/lib/data/task-activity";
+
+function formatDateTime(value: string, locale: string): string {
+  return new Date(value).toLocaleString(locale === "ar" ? "ar-SA" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
 
 // Odoo chatter bodies are HTML (links, paragraphs, line breaks). Local
 // dashboard comments are plain text. Render HTML when we detect tags;
@@ -38,7 +45,9 @@ function CommentBody({ body }: { body: string }) {
 
 type NoteItem = Extract<TaskActivity, { kind: "note" }>;
 
-export function CommentsFeed({ items }: { items: TaskActivity[] }) {
+export async function CommentsFeed({ items }: { items: TaskActivity[] }) {
+  const t = await getTranslations("TaskDetailPage.comments");
+  const locale = await getLocale();
   const requirements: NoteItem[] = [];
   const modifications: NoteItem[] = [];
   const rest: TaskActivity[] = [];
@@ -64,12 +73,12 @@ export function CommentsFeed({ items }: { items: TaskActivity[] }) {
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2 text-cyan">
               <Pin className="size-4" />
-              <h3 className="text-sm font-semibold">متطلبات المهمة</h3>
+              <h3 className="text-sm font-semibold">{t("requirements")}</h3>
             </div>
             <ul className="space-y-3">
               {requirements.map((c) => (
                 <li key={c.id}>
-                  <CommentRow item={c} />
+                  <CommentRow item={c} locale={locale} employeeFallback={t("employeeFallback")} />
                 </li>
               ))}
             </ul>
@@ -82,15 +91,15 @@ export function CommentsFeed({ items }: { items: TaskActivity[] }) {
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2 text-amber">
               <RefreshCw className="size-4" />
-              <h3 className="text-sm font-semibold">تعديلات العميل</h3>
+              <h3 className="text-sm font-semibold">{t("modifications")}</h3>
             </div>
             <ol className="space-y-3">
               {modifications.map((c, i) => (
                 <li key={c.id} className="space-y-1.5">
                   <p className="text-[11px] font-medium text-amber">
-                    تعديل #{i + 1}
+                    {t("modificationNumber", { count: i + 1 })}
                   </p>
-                  <CommentRow item={c} />
+                  <CommentRow item={c} locale={locale} employeeFallback={t("employeeFallback")} />
                 </li>
               ))}
             </ol>
@@ -103,7 +112,15 @@ export function CommentsFeed({ items }: { items: TaskActivity[] }) {
   );
 }
 
-function CommentRow({ item }: { item: NoteItem }) {
+function CommentRow({
+  item,
+  locale,
+  employeeFallback,
+}: {
+  item: NoteItem;
+  locale: string;
+  employeeFallback: string;
+}) {
   return (
     <div className="flex items-start gap-3">
       <Avatar size="sm">
@@ -114,9 +131,9 @@ function CommentRow({ item }: { item: NoteItem }) {
       </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm font-medium">{item.actor?.name ?? "موظف"}</p>
+          <p className="text-sm font-medium">{item.actor?.name ?? employeeFallback}</p>
           <p className="text-[11px] text-muted-foreground">
-            {formatArabicDateTime(item.created_at)}
+            {formatDateTime(item.created_at, locale)}
           </p>
         </div>
         <CommentBody body={item.body} />

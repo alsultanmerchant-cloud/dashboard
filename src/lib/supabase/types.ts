@@ -3085,28 +3085,34 @@ export type Database = {
           assigned_by: string | null
           created_at: string
           employee_id: string
+          head_of_dept_employee_id: string | null
           id: string
           organization_id: string
           role_type: Database["public"]["Enums"]["task_role_type"]
           task_id: string
+          team_manager_employee_id: string | null
         }
         Insert: {
           assigned_by?: string | null
           created_at?: string
           employee_id: string
+          head_of_dept_employee_id?: string | null
           id?: string
           organization_id: string
           role_type: Database["public"]["Enums"]["task_role_type"]
           task_id: string
+          team_manager_employee_id?: string | null
         }
         Update: {
           assigned_by?: string | null
           created_at?: string
           employee_id?: string
+          head_of_dept_employee_id?: string | null
           id?: string
           organization_id?: string
           role_type?: Database["public"]["Enums"]["task_role_type"]
           task_id?: string
+          team_manager_employee_id?: string | null
         }
         Relationships: [
           {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
   Loader2, Check, CalendarClock, Users, Eye, AlertCircle,
@@ -22,10 +23,10 @@ import type { TemplateWithItems } from "@/lib/data/service-categories";
 
 type WizardStep = 1 | 2 | 3;
 
-const STEPS: { id: WizardStep; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 1, label: "العميل", icon: UserIcon },
-  { id: 2, label: "الخدمات", icon: Briefcase },
-  { id: 3, label: "الجدولة والمراجعة", icon: ClipboardList },
+const STEPS: { id: WizardStep; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 1, icon: UserIcon },
+  { id: 2, icon: Briefcase },
+  { id: 3, icon: ClipboardList },
 ];
 
 const SELECT_CLASS =
@@ -87,6 +88,7 @@ export function NewProjectForm({
   templates: TemplateWithItems[];
 }) {
   const router = useRouter();
+  const t = useTranslations("ProjectsNewForm");
   const [step, setStep] = useState<WizardStep>(1);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [splits, setSplits] = useState<SplitState>({});
@@ -147,17 +149,17 @@ export function NewProjectForm({
   const validation = useMemo(() => {
     const issues: string[] = [];
     if (step >= 1) {
-      if (!clientId) issues.push("اختر العميل");
-      if (name.trim().length < 3) issues.push("اسم المشروع قصير جدًا (3 أحرف على الأقل)");
+      if (!clientId) issues.push(t("validation.pickClient"));
+      if (name.trim().length < 3) issues.push(t("validation.shortName"));
     }
     if (step >= 2) {
-      if (selectedServices.size === 0) issues.push("اختر خدمة واحدة على الأقل");
+      if (selectedServices.size === 0) issues.push(t("validation.pickService"));
     }
     if (step === 3) {
-      if (!startDate) issues.push("اختر تاريخ البدء");
+      if (!startDate) issues.push(t("validation.pickStartDate"));
     }
     return issues;
-  }, [step, clientId, name, selectedServices.size, startDate]);
+  }, [step, clientId, name, selectedServices.size, startDate, t]);
 
   const canAdvance: Record<WizardStep, boolean> = {
     1: clientId.length > 0 && name.trim().length >= 3,
@@ -167,12 +169,16 @@ export function NewProjectForm({
 
   useEffect(() => {
     if (state?.ok) {
-      toast.success(`تم إنشاء المشروع${state.taskCount ? ` وتوليد ${state.taskCount} مهمة` : ""}`);
+      toast.success(
+        state.taskCount
+          ? t("toasts.projectCreatedWithTasks", { count: state.taskCount })
+          : t("toasts.projectCreated"),
+      );
       router.push(state.projectId ? `/projects/${state.projectId}` : "/projects");
     } else if (state?.error) {
       toast.error(state.error);
     }
-  }, [state, router]);
+  }, [state, router, t]);
 
   const toggleService = (id: string) =>
     setSelectedServices((prev) => {
@@ -325,7 +331,7 @@ export function NewProjectForm({
 
   const submitQuickClient = async () => {
     if (quickClient.name.trim().length < 2) {
-      toast.error("اسم العميل قصير");
+      toast.error(t("toasts.clientNameShort"));
       return;
     }
     setCreatingClient(true);
@@ -336,7 +342,7 @@ export function NewProjectForm({
         email: quickClient.email.trim() || undefined,
       });
       if (res.ok) {
-        toast.success("تم إضافة العميل");
+        toast.success(t("toasts.clientAdded"));
         const fresh: ClientOpt = {
           id: res.client.id,
           name: res.client.name,
@@ -447,7 +453,7 @@ export function NewProjectForm({
                     {done ? <Check className="size-3" /> : i + 1}
                   </span>
                   <Icon className="size-3.5 shrink-0" />
-                  <span className="truncate">{s.label}</span>
+                  <span className="truncate">{t(`steps.${s.id}`)}</span>
                 </button>
               );
             })}
@@ -460,28 +466,28 @@ export function NewProjectForm({
             <CardContent className="space-y-3 p-4">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label>العميل *</Label>
+                <Label>{t("labels.client")}</Label>
                   <button
                     type="button"
                     onClick={() => setShowQuickClient((v) => !v)}
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-cyan-dim/40"
                   >
                     <UserPlus className="size-3.5" />
-                    {showQuickClient ? "إخفاء" : "إضافة عميل جديد"}
+                    {showQuickClient ? t("actions.hide") : t("actions.addClient")}
                   </button>
                 </div>
                 <SearchableSelect
                   value={clientId}
                   onValueChange={setClientId}
                   options={clientOptions}
-                  placeholder="اختر العميل"
-                  searchPlaceholder="ابحث بالاسم أو الهاتف…"
+                  placeholder={t("placeholders.pickClient")}
+                  searchPlaceholder={t("placeholders.searchClient")}
                   required
                   onCreateNew={(q) => {
                     setShowQuickClient(true);
                     setQuickClient((p) => ({ ...p, name: q || p.name }));
                   }}
-                  createLabel="إضافة عميل جديد"
+                  createLabel={t("actions.addClient")}
                 />
                 {state?.fieldErrors?.client_id && (
                   <p className="text-xs text-cc-red">{state.fieldErrors.client_id}</p>
@@ -490,20 +496,20 @@ export function NewProjectForm({
 
               {showQuickClient && (
                 <div className="rounded-lg border border-cyan/30 bg-cyan-dim/30 p-3 space-y-2">
-                  <div className="text-[11px] font-semibold text-cyan">عميل جديد</div>
+                  <div className="text-[11px] font-semibold text-cyan">{t("quickClient.title")}</div>
                   <Input
-                    placeholder="اسم العميل *"
+                    placeholder={t("quickClient.name")}
                     value={quickClient.name}
                     onChange={(e) => setQuickClient((p) => ({ ...p, name: e.target.value }))}
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <Input
-                      placeholder="هاتف"
+                      placeholder={t("quickClient.phone")}
                       value={quickClient.phone}
                       onChange={(e) => setQuickClient((p) => ({ ...p, phone: e.target.value }))}
                     />
                     <Input
-                      placeholder="بريد"
+                      placeholder={t("quickClient.email")}
                       type="email"
                       value={quickClient.email}
                       onChange={(e) => setQuickClient((p) => ({ ...p, email: e.target.value }))}
@@ -517,7 +523,7 @@ export function NewProjectForm({
                       disabled={creatingClient || quickClient.name.trim().length < 2}
                     >
                       {creatingClient && <Loader2 className="size-3.5 animate-spin" />}
-                      حفظ العميل
+                      {t("actions.saveClient")}
                     </Button>
                     <Button
                       type="button"
@@ -525,20 +531,20 @@ export function NewProjectForm({
                       variant="outline"
                       onClick={() => setShowQuickClient(false)}
                     >
-                      إلغاء
+                      {t("actions.cancel")}
                     </Button>
                   </div>
                 </div>
               )}
 
               <div className="space-y-1.5">
-                <Label htmlFor="name">اسم المشروع *</Label>
+                <Label htmlFor="name">{t("labels.projectName")}</Label>
                 <Input
                   id="name"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="مثال: حملة رمضان 1447"
+                  placeholder={t("placeholders.projectName")}
                 />
                 {/* `name` value is sent via the visible input */}
                 <input type="hidden" name="name" value={name} />

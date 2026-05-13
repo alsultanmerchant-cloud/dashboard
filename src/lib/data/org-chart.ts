@@ -9,6 +9,7 @@ export type OrgEmployee = {
   email: string | null;
   position: string | null;
   department_id: string | null;
+  manager_employee_id: string | null;
   employment_status: string;
 };
 
@@ -50,7 +51,12 @@ const SALES_SLUGS = new Set(["sales", "tele-sales", "telesales"]);
  * by the caller (so the feature flag check happens at render-time).
  */
 export async function loadOrgChart(orgId: string): Promise<OrgChart> {
-  const [{ data: depts, error: deptErr }, { data: emps, error: empErr }, { data: leads, error: leadsErr }] =
+  // Team leads are derived from employee_profiles.manager_employee_id:
+  // an employee is a "team lead" in their department if anyone else in
+  // the same department reports to them. /organization/employees is the
+  // single source of truth for who-reports-to-whom — the old
+  // department_team_leads table is no longer read.
+  const [{ data: depts, error: deptErr }, { data: emps, error: empErr }] =
     await Promise.all([
       supabaseAdmin
         .from("departments")
@@ -61,20 +67,13 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       supabaseAdmin
         .from("employee_profiles")
         .select(
-          "id, user_id, full_name, job_title, email, department_id, employment_status",
+          "id, user_id, full_name, job_title, email, department_id, manager_employee_id, employment_status",
         )
         .eq("organization_id", orgId),
-      supabaseAdmin
-        .from("department_team_leads")
-        .select("department_id, user_id"),
     ]);
   if (deptErr) throw deptErr;
   if (empErr) throw empErr;
-  if (leadsErr) throw leadsErr;
 
-  // employee_profiles.position lives on the same table (added in migration
-  // 0021). The Supabase type-gen may lag behind the DB so we widen here.
-  const empByUserId = new Map<string, OrgEmployee>();
   const empById = new Map<string, OrgEmployee>();
   const employees: OrgEmployee[] = [];
   for (const raw of emps ?? []) {
@@ -86,11 +85,11 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       job_title: e.job_title ?? null,
       email: e.email ?? null,
       department_id: e.department_id ?? null,
+      manager_employee_id: e.manager_employee_id ?? null,
       employment_status: e.employment_status,
       position: e.position ?? null,
     };
     employees.push(norm);
-    if (norm.user_id) empByUserId.set(norm.user_id, norm);
     empById.set(norm.id, norm);
   }
 
@@ -111,31 +110,35 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
     });
   }
 
-  // Resolve heads via head_employee_id (the canonical FK to
-  // employee_profiles.id, mirroring the existing manager_employee_id pattern).
+  // Resolve heads via head_employee_id.
   for (const dept of byId.values()) {
     if (dept.head_employee_id) {
       dept.head = empById.get(dept.head_employee_id) ?? null;
     }
   }
 
-  // Team leads.
-  for (const row of leads ?? []) {
-    const dept = byId.get(row.department_id);
-    if (!dept) continue;
-    const emp = empByUserId.get(row.user_id);
-    if (emp) dept.teamLeads.push(emp);
+  // Index: who reports to whom. An employee is considered a "team lead" of
+  // their department if at least one other employee in the same department
+  // has them as manager_employee_id.
+  const reportsByManager = new Map<string, OrgEmployee[]>();
+  for (const emp of employees) {
+    if (!emp.manager_employee_id) continue;
+    const arr = reportsByManager.get(emp.manager_employee_id) ?? [];
+    arr.push(emp);
+    reportsByManager.set(emp.manager_employee_id, arr);
   }
 
-  // Members = everyone whose department_id matches AND who isn't already
-  // surfaced as the head or a team lead.
+  // Place every employee with a department into head / teamLeads / members.
   for (const emp of employees) {
     if (!emp.department_id) continue;
     const dept = byId.get(emp.department_id);
     if (!dept) continue;
     if (dept.head?.id === emp.id) continue;
-    if (dept.teamLeads.some((l) => l.id === emp.id)) continue;
-    dept.members.push(emp);
+    const hasDeptReports = (reportsByManager.get(emp.id) ?? []).some(
+      (r) => r.department_id === dept.id,
+    );
+    if (hasDeptReports) dept.teamLeads.push(emp);
+    else dept.members.push(emp);
   }
 
   // Build child arrays + collect roots.

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { ChevronRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listClients } from "@/lib/data/clients";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
   const session = await requirePagePermission("projects.manage");
+  const t = await getTranslations("ProjectsNewPage");
   const [clients, services, ams, categories, employees, allTemplates] =
     await Promise.all([
       listClients(session.orgId),
@@ -27,11 +29,11 @@ export default async function NewProjectPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="مشروع جديد"
-        description="اختر العميل والخدمات؛ ستظهر المهام التي سيتم إنشاؤها في لوحة المعاينة على اليسار."
+        title={t("title")}
+        description={t("description")}
         breadcrumbs={[
-          { label: "المشاريع", href: "/projects" },
-          { label: "مشروع جديد" },
+          { label: t("breadcrumbs.projects"), href: "/projects" },
+          { label: t("breadcrumbs.newProject") },
         ]}
       />
 
@@ -72,7 +74,7 @@ export default async function NewProjectPage() {
           href="/service-categories"
           className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
         >
-          إدارة تصنيفات الخدمات وقوالب المهام
+          {t("manageCategories")}
           <ChevronRight className="size-3.5 icon-flip-rtl" />
         </Link>
       </div>

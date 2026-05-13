@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { getTranslations, getLocale } from "next-intl/server";
 import {
   Activity, AlertTriangle, BarChart3, ListChecks, Sparkles,
   Timer, TrendingUp, Users,
@@ -43,6 +44,7 @@ export default async function ReportsPage({
   searchParams?: Promise<{ designerMonth?: string }>;
 }) {
   const session = await requirePagePermission("reports.view");
+  const t = await getTranslations("ReportsPage");
   const sp = (await searchParams) ?? {};
   // Default the picker to "this month" so the page renders sensibly without
   // any URL param. Parsing is forgiving — bad input falls back to today.
@@ -58,12 +60,12 @@ export default async function ReportsPage({
   return (
     <div>
       <PageHeader
-        title="التقارير"
-        description="مؤشّرات أداء الوكالة لهذا الأسبوع، مُحتسبة مباشرة من بيانات Odoo."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Sparkles className="size-3 text-cyan" />
-            مرحلة 9 — موجز ذكي
+            {t("smartDigestBadge")}
           </Badge>
         }
       />
@@ -73,10 +75,10 @@ export default async function ReportsPage({
           <div>
             <p className="text-sm font-semibold inline-flex items-center gap-2">
               <Sparkles className="size-4 text-cyan" />
-              موجز الأسبوع التنفيذي
+              {t("executiveDigest.title")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              نموذج Gemini مُغذَّى بالتقارير الأربعة فقط — لا يخمّن خارجها.
+              {t("executiveDigest.description")}
             </p>
           </div>
           <SummarizeWeekButton />
@@ -86,29 +88,29 @@ export default async function ReportsPage({
       {/* Odoo-backed sections share one heavy fetch — wrap them together so we
           pay the JSON-RPC round-trip once, but everything Supabase-backed
           streams in independently below. */}
-      <Suspense fallback={<OdooSectionsFallback />}>
+      <Suspense fallback={<OdooSectionsFallback title={t("weeklyMetrics.title")} description={t("weeklyMetrics.description")} />}>
         <OdooSections />
       </Suspense>
 
       <SectionTitle
-        title="متوسط البقاء في كل مرحلة"
-        description="بالأيام، محسوب من المقاطع المُغلقة في سجل المراحل"
+        title={t("sections.stageDwell.title")}
+        description={t("sections.stageDwell.description")}
       />
       <Suspense fallback={<ChartFallback />}>
         <StageDwellSection orgId={session.orgId} />
       </Suspense>
 
       <SectionTitle
-        title="حِمل المتخصصين الحالي"
-        description="عدد المهام المفتوحة لكل منفذ، مع مجموع الساعات المخصصة"
+        title={t("sections.specialistLoad.title")}
+        description={t("sections.specialistLoad.description")}
       />
       <Suspense fallback={<ChartFallback />}>
         <SpecialistLoadSection orgId={session.orgId} />
       </Suspense>
 
       <SectionTitle
-        title="إنتاج المصممين شهريًا"
-        description="مجموع التصاميم والتعديلات لكل موظف على المهام المُغلَقة في الشهر المحدد"
+        title={t("sections.designerOutput.title")}
+        description={t("sections.designerOutput.description")}
       />
       <Suspense fallback={<ChartFallback />}>
         <DesignerOutputSection
@@ -120,19 +122,19 @@ export default async function ReportsPage({
       </Suspense>
 
       <SectionTitle
-        title="توزّع التأخّر الزمني"
-        description="المهام المفتوحة مصنّفة حسب نسبة الانحراف عن الجدول الزمني"
+        title={t("sections.slipHeatmap.title")}
+        description={t("sections.slipHeatmap.description")}
       />
       <Suspense fallback={<ChartFallback />}>
         <SlipHeatmapSection orgId={session.orgId} />
       </Suspense>
 
       <SectionTitle
-        title="توقّع التجديدات — التسعون يومًا القادمة"
-        description="مرتَّبة بحسب الأقرب موعدًا"
+        title={t("sections.renewals.title")}
+        description={t("sections.renewals.description")}
         actions={
           <Link href="/projects?filter=renewals_this_month" className="text-xs text-cyan hover:underline">
-            فتح المشاريع
+            {t("sections.renewals.openProjects")}
           </Link>
         }
       />
@@ -140,14 +142,14 @@ export default async function ReportsPage({
         <RenewalsSection orgId={session.orgId} />
       </Suspense>
 
-      <Suspense fallback={<DigestFallback />}>
+      <Suspense fallback={<DigestFallback title={t("storedDigest.title")} description={t("loading")} />}>
         <DigestSection orgId={session.orgId} />
       </Suspense>
 
       <div className="mt-4 rounded-2xl border border-cyan/20 bg-cyan-dim/20 p-5 flex items-start gap-3">
         <BarChart3 className="size-5 text-cyan shrink-0 mt-0.5" />
         <div className="text-sm text-foreground/90 leading-relaxed">
-          مؤشرات الأداء (KPIs والمشاريع والأفراد) تُحسب مباشرة من Odoo عند كل فتح للصفحة. التجديدات والموجز الأسبوعي قراءة من قاعدة لوحة التحكم.
+          {t("footerNote")}
         </div>
       </div>
     </div>
@@ -157,6 +159,7 @@ export default async function ReportsPage({
 // ───────────────────────── Odoo-backed sections ─────────────────────────
 
 async function OdooSections() {
+  const t = await getTranslations("ReportsPage");
   let reports;
   try {
     reports = await getReportsOdooData();
@@ -165,11 +168,11 @@ async function OdooSections() {
     return (
       <>
         <SectionTitle
-          title="مؤشرات الأسبوع"
-          description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
+          title={t("weeklyMetrics.title")}
+          description={t("weeklyMetrics.description")}
         />
         <div className="mb-8 rounded-2xl border border-amber/30 bg-amber/[0.05] px-5 py-6 text-sm text-foreground/85">
-          تعذّر الاتصال بـ Odoo حاليًا — مؤشرات الأسبوع المُعتمدة على Odoo غير متاحة. باقي التقارير (مرحلة المهام، الإنتاج، التجديدات) تعمل من قاعدة لوحة التحكم.
+          {t("weeklyMetrics.odooUnavailable")}
         </div>
       </>
     );
@@ -180,47 +183,47 @@ async function OdooSections() {
   return (
     <>
       <SectionTitle
-        title="مؤشرات الأسبوع"
-        description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
+        title={t("weeklyMetrics.title")}
+        description={t("weeklyMetrics.description")}
       />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
         <MetricCard
-          label="التسليم في الموعد"
+          label={t("weeklyMetrics.cards.onTime")}
           value={reports.onTime.pct === null ? "—" : `${reports.onTime.pct}%`}
-          hint={reports.onTime.sample === 0 ? "لا عيّنة بعد" : `عيّنة ${reports.onTime.sample}`}
+          hint={reports.onTime.sample === 0 ? t("weeklyMetrics.hints.noSample") : t("weeklyMetrics.hints.sample", { count: reports.onTime.sample })}
           icon={<Timer className="size-5" />}
           tone={pctTone(reports.onTime.pct)}
         />
         <MetricCard
-          label="عُلوق المراجعة"
+          label={t("weeklyMetrics.cards.reviewBacklog")}
           value={reports.reviewBacklog.length}
-          hint={reports.reviewBacklog.length === 0 ? "لا تأخّر" : "بانتظار مراجعة"}
+          hint={reports.reviewBacklog.length === 0 ? t("weeklyMetrics.hints.noDelay") : t("weeklyMetrics.hints.waitingReview")}
           icon={<AlertTriangle className="size-5" />}
           tone={reports.reviewBacklog.length > 0 ? "destructive" : "default"}
         />
         <MetricCard
-          label="إعادة العمل (Client Changes)"
+          label={t("weeklyMetrics.cards.rework")}
           value={reports.reworkTotal}
-          hint={`${reports.reworkByProject.length} مشروع متأثّر`}
+          hint={t("weeklyMetrics.hints.affectedProjects", { count: reports.reworkByProject.length })}
           icon={<Activity className="size-5" />}
           tone={reports.reworkTotal > 0 ? "warning" : "default"}
         />
         <MetricCard
-          label="مهام Odoo (آخر سحب)"
+          label={t("weeklyMetrics.cards.odooTasks")}
           value={reports.agentLeaderboard.reduce((s, r) => s + r.closedCount, 0)}
-          hint="إغلاقات آخر 4 أسابيع"
+          hint={t("weeklyMetrics.hints.last4Weeks")}
           icon={<TrendingUp className="size-5" />}
           tone="info"
         />
       </div>
 
       <SectionTitle
-        title="التزام الموعد النهائي حسب المشروع"
-        description="نسبة المهام المفتوحة التي ما زالت ضمن الموعد — أسوأ 10 مشاريع"
+        title={t("projectCompliance.title")}
+        description={t("projectCompliance.description")}
       />
       {reports.projectCompliance.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا توجد مهام مفتوحة لتقييم الالتزام.
+          {t("projectCompliance.empty")}
         </p>
       ) : (
         <Card className="mb-8">
@@ -236,7 +239,7 @@ async function OdooSections() {
                   </Link>
                   <span className="text-sm font-bold tabular-nums">
                     {d.pct === null ? "—" : `${d.pct}%`}
-                    <span className="text-xs text-muted-foreground mx-1.5"> / {d.total} مهمة</span>
+                    <span className="text-xs text-muted-foreground mx-1.5"> / {t("count.task", { count: d.total })}</span>
                   </span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
@@ -252,12 +255,12 @@ async function OdooSections() {
       )}
 
       <SectionTitle
-        title="إعادة العمل حسب المشروع"
-        description="عدد المهام في مرحلة Client Changes — يكشف المشاريع الأكثر إرهاقًا"
+        title={t("reworkByProject.title")}
+        description={t("reworkByProject.description")}
       />
       {reports.reworkByProject.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا توجد مهام في مرحلة تعديلات العميل.
+          {t("reworkByProject.empty")}
         </p>
       ) : (
         <Card className="mb-8">
@@ -289,13 +292,13 @@ async function OdooSections() {
       )}
 
       <SectionTitle
-        title="لوحة الأفراد — آخر 4 أسابيع"
-        description="عدد المهام المُغلقة + استخدام نسبيّ (من الأعلى إنتاجًا = 100%)"
+        title={t("peopleBoard.title")}
+        description={t("peopleBoard.description")}
         actions={<Users className="size-4 text-muted-foreground" />}
       />
       {reports.agentLeaderboard.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          لا بيانات إنتاج بعد.
+          {t("peopleBoard.empty")}
         </p>
       ) : (
         <Card className="mb-8">
@@ -327,12 +330,18 @@ async function OdooSections() {
   );
 }
 
-function OdooSectionsFallback() {
+function OdooSectionsFallback({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <>
       <SectionTitle
-        title="مؤشرات الأسبوع"
-        description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
+        title={title}
+        description={description}
       />
       <div className="mb-8">
         <StatRowSkeleton count={4} />
@@ -346,11 +355,12 @@ function OdooSectionsFallback() {
 // ───────────────────── Supabase-backed sections ─────────────────────
 
 async function StageDwellSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations("ReportsPage");
   const stageDwell = await getStageDwellAverages(orgId);
   if (stageDwell.length === 0) {
     return (
       <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-        لا بيانات بعد — يحتاج لمهام عبرت أكثر من مرحلة.
+        {t("sections.stageDwell.empty")}
       </p>
     );
   }
@@ -364,11 +374,12 @@ async function StageDwellSection({ orgId }: { orgId: string }) {
 }
 
 async function SpecialistLoadSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations("ReportsPage");
   const specialistLoad = await getSpecialistLoad(orgId);
   if (specialistLoad.length === 0) {
     return (
       <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-        لا توجد مهام مفتوحة مُسندة.
+        {t("sections.specialistLoad.empty")}
       </p>
     );
   }
@@ -408,11 +419,12 @@ async function SlipHeatmapSection({ orgId }: { orgId: string }) {
 }
 
 async function RenewalsSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations("ReportsPage");
   const renewals = await getRenewalForecast90d(orgId);
   if (renewals.length === 0) {
     return (
       <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-        لا تجديدات في الأفق.
+        {t("sections.renewals.empty")}
       </p>
     );
   }
@@ -438,7 +450,7 @@ async function RenewalsSection({ orgId }: { orgId: string }) {
                   {r.next_renewal_date}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  بعد {r.days_until} يومًا
+                  {t("renewalInDays", { count: r.days_until })}
                 </span>
               </div>
             </li>
@@ -450,15 +462,17 @@ async function RenewalsSection({ orgId }: { orgId: string }) {
 }
 
 async function DigestSection({ orgId }: { orgId: string }) {
+  const t = await getTranslations("ReportsPage");
+  const locale = await getLocale();
   const latestDigest = await getLatestStoredDigest(orgId);
   return (
     <>
       <SectionTitle
-        title="موجز الأسبوع المخزَّن"
+        title={t("storedDigest.title")}
         description={
           latestDigest
-            ? `أُنشئ في ${new Date(latestDigest.generated_at).toLocaleString("ar-SA-u-nu-latn")}`
-            : "لم يُنشأ موجز أسبوعي بعد — يصدر تلقائيًا صباح الأحد"
+            ? t("storedDigest.generatedAt", { date: new Date(latestDigest.generated_at).toLocaleString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-US") })
+            : t("storedDigest.notGenerated")
         }
         actions={<ListChecks className="size-4 text-muted-foreground" />}
       />
@@ -467,38 +481,38 @@ async function DigestSection({ orgId }: { orgId: string }) {
           <CardContent className="p-5 space-y-3 text-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">تسليم في الموعد</p>
+                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.onTime")}</p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.on_time.pct === null ? "—" : `${latestDigest.payload.on_time.pct}%`}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">إغلاقات الأسبوع</p>
+                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.weekClosures")}</p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.productivity.closed_this_week}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">عُلوق المراجعة</p>
+                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.reviewBacklog")}</p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.review_backlog.count}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">تجديدات 90 يومًا</p>
+                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.renewals90d")}</p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.renewals_next_90d.count}
                 </p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              يصل هذا الموجز إلى صندوق التنبيهات داخل التطبيق فقط — البريد و WhatsApp مؤجَّلان للمرحلة T8.
+              {t("storedDigest.note")}
             </p>
           </CardContent>
         </Card>
       ) : (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          سيظهر هنا فور تشغيل أوّل دورة من weekly-digest.
+          {t("storedDigest.empty")}
         </p>
       )}
     </>
@@ -513,12 +527,18 @@ function ListFallback() {
   return <Skeleton className="h-64 w-full mb-8 rounded-2xl" />;
 }
 
-function DigestFallback() {
+function DigestFallback({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <>
       <SectionTitle
-        title="موجز الأسبوع المخزَّن"
-        description="جاري التحميل..."
+        title={title}
+        description={description}
         actions={<ListChecks className="size-4 text-muted-foreground" />}
       />
       <Skeleton className="h-32 w-full mb-8 rounded-2xl" />

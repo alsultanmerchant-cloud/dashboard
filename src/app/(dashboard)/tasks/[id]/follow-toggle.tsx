@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Bell, BellOff } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -16,6 +17,7 @@ export function TaskFollowToggle({
   currentUserId: string;
   isFollowing: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.followToggle");
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -28,7 +30,7 @@ export function TaskFollowToggle({
         toast.error(res.error);
         return;
       }
-      toast.success(isFollowing ? "ألغيت المتابعة" : "تمت المتابعة");
+      toast.success(isFollowing ? t("toasts.unfollowed") : t("toasts.followed"));
       router.refresh();
     });
   };
@@ -53,7 +55,7 @@ export function TaskFollowToggle({
       ) : (
         <Bell className="size-3.5" />
       )}
-      {isFollowing ? "متابِع" : "متابعة"}
+      {isFollowing ? t("following") : t("follow")}
     </button>
   );
 }

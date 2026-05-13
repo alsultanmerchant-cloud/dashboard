@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Pencil, Check, X, Loader2, Palette, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ export function DesignCountsRow({
   initialRevisionCount: number;
   canEdit: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.designCounts");
   const [editing, setEditing] = useState(false);
   const [design, setDesign] = useState(initialDesignCount);
   const [revision, setRevision] = useState(initialRevisionCount);
@@ -42,7 +44,7 @@ export function DesignCountsRow({
     const d = parseInt(draftDesign, 10);
     const r = parseInt(draftRevision, 10);
     if (Number.isNaN(d) || Number.isNaN(r) || d < 0 || r < 0) {
-      setError("أدخل أرقامًا صحيحة موجبة");
+      setError(t("error"));
       return;
     }
     startTransition(async () => {
@@ -67,7 +69,7 @@ export function DesignCountsRow({
       <div className="grid grid-cols-[7.5rem_1fr_auto] items-center gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <Palette className="size-3.5" />
-          عدد التصاميم
+          {t("designCount")}
         </span>
         {editing ? (
           <Input
@@ -88,8 +90,8 @@ export function DesignCountsRow({
             type="button"
             onClick={startEdit}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="تعديل العدد"
-            title="تعديل العدد"
+            aria-label={t("edit")}
+            title={t("edit")}
           >
             <Pencil className="size-3.5" />
           </button>
@@ -99,7 +101,7 @@ export function DesignCountsRow({
       <div className="grid grid-cols-[7.5rem_1fr_auto] items-center gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3.5" />
-          عدد التعديلات
+          {t("revisionCount")}
         </span>
         {editing ? (
           <Input
@@ -131,7 +133,7 @@ export function DesignCountsRow({
             disabled={pending}
             className="h-7 gap-1"
           >
-            <X className="size-3.5" /> إلغاء
+            <X className="size-3.5" /> {t("cancel")}
           </Button>
           <Button
             type="button"
@@ -141,7 +143,7 @@ export function DesignCountsRow({
             className="h-7 gap-1"
           >
             {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-            حفظ
+            {t("save")}
           </Button>
         </div>
       )}

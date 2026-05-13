@@ -28,6 +28,13 @@ const ProjectsBoard = dynamic(
     })),
 );
 
+const ProjectsCalendar = dynamic(
+  () =>
+    import("./projects-calendar").then((mod) => ({
+      default: mod.ProjectsCalendar,
+    })),
+);
+
 type Props = {
   initial: LiveProject[];
   initialTotal: number;
@@ -54,7 +61,12 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const lastLoadedPageRef = useRef(1);
   const search = (params.get("q") ?? "").trim();
   const groupBy = params.get("groupBy") || undefined;
-  const view = params.get("view") === "list" ? "list" : "kanban";
+  const view = (() => {
+    const v = params.get("view");
+    if (v === "list") return "list" as const;
+    if (v === "calendar") return "calendar" as const;
+    return "kanban" as const;
+  })();
   const filters = useMemo<ProjectFilters>(() => {
     const flag = (k: string) => params.get(k) === "1" || params.get(k) === "true";
     const str = (k: string) => params.get(k) || undefined;
@@ -133,6 +145,8 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
           لا توجد نتائج
         </div>
+      ) : view === "calendar" ? (
+        <ProjectsCalendar items={items} />
       ) : view === "kanban" && groupBy ? (
         <ProjectsBoard items={items} groupBy={groupBy} />
       ) : view === "kanban" ? (

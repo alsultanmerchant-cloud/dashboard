@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2, Link2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -15,13 +16,6 @@ import {
 } from "../../projects/[id]/_link_actions";
 
 type DepType = "finish_to_start" | "start_to_start" | "finish_to_finish" | "start_to_finish";
-
-const TYPE_LABELS: Record<DepType, string> = {
-  finish_to_start: "FS — انتهاء ← بدء",
-  start_to_start: "SS — بدء ← بدء",
-  finish_to_finish: "FF — انتهاء ← انتهاء",
-  start_to_finish: "SF — بدء ← انتهاء",
-};
 
 export type TaskLinkRow = {
   id: string;
@@ -44,6 +38,13 @@ export function TaskLinksPanel({
   candidates: { id: string; title: string; task_code: string | null }[];
   canManage: boolean;
 }) {
+  const t = useTranslations("TaskDetailPage.linksPanel");
+  const typeLabels: Record<DepType, string> = {
+    finish_to_start: t("types.finish_to_start"),
+    start_to_start: t("types.start_to_start"),
+    finish_to_finish: t("types.finish_to_finish"),
+    start_to_finish: t("types.start_to_finish"),
+  };
   const router = useRouter();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
@@ -53,7 +54,10 @@ export function TaskLinksPanel({
 
   const onAdd = () =>
     start(async () => {
-      if (!targetId) return toast.error("اختر المهمة المرتبطة");
+      if (!targetId) {
+        toast.error(t("pickTask"));
+        return;
+      }
       const res = await createTaskLinkAction({
         projectId,
         sourceTaskId: taskId,
@@ -61,8 +65,11 @@ export function TaskLinksPanel({
         dependencyType: depType,
         lagDays: lag,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم إنشاء الربط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.created"));
       setAdding(false);
       setTargetId("");
       setLag(0);
@@ -77,16 +84,22 @@ export function TaskLinksPanel({
         dependencyType: patch.dependency_type,
         lagDays: patch.lag_days,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم تحديث الربط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.updated"));
       router.refresh();
     });
 
   const onDelete = (linkId: string) =>
     start(async () => {
       const res = await deleteTaskLinkAction({ linkId });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("حُذف الربط");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("toasts.deleted"));
       router.refresh();
     });
 
@@ -99,12 +112,12 @@ export function TaskLinksPanel({
         <div className="flex items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Link2 className="size-4 text-muted-foreground" />
-            ارتباطات المهمة
+            {t("title")}
           </h3>
           {canManage && !adding && (
             <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
               <Plus className="ml-1 size-3.5" />
-              إضافة ربط
+              {t("add")}
             </Button>
           )}
         </div>
@@ -112,14 +125,14 @@ export function TaskLinksPanel({
         {adding && (
           <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
             <div className="grid gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">المهمة التابعة</label>
+              <label className="text-xs font-medium text-muted-foreground">{t("dependentTask")}</label>
               <select
                 value={targetId}
                 onChange={(e) => setTargetId(e.target.value)}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
                 disabled={pending}
               >
-                <option value="">— اختر —</option>
+                <option value="">{t("pick")}</option>
                 {candidates.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.task_code ? `${c.task_code} · ` : ""}
@@ -129,20 +142,20 @@ export function TaskLinksPanel({
               </select>
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">النوع</label>
+              <label className="text-xs font-medium text-muted-foreground">{t("type")}</label>
               <select
                 value={depType}
                 onChange={(e) => setDepType(e.target.value as DepType)}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
                 disabled={pending}
               >
-                {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                {Object.entries(typeLabels).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">إزاحة (أيام)</label>
+              <label className="text-xs font-medium text-muted-foreground">{t("lagDays")}</label>
               <Input
                 type="number"
                 value={lag}
@@ -154,33 +167,37 @@ export function TaskLinksPanel({
             <div className="flex gap-2">
               <Button onClick={onAdd} disabled={pending} size="sm">
                 {pending ? <Loader2 className="ml-1 size-3.5 animate-spin" /> : null}
-                حفظ
+                {t("save")}
               </Button>
               <Button onClick={() => setAdding(false)} disabled={pending} size="sm" variant="ghost">
-                إلغاء
+                {t("cancel")}
               </Button>
             </div>
           </div>
         )}
 
         <LinkSection
-          title="مهام تتبع هذه المهمة"
-          subtitle="هذه المهمة هي المرجع — أي تغيير في تواريخها يدفع التواريخ المرتبطة"
+          title={t("outgoingTitle")}
+          subtitle={t("outgoingSubtitle")}
           rows={outgoing}
           canManage={canManage}
           pending={pending}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          typeLabels={typeLabels}
+          empty={t("empty")}
         />
 
         <LinkSection
-          title="مهام هذه المهمة تابعة لها"
-          subtitle="تواريخ هذه المهمة تتأثر بتواريخ تلك المهام"
+          title={t("incomingTitle")}
+          subtitle={t("incomingSubtitle")}
           rows={incoming}
           canManage={canManage}
           pending={pending}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          typeLabels={typeLabels}
+          empty={t("empty")}
         />
       </CardContent>
     </Card>
@@ -195,6 +212,8 @@ function LinkSection({
   pending,
   onUpdate,
   onDelete,
+  typeLabels,
+  empty,
 }: {
   title: string;
   subtitle: string;
@@ -203,6 +222,8 @@ function LinkSection({
   pending: boolean;
   onUpdate: (id: string, p: { dependency_type?: DepType; lag_days?: number }) => void;
   onDelete: (id: string) => void;
+  typeLabels: Record<DepType, string>;
+  empty: string;
 }) {
   return (
     <div>
@@ -212,7 +233,7 @@ function LinkSection({
       </div>
       {rows.length === 0 ? (
         <p className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          لا توجد ارتباطات.
+          {empty}
         </p>
       ) : (
         <ul className="grid gap-1.5">
@@ -243,7 +264,7 @@ function LinkSection({
                 disabled={!canManage || pending}
                 className="h-8 rounded-md border bg-background px-2 text-xs"
               >
-                {Object.entries(TYPE_LABELS).map(([k, v]) => (
+                {Object.entries(typeLabels).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
               </select>

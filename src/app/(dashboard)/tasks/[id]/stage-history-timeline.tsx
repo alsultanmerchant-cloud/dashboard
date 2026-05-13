@@ -7,39 +7,51 @@
 // Server component — pure rendering; data comes from the page loader.
 
 import { ArrowLeftRight } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 import { TaskStageBadge } from "@/components/status-badges";
-import { formatArabicDateTime } from "@/lib/utils-format";
 import type { TaskActivity } from "@/lib/data/task-activity";
 import type { TaskStageHistoryEntry } from "@/lib/data/task-detail";
 import { TaskActivityFeed } from "../task-activity-feed";
 
-function formatDuration(seconds: number | null): string | null {
+function formatDateTime(value: string, locale: string): string {
+  return new Date(value).toLocaleString(locale === "ar" ? "ar-SA" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function formatDuration(
+  seconds: number | null,
+  t: Awaited<ReturnType<typeof getTranslations<"TaskDetailPage.stageHistory">>>,
+): string | null {
   if (!seconds || seconds <= 0) return null;
-  if (seconds < 60) return `${seconds} ثانية`;
+  if (seconds < 60) return t("seconds", { count: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} دقيقة`;
+  if (minutes < 60) return t("minutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
     const m = minutes - hours * 60;
-    return m > 0 ? `${hours} ساعة و${m} دقيقة` : `${hours} ساعة`;
+    return m > 0 ? t("hoursMinutes", { hours, minutes: m }) : t("hours", { count: hours });
   }
   const days = Math.floor(hours / 24);
   const h = hours - days * 24;
-  return h > 0 ? `${days} يوم و${h} ساعة` : `${days} يوم`;
+  return h > 0 ? t("daysHours", { days, hours: h }) : t("days", { count: days });
 }
 
-export function StageHistoryTimeline({
+export async function StageHistoryTimeline({
   rows,
   fallbackActivity,
 }: {
   rows: TaskStageHistoryEntry[];
   fallbackActivity: Extract<TaskActivity, { kind: "stage_change" }>[];
 }) {
+  const t = await getTranslations("TaskDetailPage.stageHistory");
+  const locale = await getLocale();
   if (rows.length === 0) {
     if (fallbackActivity.length === 0) {
       return (
         <p className="text-sm text-muted-foreground">
-          لم تنتقل المهمة بين المراحل بعد.
+          {t("empty")}
         </p>
       );
     }
@@ -49,7 +61,7 @@ export function StageHistoryTimeline({
   return (
     <ol className="relative space-y-4 ms-3 border-s border-soft-2 ps-4">
       {rows.map((row) => {
-        const duration = formatDuration(row.duration_seconds);
+        const duration = formatDuration(row.duration_seconds, t);
 
         return (
           <li key={row.id} className="relative">
@@ -58,7 +70,7 @@ export function StageHistoryTimeline({
               <TaskStageBadge stage={row.stage} />
               {row.exited_at == null && (
                 <span className="text-[10px] uppercase tracking-wide text-cyan/80">
-                  المرحلة الحالية
+                  {t("current")}
                 </span>
               )}
               {duration && (
@@ -70,17 +82,17 @@ export function StageHistoryTimeline({
             </div>
             <div className="mt-1 text-[11px] text-muted-foreground">
               <span dir="ltr" className="tabular-nums">
-                {formatArabicDateTime(row.entered_at)}
+                {formatDateTime(row.entered_at, locale)}
               </span>
               {row.changed_by_name && (
                 <>
                   {" "}
-                  · بواسطة{" "}
+                  · {t("by")}{" "}
                   <span className="text-foreground/80">{row.changed_by_name}</span>
                   {row.changed_by_role && (
                     <span
                       className="ms-1 inline-flex items-center rounded-full bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan"
-                      title="الوظيفة في وقت النقل"
+                      title={t("roleAtMove")}
                     >
                       {row.changed_by_role}
                     </span>

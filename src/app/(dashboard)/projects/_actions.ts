@@ -248,7 +248,7 @@ export async function createProjectAction(
         task_id: t.id as string,
         employee_id: parsed.data.constant_assignee_employee_id!,
         role_type: "agent" as const,
-      }));
+      })).filter((row) => row.employee_id !== parsed.data.account_manager_employee_id);
       // Insert ignoring conflicts on (task_id, employee_id, role_type) — the
       // unique index prevents dupes when generate-tasks already added them.
       const { error: caErr } = await supabaseAdmin

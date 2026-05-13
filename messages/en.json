@@ -640,7 +640,9 @@
     "kanban": "Kanban",
     "list": "List",
     "kanbanView": "Kanban view",
-    "listView": "List view"
+    "listView": "List view",
+    "calendar": "Calendar",
+    "calendarView": "Calendar view"
   },
   "TasksPage": {
     "projectScope": "Project tasks",
@@ -914,6 +916,204 @@
       "hoursOnly": "{count}h",
       "minutesOnly": "{count}m",
       "hoursMinutes": "{hours}h {minutes}m"
+    },
+    "assigneesPanel": {
+      "roles": {
+        "account_manager": "Account manager",
+        "specialist": "Specialist",
+        "manager": "Department manager",
+        "agent": "Agent"
+      },
+      "toasts": {
+        "assigned": "Assignee added",
+        "removed": "Assignee removed",
+        "managerUpdated": "Team manager updated",
+        "teamLeaderUpdated": "Team leader updated",
+        "hodUpdated": "Head of department updated"
+      },
+      "empty": {
+        "title": "No assignees yet",
+        "description": "Every task needs at least one assignee before work starts."
+      },
+      "currentOwner": "Current owner",
+      "currentOwnerTitle": "Current stage owner — this person is expected to move the task forward",
+      "teamManager": "Team manager:",
+      "teamManagerOptional": "Team manager (optional)",
+      "teamLeader": "Team leader:",
+      "teamLeaderOptional": "Team leader (optional)",
+      "headOfDept": "Head of dept:",
+      "headOfDeptOptional": "Head of department (optional)",
+      "none": "—",
+      "noneOption": "— None —",
+      "removeAssignee": "Remove {name}",
+      "addAssignee": "Add assignee",
+      "role": "Role",
+      "searchPlaceholder": "Search by name, title, or department...",
+      "search": "Search employees",
+      "clearSearch": "Clear search",
+      "employees": "Employees",
+      "noResults": "No results",
+      "candidates": "{count} candidate(s)",
+      "close": "Close (Esc)"
+    },
+    "followersPanel": {
+      "toasts": {
+        "added": "Follower added",
+        "removed": "Follower removed"
+      },
+      "empty": {
+        "title": "No followers yet",
+        "description": "Add teammates who should stay informed without execution ownership.",
+        "manageHint": "Click “Add follower” below ({count} available)."
+      },
+      "inheritedTitle": "Inherited follower from project",
+      "inherited": "From project",
+      "removeFollower": "Remove {name} from followers",
+      "addFollower": "Add follower",
+      "allAlreadyFollowing": "All active teammates are already following.",
+      "pickFollower": "Pick follower",
+      "searchPlaceholder": "Search by name or role...",
+      "search": "Search followers",
+      "clearSearch": "Clear search",
+      "candidatesLabel": "Follower candidates",
+      "noResults": "No results",
+      "candidatesCount": "{count} candidate(s)",
+      "close": "Close (Esc)"
+    },
+    "followToggle": {
+      "follow": "Follow",
+      "following": "Following",
+      "toasts": {
+        "followed": "Following enabled",
+        "unfollowed": "Following removed"
+      }
+    },
+    "comments": {
+      "requirements": "Task requirements",
+      "modifications": "Client changes",
+      "modificationNumber": "Change #{count}",
+      "employeeFallback": "Employee"
+    },
+    "subtasks": {
+      "description": "Subtasks inherit the parent task's project.",
+      "add": "Add subtask",
+      "placeholder": "Subtask title...",
+      "save": "Save",
+      "cancel": "Cancel",
+      "empty": "No subtasks.",
+      "enterTitle": "Enter a subtask title",
+      "toasts": {
+        "created": "Subtask created"
+      }
+    },
+    "timesheets": {
+      "total": "Total hours:",
+      "logHours": "Log hours",
+      "date": "Date",
+      "hours": "Hours",
+      "descriptionOptional": "Description (optional)",
+      "save": "Save",
+      "cancel": "Cancel",
+      "empty": "No time entries.",
+      "hoursValue": "{count} h",
+      "enterValidHours": "Enter a valid number of hours",
+      "toasts": {
+        "added": "Time entry added",
+        "deleted": "Time entry deleted"
+      }
+    },
+    "activities": {
+      "types": {
+        "call": "Call",
+        "email": "Email",
+        "review": "Review",
+        "upload": "Upload",
+        "other": "Other"
+      },
+      "description": "Scheduled activities such as calls, reviews, or uploads are tracked separately from notes and subtasks.",
+      "add": "Add activity",
+      "placeholder": "Activity summary...",
+      "save": "Save",
+      "cancel": "Cancel",
+      "empty": "No scheduled activities.",
+      "overdue": "Overdue",
+      "complete": "Complete",
+      "delete": "Delete",
+      "done": "Completed",
+      "enterSummary": "Enter an activity summary",
+      "toasts": {
+        "added": "Activity added",
+        "completed": "Activity completed",
+        "deleted": "Activity deleted"
+      }
+    },
+    "attachments": {
+      "empty": "No attachments yet. Add one from the comment composer using the paperclip button.",
+      "open": "Open"
+    },
+    "deadlineEditor": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "none": "No deadline",
+      "add": "Add deadline",
+      "edit": "Edit deadline"
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "stageHistory": {
+      "empty": "This task has not moved between stages yet.",
+      "current": "Current stage",
+      "by": "by",
+      "roleAtMove": "Role at the time of the move",
+      "seconds": "{count}s",
+      "minutes": "{count}m",
+      "hours": "{count}h",
+      "hoursMinutes": "{hours}h {minutes}m",
+      "days": "{count}d",
+      "daysHours": "{days}d {hours}h"
+    },
+    "designCounts": {
+      "error": "Enter valid non-negative numbers",
+      "designCount": "Design count",
+      "revisionCount": "Revision count",
+      "edit": "Edit counts",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "linksPanel": {
+      "title": "Task links",
+      "add": "Add link",
+      "dependentTask": "Linked task",
+      "pick": "— Select —",
+      "type": "Type",
+      "lagDays": "Lag (days)",
+      "save": "Save",
+      "cancel": "Cancel",
+      "outgoingTitle": "Tasks that depend on this task",
+      "outgoingSubtitle": "This task is the reference, so date changes here push linked dates.",
+      "incomingTitle": "Tasks this task depends on",
+      "incomingSubtitle": "This task's dates are affected by those tasks.",
+      "empty": "No links.",
+      "pickTask": "Choose the linked task",
+      "types": {
+        "finish_to_start": "FS — finish to start",
+        "start_to_start": "SS — start to start",
+        "finish_to_finish": "FF — finish to finish",
+        "start_to_finish": "SF — start to finish"
+      },
+      "toasts": {
+        "created": "Link created",
+        "updated": "Link updated",
+        "deleted": "Link deleted"
+      }
+    },
+    "error": {
+      "title": "Failed to load task",
+      "description": "The link may be invalid, the task may have been deleted, or you may not have permission to view it.",
+      "back": "Back to tasks"
     }
   },
   "TaskLabels": {
@@ -940,6 +1140,285 @@
       "medium": "Medium",
       "high": "High",
       "urgent": "Urgent"
+    }
+  },
+  "ReportsPage": {
+    "title": "Reports",
+    "description": "Agency performance indicators for this week, computed directly from Odoo data.",
+    "smartDigestBadge": "Phase 9 — Smart digest",
+    "executiveDigest": {
+      "title": "Executive week digest",
+      "description": "The Gemini model is fed only the four reports below and does not speculate beyond them."
+    },
+    "sections": {
+      "stageDwell": {
+        "title": "Average time spent in each stage",
+        "description": "In days, calculated from closed segments in the stage history.",
+        "empty": "No data yet. This needs tasks that passed through more than one stage."
+      },
+      "specialistLoad": {
+        "title": "Current specialist load",
+        "description": "Open task count per assignee, with total allocated hours.",
+        "empty": "No assigned open tasks."
+      },
+      "designerOutput": {
+        "title": "Monthly designer output",
+        "description": "Total designs and revisions per employee on tasks closed in the selected month."
+      },
+      "slipHeatmap": {
+        "title": "Schedule slip distribution",
+        "description": "Open tasks grouped by percentage deviation from the expected schedule."
+      },
+      "renewals": {
+        "title": "Renewal forecast — next 90 days",
+        "description": "Sorted by nearest renewal date.",
+        "openProjects": "Open projects",
+        "empty": "No renewals on the horizon."
+      }
+    },
+    "footerNote": "Performance indicators, projects, and people metrics are computed directly from Odoo whenever the page opens. Renewals and the weekly digest are read from the dashboard database.",
+    "weeklyMetrics": {
+      "title": "Weekly metrics",
+      "description": "On-time delivery, review backlog, and rework, pulled directly from Odoo.",
+      "odooUnavailable": "Odoo is currently unavailable, so Odoo-backed weekly metrics cannot be shown. The remaining reports still load from the dashboard database.",
+      "cards": {
+        "onTime": "On-time delivery",
+        "reviewBacklog": "Review backlog",
+        "rework": "Rework (Client Changes)",
+        "odooTasks": "Odoo tasks (latest pull)"
+      },
+      "hints": {
+        "noSample": "No sample yet",
+        "sample": "Sample {count}",
+        "noDelay": "No delays",
+        "waitingReview": "Waiting for review",
+        "affectedProjects": "{count} affected project(s)",
+        "last4Weeks": "Closures over the last 4 weeks"
+      }
+    },
+    "projectCompliance": {
+      "title": "Deadline compliance by project",
+      "description": "Percentage of open tasks still within deadline — worst 10 projects.",
+      "empty": "No open tasks to evaluate for compliance."
+    },
+    "reworkByProject": {
+      "title": "Rework by project",
+      "description": "Tasks in the Client Changes stage — reveals the most draining projects.",
+      "empty": "No tasks are currently in the Client Changes stage."
+    },
+    "peopleBoard": {
+      "title": "People board — last 4 weeks",
+      "description": "Closed task count plus relative utilization (top performer = 100%).",
+      "empty": "No productivity data yet."
+    },
+    "storedDigest": {
+      "title": "Stored week digest",
+      "generatedAt": "Generated at {date}",
+      "notGenerated": "No weekly digest has been generated yet. It is scheduled automatically on Sunday morning.",
+      "note": "This digest is delivered only to the in-app notifications inbox. Email and WhatsApp are deferred to phase T8.",
+      "empty": "It will appear here as soon as the first weekly-digest cycle runs.",
+      "cards": {
+        "onTime": "On-time delivery",
+        "weekClosures": "Week closures",
+        "reviewBacklog": "Review backlog",
+        "renewals90d": "90-day renewals"
+      }
+    },
+    "renewalInDays": "In {count} day(s)",
+    "loading": "Loading...",
+    "count": {
+      "task": "{count} task(s)"
+    }
+  },
+  "FinancePage": {
+    "title": "Executive finance dashboard",
+    "description": "A consolidated view of contract movement, expected and actual revenue, and account management versus sales performance.",
+    "expenses": "Expenses",
+    "contractTypes": {
+      "New": "New",
+      "Renew": "Renew",
+      "Lost": "Lost",
+      "UPSELL": "Upsell",
+      "WinBack": "WinBack",
+      "Hold": "Hold"
+    },
+    "todayStatus": {
+      "title": "Client status today",
+      "description": "Total active contracts in each category.",
+      "newContracts": "New contracts",
+      "renewing": "Renewing clients",
+      "hold": "On hold",
+      "totalClients": "Total clients",
+      "upsell": "Upsell contracts",
+      "winBack": "Win-back clients"
+    },
+    "monthMovement": {
+      "title": "Month movement — {month}",
+      "description": "Contracts that started or closed during this month only."
+    },
+    "income": {
+      "title": "Company revenue (NEW + RENEWAL) — {month}",
+      "expected": "Expected revenue",
+      "expectedHint": "{count} new or renewal contract(s)",
+      "actual": "Actual revenue",
+      "actualHint": "{count} received installment(s)",
+      "ofExpected": "{count}% of expected"
+    },
+    "account": {
+      "title": "Account management — {month}",
+      "description": "Tracking account-managed clients: expected, overdue, and actual achieved revenue.",
+      "countOverview": "Contract count overview",
+      "salesDeposit": "Sales deposits",
+      "onTarget": "On target",
+      "overdue": "Overdue",
+      "expectedAll": "Expected (all)",
+      "expectedAllHint": "On target + overdue",
+      "afterRenewed": "After subtracting renewed",
+      "afterRenewedHint": "Needs follow-up",
+      "actualAchieved": "Actually achieved",
+      "expectedHeader": "Expected",
+      "overdueInstallmentsAdded": "Overdue installments added to tracking",
+      "thisMonthInstallments": "This month's installments",
+      "onTargetClients": "On-target clients",
+      "overdueClients": "Overdue clients",
+      "totalExpected": "Total expected",
+      "actualHeader": "Actual collected",
+      "collectedOverdueInstallments": "Collected overdue installments",
+      "upsell": "Upsell",
+      "winBack": "WinBack",
+      "totalIncome": "Total account revenue",
+      "achievement": "Achievement rate",
+      "revenueGap": "Revenue gap"
+    },
+    "sales": {
+      "title": "Sales — {month}",
+      "description": "Tracking new-client sales installments plus total revenue from sales.",
+      "expectedHeader": "Expected",
+      "overdueInstallments": "Overdue installments",
+      "thisMonthInstallments": "This month's installments",
+      "totalExpected": "Total expected from installments",
+      "actualHeader": "Actual",
+      "collectedInstallments": "Collected installments",
+      "newClientIncome": "Income from new clients",
+      "totalIncome": "Total sales revenue",
+      "collectionRate": "Installment collection rate",
+      "gap": "Gap"
+    },
+    "help": {
+      "title": "How are these numbers calculated?",
+      "items": {
+        "todayStatus": "Today's client status counts active contracts in each category, independent of month.",
+        "monthMovement": "Month movement includes only contracts that started or closed in the selected month.",
+        "actualIncome": "Actual revenue is the sum of installments with actual receipt dates inside this month.",
+        "departments": "Account management includes contracts whose `target` is not `Sales Deposit`. Sales includes contracts with `target=Sales Deposit`."
+      },
+      "contracts": "Manage contracts",
+      "expenses": "Expenses and operating costs"
+    }
+  },
+  "UploadsPage": {
+    "title": "Today — task uploads",
+    "description": "Tasks that the specialist must upload before the deadline.",
+    "descriptionFull": "Your specialist queue ordered by upload due date. The due date is calculated by subtracting the pre-upload window from the task deadline.",
+    "specialistsOnly": {
+      "title": "This page is for specialists",
+      "description": "It shows tasks assigned to you as the specialist. Your account does not appear to be linked to an employee profile yet."
+    },
+    "empty": {
+      "title": "No tasks waiting for upload",
+      "description": "When a task is assigned to you as a specialist and its deadline approaches, it will appear here automatically."
+    },
+    "buckets": {
+      "overdue": {
+        "label": "Overdue",
+        "description": "Tasks whose upload due date passed and are still incomplete",
+        "empty": "No overdue upload tasks."
+      },
+      "today": {
+        "label": "Today",
+        "description": "Must be uploaded before the end of today",
+        "empty": "No tasks need upload today."
+      },
+      "this_week": {
+        "label": "Within a week",
+        "description": "Tasks whose upload due date falls within the next seven days",
+        "empty": "Nothing scheduled for next week."
+      },
+      "later": {
+        "label": "Later",
+        "description": "Tasks whose upload due date is more than a week away",
+        "empty": "No later scheduled tasks."
+      }
+    },
+    "delta": {
+      "today": "Today",
+      "overdueOne": "1 day overdue",
+      "overdueTwo": "2 days overdue",
+      "overdueMany": "{count} days overdue",
+      "inOne": "In 1 day",
+      "inTwo": "In 2 days",
+      "inMany": "In {count} days"
+    },
+    "showAll": "Show all ({count})",
+    "backToAll": "Back to all tasks",
+    "uploadDue": "Upload due",
+    "openTask": "Open task"
+  },
+  "ProjectsNewPage": {
+    "title": "New project",
+    "description": "Choose the client and services. The tasks to be created will appear in the preview panel.",
+    "breadcrumbs": {
+      "projects": "Projects",
+      "newProject": "New project"
+    },
+    "manageCategories": "Manage service categories and task templates"
+  },
+  "ProjectsNewForm": {
+    "steps": {
+      "1": "Client",
+      "2": "Services",
+      "3": "Schedule & review"
+    },
+    "validation": {
+      "pickClient": "Choose a client",
+      "shortName": "Project name is too short (at least 3 characters)",
+      "pickService": "Choose at least one service",
+      "pickStartDate": "Choose a start date"
+    },
+    "toasts": {
+      "projectCreated": "Project created",
+      "projectCreatedWithTasks": "Project created and {count} task(s) generated",
+      "clientNameShort": "Client name is too short",
+      "clientAdded": "Client added"
+    },
+    "labels": {
+      "client": "Client *",
+      "projectName": "Project name *"
+    },
+    "placeholders": {
+      "pickClient": "Choose client",
+      "searchClient": "Search by name or phone…",
+      "projectName": "Example: Ramadan 1447 campaign"
+    },
+    "actions": {
+      "hide": "Hide",
+      "addClient": "Add new client",
+      "saveClient": "Save client",
+      "cancel": "Cancel",
+      "previous": "Previous",
+      "next": "Next",
+      "createProject": "Create project"
+    },
+    "quickClient": {
+      "title": "New client",
+      "name": "Client name *",
+      "phone": "Phone",
+      "email": "Email"
+    },
+    "preview": {
+      "title": "Preview generated tasks",
+      "count": "{count} task(s)",
+      "pickService": "Choose at least one service to preview the generated tasks."
     }
   },
   "PageTitles": {
