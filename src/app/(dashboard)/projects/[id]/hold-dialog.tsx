@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Loader2, PauseCircle, PlayCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,8 +17,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { formatArabicShortDate } from "@/lib/utils-format";
+import { intlLocale } from "@/lib/utils-format";
 import { holdProjectAction, resumeProjectAction } from "./_actions";
+
+function formatShortDate(value: string | null, locale: string): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat(intlLocale(locale.startsWith("ar") ? "ar-SA" : "en-US"), {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
 
 export function HoldDialog({
   projectId,
@@ -33,6 +42,8 @@ export function HoldDialog({
   heldBy?: string | null;
 }) {
   const router = useRouter();
+  const locale = useLocale();
+  const t = useTranslations("ProjectDetailPage.holdDialog");
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
@@ -44,15 +55,15 @@ export function HoldDialog({
           <div className="hidden sm:flex max-w-sm items-center gap-2 rounded-lg border border-amber/30 bg-amber-dim/40 px-2.5 py-1.5 text-[11px] text-amber">
             <PauseCircle className="size-3.5 shrink-0" />
             <span className="truncate" title={holdReason ?? undefined}>
-              {holdReason ?? "موقوف"}
+              {holdReason ?? t("held")}
             </span>
             {heldBy && (
               <span className="text-muted-foreground shrink-0">
-                · بواسطة {heldBy}
+                · {t("by")} {heldBy}
               </span>
             )}
             <span className="text-muted-foreground shrink-0">
-              {formatArabicShortDate(heldAt)}
+              {formatShortDate(heldAt, locale)}
             </span>
           </div>
         )}
@@ -67,7 +78,7 @@ export function HoldDialog({
                 toast.error(res.error);
                 return;
               }
-              toast.success("تم استئناف المشروع");
+              toast.success(t("resumeSuccess"));
               router.refresh();
             });
           }}
@@ -77,7 +88,7 @@ export function HoldDialog({
           ) : (
             <PlayCircle className="size-4" />
           )}
-          استئناف المشروع
+          {t("resume")}
         </Button>
       </div>
     );
@@ -87,23 +98,23 @@ export function HoldDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" size="sm" />}>
         <PauseCircle className="size-4" />
-        إيقاف مؤقت
+        {t("pause")}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>إيقاف المشروع مؤقتًا</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            سيتم وضع المشروع على هولد. يمكن استئنافه لاحقًا في أي وقت.
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">
-          <Label htmlFor="hold_reason">سبب الإيقاف</Label>
+          <Label htmlFor="hold_reason">{t("reasonLabel")}</Label>
           <Textarea
             id="hold_reason"
             rows={4}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="اشرح بإيجاز سبب وضع المشروع على هولد"
+            placeholder={t("reasonPlaceholder")}
             maxLength={500}
           />
           <p className="text-[11px] text-muted-foreground">
@@ -117,7 +128,7 @@ export function HoldDialog({
             onClick={() => setOpen(false)}
             disabled={pending}
           >
-            إلغاء
+            {t("cancel")}
           </Button>
           <Button
             type="button"
@@ -134,7 +145,7 @@ export function HoldDialog({
                   toast.error(res.error);
                   return;
                 }
-                toast.success("تم إيقاف المشروع مؤقتًا");
+                toast.success(t("pauseSuccess"));
                 setOpen(false);
                 setReason("");
                 router.refresh();
@@ -142,7 +153,7 @@ export function HoldDialog({
             }}
           >
             {pending && <Loader2 className="size-4 animate-spin" />}
-            تأكيد الإيقاف
+            {t("confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

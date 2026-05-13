@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { Loader2, UserPlus, X, Search, Users, Building2, ChevronDown, Check } from "lucide-react";
+import { Loader2, UserPlus, X, Search, Users, Building2, ChevronDown, Check, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -99,6 +99,14 @@ export function TaskAssigneesPanel({
   const [role, setRole] = useState<AssigneeRoleType>("agent");
   const [managerId, setManagerId] = useState<string | null>(null);
   const [headOfDeptId, setHeadOfDeptId] = useState<string | null>(null);
+  // Per-card "apply globally" toggles, keyed by `${assigneeId}:tl` /
+  // `${assigneeId}:hod`. When on, the next dropdown change also writes the
+  // canonical org-chart record (employee_profiles.manager_employee_id or
+  // departments.head_employee_id) — not just this task's override.
+  const [globalScope, setGlobalScope] = useState<Record<string, boolean>>({});
+  const isGlobal = (key: string) => Boolean(globalScope[key]);
+  const toggleGlobal = (key: string) =>
+    setGlobalScope((m) => ({ ...m, [key]: !m[key] }));
   const [activeIndex, setActiveIndex] = useState(0);
   const [pending, start] = useTransition();
   const triggerRef = useRef<HTMLSpanElement | null>(null);
@@ -164,31 +172,41 @@ export function TaskAssigneesPanel({
   }
 
   function setTeamLeader(assigneeId: string, employeeId: string | null) {
+    const applyGlobally = isGlobal(`${assigneeId}:tl`);
     start(async () => {
       const res = await setAssigneeTeamManagerAction({
         assigneeId,
         teamManagerEmployeeId: employeeId,
+        applyGlobally,
       });
       if ("error" in res) {
         toast.error(res.error);
         return;
       }
-      toast.success(t("toasts.teamLeaderUpdated"));
+      toast.success(
+        res.appliedGlobally
+          ? t("toasts.teamLeaderUpdatedGlobal")
+          : t("toasts.teamLeaderUpdated"),
+      );
       router.refresh();
     });
   }
 
   function setHeadOfDept(assigneeId: string, employeeId: string | null) {
+    const applyGlobally = isGlobal(`${assigneeId}:hod`);
     start(async () => {
       const res = await setAssigneeHeadOfDeptAction({
         assigneeId,
         headOfDeptEmployeeId: employeeId,
+        applyGlobally,
       });
       if ("error" in res) {
         toast.error(res.error);
         return;
       }
-      toast.success(t("toasts.hodUpdated"));
+      toast.success(
+        res.appliedGlobally ? t("toasts.hodUpdatedGlobal") : t("toasts.hodUpdated"),
+      );
       router.refresh();
     });
   }
@@ -274,12 +292,24 @@ export function TaskAssigneesPanel({
                     <Users className="size-3 text-muted-foreground" />
                     <span className="text-muted-foreground">{t("teamLeader")}</span>
                     {canManage ? (
-                      <ManagerSelect
-                        employees={employees.filter((e) => e.id !== a.employee_id)}
-                        value={a.team_manager_employee_id}
-                        onChange={(v) => setTeamLeader(a.id, v)}
-                        disabled={pending}
-                      />
+                      <>
+                        <ManagerSelect
+                          employees={employees.filter((e) => e.id !== a.employee_id)}
+                          value={a.team_manager_employee_id}
+                          onChange={(v) => setTeamLeader(a.id, v)}
+                          disabled={pending}
+                        />
+                        <GlobalScopeToggle
+                          active={isGlobal(`${a.id}:tl`)}
+                          onToggle={() => toggleGlobal(`${a.id}:tl`)}
+                          tooltip={
+                            isGlobal(`${a.id}:tl`)
+                              ? t("scopeGlobalActive.teamLeader")
+                              : t("scopeGlobalInactive.teamLeader")
+                          }
+                          ariaLabel={t("scopeGlobalAria.teamLeader")}
+                        />
+                      </>
                     ) : (
                       <span className="font-medium">
                         {a.team_manager?.full_name ?? t("none")}
@@ -292,12 +322,24 @@ export function TaskAssigneesPanel({
                     <Building2 className="size-3 text-muted-foreground" />
                     <span className="text-muted-foreground">{t("headOfDept")}</span>
                     {canManage ? (
-                      <ManagerSelect
-                        employees={employees.filter((e) => e.id !== a.employee_id)}
-                        value={a.head_of_dept_employee_id}
-                        onChange={(v) => setHeadOfDept(a.id, v)}
-                        disabled={pending}
-                      />
+                      <>
+                        <ManagerSelect
+                          employees={employees.filter((e) => e.id !== a.employee_id)}
+                          value={a.head_of_dept_employee_id}
+                          onChange={(v) => setHeadOfDept(a.id, v)}
+                          disabled={pending}
+                        />
+                        <GlobalScopeToggle
+                          active={isGlobal(`${a.id}:hod`)}
+                          onToggle={() => toggleGlobal(`${a.id}:hod`)}
+                          tooltip={
+                            isGlobal(`${a.id}:hod`)
+                              ? t("scopeGlobalActive.headOfDept")
+                              : t("scopeGlobalInactive.headOfDept")
+                          }
+                          ariaLabel={t("scopeGlobalAria.headOfDept")}
+                        />
+                      </>
                     ) : (
                       <span className="font-medium">
                         {a.head_of_dept?.full_name ?? t("none")}
@@ -693,5 +735,40 @@ function ManagerSelect({
         </div>
       </AnchoredPopover>
     </div>
+  );
+}
+
+/**
+ * Small Globe toggle that controls whether the next change to the adjacent
+ * ManagerSelect also writes the canonical org-chart record (vs. only this
+ * task's override row). The hover tooltip describes the current state.
+ */
+function GlobalScopeToggle({
+  active,
+  onToggle,
+  tooltip,
+  ariaLabel,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  tooltip: string;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={tooltip}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-md border transition-colors",
+        active
+          ? "border-cyan/50 bg-cyan-dim text-cyan"
+          : "border-soft-2 bg-card text-muted-foreground hover:bg-soft-2",
+      )}
+    >
+      <Globe className="size-3.5" />
+    </button>
   );
 }

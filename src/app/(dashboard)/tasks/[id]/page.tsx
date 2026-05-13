@@ -221,16 +221,16 @@ export default async function TaskDetailPage({
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader
-        title={(() => {
-          // §2.1: lead with the project name (what the operator recognises),
-          // then the task title. task_code (PRJ-NNN-NNN) moves to a small
-          // badge in the breadcrumb area where it doesn't dominate the
-          // headline. Falls back gracefully if either piece is missing.
+        title={task.title}
+        description={(() => {
+          // §2.1: topbar slot is narrow — surface the task title alone in the
+          // h2 and demote the project name to the subtitle line. Operators
+          // already navigated *from* the project; they need the task name
+          // to scan tabs/breadcrumbs without ellipsis truncation.
           const proj = Array.isArray(task.project)
             ? task.project[0]
             : (task as { project?: { id: string; name: string } | null }).project;
-          const projectName = proj?.name ?? null;
-          return projectName ? `${projectName} — ${task.title}` : task.title;
+          return proj?.name ?? undefined;
         })()}
         breadcrumbs={(() => {
           const proj = Array.isArray(task.project)

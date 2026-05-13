@@ -386,6 +386,142 @@
     "noAddress": "No address specified",
     "noCosts": "No costs"
   },
+  "ProjectDetailPage": {
+    "renewalSoonTitle": "Renewal date is near",
+    "renewalSoon": "Renewal in {days} day(s)",
+    "actions": {
+      "gantt": "Gantt"
+    },
+    "hold": {
+      "ribbonTitle": "Project is temporarily on hold",
+      "since": "Since {date}",
+      "by": "by"
+    },
+    "metrics": {
+      "totalTasks": "Total tasks",
+      "inProgress": "In progress",
+      "inReview": "In review",
+      "withClient": "With client"
+    },
+    "cards": {
+      "client": "Client",
+      "timeline": "Timeline",
+      "start": "Start",
+      "end": "End",
+      "accountManager": "Account manager",
+      "noAccountManager": "No account manager assigned yet"
+    },
+    "specialists": {
+      "owner": "{label} owner",
+      "social": "Social",
+      "media": "Media",
+      "seo": "SEO",
+      "unassigned": "Not assigned yet"
+    },
+    "sections": {
+      "tags": {
+        "title": "Tags",
+        "description": "Add quick project tags like HOLD or Urgent. Shared across all projects."
+      },
+      "services": {
+        "title": "Services"
+      },
+      "whatsapp": {
+        "title": "WhatsApp groups",
+        "description": "The official client channel and the internal team group. Follow the naming guide."
+      },
+      "holidays": {
+        "title": "Project holidays",
+        "description": "Dates added on top of the global calendar, such as client shutdowns or launch freezes. Task dates shift automatically."
+      },
+      "notes": {
+        "title": "Project notes",
+        "description": "General project log for meetings, decisions, blockers, and context that does not belong to a single task."
+      },
+      "attachments": {
+        "title": "Attachments",
+        "description": "All files attached to the project and its tasks, matching the Odoo All Documents smart button."
+      },
+      "team": {
+        "title": "Project team"
+      },
+      "followers": {
+        "title": "Followers",
+        "description": "Imported from Odoo `mail.followers`; they receive project notifications."
+      },
+      "renewals": {
+        "title": "Renewal cycles",
+        "description": "The project's active renewal schedule and previous cycle history."
+      },
+      "board": {
+        "title": "Task board",
+        "description": "{count} tasks. Drag cards between columns to change the stage."
+      }
+    },
+    "loading": {
+      "tags": "Loading tags…",
+      "whatsapp": "Loading WhatsApp groups…",
+      "holidays": "Loading holidays…",
+      "notes": "Loading notes…",
+      "attachments": "Loading attachments…",
+      "followers": "Loading followers…",
+      "renewals": "Loading renewal cycles…",
+      "board": "Loading task board…"
+    },
+    "empty": {
+      "team": "No project team members yet.",
+      "followers": "No followers.",
+      "services": "No linked services yet.",
+      "noMatchingTasks": {
+        "title": "No matching tasks",
+        "description": "Try removing some filters, or add a service that has a task template."
+      }
+    },
+    "holdDialog": {
+      "held": "On hold",
+      "by": "by",
+      "resumeSuccess": "Project resumed",
+      "resume": "Resume project",
+      "pause": "Pause",
+      "title": "Pause project",
+      "description": "The project will be put on hold. You can resume it later at any time.",
+      "reasonLabel": "Reason for pause",
+      "reasonPlaceholder": "Briefly explain why the project is being put on hold",
+      "cancel": "Cancel",
+      "pauseSuccess": "Project paused",
+      "confirm": "Confirm pause"
+    },
+    "bulkReassign": {
+      "success": "Updated {tasks} task(s) ({changes} changes)",
+      "trigger": "Bulk edit",
+      "title": "Bulk edit assignees/followers",
+      "description": "Apply the update to all project tasks, or only to tasks in the selected service categories.",
+      "targetLabel": "Target",
+      "targets": {
+        "assignees": "Assignees",
+        "followers": "Followers"
+      },
+      "roleLabel": "Role",
+      "roles": {
+        "specialist": "Specialist",
+        "manager": "Manager",
+        "agent": "Assignee",
+        "account_manager": "Account manager"
+      },
+      "actionLabel": "Action",
+      "actions": {
+        "add": "Add",
+        "replace": "Replace (clear then add)",
+        "clear": "Clear only"
+      },
+      "categoriesLabel": "Service categories (optional; leave empty to apply to all tasks)",
+      "noCategories": "No categories",
+      "employeesLabel": "Employees",
+      "employeeWithoutUser": "This employee does not have a user account",
+      "cancel": "Cancel",
+      "apply": "Apply"
+    }
+  },
   "RoleLabels": {
     "owner": "Owner",
     "admin": "Administrator",
@@ -928,8 +1064,10 @@
         "assigned": "Assignee added",
         "removed": "Assignee removed",
         "managerUpdated": "Team manager updated",
-        "teamLeaderUpdated": "Team leader updated",
-        "hodUpdated": "Head of department updated"
+        "teamLeaderUpdated": "Team leader updated for this task",
+        "teamLeaderUpdatedGlobal": "Team leader updated globally (employees page + this task)",
+        "hodUpdated": "Head of department updated for this task",
+        "hodUpdatedGlobal": "Head of department updated globally (department head + this task)"
       },
       "empty": {
         "title": "No assignees yet",
@@ -943,6 +1081,18 @@
       "teamLeaderOptional": "Team leader (optional)",
       "headOfDept": "Head of dept:",
       "headOfDeptOptional": "Head of department (optional)",
+      "scopeGlobalActive": {
+        "teamLeader": "Global mode ON — your next change also rewrites this employee's direct manager on /organization/employees (affects all their other tasks). Click to switch back to task-only.",
+        "headOfDept": "Global mode ON — your next change also sets the head of this employee's department on /organization/departments (affects EVERYONE in that department). Click to switch back to task-only."
+      },
+      "scopeGlobalInactive": {
+        "teamLeader": "Task-only mode — your next change only overrides the team leader for this single task. Click to also rewrite the org chart globally.",
+        "headOfDept": "Task-only mode — your next change only overrides the head of dept for this single task. Click to also rewrite the department head globally."
+      },
+      "scopeGlobalAria": {
+        "teamLeader": "Toggle global scope for team leader",
+        "headOfDept": "Toggle global scope for head of department"
+      },
       "none": "—",
       "noneOption": "— None —",
       "removeAssignee": "Remove {name}",
@@ -1061,7 +1211,8 @@
     },
     "pagination": {
       "previous": "Previous",
-      "next": "Next"
+      "next": "Next",
+      "position": "{position} of {total}"
     },
     "stageHistory": {
       "empty": "This task has not moved between stages yet.",
@@ -1141,6 +1292,9 @@
       "high": "High",
       "urgent": "Urgent"
     }
+  },
+  "TaskStatusSelect": {
+    "changed": "Status changed to {label}"
   },
   "ReportsPage": {
     "title": "Reports",

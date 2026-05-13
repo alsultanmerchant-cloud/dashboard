@@ -4,7 +4,7 @@
 // Drag tasks between stage columns. Drop calls moveTaskStageAction;
 // the DB trigger writes a task_stage_history row + flips completed_at.
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -512,13 +512,19 @@ function DraggableCard({
     id: task.id,
     data: { task },
   });
+  // dnd-kit's `aria-describedby` carries a globally-incrementing counter that
+  // differs between server and client renders → hydration mismatch. Skip the
+  // attributes during SSR; the drag handlers attach right after mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   return (
     <div
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
+      {...(mounted ? attributes : {})}
+      {...(mounted ? listeners : {})}
       className={cn(isDragging && "opacity-30")}
+      suppressHydrationWarning
     >
       <TaskCard task={task} onAdvance={onAdvance} onRetreat={onRetreat} advancing={advancing} />
     </div>

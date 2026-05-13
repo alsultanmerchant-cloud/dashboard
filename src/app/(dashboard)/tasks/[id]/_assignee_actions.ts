@@ -27,11 +27,13 @@ const AddSchema = z.object({
 const UpdateManagerSchema = z.object({
   assignee_id: z.string().uuid(),
   team_manager_employee_id: z.string().uuid().nullable(),
+  apply_globally: z.boolean().optional(),
 });
 
 const UpdateHodSchema = z.object({
   assignee_id: z.string().uuid(),
   head_of_dept_employee_id: z.string().uuid().nullable(),
+  apply_globally: z.boolean().optional(),
 });
 
 const RemoveSchema = z.object({
@@ -263,10 +265,12 @@ export async function removeTaskAssigneeAction(input: {
 export async function setAssigneeTeamManagerAction(input: {
   assigneeId: string;
   teamManagerEmployeeId: string | null;
-}): Promise<{ ok: true } | { error: string }> {
+  applyGlobally?: boolean;
+}): Promise<{ ok: true; appliedGlobally: boolean } | { error: string }> {
   const parsed = UpdateManagerSchema.safeParse({
     assignee_id: input.assigneeId,
     team_manager_employee_id: input.teamManagerEmployeeId,
+    apply_globally: input.applyGlobally ?? false,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -277,7 +281,7 @@ export async function setAssigneeTeamManagerAction(input: {
 
   const { data: row } = await supabaseAdmin
     .from("task_assignees")
-    .select("id, task_id, task:tasks!task_assignees_task_id_fkey(created_by, project_id)")
+    .select("id, task_id, employee_id, task:tasks!task_assignees_task_id_fkey(created_by, project_id)")
     .eq("organization_id", session.orgId)
     .eq("id", parsed.data.assignee_id)
     .maybeSingle();
@@ -289,6 +293,12 @@ export async function setAssigneeTeamManagerAction(input: {
     hasPermission(session, "tasks.manage") ||
     hasPermission(session, "task.view_all");
   if (!canManage) return { error: "لا تملك صلاحية التعديل" };
+
+  // Applying globally also writes the org-chart record on employee_profiles,
+  // which is a higher-blast-radius operation gated by org.manage_structure.
+  if (parsed.data.apply_globally && !hasPermission(session, "org.manage_structure")) {
+    return { error: "لا تملك صلاحية تعديل الهيكل التنظيمي" };
+  }
 
   if (parsed.data.team_manager_employee_id) {
     const { data: mgr } = await supabaseAdmin
@@ -297,7 +307,16 @@ export async function setAssigneeTeamManagerAction(input: {
       .eq("organization_id", session.orgId)
       .eq("id", parsed.data.team_manager_employee_id)
       .maybeSingle();
-    if (!mgr) return { error: "مدير الفريق غير موجود" };
+    if (!mgr) return { error: "قائد الفريق غير موجود" };
+  }
+
+  // Self-reference guard for global writes (an employee can't be their own
+  // direct manager in /organization/employees).
+  if (
+    parsed.data.apply_globally &&
+    parsed.data.team_manager_employee_id === row.employee_id
+  ) {
+    return { error: "لا يمكن أن يكون الموظف مديرًا لنفسه" };
   }
 
   const { error } = await supabaseAdmin
@@ -306,29 +325,48 @@ export async function setAssigneeTeamManagerAction(input: {
     .eq("id", parsed.data.assignee_id);
   if (error) return { error: error.message };
 
+  if (parsed.data.apply_globally) {
+    const { error: globalErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .update({ manager_employee_id: parsed.data.team_manager_employee_id })
+      .eq("organization_id", session.orgId)
+      .eq("id", row.employee_id);
+    if (globalErr) return { error: globalErr.message };
+  }
+
   await logAudit({
     organizationId: session.orgId,
     actorUserId: session.userId,
-    action: "task.assignee_manager_set",
+    action: parsed.data.apply_globally
+      ? "task.assignee_manager_set_global"
+      : "task.assignee_manager_set",
     entityType: "task",
     entityId: row.task_id,
     metadata: {
       assignee_id: parsed.data.assignee_id,
+      employee_id: row.employee_id,
       team_manager_employee_id: parsed.data.team_manager_employee_id,
+      apply_globally: parsed.data.apply_globally,
     },
   });
 
   revalidatePath(`/tasks/${row.task_id}`);
-  return { ok: true };
+  if (parsed.data.apply_globally) {
+    revalidatePath("/organization/employees");
+    revalidatePath("/organization/chart");
+  }
+  return { ok: true, appliedGlobally: parsed.data.apply_globally };
 }
 
 export async function setAssigneeHeadOfDeptAction(input: {
   assigneeId: string;
   headOfDeptEmployeeId: string | null;
-}): Promise<{ ok: true } | { error: string }> {
+  applyGlobally?: boolean;
+}): Promise<{ ok: true; appliedGlobally: boolean } | { error: string }> {
   const parsed = UpdateHodSchema.safeParse({
     assignee_id: input.assigneeId,
     head_of_dept_employee_id: input.headOfDeptEmployeeId,
+    apply_globally: input.applyGlobally ?? false,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -339,7 +377,7 @@ export async function setAssigneeHeadOfDeptAction(input: {
 
   const { data: row } = await supabaseAdmin
     .from("task_assignees")
-    .select("id, task_id, task:tasks!task_assignees_task_id_fkey(created_by, project_id)")
+    .select("id, task_id, employee_id, task:tasks!task_assignees_task_id_fkey(created_by, project_id)")
     .eq("organization_id", session.orgId)
     .eq("id", parsed.data.assignee_id)
     .maybeSingle();
@@ -351,6 +389,12 @@ export async function setAssigneeHeadOfDeptAction(input: {
     hasPermission(session, "tasks.manage") ||
     hasPermission(session, "task.view_all");
   if (!canManage) return { error: "لا تملك صلاحية التعديل" };
+
+  // Applying globally rewrites departments.head_employee_id which affects
+  // EVERYONE in that department — gated by org.manage_structure.
+  if (parsed.data.apply_globally && !hasPermission(session, "org.manage_structure")) {
+    return { error: "لا تملك صلاحية تعديل الهيكل التنظيمي" };
+  }
 
   if (parsed.data.head_of_dept_employee_id) {
     const { data: hod } = await supabaseAdmin
@@ -362,24 +406,57 @@ export async function setAssigneeHeadOfDeptAction(input: {
     if (!hod) return { error: "رئيس القسم غير موجود" };
   }
 
+  // Resolve the assignee's department for the global write.
+  let assigneeDeptId: string | null = null;
+  if (parsed.data.apply_globally) {
+    const { data: emp } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("department_id")
+      .eq("organization_id", session.orgId)
+      .eq("id", row.employee_id)
+      .maybeSingle();
+    assigneeDeptId = emp?.department_id ?? null;
+    if (!assigneeDeptId) {
+      return { error: "الموظف غير مرتبط بقسم — لا يمكن تطبيق التغيير على الهيكل التنظيمي" };
+    }
+  }
+
   const { error } = await supabaseAdmin
     .from("task_assignees")
     .update({ head_of_dept_employee_id: parsed.data.head_of_dept_employee_id })
     .eq("id", parsed.data.assignee_id);
   if (error) return { error: error.message };
 
+  if (parsed.data.apply_globally && assigneeDeptId) {
+    const { error: globalErr } = await supabaseAdmin
+      .from("departments")
+      .update({ head_employee_id: parsed.data.head_of_dept_employee_id })
+      .eq("organization_id", session.orgId)
+      .eq("id", assigneeDeptId);
+    if (globalErr) return { error: globalErr.message };
+  }
+
   await logAudit({
     organizationId: session.orgId,
     actorUserId: session.userId,
-    action: "task.assignee_hod_set",
+    action: parsed.data.apply_globally
+      ? "task.assignee_hod_set_global"
+      : "task.assignee_hod_set",
     entityType: "task",
     entityId: row.task_id,
     metadata: {
       assignee_id: parsed.data.assignee_id,
+      employee_id: row.employee_id,
       head_of_dept_employee_id: parsed.data.head_of_dept_employee_id,
+      department_id: assigneeDeptId,
+      apply_globally: parsed.data.apply_globally,
     },
   });
 
   revalidatePath(`/tasks/${row.task_id}`);
-  return { ok: true };
+  if (parsed.data.apply_globally) {
+    revalidatePath("/organization/departments");
+    revalidatePath("/organization/chart");
+  }
+  return { ok: true, appliedGlobally: parsed.data.apply_globally };
 }

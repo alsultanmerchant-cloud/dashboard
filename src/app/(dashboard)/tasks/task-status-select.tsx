@@ -4,10 +4,11 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { TASK_STATUS_LABELS, TASK_STATUSES } from "@/lib/labels";
+import { TASK_STATUSES, type TaskStatus } from "@/lib/labels";
 import { updateTaskStatusAction } from "./_actions";
 
 export function TaskStatusSelect({
@@ -18,6 +19,10 @@ export function TaskStatusSelect({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const t = useTranslations("TaskLabels.status");
+  const tToast = useTranslations("TaskStatusSelect");
+  const labelFor = (s: string) =>
+    t.has(s as TaskStatus) ? t(s as TaskStatus) : s;
 
   return (
     <div className="flex items-center gap-2">
@@ -29,18 +34,18 @@ export function TaskStatusSelect({
             const res = await updateTaskStatusAction({ taskId, status: value });
             if ("error" in res) toast.error(res.error);
             else {
-              toast.success(`تم تغيير الحالة إلى ${TASK_STATUS_LABELS[value as keyof typeof TASK_STATUS_LABELS]}`);
+              toast.success(tToast("changed", { label: labelFor(value) }));
               router.refresh();
             }
           });
         }}
       >
         <SelectTrigger className="min-w-36">
-          <SelectValue />
+          <SelectValue>{labelFor(currentStatus)}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           {TASK_STATUSES.map((s) => (
-            <SelectItem key={s} value={s}>{TASK_STATUS_LABELS[s]}</SelectItem>
+            <SelectItem key={s} value={s}>{labelFor(s)}</SelectItem>
           ))}
         </SelectContent>
       </Select>

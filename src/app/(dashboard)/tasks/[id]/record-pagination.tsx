@@ -37,7 +37,7 @@ export function RecordPagination({
         </span>
       )}
       <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
-        {position} / {total}
+        {t("position", { position, total })}
       </span>
       {nextId ? (
         <Link

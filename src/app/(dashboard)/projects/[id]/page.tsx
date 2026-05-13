@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
   Briefcase, Calendar, User, ListTodo, PauseCircle,
 } from "lucide-react";
@@ -11,10 +12,10 @@ import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  ProjectStatusBadge, PriorityBadge, ServiceBadge,
+  ProjectStatusBadge, PriorityBadge,
 } from "@/components/status-badges";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { formatArabicShortDate } from "@/lib/utils-format";
+import { intlLocale } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { GanttChart } from "lucide-react";
@@ -37,6 +38,18 @@ import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
 import { buildTaskFiltersFromParams } from "../../tasks/_filter_params";
 import { SmartSearchBar } from "../../tasks/smart-search-bar";
 
+function formatShortDate(
+  value: string | Date | null | undefined,
+  locale: string,
+): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat(intlLocale(locale.startsWith("ar") ? "ar-SA" : "en-US"), {
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
 export default async function ProjectDetailPage({
   params,
   searchParams,
@@ -53,6 +66,9 @@ export default async function ProjectDetailPage({
 }) {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
+  const locale = await getLocale();
+  const t = await getTranslations("ProjectDetailPage");
+  const tNav = await getTranslations("Nav");
   const session = await requirePagePermission("projects.view");
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
@@ -90,9 +106,9 @@ export default async function ProjectDetailPage({
     ? ((project as { seo_specialist?: { id: string; full_name: string; job_title: string | null }[] }).seo_specialist?.[0] ?? null)
     : ((project as { seo_specialist?: { id: string; full_name: string; job_title: string | null } | null }).seo_specialist ?? null);
   const specialists: { label: string; emp: { full_name: string; job_title: string | null } | null }[] = [
-    { label: "السوشال", emp: socialSp },
-    { label: "الميديا", emp: mediaSp },
-    { label: "السيو", emp: seoSp },
+    { label: t("specialists.social"), emp: socialSp },
+    { label: t("specialists.media"), emp: mediaSp },
+    { label: t("specialists.seo"), emp: seoSp },
   ];
 
   return (
@@ -104,7 +120,7 @@ export default async function ProjectDetailPage({
             : "") + project.name
         }
         description={project.description ?? undefined}
-        breadcrumbs={[{ label: "المشاريع", href: "/projects" }, { label: project.name }]}
+        breadcrumbs={[{ label: tNav("projects"), href: "/projects" }, { label: project.name }]}
         actions={
           <div className="flex items-center gap-2">
             <HoldDialog
@@ -117,9 +133,9 @@ export default async function ProjectDetailPage({
             {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
               <span
                 className="inline-flex items-center rounded-full border border-amber/40 bg-amber-dim px-2 py-0.5 text-[10px] font-semibold text-amber"
-                title="موعد التجديد قريب"
+                title={t("renewalSoonTitle")}
               >
-                تجديد خلال {renewalDays} يوم
+                {t("renewalSoon", { days: renewalDays })}
               </span>
             )}
             <PriorityBadge priority={project.priority} />
@@ -129,7 +145,7 @@ export default async function ProjectDetailPage({
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted/50 transition-colors"
             >
               <GanttChart className="size-3.5" />
-              مخطط جانت
+              {t("actions.gantt")}
             </Link>
             {session.permissions.has("tasks.manage") && (
               <Suspense fallback={null}>
@@ -155,12 +171,12 @@ export default async function ProjectDetailPage({
               <PauseCircle className="size-5 text-amber shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-amber">المشروع موقوف مؤقتًا</p>
+                  <p className="text-sm font-semibold text-amber">{t("hold.ribbonTitle")}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    منذ {formatArabicShortDate(project.held_at)}
+                    {t("hold.since", { date: formatShortDate(project.held_at, locale) })}
                     {holdActor?.name && (
                       <>
-                        {" "}· بواسطة{" "}
+                        {" "}· {t("hold.by")}{" "}
                         <span className="text-foreground/80">{holdActor.name}</span>
                       </>
                     )}
@@ -179,27 +195,27 @@ export default async function ProjectDetailPage({
 
       <div className="mb-6 grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <MetricCard
-          label="إجمالي المهام"
+          label={t("metrics.totalTasks")}
           value={summary.total}
           icon={<ListTodo className="size-5" />}
           className="p-3"
         />
         <MetricCard
-          label="قيد التنفيذ"
+          label={t("metrics.inProgress")}
           value={summary.in_progress}
           tone="info"
           icon={<Briefcase className="size-5" />}
           className="p-3"
         />
         <MetricCard
-          label="قيد المراجعة"
+          label={t("metrics.inReview")}
           value={summary.manager_review + summary.specialist_review}
           tone="warning"
           icon={<ListTodo className="size-5" />}
           className="p-3"
         />
         <MetricCard
-          label="مع العميل"
+          label={t("metrics.withClient")}
           value={summary.ready_to_send + summary.sent_to_client + summary.client_changes}
           tone="info"
           icon={<ListTodo className="size-5" />}
@@ -211,7 +227,7 @@ export default async function ProjectDetailPage({
         <Card>
           <CardContent className="p-4 space-y-2.5">
             <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <User className="size-4 text-cyan" /> العميل
+              <User className="size-4 text-cyan" /> {t("cards.client")}
             </h3>
             <div>
               <p className="text-base font-medium">{client?.name ?? "—"}</p>
@@ -225,16 +241,16 @@ export default async function ProjectDetailPage({
         <Card>
           <CardContent className="p-4 space-y-2.5">
             <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <Calendar className="size-4 text-cyan" /> الجدول الزمني
+              <Calendar className="size-4 text-cyan" /> {t("cards.timeline")}
             </h3>
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">البدء</span>
-                <span>{formatArabicShortDate(project.start_date)}</span>
+                <span className="text-muted-foreground">{t("cards.start")}</span>
+                <span>{formatShortDate(project.start_date, locale)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">الانتهاء</span>
-                <span>{formatArabicShortDate(project.end_date)}</span>
+                <span className="text-muted-foreground">{t("cards.end")}</span>
+                <span>{formatShortDate(project.end_date, locale)}</span>
               </div>
             </div>
           </CardContent>
@@ -242,7 +258,7 @@ export default async function ProjectDetailPage({
         <Card>
           <CardContent className="p-4 space-y-2.5">
             <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <User className="size-4 text-cyan" /> مدير الحساب
+              <User className="size-4 text-cyan" /> {t("cards.accountManager")}
             </h3>
             {am ? (
               <div className="flex items-center gap-2.5">
@@ -255,7 +271,7 @@ export default async function ProjectDetailPage({
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">لم يتم تعيين مدير حساب بعد</p>
+              <p className="text-xs text-muted-foreground">{t("cards.noAccountManager")}</p>
             )}
           </CardContent>
         </Card>
@@ -266,7 +282,7 @@ export default async function ProjectDetailPage({
           <Card key={s.label}>
             <CardContent className="p-4 space-y-2">
               <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <User className="size-4 text-cyan" /> مسؤول {s.label}
+                <User className="size-4 text-cyan" /> {t("specialists.owner", { label: s.label })}
               </h3>
               {s.emp ? (
                 <div className="flex items-center gap-2.5">
@@ -279,7 +295,7 @@ export default async function ProjectDetailPage({
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">لم يُعيَّن بعد</p>
+                <p className="text-xs text-muted-foreground">{t("specialists.unassigned")}</p>
               )}
             </CardContent>
           </Card>
@@ -287,12 +303,12 @@ export default async function ProjectDetailPage({
       </div>
 
       <SectionTitle
-        title="الوسوم"
-        description="ضع وسومًا سريعة على المشروع (مثل HOLD أو Urgent) — مشتركة بين كل المشاريع."
+        title={t("sections.tags.title")}
+        description={t("sections.tags.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-4">
-          <Suspense fallback={<p className="text-xs text-muted-foreground">جاري تحميل الوسوم...</p>}>
+          <Suspense fallback={<p className="text-xs text-muted-foreground">{t("loading.tags")}</p>}>
             <ProjectTagsSection
               orgId={session.orgId}
               projectId={project.id}
@@ -307,7 +323,7 @@ export default async function ProjectDetailPage({
           services catalog seeded by the Odoo importer (project.category_ids
           → services). canManage gates the add/remove affordances behind
           the projects.manage permission. */}
-      <SectionTitle title="الخدمات" />
+      <SectionTitle title={t("sections.services.title")} />
       <Card className="mb-8">
         <CardContent className="p-4">
           <ProjectServicesSection
@@ -319,11 +335,11 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title="مجموعات واتساب"
-        description="القناة الرسمية مع العميل والقروب الداخلي للفريق — تابع تسمية المنشور في الدليل."
+        title={t("sections.whatsapp.title")}
+        description={t("sections.whatsapp.description")}
       />
       <div className="mb-8">
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل مجموعات واتساب...</CardContent></Card>}>
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.whatsapp")}</CardContent></Card>}>
           <ProjectWhatsAppSection
             orgId={session.orgId}
             projectId={project.id}
@@ -337,15 +353,15 @@ export default async function ProjectDetailPage({
           this is the operator surface to add/remove without going through the
           org-wide /settings/holidays admin. */}
       <SectionTitle
-        title="عطلات المشروع"
-        description="تواريخ تُضاف فوق التقويم العام (إغلاق العميل، تجميد إطلاق، …) وتُزاح تواريخ المهام تلقائيًا."
+        title={t("sections.holidays.title")}
+        description={t("sections.holidays.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-4">
           <Suspense
             fallback={
               <div className="text-sm text-muted-foreground">
-                جاري تحميل العطلات...
+                {t("loading.holidays")}
               </div>
             }
           >
@@ -365,13 +381,13 @@ export default async function ProjectDetailPage({
           attachments from the project itself AND every task under it, then
           lists them with task code so the operator can see what belongs where. */}
       <SectionTitle
-        title="ملاحظات المشروع"
-        description="سجل ملاحظات المشروع — اجتماعات، قرارات، عوائق، وأي سياق عام لا ينتمي لمهمة بعينها."
+        title={t("sections.notes.title")}
+        description={t("sections.notes.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-4">
           <Suspense
-            fallback={<div className="text-sm text-muted-foreground">جاري تحميل الملاحظات...</div>}
+            fallback={<div className="text-sm text-muted-foreground">{t("loading.notes")}</div>}
           >
             <ProjectNotesSection
               orgId={session.orgId}
@@ -385,13 +401,13 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title="المرفقات"
-        description="كل الملفات المرفقة بالمشروع وكل مهامه (تطابق smart-button «All Documents» في Odoo)."
+        title={t("sections.attachments.title")}
+        description={t("sections.attachments.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-4">
           <Suspense
-            fallback={<div className="text-sm text-muted-foreground">جاري تحميل المرفقات...</div>}
+            fallback={<div className="text-sm text-muted-foreground">{t("loading.attachments")}</div>}
           >
             <ProjectDocumentsSection
               orgId={session.orgId}
@@ -401,11 +417,11 @@ export default async function ProjectDetailPage({
         </CardContent>
       </Card>
 
-      <SectionTitle title="فريق المشروع" />
+      <SectionTitle title={t("sections.team.title")} />
       <Card className="mb-8">
         <CardContent className="p-4">
           {(project.project_members ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">لا يوجد أعضاء فريق مضافون بعد.</p>
+            <p className="text-sm text-muted-foreground">{t("empty.team")}</p>
           ) : (
             <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {(project.project_members ?? []).map((m) => {
@@ -429,12 +445,12 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title="متابعون"
-        description="المُورَّدون من Odoo (`mail.followers`) — يستلمون التنبيهات على المشروع."
+        title={t("sections.followers.title")}
+        description={t("sections.followers.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-4">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المتابعين...</div>}>
+          <Suspense fallback={<div className="text-sm text-muted-foreground">{t("loading.followers")}</div>}>
             <ProjectFollowersSection
               orgId={session.orgId}
               projectId={project.id}
@@ -444,11 +460,11 @@ export default async function ProjectDetailPage({
       </Card>
 
       <SectionTitle
-        title="دورات التجديد"
-        description="جدول التجديد المعتمد للمشروع وسجل الدورات السابقة."
+        title={t("sections.renewals.title")}
+        description={t("sections.renewals.description")}
       />
       <div className="mb-8">
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل دورات التجديد...</CardContent></Card>}>
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.renewals")}</CardContent></Card>}>
           <ProjectRenewalsSection
             orgId={session.orgId}
             projectId={project.id}
@@ -460,8 +476,8 @@ export default async function ProjectDetailPage({
       </div>
 
       <SectionTitle
-        title="لوحة المهام"
-        description={`${summary.total} مهمة — اسحب البطاقة بين الأعمدة لتغيير المرحلة`}
+        title={t("sections.board.title")}
+        description={t("sections.board.description", { count: summary.total })}
       />
       {/* Project-scoped filter chip menu. Same surface as /tasks; URL params
           stay on this route so the filters affect only this project's task
@@ -477,7 +493,7 @@ export default async function ProjectDetailPage({
         fallback={
           <Card>
             <CardContent className="p-4 text-sm text-muted-foreground">
-              جاري تحميل لوحة المهام...
+              {t("loading.board")}
             </CardContent>
           </Card>
         }
@@ -504,12 +520,13 @@ async function ProjectTaskBoardSection({
   filterSignature: string;
   taskFilters: Parameters<typeof loadTaskBoardForGlobalView>[1];
 }) {
+  const t = await getTranslations("ProjectDetailPage");
   const tasks = await loadTaskBoardForGlobalView(orgId, taskFilters);
   if (tasks.length === 0) {
     return (
       <EmptyState
-        title="لا توجد مهام مطابقة"
-        description="جرّب إزالة بعض الفلاتر، أو أضف خدمة لها قالب مهام."
+        title={t("empty.noMatchingTasks.title")}
+        description={t("empty.noMatchingTasks.description")}
         variant="compact"
       />
     );
@@ -584,6 +601,7 @@ async function ProjectFollowersSection({
   orgId: string;
   projectId: string;
 }) {
+  const t = await getTranslations("ProjectDetailPage");
   const { data } = await supabaseAdmin
     .from("project_followers")
     .select("employee:employee_profiles ( id, full_name, avatar_url, job_title )")
@@ -600,7 +618,7 @@ async function ProjectFollowersSection({
     .filter((employee): employee is NonNullable<typeof employee> => employee !== null);
 
   if (followers.length === 0) {
-    return <p className="text-sm text-muted-foreground">لا يوجد متابعون.</p>;
+    return <p className="text-sm text-muted-foreground">{t("empty.followers")}</p>;
   }
 
   return (
@@ -695,6 +713,7 @@ async function ProjectServicesSection({
   orgId: string;
   canManage: boolean;
 }) {
+  const t = await getTranslations("ProjectDetailPage");
   const rawLinks = (project.project_services ?? []) as Array<{
     id: string;
     service_id: string;
@@ -786,7 +805,7 @@ async function ProjectServicesSection({
     });
 
   if (attached.length === 0 && !canManage) {
-    return <p className="text-sm text-muted-foreground">لا توجد خدمات مرتبطة بعد.</p>;
+    return <p className="text-sm text-muted-foreground">{t("empty.services")}</p>;
   }
   return (
     <ProjectServicesPanel
