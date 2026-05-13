@@ -2,65 +2,21 @@
 
 import { useState, useCallback } from "react";
 import {
-  Sparkles, RefreshCw, AlertTriangle, Lightbulb,
-  TrendingUp, TrendingDown, Minus, ShieldAlert, Clock,
-  CheckCircle2, ChevronRight,
+  Sparkles,
+  RefreshCw,
+  AlertTriangle,
+  ShieldAlert,
+  Clock,
+  Zap,
+  Users,
+  Layers,
+  Activity,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { InsightsResult, StoredInsightRun } from "@/lib/ai-insights-schema";
-
-// ── tone maps ────────────────────────────────────────────────────────────────
-
-const ALERT_STYLE = {
-  critical: {
-    border: "border-cc-red/30",
-    icon: "bg-red-dim text-cc-red",
-    badge: "bg-cc-red/15 text-cc-red border-0",
-    label: "حرج",
-    Icon: ShieldAlert,
-  },
-  warning: {
-    border: "border-amber/30",
-    icon: "bg-amber-dim text-amber",
-    badge: "bg-amber/15 text-amber border-0",
-    label: "تحذير",
-    Icon: AlertTriangle,
-  },
-  info: {
-    border: "border-cc-blue/30",
-    icon: "bg-blue-dim text-cc-blue",
-    badge: "bg-cc-blue/15 text-cc-blue border-0",
-    label: "معلومة",
-    Icon: Sparkles,
-  },
-} as const;
-
-const PRIORITY_STYLE = {
-  urgent: {
-    dot: "bg-cc-red",
-    label: "عاجل",
-    text: "text-cc-red",
-  },
-  important: {
-    dot: "bg-amber",
-    label: "مهم",
-    text: "text-amber",
-  },
-  suggestion: {
-    dot: "bg-cc-blue",
-    label: "اقتراح",
-    text: "text-cc-blue",
-  },
-} as const;
-
-const PATTERN_ICON = {
-  positive: { Icon: TrendingUp, cls: "text-cc-green bg-green-dim" },
-  negative: { Icon: TrendingDown, cls: "text-cc-red bg-red-dim" },
-  neutral: { Icon: Minus, cls: "text-muted-foreground bg-white/[0.06]" },
-} as const;
 
 const HEALTH_CONFIG = {
   excellent: { label: "ممتاز", cls: "bg-green-dim text-cc-green border-cc-green/20" },
@@ -69,7 +25,32 @@ const HEALTH_CONFIG = {
   critical: { label: "حرج", cls: "bg-red-dim text-cc-red border-cc-red/20" },
 } as const;
 
-// ── skeleton ─────────────────────────────────────────────────────────────────
+const STAGE_LABELS: Record<string, string> = {
+  new: "جديدة",
+  in_progress: "قيد التنفيذ",
+  manager_review: "مراجعة المدير",
+  specialist_review: "مراجعة المتخصص",
+  ready_to_send: "جاهزة للإرسال",
+  sent_to_client: "أُرسلت للعميل",
+  client_changes: "تعديلات العميل",
+  done: "مكتملة",
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  specialist: "متخصص",
+  manager: "مدير",
+  agent: "منفذ",
+  account_manager: "مدير حساب",
+  supporting_lead: "مساند رئيسي",
+  supporting_agent: "مساند",
+};
+
+const SERVICE_LABELS: Record<string, string> = {
+  social_media: "السوشيال ميديا",
+  seo: "SEO",
+  media_buying: "ميديا باينج",
+  other: "أخرى",
+};
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-lg bg-white/[0.06]", className)} />;
@@ -83,7 +64,6 @@ function AnalysisSkeleton() {
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-5/6" />
-          <Skeleton className="h-3 w-4/6" />
         </CardContent>
       </Card>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -101,7 +81,35 @@ function AnalysisSkeleton() {
   );
 }
 
-// ── main component ────────────────────────────────────────────────────────────
+function SectionHeader({
+  icon: Icon,
+  title,
+  hint,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  hint?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between">
+      <div className="flex items-center gap-2">
+        <Icon className="size-3.5 text-muted-foreground" />
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </p>
+      </div>
+      {hint ? <span className="text-[10px] text-muted-foreground">{hint}</span> : null}
+    </div>
+  );
+}
+
+function CodePill({ code }: { code: string }) {
+  return (
+    <span className="inline-block rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-foreground/80 ltr">
+      {code}
+    </span>
+  );
+}
 
 export function AiAnalysisPanel({
   initialInsight = null,
@@ -115,20 +123,26 @@ export function AiAnalysisPanel({
     initialInsight?.completedAt ? new Date(initialInsight.completedAt) : null,
   );
   const [model, setModel] = useState<string | null>(initialInsight?.model ?? null);
+  const [wasCached, setWasCached] = useState<boolean>(false);
 
-  const fetchInsights = useCallback(async () => {
+  const fetchInsights = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/insights", { method: "POST" });
+      const url = force ? "/api/insights?force=1" : "/api/insights";
+      const res = await fetch(url, { method: "POST" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `خطأ ${res.status}`);
       }
-      const json: { current: StoredInsightRun | null } = await res.json();
+      const json: { current: StoredInsightRun | null; cached?: boolean } =
+        await res.json();
       setData(json.current?.result ?? null);
-      setLastUpdated(json.current?.completedAt ? new Date(json.current.completedAt) : new Date());
+      setLastUpdated(
+        json.current?.completedAt ? new Date(json.current.completedAt) : new Date(),
+      );
       setModel(json.current?.model ?? null);
+      setWasCached(!!json.cached);
     } catch (e) {
       setError(e instanceof Error ? e.message : "فشل تحميل الرؤى");
     } finally {
@@ -140,14 +154,14 @@ export function AiAnalysisPanel({
 
   return (
     <div className="space-y-6">
-      {/* header row */}
+      {/* header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <div className="flex size-9 items-center justify-center rounded-xl bg-cyan-dim text-cyan">
             <Sparkles className="size-4" />
           </div>
           <div>
-            <p className="text-sm font-semibold">تحليل Gemini</p>
+            <p className="text-sm font-semibold">تحليل العمليات</p>
             <p className="text-[11px] text-muted-foreground">
               {loading
                 ? "يحلل البيانات…"
@@ -165,20 +179,40 @@ export function AiAnalysisPanel({
             </Badge>
           )}
           {health && !loading && (
-            <span className={cn("text-[11px] font-medium px-2.5 py-1 rounded-full border", health.cls)}>
+            <span
+              className={cn(
+                "text-[11px] font-medium px-2.5 py-1 rounded-full border",
+                health.cls,
+              )}
+            >
               {health.label}
             </span>
+          )}
+          {wasCached && !loading && data && (
+            <span className="text-[10px] text-muted-foreground">من الذاكرة المؤقتة</span>
           )}
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchInsights}
+            onClick={() => fetchInsights(false)}
             disabled={loading}
             className="gap-2 h-8 text-xs"
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
             {loading ? "جارٍ التحليل…" : data ? "تحديث التحليل" : "تشغيل أول تحليل"}
           </Button>
+          {data && !loading && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchInsights(true)}
+              disabled={loading}
+              className="h-8 text-[11px] text-muted-foreground"
+              title="تجاهل الذاكرة المؤقتة وتشغيل تحليل جديد"
+            >
+              تحديث إجباري
+            </Button>
+          )}
         </div>
       </div>
 
@@ -191,7 +225,12 @@ export function AiAnalysisPanel({
               <p className="text-sm font-medium text-cc-red">فشل التحليل</p>
               <p className="text-xs text-muted-foreground mt-0.5">{error}</p>
             </div>
-            <Button variant="ghost" size="sm" onClick={fetchInsights} className="mr-auto text-xs h-7">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchInsights(false)}
+              className="mr-auto text-xs h-7"
+            >
               إعادة المحاولة
             </Button>
           </CardContent>
@@ -207,10 +246,15 @@ export function AiAnalysisPanel({
             <div className="space-y-1">
               <p className="text-sm font-semibold">لا يوجد تحليل محفوظ بعد</p>
               <p className="text-xs text-muted-foreground">
-                شغّل التحليل عند الحاجة وسيُحفَظ في قاعدة البيانات لتراجعه لاحقًا.
+                التحليل يستخدم البيانات الفعلية من رواسم — مراحل، خدمات، أكواد المهام.
               </p>
             </div>
-            <Button onClick={fetchInsights} disabled={loading} size="sm" className="gap-2">
+            <Button
+              onClick={() => fetchInsights(false)}
+              disabled={loading}
+              size="sm"
+              className="gap-2"
+            >
               <Sparkles className="size-4" />
               تشغيل أول تحليل
             </Button>
@@ -218,88 +262,127 @@ export function AiAnalysisPanel({
         </Card>
       )}
 
-      {/* skeleton */}
       {loading && <AnalysisSkeleton />}
 
-      {/* results */}
       {data && !loading && (
         <div className="space-y-8">
-
           {/* executive summary */}
           <Card className="border-cyan/20 bg-cyan/[0.03]">
             <CardContent className="p-5">
               <div className="flex items-center gap-2 mb-3">
                 <Sparkles className="size-3.5 text-cyan" />
-                <span className="text-xs font-semibold text-cyan uppercase tracking-wider">الملخص التنفيذي</span>
+                <span className="text-xs font-semibold text-cyan uppercase tracking-wider">
+                  الملخص التنفيذي
+                </span>
               </div>
-              <p className="text-sm leading-7 text-foreground/90">{data.executiveSummary}</p>
+              <p className="text-sm leading-7 text-foreground/90">
+                {data.executiveSummary}
+              </p>
             </CardContent>
           </Card>
 
-          {/* alerts */}
-          {data.alerts.length > 0 && (
+          {/* clients at risk — most urgent so it comes first */}
+          {data.clientsAtRisk.length > 0 && (
             <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                التنبيهات والمخاطر
-              </p>
+              <SectionHeader
+                icon={ShieldAlert}
+                title="عملاء في منطقة الخطر"
+                hint={`${data.clientsAtRisk.length} عميل`}
+              />
               <div className="space-y-2">
-                {data.alerts.map((alert, i) => {
-                  const s = ALERT_STYLE[alert.level];
-                  return (
-                    <Card key={i} className={cn("border", s.border)}>
-                      <CardContent className="p-4 flex gap-3 items-start">
-                        <div className={cn("flex size-8 items-center justify-center rounded-lg shrink-0 mt-0.5", s.icon)}>
-                          <s.Icon className="size-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="text-sm font-semibold">{alert.title}</p>
-                            <Badge className={cn("text-[10px] h-4 px-1.5", s.badge)}>
-                              {s.label}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed">{alert.body}</p>
-                          {alert.action && (
-                            <div className="flex items-center gap-1 mt-2">
-                              <ChevronRight className="size-3 text-muted-foreground" />
-                              <p className="text-xs text-foreground/70">{alert.action}</p>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                {data.clientsAtRisk.map((c, i) => (
+                  <Card key={i} className="border-cc-red/25">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold">{c.clientName}</p>
+                        {c.projectCode ? <CodePill code={c.projectCode} /> : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {c.reason}
+                      </p>
+                      <div className="flex items-start gap-1.5 pt-1">
+                        <Zap className="size-3 text-amber shrink-0 mt-0.5" />
+                        <p className="text-xs text-foreground/85">{c.suggestedAction}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             </div>
           )}
 
-          {/* recommendations */}
-          {data.recommendations.length > 0 && (
+          {/* stage bottlenecks */}
+          {data.stageBottlenecks.length > 0 && (
             <div className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                التوصيات
-              </p>
+              <SectionHeader
+                icon={Layers}
+                title="اختناقات المراحل"
+                hint="مهام عالقة في مرحلة واحدة"
+              />
               <div className="grid gap-3 sm:grid-cols-2">
-                {data.recommendations.map((rec, i) => {
-                  const s = PRIORITY_STYLE[rec.priority];
+                {data.stageBottlenecks.map((b, i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold">
+                          {STAGE_LABELS[b.stage] ?? b.stage}
+                        </p>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                          {b.count} مهمة · أقدمها {b.oldestDays} يوم
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {b.narrative}
+                      </p>
+                      {b.sampleTaskCodes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {b.sampleTaskCodes.map((code) => (
+                            <CodePill key={code} code={code} />
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* service health */}
+          {data.serviceHealth.length > 0 && (
+            <div className="space-y-3">
+              <SectionHeader icon={Activity} title="صحة الخدمات" />
+              <div className="grid gap-3 sm:grid-cols-3">
+                {data.serviceHealth.map((s, i) => {
+                  const tone =
+                    s.onTimePct >= 80
+                      ? "border-cc-green/25"
+                      : s.onTimePct >= 60
+                        ? "border-amber/25"
+                        : "border-cc-red/25";
+                  const pctTone =
+                    s.onTimePct >= 80
+                      ? "text-cc-green"
+                      : s.onTimePct >= 60
+                        ? "text-amber"
+                        : "text-cc-red";
                   return (
-                    <Card key={i}>
+                    <Card key={i} className={cn("border", tone)}>
                       <CardContent className="p-4 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <div className={cn("size-2 rounded-full shrink-0", s.dot)} />
-                          <span className={cn("text-[10px] font-semibold uppercase tracking-wider", s.text)}>
-                            {s.label}
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold">
+                            {SERVICE_LABELS[s.service] ?? s.service}
+                          </p>
+                          <span className={cn("text-sm font-bold tabular-nums", pctTone)}>
+                            {s.onTimePct}%
                           </span>
                         </div>
-                        <p className="text-sm font-semibold">{rec.title}</p>
-                        <p className="text-xs text-muted-foreground leading-relaxed">{rec.body}</p>
-                        {rec.estimatedImpact && (
-                          <p className="text-[11px] text-cc-green flex items-center gap-1 mt-1">
-                            <TrendingUp className="size-3" />
-                            {rec.estimatedImpact}
-                          </p>
-                        )}
+                        <p className="text-[11px] text-muted-foreground tabular-nums">
+                          {s.openCount} مفتوحة · {s.overdueCount} متأخرة
+                        </p>
+                        <p className="text-xs text-foreground/85 leading-relaxed">
+                          {s.note}
+                        </p>
                       </CardContent>
                     </Card>
                   );
@@ -308,75 +391,88 @@ export function AiAnalysisPanel({
             </div>
           )}
 
-          {/* patterns + team insights side by side */}
-          <div className="grid gap-4 lg:grid-cols-2">
-
-            {data.patterns.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  الأنماط المكتشفة
-                </p>
-                <div className="space-y-2">
-                  {data.patterns.map((p, i) => {
-                    const s = PATTERN_ICON[p.type];
-                    return (
-                      <Card key={i}>
-                        <CardContent className="p-4 flex gap-3 items-start">
-                          <div className={cn("flex size-7 items-center justify-center rounded-lg shrink-0 mt-0.5", s.cls)}>
-                            <s.Icon className="size-3.5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold">{p.title}</p>
-                            <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">{p.body}</p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
+          {/* team hotspots */}
+          {data.teamHotspots.length > 0 && (
+            <div className="space-y-3">
+              <SectionHeader
+                icon={Users}
+                title="نقاط ضغط الفريق"
+                hint="الصمت = صحي"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {data.teamHotspots.map((t, i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">{t.employeeName}</p>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {ROLE_LABELS[t.role] ?? t.role}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground tabular-nums">
+                        {t.openCount} مفتوحة · {t.overdueCount} متأخرة
+                      </p>
+                      <p className="text-xs text-foreground/85 leading-relaxed">
+                        {t.recommendation}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {data.teamInsights.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  رؤى الفريق
-                </p>
-                <div className="space-y-2">
-                  {data.teamInsights.map((t, i) => (
-                    <Card key={i}>
-                      <CardContent className="p-4 space-y-2">
-                        <div className="flex gap-2 items-start">
-                          <div className="flex size-7 items-center justify-center rounded-lg bg-purple-dim text-cc-purple shrink-0 mt-0.5">
-                            <Lightbulb className="size-3.5" />
-                          </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed">{t.observation}</p>
+          {/* quick wins */}
+          {data.quickWins.length > 0 && (
+            <div className="space-y-3">
+              <SectionHeader
+                icon={Zap}
+                title="مكاسب سريعة"
+                hint="قابلة للتنفيذ هذا الأسبوع"
+              />
+              <div className="space-y-2">
+                {data.quickWins.map((q, i) => (
+                  <Card key={i} className="border-cc-green/25">
+                    <CardContent className="p-4 space-y-2">
+                      <p className="text-sm font-semibold">{q.title}</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {q.description}
+                      </p>
+                      {q.taskCodes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {q.taskCodes.map((code) => (
+                            <CodePill key={code} code={code} />
+                          ))}
                         </div>
-                        {t.recommendation && (
-                          <div className="flex items-start gap-1.5 pr-9">
-                            <CheckCircle2 className="size-3 text-cc-green shrink-0 mt-0.5" />
-                            <p className="text-xs text-foreground/80">{t.recommendation}</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                      )}
+                      <p className="text-[11px] text-cc-green flex items-center gap-1 pt-1">
+                        <Zap className="size-3" />
+                        {q.expectedImpact}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
+            </div>
+          )}
+
+          {/* fully-quiet state — schema ran but found nothing actionable */}
+          {data.clientsAtRisk.length === 0 &&
+            data.stageBottlenecks.length === 0 &&
+            data.serviceHealth.length === 0 &&
+            data.teamHotspots.length === 0 &&
+            data.quickWins.length === 0 && (
+              <Card className="border-dashed">
+                <CardContent className="p-8 text-center">
+                  <Clock className="size-8 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm font-medium">لا توجد إشارات تستدعي تدخلًا الآن</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    التشغيل يبدو ضمن النطاق الطبيعي. أعد التحليل لاحقًا.
+                  </p>
+                </CardContent>
+              </Card>
             )}
-
-          </div>
         </div>
-      )}
-
-      {/* empty — never fetched */}
-      {!data && !loading && !error && (
-        <Card className="border-dashed border-white/10">
-          <CardContent className="py-10 text-center">
-            <Clock className="size-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">اضغط "تحديث التحليل" لبدء التحليل الذكي</p>
-          </CardContent>
-        </Card>
       )}
     </div>
   );

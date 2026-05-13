@@ -1,4 +1,5 @@
 import { ClipboardList, CalendarDays } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listTaskTemplates, getTaskTemplate } from "@/lib/data/templates";
 import { listDepartments } from "@/lib/data/employees";
@@ -32,6 +33,8 @@ export default async function TaskTemplatesPage({
   searchParams: Promise<{ id?: string }>;
 }) {
   const session = await requirePagePermission("templates.manage");
+  const t = await getTranslations("TaskTemplatesPage");
+  const tRoles = await getTranslations("RoleLabels");
   const sp = await searchParams;
   const templates = await listTaskTemplates(session.orgId);
 
@@ -65,15 +68,15 @@ export default async function TaskTemplatesPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title="قوالب المهام"
-        description="سير العمل الافتراضي لكل خدمة. عند إنشاء مشروع جديد بخدمة معينة، تُولَّد المهام تلقائيًا من قالبها."
+        title={t("title")}
+        description={t("description")}
       />
 
       {templates.length === 0 ? (
         <EmptyState
           icon={<ClipboardList className="size-6" />}
-          title="لا توجد قوالب بعد"
-          description="القوالب الافتراضية تُحمَّل من بيانات السيد. تحقق من تطبيق ميجريشن السيد في Supabase."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
         />
       ) : (
         <ConfigShell
@@ -85,6 +88,17 @@ export default async function TaskTemplatesPage({
               <TemplateDetail
                 tpl={selected}
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+                labels={{
+                  active: t("active"),
+                  inactive: t("inactive"),
+                  title: t("table.title"),
+                  department: t("table.department"),
+                  role: t("table.role"),
+                  offsetDays: t("table.offsetDays"),
+                  durationDays: t("table.durationDays"),
+                  priority: t("table.priority"),
+                }}
+                tRoles={tRoles}
               />
             ) : null
           }
@@ -99,9 +113,22 @@ export default async function TaskTemplatesPage({
 function TemplateDetail({
   tpl,
   departments,
+  labels,
+  tRoles,
 }: {
   tpl: NonNullable<Awaited<ReturnType<typeof getTaskTemplate>>>;
   departments: { id: string; name: string }[];
+  labels: {
+    active: string;
+    inactive: string;
+    title: string;
+    department: string;
+    role: string;
+    offsetDays: string;
+    durationDays: string;
+    priority: string;
+  };
+  tRoles: Awaited<ReturnType<typeof getTranslations<"RoleLabels">>>;
 }) {
   const service = Array.isArray(tpl.service) ? tpl.service[0] : tpl.service;
   const items = tpl.task_template_items ?? [];
@@ -125,7 +152,7 @@ function TemplateDetail({
                   : "bg-muted text-muted-foreground"
               }`}
             >
-              {tpl.is_active ? "نشط" : "متوقف"}
+              {tpl.is_active ? labels.active : labels.inactive}
             </span>
             <AddTemplateItemDialog templateId={tpl.id} departments={departments} />
           </div>
@@ -137,12 +164,12 @@ function TemplateDetail({
           <DataTableHead>
             <tr>
               <DataTableHeaderCell>#</DataTableHeaderCell>
-              <DataTableHeaderCell>عنوان المهمة</DataTableHeaderCell>
-              <DataTableHeaderCell>القسم المسؤول</DataTableHeaderCell>
-              <DataTableHeaderCell>الدور المسؤول</DataTableHeaderCell>
-              <DataTableHeaderCell>الإزاحة (يوم)</DataTableHeaderCell>
-              <DataTableHeaderCell>المدة (يوم)</DataTableHeaderCell>
-              <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.title}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.department}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.role}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.offsetDays}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.durationDays}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.priority}</DataTableHeaderCell>
             </tr>
           </DataTableHead>
           <tbody>
@@ -168,7 +195,9 @@ function TemplateDetail({
                   </DataTableCell>
                   <DataTableCell className="text-xs text-muted-foreground">
                     {it.default_role_key
-                      ? ROLE_LABELS[it.default_role_key] ?? it.default_role_key
+                      ? tRoles.has(it.default_role_key)
+                        ? tRoles(it.default_role_key)
+                        : ROLE_LABELS[it.default_role_key] ?? it.default_role_key
                       : "—"}
                   </DataTableCell>
                   <DataTableCell className="tabular-nums" dir="ltr">

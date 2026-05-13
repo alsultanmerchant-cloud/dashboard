@@ -386,6 +386,324 @@
     "noAddress": "No address specified",
     "noCosts": "No costs"
   },
+  "RoleLabels": {
+    "owner": "Owner",
+    "admin": "Administrator",
+    "manager": "Manager",
+    "sales": "Sales",
+    "account_manager": "Account manager",
+    "specialist": "Specialist",
+    "designer": "Designer",
+    "viewer": "Viewer"
+  },
+  "ClientsPage": {
+    "title": "Clients",
+    "description": "Agency client base synced directly from Odoo.",
+    "stats": {
+      "totalClients": "Total clients",
+      "activeClients": "Active clients",
+      "activeClientsHint": "Have projects",
+      "totalProjects": "Total projects",
+      "contactData": "Contact data",
+      "contactDataHint": "{count} missing"
+    },
+    "emptyTitle": "No clients",
+    "emptyDescription": "There are currently no client partners in Odoo.",
+    "table": {
+      "client": "Client",
+      "contact": "Contact",
+      "location": "Website",
+      "projects": "Projects",
+      "actions": "Actions"
+    },
+    "openClient": "Open client"
+  },
+  "SettingsPage": {
+    "title": "Settings",
+    "description": "Agency and current account settings. Advanced settings like integrations, AI, and communication templates will be added later.",
+    "phaseBadge": "Expanded settings in phase 9",
+    "soon": "Soon",
+    "locales": {
+      "ar": "Arabic",
+      "en": "English"
+    },
+    "agencyInfo": {
+      "title": "Agency information",
+      "name": "Name",
+      "slug": "Slug",
+      "defaultLocale": "Default language",
+      "timezone": "Timezone"
+    },
+    "projectManager": {
+      "title": "Default project manager",
+      "description": "The person shown as Project Manager across project boards. Usually fixed for all projects."
+    },
+    "workSchedule": {
+      "title": "Work schedule",
+      "holidaysTitle": "Official holidays",
+      "holidaysDescription": "Work week: Sunday to Thursday. Add holidays so they are counted in Gantt planning and delivery reminders."
+    },
+    "account": {
+      "title": "Your account",
+      "name": "Name",
+      "email": "Email",
+      "roles": "Roles",
+      "permissions": "Permissions",
+      "permissionsValue": "{count} permissions{ownerSuffix}",
+      "ownerSuffix": "(full owner override)"
+    },
+    "upcoming": {
+      "title": "Upcoming settings",
+      "whatsapp": "WhatsApp integrations",
+      "whatsappDesc": "Connect client messages and notifications",
+      "email": "Email integrations",
+      "emailDesc": "Email notifications for employees",
+      "templates": "Communication templates",
+      "templatesDesc": "Approved comment and reply templates",
+      "ai": "AI settings",
+      "aiDesc": "Choose models and adjust limits",
+      "backup": "Backup and export",
+      "backupDesc": "Scheduled exports of agency data",
+      "security": "Security settings",
+      "securityDesc": "MFA, session expiry, and sign-in logs"
+    }
+  },
+  "ContractsImportPage": {
+    "title": "Import contracts file",
+    "description": "Upload the current Acc SHEET file and the data will flow into the dashboard automatically.",
+    "breadcrumbs": {
+      "contracts": "Contracts",
+      "import": "Import"
+    },
+    "howItWorks": "How it works:",
+    "steps": {
+      "upload": "Upload the Excel file in .xlsx format (the same current file).",
+      "preview": "Review the preview to see client, contract, and installment counts.",
+      "save": "Press \"Save\" and the data will appear in finance and contracts immediately."
+    },
+    "note": "The system uses the <code>Key</code> column (for example <code>C83|20250906</code>) to identify contracts. Re-importing is <strong>safe</strong>; it updates values without duplicating rows."
+  },
+  "TaskTemplatesPage": {
+    "title": "Task templates",
+    "description": "The default workflow for each service. When a new project is created with a given service, tasks are generated automatically from its template.",
+    "emptyTitle": "No templates yet",
+    "emptyDescription": "Default templates are loaded from the seed data. Confirm the seed migration was applied in Supabase.",
+    "active": "Active",
+    "inactive": "Inactive",
+    "table": {
+      "title": "Task title",
+      "department": "Responsible department",
+      "role": "Responsible role",
+      "offsetDays": "Offset (days)",
+      "durationDays": "Duration (days)",
+      "priority": "Priority"
+    }
+  },
+  "ServiceCategoriesPage": {
+    "title": "Service categories",
+    "description": "Manage service packages like onboarding, social media, paid ads, SEO, and design, along with their linked templates.",
+    "emptyTitle": "No categories yet",
+    "emptyDescription": "Use the add-category button or import Odoo categories with the import-odoo-categories script."
+  },
+  "MyActivitiesPage": {
+    "title": "My activities",
+    "description": "Reminders and scheduled follow-ups you created on tasks. Similar to Odoo mail.activity, but personal to you.",
+    "missingEmployeePageDescription": "Reminders and follow-ups scheduled by you from tasks.",
+    "missingEmployeeTitle": "No linked employee profile",
+    "missingEmployeeDescription": "This page shows activities for the signed-in employee. Link your employee profile first.",
+    "emptyTitle": "No scheduled activities",
+    "emptyDescription": "From any task page, use the Scheduled Activities tab to add a call, review, or upload and it will appear here.",
+    "calendar": {
+      "summary": {
+        "overdue": "Overdue",
+        "today": "Due today",
+        "thisWeek": "This week",
+        "completed": "Completed (last 30 days)"
+      },
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month",
+      "today": "Today",
+      "undated": "{count} activities without a date; they do not appear on the calendar.",
+      "listTitle": "Activities list",
+      "noActivities": "No activities.",
+      "types": {
+        "call": "Call",
+        "email": "Email",
+        "review": "Review",
+        "upload": "Upload",
+        "other": "Other"
+      }
+    }
+  },
+  "MessagesPage": {
+    "title": "Messages",
+    "description": "Private conversations between you and your teammates.",
+    "emptyTitle": "No conversations",
+    "emptyDescription": "Click any teammate from a task or project page to start a conversation.",
+    "attachmentFallback": "(attachment)"
+  },
+  "FinanceExpensesPage": {
+    "title": "Finance",
+    "description": "A complete view of revenue from contracts, expenses, and net profit.",
+    "stats": {
+      "ytdRevenue": "Revenue this year",
+      "receivedPayments": "{count} payments received",
+      "ytdExpenses": "Expenses this year",
+      "expenseOps": "{count} entries",
+      "ytdNet": "Net profit this year",
+      "profit": "Profit",
+      "loss": "Loss",
+      "receivables": "Receivables",
+      "receivablesHint": "Overdue or due installments"
+    },
+    "month": {
+      "title": "Current month performance",
+      "revenue": "Revenue",
+      "expenses": "Expenses",
+      "net": "Net"
+    },
+    "trend": {
+      "title": "Revenue and expenses over the last 6 months",
+      "revenue": "Revenue",
+      "expenses": "Expenses"
+    },
+    "breakdown": {
+      "title": "Expenses by category (this year)",
+      "empty": "No expenses have been recorded yet this year."
+    },
+    "expensesList": {
+      "title": "Expenses",
+      "emptyTitle": "No expenses",
+      "emptyDescription": "Start by recording the first expense to populate finance reports.",
+      "loading": "Loading...",
+      "loadMore": "Scroll down to load more"
+    },
+    "categories": {
+      "salaries": "Salaries",
+      "rent": "Rent",
+      "ads": "Ad campaigns",
+      "software": "Software and tools",
+      "equipment": "Equipment",
+      "utilities": "Utilities",
+      "marketing": "Marketing",
+      "tax": "Taxes and fees",
+      "other": "Other"
+    }
+  },
+  "OrganizationRolesPage": {
+    "title": "Roles and permissions",
+    "description": "Role and permission matrix. Click any cell to grant or revoke a permission. The owner role always has full access.",
+    "badge": "{roles} roles · {permissions} permissions",
+    "table": {
+      "permission": "Permission"
+    },
+    "systemRole": "System",
+    "customRole": "Custom",
+    "permissionsCount": "Permission count"
+  },
+  "OrganizationDepartmentsPage": {
+    "title": "Departments",
+    "description": "Agency structure and team divisions.",
+    "emptyTitle": "No departments yet",
+    "emptyDescription": "Start by adding the core departments of the agency.",
+    "table": {
+      "department": "Department",
+      "slug": "Slug",
+      "description": "Description",
+      "employeeCount": "Employees"
+    }
+  },
+  "OrganizationEmployeesPage": {
+    "title": "Employees",
+    "description": "Full team management: add, edit, terminate, restore, or permanently delete employees.",
+    "emptyTitle": "No employees",
+    "emptyDescription": "Start by adding the first employee to the agency."
+  },
+  "ModuleTabs": {
+    "projects": "Projects",
+    "tasks": "Tasks",
+    "serviceCategories": "Service categories",
+    "taskTemplates": "Task templates",
+    "reports": "Reports",
+    "import": "Import",
+    "employees": "Employees",
+    "departments": "Departments",
+    "rolesPermissions": "Roles & permissions",
+    "agencyChart": "Agency chart",
+    "hr": "HR",
+    "clients": "Clients",
+    "salesHandover": "Sales handover",
+    "contracts": "Contracts",
+    "salesTeam": "Sales team",
+    "leads": "Leads",
+    "soon": "Soon",
+    "kanban": "Kanban",
+    "list": "List",
+    "kanbanView": "Kanban view",
+    "listView": "List view"
+  },
+  "TasksPage": {
+    "projectScope": "Project tasks",
+    "taskCount": "({count} tasks)",
+    "projectInfo": "Project info",
+    "allTasks": "View all tasks",
+    "views": {
+      "kanban": "Kanban",
+      "list": "List",
+      "calendar": "Calendar",
+      "pivot": "Pivot"
+    },
+    "monthQuickPick": {
+      "groupLabel": "Monthly filter by creation date",
+      "thisMonth": "This month",
+      "lastMonth": "Last month",
+      "pickMonth": "Choose a month",
+      "customMonth": "Custom month...",
+      "clear": "Clear"
+    }
+  },
+  "TasksBoard": {
+    "assigned": "Assigned",
+    "progressVariance": "Progress variance",
+    "behind": "Behind",
+    "ahead": "Ahead",
+    "deadline": "Deadline",
+    "completionDate": "Completed on",
+    "allocatedTime": "Allocated time",
+    "delayDays": "Delay days",
+    "expectedProgress": "Expected progress",
+    "progress": "Progress",
+    "expected": "Expected",
+    "stage": "Stage",
+    "timeInStage": "Time in stage",
+    "moveBackTo": "Move back to",
+    "moveTo": "Move to",
+    "showMore": "Show {count} more{totalSuffix}",
+    "from": "of",
+    "open": "Open",
+    "collapseColumn": "Collapse column",
+    "newTaskPlaceholder": "+ New task",
+    "cannotMoveBack": "Tasks cannot be moved back to an earlier stage",
+    "taskMoved": "Task moved to",
+    "noTasksToShow": "No tasks to display.",
+    "saving": "Saving",
+    "taskCreated": "Task created",
+    "confirmMoveTitle": "Confirm stage move",
+    "confirmMoveFrom": "Move task from",
+    "confirmMoveTo": "to",
+    "confirmMoveWarning": "This action cannot be undone.",
+    "confirmMove": "Move",
+    "stages": {
+      "new": "New",
+      "in_progress": "In Progress",
+      "manager_review": "Manager Review",
+      "specialist_review": "Specialist Review",
+      "ready_to_send": "Ready to Send",
+      "sent_to_client": "Sent to Client",
+      "client_changes": "Client Changes",
+      "done": "Done"
+    }
+  },
   "PageTitles": {
     "dashboardTitle": "Overview",
     "dashboardSubtitle": "Executive dashboard focused on the most important signals right now",

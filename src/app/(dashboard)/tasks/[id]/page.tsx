@@ -2,6 +2,7 @@ import { cache, Suspense } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { getTask, getTaskSummary } from "@/lib/data/tasks";
@@ -102,6 +103,7 @@ export default async function TaskDetailPage({
   const { id } = await params;
   const sp = await searchParams;
   const session = await requirePagePermission("tasks.view");
+  const t = await getTranslations("TaskDetailPage");
   const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
 
   const [task, followingRes, openExc] = await Promise.all([
@@ -227,7 +229,7 @@ export default async function TaskDetailPage({
             : (task as { project?: { id: string; name: string } | null }).project;
           const taskCode = (task as { task_code?: string | null }).task_code;
           return [
-            { label: "المهام", href: "/tasks" },
+            { label: t("breadcrumbs.tasks"), href: "/tasks" },
             ...(proj
               ? [{ label: proj.name, href: `/projects/${proj.id}` }]
               : []),
@@ -264,7 +266,7 @@ export default async function TaskDetailPage({
                 {service ? <ServiceBadge slug={service.slug ?? ""} name={service.name} /> : null}
                 {showDelayBanner ? (
                   <span className="inline-flex h-5 items-center rounded-full border border-cc-red/30 bg-cc-red/10 px-2 text-[11px] font-medium text-cc-red">
-                    متأخرة {delayDays} يوم
+                    {t("delayPill", { count: delayDays ?? 0 })}
                   </span>
                 ) : null}
               </div>
@@ -302,22 +304,22 @@ export default async function TaskDetailPage({
 
             <dl className="grid min-w-0 gap-3 rounded-xl border border-soft/60 bg-soft/20 p-3 text-sm sm:grid-cols-3 lg:min-w-[30rem]">
               <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                <dt className="text-[11px] text-muted-foreground">المشروع</dt>
+                <dt className="text-[11px] text-muted-foreground">{t("summary.project")}</dt>
                 <dd className="text-pretty break-words font-medium leading-6 text-foreground">
                   {project?.name ?? "—"}
                 </dd>
                 <p className="text-[11px] text-muted-foreground break-words">
-                  {client?.name ?? "بدون عميل"}
+                  {client?.name ?? t("summary.noClient")}
                 </p>
               </div>
               <div>
-                <dt className="text-[11px] text-muted-foreground">الموعد النهائي</dt>
+                <dt className="text-[11px] text-muted-foreground">{t("summary.deadline")}</dt>
                 <dd className={cn("font-medium tabular-nums", overdue && "text-cc-red")}>
                   {deadline ?? "—"}
                 </dd>
               </div>
               <div>
-                <dt className="text-[11px] text-muted-foreground">آخر إنجاز</dt>
+                <dt className="text-[11px] text-muted-foreground">{t("summary.lastCompletion")}</dt>
                 <dd className="font-medium tabular-nums">
                   {formattedCompletedAt ?? "—"}
                 </dd>
@@ -349,12 +351,11 @@ export default async function TaskDetailPage({
             <div className="flex items-center gap-2 text-sm font-semibold text-cc-red">
               <AlertTriangle className="size-4" />
               {task.stage === "done"
-                ? `تأخر التسليم بـ ${delayDays} يوم`
-                : `متأخر بـ ${delayDays} يوم`}
+                ? t("delayBanner.done", { count: delayDays ?? 0 })
+                : t("delayBanner.open", { count: delayDays ?? 0 })}
             </div>
             <p className="mt-0.5 text-[11px] text-cc-red/80">
-              تجاوز الموعد النهائي مشكلة مع العميل (PDF §8.2). راجع السبب
-              وسجّله في ملاحظات المهمة.
+              {t("delayBanner.description")}
             </p>
           </CardContent>
         </Card>
@@ -369,7 +370,7 @@ export default async function TaskDetailPage({
       </div>
 
       <div className="mb-6">
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل الموافقات...</CardContent></Card>}>
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.approvals")}</CardContent></Card>}>
           <TaskApprovalSection
             orgId={session.orgId}
             taskId={task.id}
@@ -418,22 +419,22 @@ export default async function TaskDetailPage({
         const ownerPosition = stageOwnerMap?.[task.stage as string] ?? null;
         if (!ownerPosition) return null;
         const ROLE_LABEL: Record<string, string> = {
-          account_manager: "مدير الحساب",
-          specialist: "المتخصص",
-          manager: "مدير القسم",
-          agent: "المنفذ",
-          supporting_lead: "قائد القسم المساند",
-          supporting_agent: "منفذ القسم المساند",
+          account_manager: t("roles.account_manager"),
+          specialist: t("roles.specialist"),
+          manager: t("roles.manager"),
+          agent: t("roles.agent"),
+          supporting_lead: t("roles.supporting_lead"),
+          supporting_agent: t("roles.supporting_agent"),
         };
         const STAGE_LABEL: Record<string, string> = {
-          new: "جديدة",
-          in_progress: "قيد التنفيذ",
-          manager_review: "مراجعة المدير",
-          specialist_review: "مراجعة المتخصص",
-          ready_to_send: "جاهزة للإرسال",
-          sent_to_client: "أرسلت للعميل",
-          client_changes: "تعديلات العميل",
-          done: "مكتملة",
+          new: t("stages.new"),
+          in_progress: t("stages.in_progress"),
+          manager_review: t("stages.manager_review"),
+          specialist_review: t("stages.specialist_review"),
+          ready_to_send: t("stages.ready_to_send"),
+          sent_to_client: t("stages.sent_to_client"),
+          client_changes: t("stages.client_changes"),
+          done: t("stages.done"),
         };
         const owner = roleSlots.find(
           (s) => s.role_type === ownerPosition,
@@ -446,7 +447,7 @@ export default async function TaskDetailPage({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  المسؤول عن المرحلة الحالية
+                  {t("currentStageOwner")}
                 </p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="rounded-full bg-cyan-dim px-2 py-0.5 text-[11px] font-semibold text-cyan">
@@ -489,8 +490,7 @@ export default async function TaskDetailPage({
                 </div>
               ) : (
                 <p className="text-xs text-amber-400">
-                  لا يوجد موظف مُسنَد بهذا الدور بعد —
-                  أضف {ROLE_LABEL[ownerPosition] ?? ownerPosition} من قائمة المشاركين أدناه.
+                  {t("noStageOwnerPrefix")} {ROLE_LABEL[ownerPosition] ?? ownerPosition} {t("noStageOwnerSuffix")}
                 </p>
               )}
             </CardContent>
@@ -499,12 +499,12 @@ export default async function TaskDetailPage({
       })()}
 
       <SectionTitle
-        title="المُسنَدون"
-        description="كل مَن يعمل على المهمة. لكل شخص دور (متخصص/مدير/منفّذ/مدير حساب) ومدير فريق اختياري."
+        title={t("sections.assignees.title")}
+        description={t("sections.assignees.description")}
       />
       <Card className="mb-6">
         <CardContent className="p-4">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المُسنَدين...</div>}>
+          <Suspense fallback={<div className="text-sm text-muted-foreground">{t("loading.assignees")}</div>}>
             <TaskAssigneesSection
               orgId={session.orgId}
               taskId={task.id}
@@ -598,12 +598,12 @@ export default async function TaskDetailPage({
       )}
 
       <SectionTitle
-        title="متابعون"
-        description="المتابعون يَرَون المهمة دون أن يتسلموا دورًا تنفيذيًا في مراحلها."
+        title={t("sections.followers.title")}
+        description={t("sections.followers.description")}
       />
       <Card className="mb-6">
         <CardContent className="p-4">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">جاري تحميل المتابعين...</div>}>
+          <Suspense fallback={<div className="text-sm text-muted-foreground">{t("loading.followers")}</div>}>
             <TaskFollowersSection
               orgId={session.orgId}
               taskId={task.id}
@@ -621,7 +621,7 @@ export default async function TaskDetailPage({
 
       <div className="mt-2 space-y-4">
         <TaskTabNav taskId={task.id} activeTab={activeTab} />
-        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل هذا القسم...</CardContent></Card>}>
+        <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.section")}</CardContent></Card>}>
           <TaskTabPanelSection
             orgId={session.orgId}
             taskId={task.id}
@@ -1050,17 +1050,18 @@ function TaskTabNav({
   taskId: string;
   activeTab: TaskTab;
 }) {
+  const t = useTranslations("TaskDetailPage.tabs");
   const tabs: Array<{ key: TaskTab; label: string }> = [
-    { key: "activity", label: "سجل النشاط" },
-    { key: "description", label: "الوصف" },
-    { key: "subtasks", label: "مهام فرعية" },
-    { key: "links", label: "ربط المهام" },
-    { key: "timesheets", label: "السجل الزمني" },
-    { key: "activities", label: "أنشطة مجدولة" },
-    { key: "documents", label: "المرفقات" },
-    { key: "history", label: "تاريخ المراحل" },
-    { key: "gantt", label: "جانت المهمة" },
-    { key: "extra", label: "معلومات إضافية" },
+    { key: "activity", label: t("activity") },
+    { key: "description", label: t("description") },
+    { key: "subtasks", label: t("subtasks") },
+    { key: "links", label: t("links") },
+    { key: "timesheets", label: t("timesheets") },
+    { key: "activities", label: t("activities") },
+    { key: "documents", label: t("documents") },
+    { key: "history", label: t("history") },
+    { key: "gantt", label: t("gantt") },
+    { key: "extra", label: t("extra") },
   ];
 
   return (
@@ -1143,7 +1144,7 @@ async function TaskTabPanelSection({
       return (
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">المهمة غير مرتبطة بمشروع.</p>
+            <p className="text-xs text-muted-foreground">Task is not linked to a project.</p>
           </CardContent>
         </Card>
       );
@@ -1411,7 +1412,7 @@ async function TaskTabPanelSection({
 
   return (
     <div className="space-y-4">
-      <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">جاري تحميل سجل النشاط...</CardContent></Card>}>
+      <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">Loading activity feed...</CardContent></Card>}>
         <TaskActivityFeedSection orgId={orgId} taskId={taskId} />
       </Suspense>
       <Suspense fallback={null}>

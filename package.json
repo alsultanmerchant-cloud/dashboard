@@ -7,7 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "sync:odoo": "bun run scripts/sync-odoo.ts"
+    "sync:odoo": "bun run scripts/sync-odoo.ts",
+    "sync:stage-history": "bun run scripts/sync-stage-history.ts",
+    "sync:followers": "bun run scripts/sync-project-followers.ts",
+    "sync:members": "bun run scripts/sync-project-members.ts",
+    "sync:attachments": "bun run scripts/sync-attachments.ts",
+    "sync:chatter": "bun run scripts/sync-chatter.ts",
+    "sync:all": "bun run sync:odoo && bun run sync:stage-history && bun run sync:followers && bun run sync:members && bun run sync:attachments"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",

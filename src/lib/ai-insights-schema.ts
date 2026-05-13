@@ -1,49 +1,100 @@
 import { z } from "zod";
 
+// Sky Light operations-tuned insight schema.
+// All numeric/entity fields are pre-computed server-side from synced Odoo data;
+// the model only writes Arabic narrative around them. This keeps tokens down
+// and prevents the model from inventing numbers.
+
+const SERVICE = z.enum(["social_media", "seo", "media_buying", "other"]);
+const STAGE = z.enum([
+  "new",
+  "in_progress",
+  "manager_review",
+  "specialist_review",
+  "ready_to_send",
+  "sent_to_client",
+  "client_changes",
+  "done",
+]);
+const ROLE = z.enum([
+  "specialist",
+  "manager",
+  "agent",
+  "account_manager",
+  "supporting_lead",
+  "supporting_agent",
+]);
+
 export const InsightsSchema = z.object({
   executiveSummary: z
     .string()
-    .describe("فقرة تلخيصية شاملة للحالة الراهنة بأسلوب مدير تنفيذي، 3-4 جمل، بالعربية"),
+    .describe("ملخص تنفيذي شامل من 3-4 جمل بالعربية الفصحى يصف الحالة الراهنة"),
   overallHealth: z
     .enum(["excellent", "good", "concerning", "critical"])
-    .describe("التقييم العام الشامل للوكالة"),
-  alerts: z
+    .describe("التقييم العام للوكالة"),
+
+  stageBottlenecks: z
     .array(
       z.object({
-        level: z.enum(["critical", "warning", "info"]),
-        title: z.string().describe("عنوان قصير للتنبيه"),
-        body: z.string().describe("شرح موجز مع أرقام محددة من البيانات"),
-        action: z.string().describe("الإجراء المقترح (جملة واحدة)"),
+        stage: STAGE,
+        count: z.number().int(),
+        oldestDays: z.number().int().describe("أقدم مهمة في هذه المرحلة (بالأيام)"),
+        sampleTaskCodes: z.array(z.string()).max(3).describe("أكواد أسوأ 3 مهام للاستشهاد"),
+        narrative: z.string().describe("جملة عربية واحدة تشرح المشكلة والأثر"),
       }),
     )
-    .describe("تنبيهات تحتاج اهتمامًا فوريًا — حرجة أو تحذيرية أو معلوماتية"),
-  recommendations: z
+    .max(4)
+    .describe("اختناقات المراحل التي تتجمع فيها المهام أكثر من المتوقع"),
+
+  clientsAtRisk: z
     .array(
       z.object({
-        priority: z.enum(["urgent", "important", "suggestion"]),
-        title: z.string().describe("عنوان الاقتراح"),
-        body: z.string().describe("شرح تفصيلي مع تبرير مبني على البيانات"),
-        estimatedImpact: z.string().describe("الأثر المتوقع على الأداء"),
+        clientName: z.string(),
+        projectCode: z.string().nullable(),
+        reason: z.string().describe("سبب الخطر مع أرقام محددة"),
+        suggestedAction: z.string().describe("إجراء واحد يمكن اتخاذه هذا الأسبوع"),
       }),
     )
-    .describe("توصيات عملية مرتبة حسب الأولوية"),
-  patterns: z
+    .max(5)
+    .describe("عملاء يحتاجون انتباهًا فوريًا (مشاريع متأخرة قرب نهاية العقد، أو معلقة عند العميل)"),
+
+  serviceHealth: z
     .array(
       z.object({
-        title: z.string().describe("اسم النمط"),
-        body: z.string().describe("وصف النمط المكتشف من البيانات مع شواهد رقمية"),
-        type: z.enum(["positive", "negative", "neutral"]),
+        service: SERVICE,
+        openCount: z.number().int(),
+        overdueCount: z.number().int(),
+        onTimePct: z.number().int().min(0).max(100),
+        note: z.string().describe("ملاحظة قصيرة تشخص الوضع، تذكر الفجوة الرئيسية"),
       }),
     )
-    .describe("أنماط مكتشفة في سير العمل"),
-  teamInsights: z
+    .max(4)
+    .describe("صحة الخدمات الثلاث: السوشيال ميديا، SEO، ميديا باينج"),
+
+  teamHotspots: z
     .array(
       z.object({
-        observation: z.string().describe("ملاحظة متعلقة بالفريق أو قسم أو موظف بعينه"),
-        recommendation: z.string().describe("توصية محددة"),
+        employeeName: z.string(),
+        role: ROLE,
+        openCount: z.number().int(),
+        overdueCount: z.number().int(),
+        recommendation: z.string().describe("توصية محددة (إعادة توزيع، دعم، ترقية)"),
       }),
     )
-    .describe("رؤى تتعلق بأداء الفريق وتوزيع الأعمال"),
+    .max(5)
+    .describe("نقاط الضغط في الفريق — فقط من يحتاج تدخلًا. الصمت = صحي."),
+
+  quickWins: z
+    .array(
+      z.object({
+        title: z.string().describe("عنوان قصير للإجراء"),
+        description: z.string().describe("شرح موجز يستشهد بأكواد المهام أو المشاريع"),
+        taskCodes: z.array(z.string()).max(5),
+        expectedImpact: z.string().describe("الأثر المتوقع بجملة واحدة"),
+      }),
+    )
+    .max(4)
+    .describe("مكاسب سريعة يمكن إنجازها هذا الأسبوع لإزالة عوائق محددة"),
 });
 
 export type InsightsResult = z.infer<typeof InsightsSchema>;

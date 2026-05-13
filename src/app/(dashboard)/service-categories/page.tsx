@@ -1,4 +1,5 @@
 import { ListTree } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listServiceCategories } from "@/lib/data/service-categories";
 import { listServices } from "@/lib/data/employees";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ServiceCategoriesPage() {
   const session = await requirePagePermission("category.manage_templates");
+  const t = await getTranslations("ServiceCategoriesPage");
   const [categories, services] = await Promise.all([
     listServiceCategories(session.orgId),
     listServices(session.orgId),
@@ -19,16 +21,16 @@ export default async function ServiceCategoriesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="تصنيفات الخدمات"
-        description="إدارة باقات الخدمات (Onboarding، السوشيال ميديا، الإعلانات الممولة، SEO، التصميم…) والقوالب المرتبطة بها."
+        title={t("title")}
+        description={t("description")}
         actions={<SyncOdooButton />}
       />
 
       {categories.length === 0 ? (
         <EmptyState
           icon={<ListTree className="size-6" />}
-          title="لا توجد تصنيفات بعد"
-          description="استخدم زر + إضافة تصنيف، أو استورد تصنيفات Odoo عبر سكريبت import-odoo-categories."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
         />
       ) : null}
 

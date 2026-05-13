@@ -96,7 +96,10 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
   );
 
   // Pull partner phone/mobile in one batch so we can hydrate emp.phone.
-  const partnerIds = users.map((u) => u.partner_id?.[0]).filter((x): x is number => Boolean(x));
+  // OdooMany2one is `[id, name] | false`, so guard before indexing.
+  const partnerIds = users
+    .map((u) => (Array.isArray(u.partner_id) ? u.partner_id[0] : null))
+    .filter((x): x is number => typeof x === "number");
   type OdooUserPartner = { id: number; phone: string | false; mobile: string | false; function: string | false };
   const partners = partnerIds.length
     ? await ctx.odoo.searchRead<OdooUserPartner>(
@@ -234,7 +237,9 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
   // Pull hr.job for canonical position names. job_id many2one only carries
   // [id, name], but Odoo sometimes appends "(Department)" to the name —
   // hr.job.name is the clean string we want for `position`.
-  const jobIds = employees.map((e) => e.job_id?.[0]).filter((x): x is number => Boolean(x));
+  const jobIds = employees
+    .map((e) => (Array.isArray(e.job_id) ? e.job_id[0] : null))
+    .filter((x): x is number => typeof x === "number");
   type OdooJob = { id: number; name: string };
   const jobs = jobIds.length
     ? await ctx.odoo.searchRead<OdooJob>(

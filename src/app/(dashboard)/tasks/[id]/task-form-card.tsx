@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Briefcase } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PriorityBadge, ServiceBadge } from "@/components/status-badges";
@@ -95,6 +96,7 @@ export function TaskFormCard({
   canEditDeadline: boolean;
 }) {
   const progress = task.progress_percent;
+  const t = useTranslations("TaskDetailPage.form");
   const progressNum =
     progress == null
       ? 0
@@ -112,7 +114,7 @@ export function TaskFormCard({
     <Card>
       <CardContent className="grid gap-x-8 gap-y-0 p-5 md:grid-cols-2">
         <dl className="divide-y divide-soft/40">
-          <Row label="المشروع">
+          <Row label={t("project")}>
             {project ? (
               <Link
                 href={`/projects/${project.id}`}
@@ -130,17 +132,17 @@ export function TaskFormCard({
               </div>
             )}
           </Row>
-          <Row label="الخدمة">
+          <Row label={t("service")}>
             {service ? (
               <ServiceBadge slug={service.slug ?? ""} name={service.name} />
             ) : (
               <span className="text-muted-foreground">—</span>
             )}
           </Row>
-          <Row label="الأولوية">
+          <Row label={t("priority")}>
             <PriorityBadge priority={task.priority} />
           </Row>
-          <Row label="التقدم">
+          <Row label={t("progress")}>
             <div className="flex items-center gap-2">
               <div className="relative h-1.5 w-32 overflow-hidden rounded-full bg-soft-2">
                 <div
@@ -160,12 +162,12 @@ export function TaskFormCard({
               </span>
             </div>
           </Row>
-          <Row label="التقدم المتوقع">
+          <Row label={t("expectedProgress")}>
             <span className="tabular-nums">
               {formatPct(task.expected_progress_percent)}
             </span>
           </Row>
-          <Row label="انحراف التقدم">
+          <Row label={t("progressVariance")}>
             <span
               className={cn(
                 "tabular-nums",
@@ -178,12 +180,12 @@ export function TaskFormCard({
         </dl>
 
         <dl className="divide-y divide-soft/40">
-          <Row label="الوقت المخصص">
+          <Row label={t("allocatedTime")}>
             <span className="tabular-nums">
               {formatMinutes(task.allocated_time_minutes)}
             </span>
           </Row>
-          <Row label="الموعد النهائي">
+          <Row label={t("deadline")}>
             <DeadlineEditor
               taskId={task.id}
               initialDate={task.planned_date ?? task.due_date ?? null}
@@ -194,20 +196,20 @@ export function TaskFormCard({
           {task.due_date &&
             task.planned_date &&
             task.due_date !== task.planned_date && (
-              <Row label="الموعد المخطط">
+              <Row label={t("plannedDeadline")}>
                 <span className="tabular-nums" dir="ltr">
                   {task.due_date}
                 </span>
               </Row>
             )}
           {task.actual_done_date && (
-            <Row label="اليوم الفعلي للإنجاز">
+            <Row label={t("actualDoneDate")}>
               <span className="text-cc-green tabular-nums" dir="ltr">
                 {task.actual_done_date}
               </span>
             </Row>
           )}
-          <Row label="تاريخ الإنجاز">
+          <Row label={t("completedAt")}>
             {formattedCompletedAt ? (
               <span className="text-cc-green tabular-nums" dir="ltr">
                 {formattedCompletedAt}
@@ -216,7 +218,7 @@ export function TaskFormCard({
               <span className="text-muted-foreground">—</span>
             )}
           </Row>
-          <Row label="أيام التأخير">
+          <Row label={t("delayDays")}>
             {computedDelayDays != null && computedDelayDays > 0 ? (
               <span className="text-cc-red tabular-nums font-medium">
                 {computedDelayDays}
@@ -226,7 +228,7 @@ export function TaskFormCard({
             )}
           </Row>
           {task.hold_reason && (
-            <Row label="سبب التعليق">
+            <Row label={t("holdReason")}>
               <span className="text-amber-300">{task.hold_reason}</span>
             </Row>
           )}

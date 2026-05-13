@@ -1,4 +1,5 @@
 import { Users } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { listEmployees, listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions } from "@/lib/data/organization";
@@ -16,6 +17,8 @@ import { EmployeesAdmin, type EmployeeRow, type DeptOption } from "./employees-a
 
 export default async function EmployeesPage() {
   const session = await requirePagePermission("employees.view");
+  const t = await getTranslations("OrganizationEmployeesPage");
+  const tRoles = await getTranslations("RoleLabels");
   const canManage = hasPermission(session, "employees.manage");
 
   const [employees, departments, roleOptions] = await Promise.all([
@@ -66,7 +69,7 @@ export default async function EmployeesPage() {
       }))}
       roles={roleOptions.map((r) => ({
         id: r.id,
-        label: ROLE_LABELS[r.key] ?? r.name,
+        label: tRoles.has(r.key) ? tRoles(r.key) : ROLE_LABELS[r.key] ?? r.name,
       }))}
     />
   );
@@ -74,16 +77,16 @@ export default async function EmployeesPage() {
   return (
     <div>
       <PageHeader
-        title="الموظفون"
-        description="إدارة كاملة لفريق الوكالة — إضافة، تعديل، إنهاء خدمة، أو حذف نهائي."
+        title={t("title")}
+        description={t("description")}
         actions={canManage ? inviteButton : null}
       />
 
       {rows.length === 0 ? (
         <EmptyState
           icon={<Users className="size-6" />}
-          title="لا يوجد موظفون"
-          description="ابدأ بإضافة أول موظف للوكالة."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
           action={canManage ? inviteButton : null}
         />
       ) : (

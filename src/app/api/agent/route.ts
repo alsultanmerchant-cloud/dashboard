@@ -292,6 +292,11 @@ export async function POST(req: Request) {
       }
     }
 
+    // Anti-loop guard: Gemini sometimes re-fires the exact same tool call
+    // verbatim. We hash each invocation and abort identical repeats so the
+    // model is forced to either change strategy or produce a text answer.
+    const seenToolCalls = new Map<string, number>();
+
     const queryDbParams = z.object({
       table: z.enum(ALLOWED_TABLES).describe("The table to query (auto-scoped to current organization)"),
       select: z.string().default("*").describe("Columns to select, e.g. 'name,status' or '*'"),
@@ -310,6 +315,9 @@ export async function POST(req: Request) {
       model: google("gemini-3-flash-preview"),
       system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}`,
       messages: modelMessages,
+      // Fail fast on transient Gemini errors (esp. 429 rate limits) instead
+      // of hanging 60-180s on 3 internal retries.
+      maxRetries: 0,
       stopWhen: stepCountIs(20),
       // §9.1: surface stream/tool errors instead of letting them deadlock
       // the client. The UI shows a generic toast on stream error.
@@ -565,6 +573,18 @@ export async function POST(req: Request) {
           description: "Query the agency database (auto-scoped to current organization). Use this to look up clients, projects, tasks, handovers, and ai_events.",
           inputSchema: queryDbParams,
           execute: async ({ table, select, filters, orderColumn, orderAscending, limit }) => {
+            const sig = `queryDatabase:${JSON.stringify({ table, select, filters, orderColumn, orderAscending, limit })}`;
+            const n = (seenToolCalls.get(sig) ?? 0) + 1;
+            seenToolCalls.set(sig, n);
+            if (n > 1) {
+              return {
+                success: false as const,
+                error:
+                  "تم استدعاء نفس الاستعلام مسبقًا في هذه الجولة. استخدم النتائج السابقة أو غيّر الاستعلام، ثم قدّم إجابة نصية للمستخدم.",
+                data: null,
+                count: 0,
+              };
+            }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let query = supabaseAdmin
               .from(table)
@@ -604,6 +624,18 @@ export async function POST(req: Request) {
       // can come back empty because the SDK can't distinguish.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       originalMessages: messages as any,
+      // Forward stream errors to the client so useChat.onError fires with
+      // a real message instead of swallowing the error silently.
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/quota|RESOURCE_EXHAUSTED|429/i.test(msg)) {
+          return "تم تجاوز الحد اليومي لطلبات Gemini (الطبقة المجانية: 20 طلب/يوم). يرجى ترقية المفتاح أو المحاولة غدًا.";
+        }
+        if (/timeout|ETIMEDOUT/i.test(msg)) {
+          return "انتهت مهلة الاتصال بالنموذج. حاول مرة أخرى.";
+        }
+        return `خطأ من المساعد الذكي: ${msg}`;
+      },
       // Persist the assistant turn once the UI stream completes. Uses
       // `responseMessage` (the just-generated UIMessage with its full
       // parts array) so tool turns + markdown are preserved verbatim.

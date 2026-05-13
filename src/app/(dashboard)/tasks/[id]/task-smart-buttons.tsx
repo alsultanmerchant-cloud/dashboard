@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   ListTree,
   Link2,
@@ -34,41 +35,42 @@ export function TaskSmartButtons({
   // #14 — Sky Light's Odoo "All Documents" smart-button.
   attachmentCount: number;
 }) {
+  const t = useTranslations("TaskDetailPage.smartButtons");
   const buttons: SmartButton[] = [
     {
       target: "subtasks",
-      label: "مهام فرعية",
+      label: t("subtasks"),
       value: String(subtaskCount),
       icon: ListTree,
     },
     {
       target: "links",
-      label: "ربط",
+      label: t("links"),
       value: String(linkCount),
       icon: Link2,
     },
     {
       target: "timesheets",
-      label: "ساعات",
+      label: t("timesheets"),
       value: formatHours(timesheetHours),
       icon: Clock,
     },
     {
       target: "activity",
-      label: "تعليقات",
+      label: t("comments"),
       value: String(commentCount),
       icon: MessageSquare,
     },
     {
       target: "activities",
-      label: "أنشطة",
+      label: t("activities"),
       value: String(openActivityCount),
       icon: AlarmClock,
       tone: openActivityCount > 0 ? "amber" : "default",
     },
     {
       target: "documents",
-      label: "مرفقات",
+      label: t("documents"),
       value: String(attachmentCount),
       icon: Paperclip,
     },

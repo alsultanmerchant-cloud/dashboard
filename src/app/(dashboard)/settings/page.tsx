@@ -1,5 +1,6 @@
 import { Settings, Building2, User, Globe, Shield, Sparkles, CalendarOff, ChevronLeft } from "lucide-react";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { listEmployees } from "@/lib/data/employees";
@@ -21,6 +22,8 @@ async function getOrgInfo(orgId: string) {
 
 export default async function SettingsPage() {
   const session = await requirePagePermission("settings.manage");
+  const t = await getTranslations("SettingsPage");
+  const tRoles = await getTranslations("RoleLabels");
   const [org, employees] = await Promise.all([
     getOrgInfo(session.orgId),
     listEmployees(session.orgId),
@@ -40,31 +43,35 @@ export default async function SettingsPage() {
   return (
     <div>
       <PageHeader
-        title="الإعدادات"
-        description="إعدادات الوكالة والحساب الحالي. إعدادات متقدمة (تكاملات، إعدادات الذكاء الاصطناعي، قوالب التواصل) ستضاف لاحقًا."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Sparkles className="size-3 text-cyan" />
-            إعدادات موسّعة في مرحلة 9
+            {t("phaseBadge")}
           </Badge>
         }
       />
 
-      <SectionTitle title="بيانات الوكالة" />
+      <SectionTitle title={t("agencyInfo.title")} />
       <Card className="mb-8">
         <CardContent className="p-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field icon={<Building2 className="size-4" />} label="الاسم" value={org?.name ?? "—"} />
-            <Field icon={<Globe className="size-4" />} label="المعرّف" value={org?.slug ?? "—"} mono />
-            <Field icon={<Globe className="size-4" />} label="اللغة الافتراضية" value={org?.default_locale === "ar" ? "العربية" : (org?.default_locale ?? "—")} />
-            <Field icon={<Globe className="size-4" />} label="المنطقة الزمنية" value={org?.timezone ?? "—"} mono />
+            <Field icon={<Building2 className="size-4" />} label={t("agencyInfo.name")} value={org?.name ?? "—"} />
+            <Field icon={<Globe className="size-4" />} label={t("agencyInfo.slug")} value={org?.slug ?? "—"} mono />
+            <Field
+              icon={<Globe className="size-4" />}
+              label={t("agencyInfo.defaultLocale")}
+              value={org?.default_locale === "ar" ? t("locales.ar") : org?.default_locale === "en" ? t("locales.en") : (org?.default_locale ?? "—")}
+            />
+            <Field icon={<Globe className="size-4" />} label={t("agencyInfo.timezone")} value={org?.timezone ?? "—"} mono />
           </div>
         </CardContent>
       </Card>
 
       <SectionTitle
-        title="مدير المشاريع العام"
-        description="الشخص الذي يظهر كـ Project Manager على لوحات المشاريع. عادةً ثابت لجميع المشاريع."
+        title={t("projectManager.title")}
+        description={t("projectManager.description")}
       />
       <Card className="mb-8">
         <CardContent className="p-5">
@@ -72,7 +79,7 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <SectionTitle title="جدولة العمل" />
+      <SectionTitle title={t("workSchedule.title")} />
       <Card className="mb-8">
         <CardContent className="p-5">
           <Link
@@ -82,9 +89,9 @@ export default async function SettingsPage() {
             <span className="flex items-center gap-3">
               <CalendarOff className="size-4 text-cyan" />
               <span>
-                <span className="block text-sm font-medium">الإجازات الرسمية</span>
+                <span className="block text-sm font-medium">{t("workSchedule.holidaysTitle")}</span>
                 <span className="block text-[11px] text-muted-foreground">
-                  أسبوع العمل: الأحد–الخميس. أضف العطل لتُحتسب في مخطط جانت وتذكيرات التسليم.
+                  {t("workSchedule.holidaysDescription")}
                 </span>
               </span>
             </span>
@@ -93,41 +100,44 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      <SectionTitle title="حسابك" />
+      <SectionTitle title={t("account.title")} />
       <Card className="mb-8">
         <CardContent className="p-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field icon={<User className="size-4" />} label="الاسم" value={session.fullName} />
-            <Field icon={<User className="size-4" />} label="البريد" value={session.email} mono />
+            <Field icon={<User className="size-4" />} label={t("account.name")} value={session.fullName} />
+            <Field icon={<User className="size-4" />} label={t("account.email")} value={session.email} mono />
             <Field
               icon={<Shield className="size-4" />}
-              label="الأدوار"
-              value={session.roleKeys.map((k) => ROLE_LABELS[k] ?? k).join(" · ") || "—"}
+              label={t("account.roles")}
+              value={session.roleKeys.map((k) => tRoles.has(k) ? tRoles(k) : (ROLE_LABELS[k] ?? k)).join(" · ") || "—"}
             />
             <Field
               icon={<Shield className="size-4" />}
-              label="الصلاحيات"
-              value={`${session.permissions.size} صلاحية ${ownerRole ? "(تجاوز كامل بصفة مالك)" : ""}`}
+              label={t("account.permissions")}
+              value={t("account.permissionsValue", {
+                count: session.permissions.size,
+                ownerSuffix: ownerRole ? ` ${t("account.ownerSuffix")}` : "",
+              })}
             />
           </div>
         </CardContent>
       </Card>
 
-      <SectionTitle title="إعدادات قادمة" />
+      <SectionTitle title={t("upcoming.title")} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          { label: "تكاملات الواتساب", desc: "ربط رسائل العميل والإشعارات" },
-          { label: "تكاملات البريد", desc: "إشعارات بريدية للموظفين" },
-          { label: "قوالب التواصل", desc: "قوالب تعليقات وردود معتمدة" },
-          { label: "إعدادات الذكاء الاصطناعي", desc: "اختيار النماذج وضبط الحدود" },
-          { label: "النسخ الاحتياطي والتصدير", desc: "تصدير دوري لبيانات الوكالة" },
-          { label: "إعدادات الأمان", desc: "MFA، انتهاء الجلسات، سجلات الدخول" },
+          { label: t("upcoming.whatsapp"), desc: t("upcoming.whatsappDesc") },
+          { label: t("upcoming.email"), desc: t("upcoming.emailDesc") },
+          { label: t("upcoming.templates"), desc: t("upcoming.templatesDesc") },
+          { label: t("upcoming.ai"), desc: t("upcoming.aiDesc") },
+          { label: t("upcoming.backup"), desc: t("upcoming.backupDesc") },
+          { label: t("upcoming.security"), desc: t("upcoming.securityDesc") },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-2">
                 <Settings className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                <Badge variant="ghost" className="text-[10px]">قريبًا</Badge>
+                <Badge variant="ghost" className="text-[10px]">{t("soon")}</Badge>
               </div>
               <h3 className="mt-2 text-sm font-semibold">{s.label}</h3>
               <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{s.desc}</p>

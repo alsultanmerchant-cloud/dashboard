@@ -1,4 +1,5 @@
 import { requirePagePermission } from "@/lib/auth-server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function MessagesPage() {
   const session = await requirePagePermission("notifications.view");
+  const t = await getTranslations("MessagesPage");
+  const locale = await getLocale();
 
   // Build a per-conversation summary: for each "other user" the caller has
   // exchanged messages with, return the latest message + unread count.
@@ -82,15 +85,15 @@ export default async function MessagesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="الرسائل" description="المحادثات الخاصة بينك وبين زملائك." />
+      <PageHeader title={t("title")} description={t("description")} />
       {conversations.length === 0 ? (
         <EmptyState
           icon={<MessageCircle className="size-6" />}
-          title="لا توجد محادثات"
-          description="انقر على أي زميل في صفحة المهمة أو المشروع لبدء محادثة."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
         />
       ) : (
-        <MessagesInbox conversations={conversations} />
+        <MessagesInbox conversations={conversations} locale={locale} />
       )}
     </div>
   );

@@ -7,6 +7,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   DndContext,
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 import {
   TASK_STAGES,
   TASK_STAGE_LABELS,
+  TASK_STAGE_LABELS_EN,
   TASK_STAGE_TONES,
   TASK_ROLE_TYPES,
   isForwardStageMove,
@@ -35,6 +37,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 // Rwasem-style priority star — `urgent`/`high` paint a filled star (gold/red),
 // medium = outline star, low = no star.
 function PriorityStar({ priority, className }: { priority: string; className?: string }) {
+  const locale = useLocale();
   if (priority === "low") return null;
   const filled = priority === "urgent" || priority === "high";
   const tone =
@@ -48,7 +51,7 @@ function PriorityStar({ priority, className }: { priority: string; className?: s
       className={cn("size-3.5", tone, className)}
       fill={filled ? "currentColor" : "none"}
       strokeWidth={2}
-      aria-label={`أولوية: ${priority}`}
+      aria-label={`${locale.startsWith("en") ? "Priority" : "الأولوية"}: ${priority}`}
     />
   );
 }
@@ -145,19 +148,19 @@ function serviceColor(slug: string): string {
   return PALETTE[h % PALETTE.length];
 }
 
-function formatDuration(fromIso: string): string {
+function formatDuration(fromIso: string, locale: string): string {
   const ms = Date.now() - new Date(fromIso).getTime();
   const hours = Math.floor(ms / 3_600_000);
   if (hours < 1) {
     const m = Math.max(0, Math.floor(ms / 60_000));
-    return `${m}د`;
+    return locale.startsWith("en") ? `${m}m` : `${m}د`;
   }
-  if (hours < 48) return `${hours}س`;
-  return `${Math.floor(hours / 24)}ي`;
+  if (hours < 48) return locale.startsWith("en") ? `${hours}h` : `${hours}س`;
+  return locale.startsWith("en") ? `${Math.floor(hours / 24)}d` : `${Math.floor(hours / 24)}ي`;
 }
 
 // Relative deadline label — mirrors Rwasem: "متأخرة ب X يوم" / "اليوم" / "خلال X أيام".
-function deadlineLabel(deadline: string | null): {
+function deadlineLabel(deadline: string | null, locale: string): {
   label: string;
   tone: "late" | "today" | "soon" | "future";
 } | null {
@@ -165,11 +168,22 @@ function deadlineLabel(deadline: string | null): {
   const days = Math.round(
     (new Date(deadline).getTime() - Date.now()) / 86_400_000,
   );
+  if (locale.startsWith("en")) {
+    if (days < 0) return { label: `${-days}d overdue`, tone: "late" };
+    if (days === 0) return { label: "Today", tone: "today" };
+    if (days === 1) return { label: "Tomorrow", tone: "soon" };
+    if (days <= 7) return { label: `In ${days} days`, tone: "soon" };
+    return { label: `${days}d left`, tone: "future" };
+  }
   if (days < 0) return { label: `متأخرة ب ${-days} يوم`, tone: "late" };
   if (days === 0) return { label: "اليوم", tone: "today" };
   if (days === 1) return { label: "غداً", tone: "soon" };
   if (days <= 7) return { label: `خلال ${days} أيام`, tone: "soon" };
   return { label: `لـ ${days} يوم`, tone: "future" };
+}
+
+function stageLabel(stage: TaskStage, locale: string): string {
+  return locale.startsWith("en") ? TASK_STAGE_LABELS_EN[stage] : TASK_STAGE_LABELS[stage];
 }
 
 // -------- card -----------------------------------------------------------
@@ -187,9 +201,11 @@ function TaskCard({
   onRetreat?: (prev: TaskStage) => void;
   advancing?: boolean;
 }) {
-  const stageDuration = formatDuration(task.stage_entered_at);
+  const t = useTranslations("TasksBoard");
+  const locale = useLocale();
+  const stageDuration = formatDuration(task.stage_entered_at, locale);
   const deadline = task.planned_date ?? task.due_date;
-  const dl = deadlineLabel(task.stage === "done" ? null : deadline);
+  const dl = deadlineLabel(task.stage === "done" ? null : deadline, locale);
   const progress =
     typeof task.progress_percent === "number"
       ? task.progress_percent
@@ -243,7 +259,7 @@ function TaskCard({
           <span className="tabular-nums font-mono shrink-0">{ref}</span>
           {hasAssignee && (
             <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
-              محدد
+              {t("assigned")}
             </span>
           )}
         </div>
@@ -298,17 +314,17 @@ function TaskCard({
         {slip != null && slip > 5 && (
           <span
             className="inline-flex items-center rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400 tabular-nums"
-            title="انحراف التقدم"
+            title={t("progressVariance")}
           >
-            متأخر {Math.round(slip)}%
+            {t("behind")} {Math.round(slip)}%
           </span>
         )}
         {slip != null && slip < -2 && (
           <span
             className="inline-flex items-center rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums"
-            title="انحراف التقدم"
+            title={t("progressVariance")}
           >
-            متقدم {Math.round(-slip)}%
+            {t("ahead")} {Math.round(-slip)}%
           </span>
         )}
       </div>
@@ -317,7 +333,7 @@ function TaskCard({
       <dl className="mt-1.5 space-y-1 text-[10px] leading-snug">
         {(task.due_date || task.planned_date) && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">الموعد النهائي:</dt>
+            <dt className="text-muted-foreground/80">{t("deadline")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80" dir="ltr">
               {(task.due_date ?? task.planned_date ?? "").slice(0, 10)}
             </dd>
@@ -325,7 +341,7 @@ function TaskCard({
         )}
         {task.completed_at && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">تاريخ الإنجاز:</dt>
+            <dt className="text-muted-foreground/80">{t("completionDate")}:</dt>
             <dd className="break-words tabular-nums text-emerald-700 dark:text-emerald-300" dir="ltr">
               {task.completed_at.slice(0, 10)}
             </dd>
@@ -333,17 +349,21 @@ function TaskCard({
         )}
         {task.allocated_time_minutes != null && task.allocated_time_minutes > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">الوقت المخصص:</dt>
+            <dt className="text-muted-foreground/80">{t("allocatedTime")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80">
               {task.allocated_time_minutes >= 60
-                ? `${(task.allocated_time_minutes / 60).toFixed(1)} س`
-                : `${task.allocated_time_minutes} د`}
+                ? locale.startsWith("en")
+                  ? `${(task.allocated_time_minutes / 60).toFixed(1)} h`
+                  : `${(task.allocated_time_minutes / 60).toFixed(1)} س`
+                : locale.startsWith("en")
+                  ? `${task.allocated_time_minutes} m`
+                  : `${task.allocated_time_minutes} د`}
             </dd>
           </div>
         )}
         {task.delay_days != null && task.delay_days > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">أيام التأخير:</dt>
+            <dt className="text-muted-foreground/80">{t("delayDays")}:</dt>
             <dd className="break-words font-semibold tabular-nums text-red-600 dark:text-red-400">
               {task.delay_days}
             </dd>
@@ -351,7 +371,7 @@ function TaskCard({
         )}
         {expected != null && expected > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">التقدم المتوقع:</dt>
+            <dt className="text-muted-foreground/80">{t("expectedProgress")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80">{expected.toFixed(1)}%</dd>
           </div>
         )}
@@ -363,8 +383,8 @@ function TaskCard({
           className="mt-2"
           title={
             expected != null
-              ? `التقدم ${progress.toFixed(0)}% / المتوقع ${expected.toFixed(0)}%`
-              : `التقدم ${progress.toFixed(0)}%`
+              ? `${t("progress")} ${progress.toFixed(0)}% / ${t("expected")} ${expected.toFixed(0)}%`
+              : `${t("progress")} ${progress.toFixed(0)}%`
           }
         >
           <div className="relative h-1 overflow-hidden rounded-full bg-muted">
@@ -393,7 +413,7 @@ function TaskCard({
       {/* ── Row 5: stage progression strip (Odoo-style 8-step dots) ── */}
       <div
         className="mt-2 flex items-center gap-1"
-        title={`المرحلة: ${TASK_STAGE_LABELS[task.stage]} (${stageIndex + 1}/${TASK_STAGES.length})`}
+        title={`${t("stage")}: ${stageLabel(task.stage, locale)} (${stageIndex + 1}/${TASK_STAGES.length})`}
       >
         {TASK_STAGES.map((s, i) => (
           <span
@@ -415,7 +435,7 @@ function TaskCard({
       <div className="mt-2 flex items-center justify-between gap-1.5">
         {/* left: stage duration */}
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-0.5 tabular-nums" title="مدة في المرحلة">
+          <span className="inline-flex items-center gap-0.5 tabular-nums" title={t("timeInStage")}>
             <Clock className="size-3" />
             {stageDuration}
           </span>
@@ -452,7 +472,7 @@ function TaskCard({
               onClick={(e) => { e.stopPropagation(); e.preventDefault(); onRetreat(prv); }}
               onPointerDown={(e) => e.stopPropagation()}
               className="inline-flex items-center rounded border border-border bg-muted/50 p-0.5 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary disabled:opacity-40"
-              title={`الرجوع إلى: ${TASK_STAGE_LABELS[prv]}`}
+              title={`${t("moveBackTo")}: ${stageLabel(prv, locale)}`}
             >
               <ChevronRight className="size-3.5 icon-flip-rtl" />
             </button>
@@ -464,7 +484,7 @@ function TaskCard({
               onClick={(e) => { e.stopPropagation(); e.preventDefault(); onAdvance(nxt); }}
               onPointerDown={(e) => e.stopPropagation()}
               className="inline-flex items-center rounded border border-primary/30 bg-primary/5 p-0.5 text-primary transition-colors hover:bg-primary hover:text-primary-foreground hover:border-primary disabled:opacity-40"
-              title={`نقل إلى: ${TASK_STAGE_LABELS[nxt]}`}
+              title={`${t("moveTo")}: ${stageLabel(nxt, locale)}`}
             >
               <ChevronLeft className="size-3.5 icon-flip-rtl" />
             </button>
@@ -512,6 +532,7 @@ function VisibleTaskList({
   tasks: BoardTask[];
   renderTask: (task: BoardTask) => React.ReactNode;
 }) {
+  const t = useTranslations("TasksBoard");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_CARDS);
   const visibleTasks = tasks.slice(0, visibleCount);
   const remainingCount = Math.max(0, tasks.length - visibleTasks.length);
@@ -525,8 +546,10 @@ function VisibleTaskList({
           onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_CARDS)}
           className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
         >
-          عرض {Math.min(INITIAL_VISIBLE_CARDS, remainingCount)} أخرى
-          {remainingCount > INITIAL_VISIBLE_CARDS ? ` من ${remainingCount}` : ""}
+          {t("showMore", {
+            count: Math.min(INITIAL_VISIBLE_CARDS, remainingCount),
+            totalSuffix: remainingCount > INITIAL_VISIBLE_CARDS ? ` ${t("from")} ${remainingCount}` : "",
+          })}
         </button>
       )}
     </>
@@ -555,6 +578,8 @@ function StageColumn({
   /** Optional: enables the Rwasem "+ add task" footer per column. */
   onQuickCreate?: (stage: TaskStage, title: string) => Promise<void> | void;
 }) {
+  const t = useTranslations("TasksBoard");
+  const locale = useLocale();
   // Stable wrapper for dnd-kit — always a <div> so the droppable ref doesn't
   // remount when the user folds/unfolds the column.
   const { setNodeRef, isOver } = useDroppable({ id: `stage:${stage}` });
@@ -591,7 +616,7 @@ function StageColumn({
         <button
           type="button"
           onClick={onToggleFold}
-          title={`فتح: ${TASK_STAGE_LABELS[stage]}`}
+          title={`${t("open")}: ${stageLabel(stage, locale)}`}
           className="group flex h-full w-full flex-col items-center gap-2 py-3"
         >
           <span
@@ -606,7 +631,7 @@ function StageColumn({
             className="text-xs font-semibold text-foreground/70 group-hover:text-foreground"
             style={{ writingMode: "vertical-rl" }}
           >
-            {TASK_STAGE_LABELS[stage]}
+            {stageLabel(stage, locale)}
           </span>
         </button>
       ) : (
@@ -618,14 +643,14 @@ function StageColumn({
             )}
           >
             <span className="flex items-center gap-1.5">
-              {TASK_STAGE_LABELS[stage]}
+              {stageLabel(stage, locale)}
               <span className="tabular-nums opacity-80">({tasks.length})</span>
             </span>
             <button
               type="button"
               onClick={onToggleFold}
-              aria-label={`طي العمود ${TASK_STAGE_LABELS[stage]}`}
-              title="طي العمود"
+              aria-label={`${t("collapseColumn")} ${stageLabel(stage, locale)}`}
+              title={t("collapseColumn")}
               className="rounded p-0.5 text-foreground/60 hover:bg-foreground/10 hover:text-foreground"
             >
               <ChevronLeft className="size-3.5 -rotate-90" />
@@ -663,7 +688,7 @@ function StageColumn({
                 value={draft}
                 disabled={creating}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="+ مهمة جديدة"
+                placeholder={t("newTaskPlaceholder")}
                 className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
               />
             </form>
@@ -1112,6 +1137,8 @@ export function TaskBoard({
   const outerKey = groupKeys[0] ?? "stage";
   const innerKey = groupKeys[1];
 
+  const t = useTranslations("TasksBoard");
+  const locale = useLocale();
   const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -1344,7 +1371,7 @@ export function TaskBoard({
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.stage === newStage) return;
     if (!isForwardStageMove(task.stage, newStage)) {
-      toast.error("لا يمكن إرجاع المهمة إلى مرحلة سابقة");
+      toast.error(t("cannotMoveBack"));
       return;
     }
     setPendingMove({ taskId, fromStage: task.stage, toStage: newStage });
@@ -1380,7 +1407,7 @@ export function TaskBoard({
         );
         return;
       }
-      toast.success(`المهمة → ${TASK_STAGE_LABELS[toStage]}`);
+      toast.success(`${t("taskMoved")} ${stageLabel(toStage, locale)}`);
       router.refresh();
     });
   }
@@ -1409,7 +1436,7 @@ export function TaskBoard({
         ))}
         {outerCols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-            لا توجد مهام لعرضها.
+            {t("noTasksToShow")}
           </div>
         )}
       </div>
@@ -1430,7 +1457,7 @@ export function TaskBoard({
         ))}
         {projectColumns.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-            لا توجد مهام لعرضها.
+            {t("noTasksToShow")}
           </div>
         )}
       </div>
@@ -1446,7 +1473,7 @@ export function TaskBoard({
         ))}
         {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-            لا توجد مهام لعرضها.
+            {t("noTasksToShow")}
           </div>
         )}
       </div>
@@ -1466,7 +1493,7 @@ export function TaskBoard({
         ))}
         {customColumns.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-            لا توجد مهام لعرضها.
+            {t("noTasksToShow")}
           </div>
         )}
       </div>
@@ -1488,7 +1515,7 @@ export function TaskBoard({
         ))}
         {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
-            لا توجد مهام لعرضها.
+            {t("noTasksToShow")}
           </div>
         )}
       </div>
@@ -1500,7 +1527,7 @@ export function TaskBoard({
       {pending && (
         <div className="absolute end-2 top-2 z-10 inline-flex items-center gap-1.5 rounded-full bg-card/80 px-2.5 py-1 text-[11px] text-muted-foreground backdrop-blur">
           <Loader2 className="size-3 animate-spin" />
-          جاري الحفظ
+          {t("saving")}
         </div>
       )}
       <DndContext
@@ -1529,7 +1556,7 @@ export function TaskBoard({
                       if ("error" in res) {
                         toast.error(res.error);
                       } else {
-                        toast.success("تم إنشاء المهمة");
+                        toast.success(t("taskCreated"));
                         router.refresh();
                       }
                     }
@@ -1547,23 +1574,23 @@ export function TaskBoard({
         onOpenChange={(o) => {
           if (!o && !pending) setPendingMove(null);
         }}
-        title="تأكيد نقل المرحلة"
+        title={t("confirmMoveTitle")}
         description={
           pendingMove ? (
             <>
-              نقل المهمة من{" "}
+              {t("confirmMoveFrom")}{" "}
               <span className="font-semibold text-foreground">
-                {TASK_STAGE_LABELS[pendingMove.fromStage]}
+                {stageLabel(pendingMove.fromStage, locale)}
               </span>{" "}
-              إلى{" "}
+              {t("confirmMoveTo")}{" "}
               <span className="font-semibold text-foreground">
-                {TASK_STAGE_LABELS[pendingMove.toStage]}
+                {stageLabel(pendingMove.toStage, locale)}
               </span>
-              ؟ لا يمكن التراجع عن هذه الخطوة.
+              ? {t("confirmMoveWarning")}
             </>
           ) : null
         }
-        confirmLabel="نقل"
+        confirmLabel={t("confirmMove")}
         onConfirm={confirmPendingMove}
         pending={pending}
       />

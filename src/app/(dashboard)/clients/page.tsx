@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { Building2, Phone, Mail, Briefcase, ChevronLeft, Globe } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listLiveClientsPaged } from "@/lib/odoo/live";
@@ -19,6 +20,7 @@ export default async function ClientsPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   await requirePagePermission("clients.view");
+  const t = await getTranslations("ClientsPage");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
   const { rows: clients, total, totals } = await listLiveClientsPaged({
@@ -29,34 +31,34 @@ export default async function ClientsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="العملاء"
-        description="قاعدة عملاء الوكالة — مباشرة من Odoo."
+        title={t("title")}
+        description={t("description")}
       />
 
       {total > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
-            label="إجمالي العملاء"
+            label={t("stats.totalClients")}
             value={totals.clients}
             icon={<Building2 className="size-5" />}
             tone="default"
           />
           <MetricCard
-            label="عملاء نشطون"
+            label={t("stats.activeClients")}
             value={totals.activeClients}
-            hint="لديهم مشاريع"
+            hint={t("stats.activeClientsHint")}
             icon={<Briefcase className="size-5" />}
             tone="success"
           />
           <MetricCard
-            label="إجمالي المشاريع"
+            label={t("stats.totalProjects")}
             value={totals.activeProjects}
             tone="info"
           />
           <MetricCard
-            label="بيانات تواصل"
+            label={t("stats.contactData")}
             value={totals.reachable}
-            hint={`${totals.clients - totals.reachable} بدون`}
+            hint={t("stats.contactDataHint", { count: totals.clients - totals.reachable })}
             icon={<Mail className="size-5" />}
             tone={totals.reachable === totals.clients ? "success" : "warning"}
           />
@@ -66,19 +68,19 @@ export default async function ClientsPage({
       {total === 0 ? (
         <EmptyState
           icon={<Building2 className="size-6" />}
-          title="لا يوجد عملاء"
-          description="لا توجد شركاء عملاء في Odoo حالياً."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
         />
       ) : (
         <DataTableShell>
           <DataTable>
             <DataTableHead>
               <tr>
-                <DataTableHeaderCell>العميل</DataTableHeaderCell>
-                <DataTableHeaderCell>التواصل</DataTableHeaderCell>
-                <DataTableHeaderCell>الموقع</DataTableHeaderCell>
-                <DataTableHeaderCell>المشاريع</DataTableHeaderCell>
-                <DataTableHeaderCell aria-label="إجراءات" />
+                <DataTableHeaderCell>{t("table.client")}</DataTableHeaderCell>
+                <DataTableHeaderCell>{t("table.contact")}</DataTableHeaderCell>
+                <DataTableHeaderCell>{t("table.location")}</DataTableHeaderCell>
+                <DataTableHeaderCell>{t("table.projects")}</DataTableHeaderCell>
+                <DataTableHeaderCell aria-label={t("table.actions")} />
               </tr>
             </DataTableHead>
             <tbody>
@@ -121,7 +123,7 @@ export default async function ClientsPage({
                     <Link
                       href={`/clients/odoo/${c.odooId}`}
                       className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
-                      aria-label="فتح"
+                      aria-label={t("openClient")}
                     >
                       <ChevronLeft className="size-3.5 icon-flip-rtl" />
                     </Link>

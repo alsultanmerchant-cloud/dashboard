@@ -1,4 +1,5 @@
 import { Shield } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listRolesWithPermissions, listAllPermissions } from "@/lib/data/organization";
 import { PageHeader } from "@/components/page-header";
@@ -9,6 +10,8 @@ import { PermissionToggle } from "./permission-toggle";
 
 export default async function RolesPage() {
   const session = await requirePagePermission("settings.manage");
+  const t = await getTranslations("OrganizationRolesPage");
+  const tRoles = await getTranslations("RoleLabels");
   const [roles, permissions] = await Promise.all([
     listRolesWithPermissions(session.orgId),
     listAllPermissions(),
@@ -28,12 +31,12 @@ export default async function RolesPage() {
   return (
     <div>
       <PageHeader
-        title="الأدوار والصلاحيات"
-        description="مصفوفة الأدوار والصلاحيات. انقر على أي خانة لمنح أو سحب صلاحية. دور المالك يحصل على كل الصلاحيات تلقائيًا."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
             <Shield className="size-3 text-cyan" />
-            {roles.length} دور · {permissions.length} صلاحية
+            {t("badge", { roles: roles.length, permissions: permissions.length })}
           </Badge>
         }
       />
@@ -43,11 +46,11 @@ export default async function RolesPage() {
           <table className="w-full text-sm">
             <thead className="bg-soft-1 text-[11px] uppercase tracking-wider text-muted-foreground sticky top-0">
               <tr>
-                <th className="px-3 py-2.5 text-start font-medium sticky right-0 bg-card/95 backdrop-blur-sm z-10 min-w-44">الصلاحية</th>
+                <th className="px-3 py-2.5 text-start font-medium sticky right-0 bg-card/95 backdrop-blur-sm z-10 min-w-44">{t("table.permission")}</th>
                 {roles.map((r) => (
                   <th key={r.id} className="px-2 py-2.5 text-center font-medium whitespace-nowrap">
                     <div className="flex flex-col items-center gap-0.5">
-                      <span className="text-[11px] text-foreground">{ROLE_LABELS[r.key] ?? r.name}</span>
+                      <span className="text-[11px] text-foreground">{tRoles.has(r.key) ? tRoles(r.key) : ROLE_LABELS[r.key] ?? r.name}</span>
                       <span className="text-[9px] font-mono text-muted-foreground/70" dir="ltr">{r.key}</span>
                     </div>
                   </th>
@@ -92,16 +95,16 @@ export default async function RolesPage() {
               <CardContent className="p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <h3 className="text-sm font-semibold truncate">{ROLE_LABELS[r.key] ?? r.name}</h3>
+                    <h3 className="text-sm font-semibold truncate">{tRoles.has(r.key) ? tRoles(r.key) : ROLE_LABELS[r.key] ?? r.name}</h3>
                     <p className="text-[10px] font-mono text-muted-foreground" dir="ltr">{r.key}</p>
                   </div>
                   <Badge variant={r.is_system ? "default" : "secondary"} className="text-[10px]">
-                    {r.is_system ? "نظامي" : "مخصص"}
+                    {r.is_system ? t("systemRole") : t("customRole")}
                   </Badge>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{r.description ?? "—"}</p>
                 <div className="mt-3 flex items-center justify-between text-[11px]">
-                  <span className="text-muted-foreground">عدد الصلاحيات</span>
+                  <span className="text-muted-foreground">{t("permissionsCount")}</span>
                   <span className="font-bold text-cyan tabular-nums">{count}</span>
                 </div>
               </CardContent>

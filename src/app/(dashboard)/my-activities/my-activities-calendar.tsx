@@ -2,17 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { ChevronLeft, ChevronRight, Phone, Mail, Eye, Upload, ListTodo, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MyActivityRow } from "@/lib/data/my-activities";
-
-const MONTHS_AR = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
-];
-
-// Saudi week — Saturday first.
-const DAYS_AR = ["السبت", "الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
 
 const TYPE_ICON = {
   call: Phone,
@@ -21,14 +14,6 @@ const TYPE_ICON = {
   upload: Upload,
   other: ListTodo,
 } as const;
-
-const TYPE_LABEL: Record<string, string> = {
-  call: "مكالمة",
-  email: "بريد",
-  review: "مراجعة",
-  upload: "رفع",
-  other: "أخرى",
-};
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -42,11 +27,37 @@ function daysFromSaturday(jsDay: number): number {
 }
 
 export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
+  const t = useTranslations("MyActivitiesPage.calendar");
+  const locale = useLocale();
   const today = new Date();
   const [cursor, setCursor] = useState({
     year: today.getFullYear(),
     month: today.getMonth(),
   });
+
+  const monthFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
+    [locale],
+  );
+  const dayFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { weekday: "long" }),
+    [locale],
+  );
+  const shortDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }),
+    [locale],
+  );
+  const dayNames = useMemo(() => {
+    const base = new Date(Date.UTC(2026, 0, 3)); // Saturday
+    return Array.from({ length: 7 }, (_, i) => dayFormatter.format(new Date(base.getTime() + i * 86400000)));
+  }, [dayFormatter]);
+  const activityTypeLabel = (type: string) => {
+    if (type === "call") return t("types.call");
+    if (type === "email") return t("types.email");
+    if (type === "review") return t("types.review");
+    if (type === "upload") return t("types.upload");
+    return t("types.other");
+  };
 
   const byDay = useMemo(() => {
     const map = new Map<string, MyActivityRow[]>();
@@ -115,23 +126,23 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <SummaryPill label="متأخرة" value={summary.overdue} tone="red" />
-        <SummaryPill label="تستحق اليوم" value={summary.dueToday} tone="amber" />
-        <SummaryPill label="هذا الأسبوع" value={summary.thisWeek} tone="cyan" />
-        <SummaryPill label="مكتملة (آخر 30 يوم)" value={summary.completed} tone="emerald" />
+        <SummaryPill label={t("summary.overdue")} value={summary.overdue} tone="red" />
+        <SummaryPill label={t("summary.today")} value={summary.dueToday} tone="amber" />
+        <SummaryPill label={t("summary.thisWeek")} value={summary.thisWeek} tone="cyan" />
+        <SummaryPill label={t("summary.completed")} value={summary.completed} tone="emerald" />
       </div>
 
       <div className="rounded-2xl border border-soft bg-card/30 p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">
-            {MONTHS_AR[cursor.month]} {cursor.year}
+            {monthFormatter.format(new Date(cursor.year, cursor.month, 1))}
           </h2>
           <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => shiftMonth(-1)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-soft hover:bg-muted/60"
-              aria-label="الشهر السابق"
+              aria-label={t("previousMonth")}
             >
               <ChevronRight className="size-4" />
             </button>
@@ -142,13 +153,13 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
               }
               className="rounded-md border border-soft px-2 py-1 text-xs hover:bg-muted/60"
             >
-              اليوم
+              {t("today")}
             </button>
             <button
               type="button"
               onClick={() => shiftMonth(1)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-soft hover:bg-muted/60"
-              aria-label="الشهر التالي"
+              aria-label={t("nextMonth")}
             >
               <ChevronLeft className="size-4" />
             </button>
@@ -156,7 +167,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
         </div>
 
         <div className="grid grid-cols-7 gap-px overflow-hidden rounded-lg border border-soft bg-soft/40 text-xs">
-          {DAYS_AR.map((d) => (
+          {dayNames.map((d) => (
             <div
               key={d}
               className="bg-card/80 px-2 py-1.5 text-center font-semibold text-muted-foreground"
@@ -230,15 +241,15 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
 
         {undated.length > 0 && (
           <p className="mt-3 text-[11px] text-muted-foreground">
-            {undated.length} نشاطًا بدون تاريخ — لا يظهر في التقويم.
+            {t("undated", { count: undated.length })}
           </p>
         )}
       </div>
 
       <div className="rounded-2xl border border-soft bg-card/30 p-4">
-        <h3 className="mb-2 text-sm font-semibold">قائمة الأنشطة</h3>
+        <h3 className="mb-2 text-sm font-semibold">{t("listTitle")}</h3>
         {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">لا توجد أنشطة.</p>
+          <p className="text-xs text-muted-foreground">{t("noActivities")}</p>
         ) : (
           <ul className="divide-y divide-soft/40">
             {rows.map((a) => {
@@ -263,7 +274,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
                     {a.summary}
                   </span>
                   <span className="hidden text-muted-foreground sm:inline">
-                    {TYPE_LABEL[a.activity_type] ?? a.activity_type}
+                    {activityTypeLabel(a.activity_type)}
                   </span>
                   <Link
                     href={`/tasks/${a.task_id}`}
@@ -279,7 +290,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
                     )}
                     dir="ltr"
                   >
-                    {a.due_date ?? "—"}
+                    {a.due_date ? shortDateFormatter.format(new Date(a.due_date)) : "—"}
                   </span>
                 </li>
               );

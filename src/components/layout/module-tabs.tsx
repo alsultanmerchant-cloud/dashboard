@@ -8,12 +8,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { LayoutGrid, List as ListIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTopbarControls } from "@/components/layout/topbar-context";
 
 type Tab = {
-  label: string;
+  labelKey: string;
   href?: string;
   /** Active when pathname starts with this. Falls back to href when omitted. */
   match?: string | RegExp;
@@ -36,36 +37,36 @@ const MODULES: Module[] = [
     name: "Project",
     prefixes: /^\/(projects|tasks|task-templates|service-categories|reports)/,
     tabs: [
-      { label: "المشاريع", href: "/projects", match: /^\/projects(?!\/odoo|\/new)/ },
+      { labelKey: "projects", href: "/projects", match: /^\/projects(?!\/odoo|\/new)/ },
       // The new-project wizard lives under /projects/new but is conceptually
       // the same "Projects" page from Odoo's tab perspective.
-      { label: "المهام", href: "/tasks", match: /^\/tasks/ },
-      { label: "تصنيفات الخدمات", href: "/service-categories", match: /^\/service-categories/ },
-      { label: "قوالب المهام", href: "/task-templates", match: /^\/task-templates/ },
-      { label: "التقارير", href: "/reports", match: /^\/reports/ },
-      { label: "استيراد", comingSoon: true },
+      { labelKey: "tasks", href: "/tasks", match: /^\/tasks/ },
+      { labelKey: "serviceCategories", href: "/service-categories", match: /^\/service-categories/ },
+      { labelKey: "taskTemplates", href: "/task-templates", match: /^\/task-templates/ },
+      { labelKey: "reports", href: "/reports", match: /^\/reports/ },
+      { labelKey: "import", comingSoon: true },
     ],
   },
   {
     name: "HR",
     prefixes: /^\/(hr|organization)/,
     tabs: [
-      { label: "الموظفون", href: "/organization/employees", match: /^\/organization\/employees/ },
-      { label: "الأقسام", href: "/organization/departments", match: /^\/organization\/departments/ },
-      { label: "الأدوار والصلاحيات", href: "/organization/roles", match: /^\/organization\/roles/ },
-      { label: "هيكل الوكالة", href: "/organization/chart", match: /^\/organization\/chart/ },
-      { label: "الموارد البشرية", href: "/hr", match: /^\/hr$/ },
+      { labelKey: "employees", href: "/organization/employees", match: /^\/organization\/employees/ },
+      { labelKey: "departments", href: "/organization/departments", match: /^\/organization\/departments/ },
+      { labelKey: "rolesPermissions", href: "/organization/roles", match: /^\/organization\/roles/ },
+      { labelKey: "agencyChart", href: "/organization/chart", match: /^\/organization\/chart/ },
+      { labelKey: "hr", href: "/hr", match: /^\/hr$/ },
     ],
   },
   {
     name: "Sales",
     prefixes: /^\/(sales|handover|clients|contracts)/,
     tabs: [
-      { label: "العملاء", href: "/clients", match: /^\/clients/ },
-      { label: "تسليمات المبيعات", href: "/handover", match: /^\/handover/ },
-      { label: "العقود", href: "/contracts", match: /^\/contracts/ },
-      { label: "فريق المبيعات", href: "/sales/team", match: /^\/sales\/team/ },
-      { label: "الفرص", href: "/sales/leads", match: /^\/sales\/leads/ },
+      { labelKey: "clients", href: "/clients", match: /^\/clients/ },
+      { labelKey: "salesHandover", href: "/handover", match: /^\/handover/ },
+      { labelKey: "contracts", href: "/contracts", match: /^\/contracts/ },
+      { labelKey: "salesTeam", href: "/sales/team", match: /^\/sales\/team/ },
+      { labelKey: "leads", href: "/sales/leads", match: /^\/sales\/leads/ },
     ],
   },
 ];
@@ -78,6 +79,7 @@ function isActive(pathname: string, tab: Tab): boolean {
 }
 
 export function ModuleTabs() {
+  const t = useTranslations("ModuleTabs");
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -109,20 +111,20 @@ export function ModuleTabs() {
             if (tab.comingSoon || !tab.href) {
               return (
                 <span
-                  key={tab.label}
-                  title="قريباً"
+                  key={tab.labelKey}
+                  title={t("soon")}
                   className={cn(
                     baseCls,
                     "text-muted-foreground/60 cursor-not-allowed",
                   )}
                 >
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </span>
               );
             }
             return (
               <Link
-                key={tab.label}
+                key={tab.labelKey}
                 href={tab.href}
                 className={cn(
                   baseCls,
@@ -131,7 +133,7 @@ export function ModuleTabs() {
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
-                {tab.label}
+                {t(tab.labelKey)}
               </Link>
             );
           })}
@@ -149,25 +151,25 @@ export function ModuleTabs() {
             <div className="flex overflow-hidden rounded-md border border-border">
               <button
                 type="button"
-                aria-label="عرض كانبان"
+                aria-label={t("kanbanView")}
                 onClick={() => setProjectView("kanban")}
                 className={cn(
                   "grid size-8 place-items-center text-muted-foreground transition-colors hover:bg-muted",
                   projectView === "kanban" && "bg-primary/15 text-primary hover:bg-primary/20",
                 )}
-                title="Kanban"
+                title={t("kanban")}
               >
                 <LayoutGrid className="size-3.5" />
               </button>
               <button
                 type="button"
-                aria-label="عرض قائمة"
+                aria-label={t("listView")}
                 onClick={() => setProjectView("list")}
                 className={cn(
                   "grid size-8 place-items-center border-s border-border text-muted-foreground transition-colors hover:bg-muted",
                   projectView === "list" && "bg-primary/15 text-primary hover:bg-primary/20",
                 )}
-                title="List"
+                title={t("list")}
               >
                 <ListIcon className="size-3.5" />
               </button>

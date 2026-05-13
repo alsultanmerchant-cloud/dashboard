@@ -122,6 +122,7 @@ export default function AgentPage() {
   // having to remount the chat. The chat's `body` accepts either an object
   // or a function — the function form runs at send time.
   const activeConversationRef = useRef<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
   const { messages, sendMessage, status, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/agent",
@@ -130,9 +131,36 @@ export default function AgentPage() {
         conversationId: activeConversationRef.current,
       }),
     }),
+    onError: (err) => {
+      console.error("AI chat error:", err);
+      setChatError(
+        err instanceof Error
+          ? err.message
+          : "حدث خطأ في الاتصال بالمساعد الذكي. حاول مرة أخرى.",
+      );
+    },
   });
 
   const isLoading = status === "streaming" || status === "submitted";
+
+  // Detect a "silent finish": stream ended (status === 'ready') and the last
+  // assistant message has only tool parts with no text. Gemini-3-flash sometimes
+  // returns STOP after a tool call without follow-up text — without this the
+  // user just sees query indicators and nothing else.
+  useEffect(() => {
+    if (status !== "ready" || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "assistant") return;
+    const hasText = last.parts?.some(
+      (p) => p.type === "text" && (p as { text?: string }).text?.trim(),
+    );
+    const hasTools = last.parts?.some((p) => isToolUIPart(p));
+    if (!hasText && hasTools) {
+      setChatError(
+        "تم جلب البيانات لكن النموذج لم يصدر إجابة نصية. حاول إعادة صياغة السؤال أو اضغط إرسال مرة أخرى.",
+      );
+    }
+  }, [status, messages]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -288,6 +316,7 @@ export default function AgentPage() {
 
   const submitMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
+    setChatError(null);
     setInput("");
     // §9.2: pre-create a DB-backed conversation so the *first* user message
     // (and its assistant reply) are persisted. Without this the first turn
@@ -710,8 +739,45 @@ export default function AgentPage() {
                                 );
                               }
 
-                              // Unknown tool — hide
-                              return null;
+                              // Generic skeleton/done for any other tool
+                              // (odoo*, dashboard*, etc.). Without this they
+                              // render nothing while the model is waiting,
+                              // making it look stuck.
+                              const labelMap: Record<string, string> = {
+                                odooListProjects: "مشاريع أودو",
+                                odooGetProject: "مشروع أودو",
+                                odooListClients: "عملاء أودو",
+                                odooGetClient: "عميل أودو",
+                                odooListTasks: "مهام أودو",
+                                odooGetTask: "مهمة أودو",
+                                odooGetTaskMessages: "محادثات المهمة",
+                                odooListEmployees: "موظفي أودو",
+                                odooGetEmployee: "موظف أودو",
+                                dashboardGetTaskTimeline: "سجل المهمة",
+                                dashboardGetProjectStageActivity: "نشاط المشروع",
+                              };
+                              const label = labelMap[name] ?? name;
+                              if (!isDone) {
+                                return (
+                                  <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-cc-blue/5 border border-cc-blue/15 animate-pulse">
+                                    <Database className="w-4 h-4 text-cc-blue animate-pulse" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium text-cc-blue">جاري جلب {label}...</p>
+                                      <div className="flex gap-2 mt-1.5">
+                                        <div className="h-2 w-20 bg-cc-blue/10 rounded-full" />
+                                        <div className="h-2 w-28 bg-cc-blue/10 rounded-full" />
+                                        <div className="h-2 w-14 bg-cc-blue/10 rounded-full" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cc-blue/5 border border-cc-blue/10 text-[11px] text-cc-blue/70">
+                                  <Database className="w-3 h-3" />
+                                  تم جلب {label}
+                                </div>
+                              );
                             }
 
                             // Text parts
@@ -773,6 +839,21 @@ export default function AgentPage() {
             </div>
           )}
         </div>
+
+        {chatError && (
+          <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-600 sm:mx-4">
+            <span className="font-semibold">⚠️</span>
+            <div className="flex-1 text-right">{chatError}</div>
+            <button
+              type="button"
+              onClick={() => setChatError(null)}
+              className="text-red-600/70 hover:text-red-600"
+              aria-label="إغلاق"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Input Area — always visible */}
         <div className="sticky bottom-0 z-10 flex-shrink-0 border-t border-border bg-card/95 p-3 backdrop-blur-sm sm:p-4">

@@ -1,4 +1,5 @@
 import { Building, Users } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listDepartments } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -29,21 +30,22 @@ async function getDepartmentsWithCounts(orgId: string) {
 
 export default async function DepartmentsPage() {
   const session = await requirePagePermission("employees.view");
+  const t = await getTranslations("OrganizationDepartmentsPage");
   const departments = await getDepartmentsWithCounts(session.orgId);
 
   return (
     <div>
       <PageHeader
-        title="الأقسام"
-        description="هيكل الوكالة وتقسيمات الفرق."
+        title={t("title")}
+        description={t("description")}
         actions={<NewDepartmentDialog />}
       />
 
       {departments.length === 0 ? (
         <EmptyState
           icon={<Building className="size-6" />}
-          title="لا توجد أقسام بعد"
-          description="ابدأ بإضافة الأقسام الأساسية في الوكالة."
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
           action={<NewDepartmentDialog />}
         />
       ) : (
@@ -53,10 +55,10 @@ export default async function DepartmentsPage() {
               <DataTable>
                 <DataTableHead>
                   <tr>
-                    <DataTableHeaderCell>القسم</DataTableHeaderCell>
-                    <DataTableHeaderCell>المعرّف</DataTableHeaderCell>
-                    <DataTableHeaderCell>الوصف</DataTableHeaderCell>
-                    <DataTableHeaderCell>عدد الموظفين</DataTableHeaderCell>
+                    <DataTableHeaderCell>{t("table.department")}</DataTableHeaderCell>
+                    <DataTableHeaderCell>{t("table.slug")}</DataTableHeaderCell>
+                    <DataTableHeaderCell>{t("table.description")}</DataTableHeaderCell>
+                    <DataTableHeaderCell>{t("table.employeeCount")}</DataTableHeaderCell>
                   </tr>
                 </DataTableHead>
                 <tbody>

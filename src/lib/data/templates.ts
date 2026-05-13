@@ -33,7 +33,8 @@ export async function getTaskTemplate(orgId: string, id: string) {
   if (error) throw error;
   if (data?.task_template_items) {
     data.task_template_items.sort(
-      (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0),
+      (a: { order_index: number | null }, b: { order_index: number | null }) =>
+        (a.order_index ?? 0) - (b.order_index ?? 0),
     );
   }
   return data;

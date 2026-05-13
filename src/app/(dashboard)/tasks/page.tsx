@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { Briefcase } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -147,6 +148,7 @@ export default async function TasksPage({
   }>;
 }) {
   const session = await requirePagePermission("tasks.view");
+  const t = await getTranslations("TasksPage");
   const sp = await searchParams;
   const view = sp.view ?? "kanban";
   const active = parseFilterKeys(sp.f, sp.filter);
@@ -275,13 +277,13 @@ export default async function TasksPage({
             <Briefcase className="size-4 text-cyan shrink-0" />
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-wide text-cyan/80">
-                مهام مشروع
+                {t("projectScope")}
               </p>
               <p className="text-sm font-semibold truncate">
                 {projectInfo.name}
                 {scopedTaskCount !== null && (
                   <span className="ms-2 text-xs font-normal text-muted-foreground">
-                    ({scopedTaskCount} مهمة)
+                    {t("taskCount", { count: scopedTaskCount })}
                   </span>
                 )}
               </p>
@@ -293,13 +295,13 @@ export default async function TasksPage({
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted hover:text-foreground"
             >
               <Briefcase className="size-3.5" />
-              معلومات المشروع
+              {t("projectInfo")}
             </Link>
             <Link
               href="/tasks"
               className="inline-flex h-8 items-center rounded-lg border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              عرض كل المهام
+              {t("allTasks")}
             </Link>
           </div>
         </div>

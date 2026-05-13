@@ -386,6 +386,324 @@
     "noAddress": "لا يوجد عنوان",
     "noCosts": "لا توجد تكاليف"
   },
+  "RoleLabels": {
+    "owner": "المالك",
+    "admin": "مسؤول النظام",
+    "manager": "مدير",
+    "sales": "مبيعات",
+    "account_manager": "مدير حساب",
+    "specialist": "متخصص",
+    "designer": "مصمم",
+    "viewer": "قارئ فقط"
+  },
+  "ClientsPage": {
+    "title": "العملاء",
+    "description": "قاعدة عملاء الوكالة مباشرة من Odoo.",
+    "stats": {
+      "totalClients": "إجمالي العملاء",
+      "activeClients": "عملاء نشطون",
+      "activeClientsHint": "لديهم مشاريع",
+      "totalProjects": "إجمالي المشاريع",
+      "contactData": "بيانات تواصل",
+      "contactDataHint": "{count} بدون"
+    },
+    "emptyTitle": "لا يوجد عملاء",
+    "emptyDescription": "لا توجد شركاء عملاء في Odoo حالياً.",
+    "table": {
+      "client": "العميل",
+      "contact": "التواصل",
+      "location": "الموقع",
+      "projects": "المشاريع",
+      "actions": "إجراءات"
+    },
+    "openClient": "فتح العميل"
+  },
+  "SettingsPage": {
+    "title": "الإعدادات",
+    "description": "إعدادات الوكالة والحساب الحالي. الإعدادات المتقدمة مثل التكاملات والذكاء الاصطناعي وقوالب التواصل ستُضاف لاحقًا.",
+    "phaseBadge": "إعدادات موسّعة في المرحلة 9",
+    "soon": "قريبًا",
+    "locales": {
+      "ar": "العربية",
+      "en": "الإنجليزية"
+    },
+    "agencyInfo": {
+      "title": "بيانات الوكالة",
+      "name": "الاسم",
+      "slug": "المعرّف",
+      "defaultLocale": "اللغة الافتراضية",
+      "timezone": "المنطقة الزمنية"
+    },
+    "projectManager": {
+      "title": "مدير المشاريع العام",
+      "description": "الشخص الذي يظهر كمدير مشروع في لوحات المشاريع. عادةً يكون ثابتًا لجميع المشاريع."
+    },
+    "workSchedule": {
+      "title": "جدولة العمل",
+      "holidaysTitle": "الإجازات الرسمية",
+      "holidaysDescription": "أسبوع العمل: الأحد إلى الخميس. أضف العطل لتُحتسب في مخطط جانت وتذكيرات التسليم."
+    },
+    "account": {
+      "title": "حسابك",
+      "name": "الاسم",
+      "email": "البريد",
+      "roles": "الأدوار",
+      "permissions": "الصلاحيات",
+      "permissionsValue": "{count} صلاحية{ownerSuffix}",
+      "ownerSuffix": "(تجاوز كامل بصفة مالك)"
+    },
+    "upcoming": {
+      "title": "إعدادات قادمة",
+      "whatsapp": "تكاملات الواتساب",
+      "whatsappDesc": "ربط رسائل العميل والإشعارات",
+      "email": "تكاملات البريد",
+      "emailDesc": "إشعارات بريدية للموظفين",
+      "templates": "قوالب التواصل",
+      "templatesDesc": "قوالب تعليقات وردود معتمدة",
+      "ai": "إعدادات الذكاء الاصطناعي",
+      "aiDesc": "اختيار النماذج وضبط الحدود",
+      "backup": "النسخ الاحتياطي والتصدير",
+      "backupDesc": "تصدير دوري لبيانات الوكالة",
+      "security": "إعدادات الأمان",
+      "securityDesc": "MFA، انتهاء الجلسات، سجلات الدخول"
+    }
+  },
+  "ContractsImportPage": {
+    "title": "استيراد ملف العقود",
+    "description": "ارفع ملف Acc SHEET الحالي وستُنقل البيانات إلى لوحة التحكم تلقائيًا.",
+    "breadcrumbs": {
+      "contracts": "العقود",
+      "import": "استيراد"
+    },
+    "howItWorks": "كيف يعمل:",
+    "steps": {
+      "upload": "ارفع ملف Excel بصيغة .xlsx (نفس الملف الحالي).",
+      "preview": "راجع المعاينة لتظهر أعداد العملاء والعقود والدفعات.",
+      "save": "اضغط \"حفظ\" وستظهر البيانات في لوحات المالية والعقود فورًا."
+    },
+    "note": "يستخدم النظام عمود <code>Key</code> (مثل <code>C83|20250906</code>) لتمييز العقود. إعادة الاستيراد <strong>آمنة</strong>؛ فهي تُحدّث القيم ولا تُكرّر الصفوف."
+  },
+  "TaskTemplatesPage": {
+    "title": "قوالب المهام",
+    "description": "سير العمل الافتراضي لكل خدمة. عند إنشاء مشروع جديد بخدمة معيّنة، تُولَّد المهام تلقائيًا من قالبها.",
+    "emptyTitle": "لا توجد قوالب بعد",
+    "emptyDescription": "القوالب الافتراضية تُحمَّل من بيانات التهيئة. تأكد من تطبيق ميجريشن البذور في Supabase.",
+    "active": "نشط",
+    "inactive": "متوقف",
+    "table": {
+      "title": "عنوان المهمة",
+      "department": "القسم المسؤول",
+      "role": "الدور المسؤول",
+      "offsetDays": "الإزاحة (يوم)",
+      "durationDays": "المدة (يوم)",
+      "priority": "الأولوية"
+    }
+  },
+  "ServiceCategoriesPage": {
+    "title": "تصنيفات الخدمات",
+    "description": "إدارة باقات الخدمات مثل التهيئة والسوشيال ميديا والإعلانات الممولة وSEO والتصميم، مع القوالب المرتبطة بها.",
+    "emptyTitle": "لا توجد تصنيفات بعد",
+    "emptyDescription": "استخدم زر إضافة تصنيف أو استورد تصنيفات Odoo عبر سكريبت import-odoo-categories."
+  },
+  "MyActivitiesPage": {
+    "title": "أنشطتي",
+    "description": "تذكيرات ومواعيد جدولتها لنفسك من المهام. تشبه mail.activity في Odoo لكنها خاصة بك.",
+    "missingEmployeePageDescription": "تذكيرات ومواعيد جدولتها لنفسك من المهام.",
+    "missingEmployeeTitle": "لا يوجد ملف موظف مرتبط",
+    "missingEmployeeDescription": "هذه الصفحة تعرض أنشطة الموظف المسجل دخوله. اربط ملف موظفك أولاً.",
+    "emptyTitle": "لا توجد أنشطة مجدولة لك",
+    "emptyDescription": "من صفحة أي مهمة، تبويب «أنشطة مجدولة»، يمكنك إضافة مكالمة أو مراجعة أو رفع وستظهر هنا.",
+    "calendar": {
+      "summary": {
+        "overdue": "متأخرة",
+        "today": "تستحق اليوم",
+        "thisWeek": "هذا الأسبوع",
+        "completed": "مكتملة (آخر 30 يوم)"
+      },
+      "previousMonth": "الشهر السابق",
+      "nextMonth": "الشهر التالي",
+      "today": "اليوم",
+      "undated": "{count} نشاطًا بدون تاريخ؛ لا يظهر في التقويم.",
+      "listTitle": "قائمة الأنشطة",
+      "noActivities": "لا توجد أنشطة.",
+      "types": {
+        "call": "مكالمة",
+        "email": "بريد",
+        "review": "مراجعة",
+        "upload": "رفع",
+        "other": "أخرى"
+      }
+    }
+  },
+  "MessagesPage": {
+    "title": "الرسائل",
+    "description": "المحادثات الخاصة بينك وبين زملائك.",
+    "emptyTitle": "لا توجد محادثات",
+    "emptyDescription": "انقر على أي زميل في صفحة المهمة أو المشروع لبدء محادثة.",
+    "attachmentFallback": "(مرفق)"
+  },
+  "FinanceExpensesPage": {
+    "title": "المالية",
+    "description": "نظرة كاملة على الإيرادات من العقود والمصروفات وصافي الربح.",
+    "stats": {
+      "ytdRevenue": "إيرادات هذه السنة",
+      "receivedPayments": "{count} دفعة مستلمة",
+      "ytdExpenses": "مصروفات هذه السنة",
+      "expenseOps": "{count} عملية",
+      "ytdNet": "صافي الربح هذه السنة",
+      "profit": "ربح",
+      "loss": "خسارة",
+      "receivables": "ذمم مستحقة",
+      "receivablesHint": "أقساط متأخرة أو حالّة"
+    },
+    "month": {
+      "title": "أداء الشهر الحالي",
+      "revenue": "إيرادات",
+      "expenses": "مصروفات",
+      "net": "صافي"
+    },
+    "trend": {
+      "title": "الإيرادات والمصروفات — آخر 6 أشهر",
+      "revenue": "إيرادات",
+      "expenses": "مصروفات"
+    },
+    "breakdown": {
+      "title": "المصروفات حسب الفئة (هذه السنة)",
+      "empty": "لا توجد مصروفات مسجّلة هذه السنة بعد."
+    },
+    "expensesList": {
+      "title": "المصروفات",
+      "emptyTitle": "لا توجد مصروفات",
+      "emptyDescription": "ابدأ بتسجيل أول مصروف لتظهر التقارير المالية.",
+      "loading": "جاري التحميل...",
+      "loadMore": "مرّر للأسفل لتحميل المزيد"
+    },
+    "categories": {
+      "salaries": "رواتب",
+      "rent": "إيجار",
+      "ads": "حملات إعلانية",
+      "software": "برامج وأدوات",
+      "equipment": "معدات",
+      "utilities": "مرافق",
+      "marketing": "تسويق",
+      "tax": "ضرائب ورسوم",
+      "other": "أخرى"
+    }
+  },
+  "OrganizationRolesPage": {
+    "title": "الأدوار والصلاحيات",
+    "description": "مصفوفة الأدوار والصلاحيات. انقر على أي خانة لمنح أو سحب صلاحية. دور المالك يحصل على كل الصلاحيات تلقائيًا.",
+    "badge": "{roles} دور · {permissions} صلاحية",
+    "table": {
+      "permission": "الصلاحية"
+    },
+    "systemRole": "نظامي",
+    "customRole": "مخصص",
+    "permissionsCount": "عدد الصلاحيات"
+  },
+  "OrganizationDepartmentsPage": {
+    "title": "الأقسام",
+    "description": "هيكل الوكالة وتقسيمات الفرق.",
+    "emptyTitle": "لا توجد أقسام بعد",
+    "emptyDescription": "ابدأ بإضافة الأقسام الأساسية في الوكالة.",
+    "table": {
+      "department": "القسم",
+      "slug": "المعرّف",
+      "description": "الوصف",
+      "employeeCount": "عدد الموظفين"
+    }
+  },
+  "OrganizationEmployeesPage": {
+    "title": "الموظفون",
+    "description": "إدارة كاملة لفريق الوكالة: إضافة، تعديل، إنهاء خدمة، استعادة، أو حذف نهائي.",
+    "emptyTitle": "لا يوجد موظفون",
+    "emptyDescription": "ابدأ بإضافة أول موظف للوكالة."
+  },
+  "ModuleTabs": {
+    "projects": "المشاريع",
+    "tasks": "المهام",
+    "serviceCategories": "تصنيفات الخدمات",
+    "taskTemplates": "قوالب المهام",
+    "reports": "التقارير",
+    "import": "استيراد",
+    "employees": "الموظفون",
+    "departments": "الأقسام",
+    "rolesPermissions": "الأدوار والصلاحيات",
+    "agencyChart": "هيكل الوكالة",
+    "hr": "الموارد البشرية",
+    "clients": "العملاء",
+    "salesHandover": "تسليمات المبيعات",
+    "contracts": "العقود",
+    "salesTeam": "فريق المبيعات",
+    "leads": "الفرص",
+    "soon": "قريبًا",
+    "kanban": "Kanban",
+    "list": "قائمة",
+    "kanbanView": "عرض كانبان",
+    "listView": "عرض قائمة"
+  },
+  "TasksPage": {
+    "projectScope": "مهام مشروع",
+    "taskCount": "({count} مهمة)",
+    "projectInfo": "معلومات المشروع",
+    "allTasks": "عرض كل المهام",
+    "views": {
+      "kanban": "Kanban",
+      "list": "قائمة",
+      "calendar": "تقويم",
+      "pivot": "محوري"
+    },
+    "monthQuickPick": {
+      "groupLabel": "فلتر شهري على تاريخ الإنشاء",
+      "thisMonth": "هذا الشهر",
+      "lastMonth": "الشهر الماضي",
+      "pickMonth": "اختر شهرًا",
+      "customMonth": "شهر مخصص…",
+      "clear": "إزالة"
+    }
+  },
+  "TasksBoard": {
+    "assigned": "محدد",
+    "progressVariance": "انحراف التقدم",
+    "behind": "متأخر",
+    "ahead": "متقدم",
+    "deadline": "الموعد النهائي",
+    "completionDate": "تاريخ الإنجاز",
+    "allocatedTime": "الوقت المخصص",
+    "delayDays": "أيام التأخير",
+    "expectedProgress": "التقدم المتوقع",
+    "progress": "التقدم",
+    "expected": "المتوقع",
+    "stage": "المرحلة",
+    "timeInStage": "مدة في المرحلة",
+    "moveBackTo": "الرجوع إلى",
+    "moveTo": "نقل إلى",
+    "showMore": "عرض {count} أخرى{totalSuffix}",
+    "from": "من",
+    "open": "فتح",
+    "collapseColumn": "طي العمود",
+    "newTaskPlaceholder": "+ مهمة جديدة",
+    "cannotMoveBack": "لا يمكن إرجاع المهمة إلى مرحلة سابقة",
+    "taskMoved": "المهمة →",
+    "noTasksToShow": "لا توجد مهام لعرضها.",
+    "saving": "جاري الحفظ",
+    "taskCreated": "تم إنشاء المهمة",
+    "confirmMoveTitle": "تأكيد نقل المرحلة",
+    "confirmMoveFrom": "نقل المهمة من",
+    "confirmMoveTo": "إلى",
+    "confirmMoveWarning": "لا يمكن التراجع عن هذه الخطوة.",
+    "confirmMove": "نقل",
+    "stages": {
+      "new": "جديدة",
+      "in_progress": "قيد التنفيذ",
+      "manager_review": "مراجعة المدير",
+      "specialist_review": "مراجعة المتخصص",
+      "ready_to_send": "جاهزة للإرسال",
+      "sent_to_client": "أرسلت للعميل",
+      "client_changes": "تعديلات العميل",
+      "done": "مكتملة"
+    }
+  },
   "PageTitles": {
     "dashboardTitle": "لوحة التحكم",
     "dashboardSubtitle": "مركز قيادة الوكالة",

@@ -1,14 +1,16 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import sanitizeHtml from "sanitize-html";
 
 // Renders a task description that may be HTML (Odoo chatter / rich-text editor)
 // or plain text. Odoo's editor outputs <p>, <a href>, <br>, <ul>, etc — we
 // sanitize and render those rather than displaying the raw markup as text.
 export function TaskDescription({ html }: { html: string | null | undefined }) {
+  const t = useTranslations("TaskDetailPage.descriptionTab");
   const value = (html ?? "").trim();
   if (!value) {
-    return <span className="text-sm text-muted-foreground">لا يوجد وصف لهذه المهمة.</span>;
+    return <span className="text-sm text-muted-foreground">{t("empty")}</span>;
   }
   const looksHtml = /<\/?(p|a|br|div|span|ul|ol|li|h[1-6]|img|strong|em|b|i|table)\b/i.test(value);
   if (!looksHtml) {

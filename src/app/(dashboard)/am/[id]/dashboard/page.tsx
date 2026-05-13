@@ -40,6 +40,18 @@ export default async function AmDashboardPage({
     .maybeSingle();
   if (!emp || emp.organization_id !== session.orgId) notFound();
 
+  // Per-AM scoping: an account_manager may only view their OWN dashboard.
+  // Owners, admins, and managers see any AM (oversight). Anyone else with
+  // contract.view also gets oversight-style access (sales heads, etc.).
+  // This closes the URL-guessing leak — `contract.view` alone is not enough
+  // to read a peer AM's commercial data.
+  const isSelf = session.employeeId === emp.id;
+  const hasOversight =
+    session.isOwner ||
+    session.roleKeys.includes("admin") ||
+    session.roleKeys.includes("manager");
+  if (!isSelf && !hasOversight) notFound();
+
   const data = await getAmDashboard(emp.id, monthIso);
   const expected = Number(data.target?.expected_total ?? 0);
   const achieved = Number(data.target?.achieved_total ?? 0);

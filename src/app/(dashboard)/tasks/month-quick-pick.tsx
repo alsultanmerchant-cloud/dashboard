@@ -9,13 +9,9 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTransition, useMemo } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Calendar, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const MONTHS_AR = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
-];
 
 const FIELD = "created_at"; // the team specifically asked for "tasks created in month M"
 
@@ -43,6 +39,8 @@ function activeMonth(raw: string | null): { year: number; monthIdx: number } | n
 }
 
 export function MonthQuickPick() {
+  const t = useTranslations("TasksPage.monthQuickPick");
+  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -75,6 +73,10 @@ export function MonthQuickPick() {
   const isLast =
     active && active.year === lastMonth.year && active.monthIdx === lastMonth.monthIdx;
   const isCustom = active && !isThis && !isLast;
+  const monthFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
+    [locale],
+  );
 
   return (
     <div
@@ -83,7 +85,7 @@ export function MonthQuickPick() {
         pending && "opacity-70",
       )}
       role="group"
-      aria-label="فلتر شهري على تاريخ الإنشاء"
+      aria-label={t("groupLabel")}
     >
       <Calendar className="size-3.5 shrink-0 text-muted-foreground mx-1" />
       <button
@@ -96,7 +98,7 @@ export function MonthQuickPick() {
             : "text-muted-foreground hover:bg-muted hover:text-foreground",
         )}
       >
-        هذا الشهر
+        {t("thisMonth")}
       </button>
       <button
         type="button"
@@ -108,7 +110,7 @@ export function MonthQuickPick() {
             : "text-muted-foreground hover:bg-muted hover:text-foreground",
         )}
       >
-        الشهر الماضي
+        {t("lastMonth")}
       </button>
       <select
         value={
@@ -129,18 +131,18 @@ export function MonthQuickPick() {
           "rounded-md bg-transparent px-1.5 py-1 text-xs outline-none focus:ring-1 focus:ring-cyan",
           isCustom ? "text-cyan font-medium" : "text-muted-foreground",
         )}
-        aria-label="اختر شهرًا"
+        aria-label={t("pickMonth")}
       >
-        <option value="">شهر مخصص…</option>
+        <option value="">{t("customMonth")}</option>
         {/* Render the current year + previous year, all 12 months each. */}
         {[now.getFullYear(), now.getFullYear() - 1].map((year) => (
           <optgroup key={year} label={String(year)}>
-            {MONTHS_AR.map((monthName, idx) => (
+            {Array.from({ length: 12 }, (_, idx) => (
               <option
                 key={`${year}-${idx}`}
                 value={`${year}-${String(idx + 1).padStart(2, "0")}`}
               >
-                {monthName} {year}
+                {monthFormatter.format(new Date(year, idx, 1))}
               </option>
             ))}
           </optgroup>
@@ -151,8 +153,8 @@ export function MonthQuickPick() {
           type="button"
           onClick={() => applyMonth(null)}
           className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="إزالة الفلتر الشهري"
-          title="إزالة"
+          aria-label={t("clear")}
+          title={t("clear")}
         >
           <X className="size-3" />
         </button>

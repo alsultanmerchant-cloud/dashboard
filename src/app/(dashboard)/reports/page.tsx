@@ -157,7 +157,23 @@ export default async function ReportsPage({
 // ───────────────────────── Odoo-backed sections ─────────────────────────
 
 async function OdooSections() {
-  const reports = await getReportsOdooData();
+  let reports;
+  try {
+    reports = await getReportsOdooData();
+  } catch (err) {
+    console.error("[reports] Odoo fetch failed:", err);
+    return (
+      <>
+        <SectionTitle
+          title="مؤشرات الأسبوع"
+          description="نسبة التسليم في الموعد، المتراكم في المراجعة، وإعادة العمل — من Odoo مباشرة"
+        />
+        <div className="mb-8 rounded-2xl border border-amber/30 bg-amber/[0.05] px-5 py-6 text-sm text-foreground/85">
+          تعذّر الاتصال بـ Odoo حاليًا — مؤشرات الأسبوع المُعتمدة على Odoo غير متاحة. باقي التقارير (مرحلة المهام، الإنتاج، التجديدات) تعمل من قاعدة لوحة التحكم.
+        </div>
+      </>
+    );
+  }
   const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
   const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
 
