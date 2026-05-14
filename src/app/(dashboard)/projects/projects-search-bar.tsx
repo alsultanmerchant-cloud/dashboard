@@ -11,8 +11,18 @@ import {
   Star,
   Layers,
   Plus,
+  Sliders,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CustomFilterDialog } from "@/components/custom-filter/dialog";
+import { PROJECT_FIELDS, getProjectField } from "@/lib/custom-filter/projects-fields";
+import {
+  URL_PARAM as CF_URL_PARAM,
+  encodeFilterToUrl,
+  decodeFilterFromUrl,
+} from "@/lib/custom-filter/url-state";
+import { formatFilterTree } from "@/lib/custom-filter/format-pill";
+import type { FilterTree } from "@/lib/custom-filter/types";
 
 // All filter keys are URL-driven so the dropdown is fully bookmark/share-able.
 type BoolFilterKey =
@@ -109,6 +119,70 @@ export function ProjectsSearchBar() {
   const [customFilterOpen, setCustomFilterOpen] = useState(customFilterActive);
   const [customGroupOpen, setCustomGroupOpen] = useState(customGroupActive);
 
+  // ── Custom Filter (Odoo-style rule builder) ───────────────────────────
+  // The whole tree lives in `?cf=<base64-json>` so reloads + share-links
+  // preserve it. `customTree` is the decoded form for rendering.
+  const customTreeRaw = params.get(CF_URL_PARAM);
+  const customTree: FilterTree | null = useMemo(
+    () => decodeFilterFromUrl(customTreeRaw),
+    [customTreeRaw],
+  );
+  // Relational pill labels — resolve UUIDs to names so the pill reads
+  // "Project Manager is in ( احمد حبيب )" instead of "( 2f5441e2-… )".
+  // Walks the tree once on each change, collects (model, id) pairs, fetches
+  // them in batched requests per model, caches in a Map for repeat renders.
+  const [relationLabels, setRelationLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!customTree) return;
+    type Pair = { model: string; id: string };
+    const pairs: Pair[] = [];
+    const walk = (nodes: typeof customTree.children) => {
+      for (const n of nodes) {
+        if (n.type === "group") walk(n.children);
+        else {
+          const f = getProjectField(n.field);
+          if (!f || f.kind !== "relational" || !f.relation) continue;
+          const ids = Array.isArray(n.value) ? (n.value as string[]) : n.value ? [n.value as string] : [];
+          for (const id of ids) pairs.push({ model: f.relation.model, id });
+        }
+      }
+    };
+    walk(customTree.children);
+    const missing = pairs.filter((p) => !relationLabels[p.id]);
+    if (missing.length === 0) return;
+    const byModel = new Map<string, string[]>();
+    for (const { model, id } of missing) {
+      const arr = byModel.get(model) ?? [];
+      arr.push(id);
+      byModel.set(model, arr);
+    }
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const [model, ids] of byModel) {
+        const res = await fetch(
+          `/api/custom-filter/options?model=${encodeURIComponent(model)}&ids=${ids.join(",")}`,
+          { credentials: "include" },
+        );
+        if (!res.ok) continue;
+        const json = (await res.json()) as { items: { id: string; label: string }[] };
+        for (const item of json.items) next[item.id] = item.label;
+      }
+      if (!cancelled && Object.keys(next).length > 0) {
+        setRelationLabels((prev) => ({ ...prev, ...next }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customTree, relationLabels]);
+
+  const customFilterLabel = useMemo(() => {
+    if (!customTree) return "";
+    return formatFilterTree(customTree, getProjectField, (_model, id) => relationLabels[id]);
+  }, [customTree, relationLabels]);
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+
   const startDateFrom = params.get("startDateFrom") ?? "";
   const startDateTo = params.get("startDateTo") ?? "";
   const endDateFrom = params.get("endDateFrom") ?? "";
@@ -181,7 +255,22 @@ export function ProjectsSearchBar() {
       sp.delete("endDateFrom");
       sp.delete("endDateTo");
       sp.delete("groupBy");
+      sp.delete(CF_URL_PARAM);
     });
+  };
+
+  const applyCustomFilter = (tree: FilterTree | null) => {
+    updateParams((sp) => {
+      if (tree && tree.children.length > 0) {
+        sp.set(CF_URL_PARAM, encodeFilterToUrl(tree));
+      } else {
+        sp.delete(CF_URL_PARAM);
+      }
+    });
+  };
+
+  const clearCustomFilter = () => {
+    updateParams((sp) => sp.delete(CF_URL_PARAM));
   };
 
   const clearQuery = () => {
@@ -257,6 +346,34 @@ export function ProjectsSearchBar() {
             </button>
           </span>
         )}
+        {/* Custom-filter pill — clicking the body re-opens the rule dialog. */}
+        {customTree && customFilterLabel && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet-400/15 px-2 py-0.5 text-[11px] font-medium text-violet-100">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setCustomDialogOpen(true);
+                setOpen(false);
+              }}
+              className="hover:underline"
+              title="Edit custom filter"
+            >
+              {customFilterLabel}
+            </button>
+            <button
+              type="button"
+              aria-label="إزالة الفلتر المخصص"
+              onClick={(event) => {
+                event.stopPropagation();
+                clearCustomFilter();
+              }}
+              className="opacity-70 hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
 
         <Search className="size-3.5 shrink-0 text-white/80" />
         <input
@@ -321,9 +438,26 @@ export function ProjectsSearchBar() {
                   </button>
                 ))}
                 <div className="my-2 border-t border-soft" />
-                {/* Add Custom Filter — mirrors Odoo. Expander reveals less-used
-                    filters (Has Project Manager, Timesheets >100%, All
-                    Categories Archived). */}
+                {/* Real "Add Custom Filter" (Odoo parity): opens the rule
+                    builder dialog. Independent of the boolean-shortcuts
+                    expander below. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomDialogOpen(true);
+                    setOpen(false);
+                  }}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Sliders className="size-3" /> Add Custom Filter
+                  </span>
+                </button>
+                <div className="my-1 border-t border-soft" />
+                {/* Boolean-shortcuts expander — pre-built filters that used to
+                    be hidden under "Add Custom Filter". Kept for muscle
+                    memory but renamed to disambiguate from the real custom
+                    filter above. */}
                 <button
                   type="button"
                   onClick={() => setCustomFilterOpen((v) => !v)}
@@ -331,7 +465,7 @@ export function ProjectsSearchBar() {
                   aria-expanded={customFilterOpen}
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Plus className="size-3" /> Add Custom Filter
+                    <Plus className="size-3" /> More filters
                   </span>
                   <ChevronDown
                     className={cn(
@@ -506,6 +640,23 @@ export function ProjectsSearchBar() {
           )}
         </div>
       )}
+
+      {/* Custom-filter dialog — mounted at the search bar level so its DOM
+          isn't inside the popover (which gets dismissed on outside-click). */}
+      <CustomFilterDialog
+        open={customDialogOpen}
+        onOpenChange={setCustomDialogOpen}
+        fields={PROJECT_FIELDS}
+        initialTree={customTree}
+        includeArchived={filters.archived}
+        onIncludeArchivedChange={(next) => {
+          updateParams((sp) => {
+            if (next) sp.set("archived", "1");
+            else sp.delete("archived");
+          });
+        }}
+        onApply={applyCustomFilter}
+      />
     </div>
   );
 }

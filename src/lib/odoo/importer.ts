@@ -725,6 +725,27 @@ async function importProjects(ctx: ImportContext): Promise<number> {
     else console.log(`[odoo-import] archived ${stale.length} stale projects`);
   }
 
+  // Hard-delete any project that wasn't sourced from Odoo. Odoo is the
+  // source of truth — dashboard-created projects (external_source is null)
+  // are removed on every sync so the list view only ever shows Odoo data.
+  // Child rows (tasks, members, services, tags, comments, ...) cascade.
+  const { data: nativeRows, error: nativeSelErr } = await supabaseAdmin
+    .from("projects")
+    .select("id")
+    .eq("organization_id", ctx.organizationId)
+    .is("external_source", null);
+  if (nativeSelErr) {
+    console.warn(`select native projects: ${nativeSelErr.message}`);
+  } else if (nativeRows && nativeRows.length > 0) {
+    const ids = nativeRows.map((r) => r.id as string);
+    const { error: delErr } = await supabaseAdmin
+      .from("projects")
+      .delete()
+      .in("id", ids);
+    if (delErr) console.warn(`delete native projects: ${delErr.message}`);
+    else console.log(`[odoo-import] deleted ${ids.length} non-Odoo projects`);
+  }
+
   return imported;
 }
 

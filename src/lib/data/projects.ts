@@ -2,13 +2,22 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { LiveProject } from "@/lib/odoo/live";
+import { compileFilterTree } from "@/lib/custom-filter/postgrest";
+import { getProjectField } from "@/lib/custom-filter/projects-fields";
+import type { FilterTree } from "@/lib/custom-filter/types";
 
 export interface ListProjectsPagedResult {
   rows: LiveProject[];
   total: number;
   page: number;
   pageSize: number;
-  totals: { projects: number; tasks: number; withManager: number };
+  totals: {
+    projects: number;
+    tasks: number;
+    withManager: number;
+    needsDeadline: number;
+    renewalsThisMonth: number;
+  };
 }
 
 export interface ListProjectsPagedOpts {
@@ -39,6 +48,39 @@ export interface ListProjectsPagedOpts {
   endDateTo?: string;
   /** Employee id of the caller — required for onlyMine. */
   currentEmployeeId?: string;
+  /** Odoo-style ad-hoc rule tree from the "Add Custom Filter" dialog. When
+   *  present we resolve matching project IDs via PostgREST first, then pass
+   *  the whitelist into the bundle RPC. */
+  customFilter?: FilterTree | null;
+}
+
+/** Pre-filter project IDs via PostgREST using the custom-filter tree.
+ *  Returns `null` when the tree compiles to nothing (no constraints). */
+async function resolveCustomFilterIds(
+  organizationId: string,
+  tree: FilterTree,
+): Promise<string[] | null> {
+  const compiled = compileFilterTree(tree, getProjectField);
+  if (!compiled) return null;
+
+  const query = supabaseAdmin
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    // Hard cap — if a custom filter matches more than this the user almost
+    // certainly wants to narrow further. Matches the "Search More" pattern
+    // in Odoo where the autocomplete returns ~80 then offers to widen.
+    .limit(5000)
+    .or(compiled.clause);
+  const { data, error } = await query;
+  if (error) {
+    // Don't throw — a malformed/unsupported filter should yield "no matches"
+    // rather than crashing the page. The pill still renders so the user can
+    // edit/remove it.
+    console.warn(`[listProjectsPaged] custom filter compile failed: ${error.message}`);
+    return [];
+  }
+  return (data ?? []).map((r) => r.id as string);
 }
 
 type BundleRow = {
@@ -67,7 +109,13 @@ type BundleRow = {
 type BundleResult = {
   rows: BundleRow[];
   total: number;
-  totals: { projects: number; tasks: number; withManager: number };
+  totals: {
+    projects: number;
+    tasks: number;
+    withManager: number;
+    needsDeadline: number;
+    renewalsThisMonth: number;
+  };
 };
 
 function externalToOdooId(ext: string | null | undefined): number {
@@ -102,6 +150,31 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   const onlyMineEmployeeId =
     opts.onlyMine && opts.currentEmployeeId ? opts.currentEmployeeId : null;
 
+  // Resolve custom-filter IDs first so we can hand the bundle RPC a whitelist.
+  let customIds: string[] | null = null;
+  if (opts.customFilter) {
+    customIds = await resolveCustomFilterIds(opts.organizationId, opts.customFilter);
+    // Empty array = filter compiled but matched zero rows; shortcut the RPC.
+    if (customIds && customIds.length === 0) {
+      return {
+        rows: [],
+        total: 0,
+        page,
+        pageSize,
+        totals:
+          opts.includeTotals === false
+            ? { projects: 0, tasks: 0, withManager: 0 }
+            : {
+                projects: 0,
+                tasks: 0,
+                withManager: 0,
+                needsDeadline: 0,
+                renewalsThisMonth: 0,
+              },
+      };
+    }
+  }
+
   const { data, error } = await supabaseAdmin.rpc("list_projects_page_bundle", {
     p_org_id: opts.organizationId,
     p_page: page,
@@ -119,9 +192,22 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     p_only_mine_employee_id: onlyMineEmployeeId,
     p_all_categories_archived: !!opts.allCategoriesArchived,
     p_over_timesheets: !!opts.overTimesheets,
+    p_id_whitelist: customIds,
   });
   if (error) throw error;
-  const bundle = (data ?? { rows: [], total: 0, totals: { projects: 0, tasks: 0, withManager: 0 } }) as BundleResult;
+  const bundle = (
+    data ?? {
+      rows: [],
+      total: 0,
+      totals: {
+        projects: 0,
+        tasks: 0,
+        withManager: 0,
+        needsDeadline: 0,
+        renewalsThisMonth: 0,
+      },
+    }
+  ) as BundleResult;
 
   // Custom project_tags (HOLD, Urgent, …) attached to the visible rows.
   // One round-trip per page keeps render fast; tags are tiny by definition.
@@ -198,25 +284,51 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
 }
 
 const aggregateProjectTotals = cache(async (organizationId: string) => {
-  const [projectsCount, tasksCount, withMgrCount] = await Promise.all([
-    supabaseAdmin
-      .from("projects")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", organizationId),
-    supabaseAdmin
-      .from("tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", organizationId),
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const lastOfMonth = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+
+  const [projectsCount, tasksCount, withMgrCount, needsDeadlineCount, renewalsThisMonthCount] =
+    await Promise.all([
     supabaseAdmin
       .from("projects")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
+      .neq("status", "archived"),
+    supabaseAdmin
+      .from("tasks")
+      .select("id, project:projects!inner(status)", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .is("archived_at", null)
+      .neq("project.status", "archived"),
+    supabaseAdmin
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .neq("status", "archived")
       .not("project_manager_employee_id", "is", null),
+    supabaseAdmin
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .neq("status", "archived")
+      .is("end_date", null),
+    supabaseAdmin
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .neq("status", "archived")
+      .gte("next_renewal_date", firstOfMonth)
+      .lte("next_renewal_date", lastOfMonth),
   ]);
   return {
     projects: projectsCount.count ?? 0,
     tasks: tasksCount.count ?? 0,
     withManager: withMgrCount.count ?? 0,
+    needsDeadline: needsDeadlineCount.count ?? 0,
+    renewalsThisMonth: renewalsThisMonthCount.count ?? 0,
   };
 });
 

@@ -83,6 +83,9 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       startDateTo: str("startDateTo"),
       endDateFrom: str("endDateFrom"),
       endDateTo: str("endDateTo"),
+      // Pass through the raw URL `cf=` so the server action can decode it
+      // (avoids shipping the custom-filter helpers to the client bundle).
+      customFilterEncoded: params.get("cf") || undefined,
     };
   }, [params]);
 

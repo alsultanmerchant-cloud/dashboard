@@ -1,11 +1,24 @@
 import { Suspense } from "react";
-import { Briefcase, ListTodo, AlertTriangle, CheckCircle2 } from "lucide-react";
+import {
+  Briefcase,
+  ListTodo,
+  AlertTriangle,
+  CheckCircle2,
+  CalendarX2,
+  RefreshCcw,
+} from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { getProjectTotals, listProjectsPaged } from "@/lib/data/projects";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
 import { ProjectsList } from "./projects-list";
+import {
+  URL_PARAM as CF_URL_PARAM,
+  encodeFilterToUrl,
+  decodeFilterFromUrl,
+} from "@/lib/custom-filter/url-state";
+import type { FilterTree } from "@/lib/custom-filter/types";
 
 const PAGE_SIZE = 25;
 
@@ -17,6 +30,31 @@ function toStr(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
+function buildOverviewHref(
+  sp: Record<string, string | string[] | undefined>,
+  preset?: {
+    bool?: Record<string, boolean>;
+    customFilter?: FilterTree | null;
+  },
+) {
+  const next = new URLSearchParams();
+  const view = toStr(sp.view);
+  const groupBy = toStr(sp.groupBy);
+  if (view) next.set("view", view);
+  if (groupBy) next.set("groupBy", groupBy);
+
+  for (const [key, value] of Object.entries(preset?.bool ?? {})) {
+    if (value) next.set(key, "1");
+  }
+
+  if (preset?.customFilter) {
+    next.set(CF_URL_PARAM, encodeFilterToUrl(preset.customFilter));
+  }
+
+  const query = next.toString();
+  return query ? `/projects?${query}` : "/projects";
+}
+
 export default async function ProjectsPage({
   searchParams,
 }: {
@@ -24,6 +62,9 @@ export default async function ProjectsPage({
 }) {
   const sp = await searchParams;
   const session = await requirePagePermission("projects.view");
+  const customFilter = decodeFilterFromUrl(
+    typeof sp[CF_URL_PARAM] === "string" ? (sp[CF_URL_PARAM] as string) : null,
+  );
   const { rows: projects, total } = await listProjectsPaged({
     organizationId: session.orgId,
     page: 1,
@@ -43,6 +84,7 @@ export default async function ProjectsPage({
     endDateFrom: toStr(sp.endDateFrom),
     endDateTo: toStr(sp.endDateTo),
     currentEmployeeId: session.employeeId,
+    customFilter,
   });
 
   return (
@@ -54,8 +96,8 @@ export default async function ProjectsPage({
 
       {/* Analytics overview */}
       {total > 0 && (
-        <Suspense fallback={<div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4"><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /></div>}>
-          <ProjectsOverviewMetrics orgId={session.orgId} />
+        <Suspense fallback={<div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-6"><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /><div className="h-24 rounded-xl border border-border bg-card/60" /></div>}>
+          <ProjectsOverviewMetrics orgId={session.orgId} searchParams={sp} />
         </Suspense>
       )}
 
@@ -82,6 +124,7 @@ export default async function ProjectsPage({
             endDateFrom: toStr(sp.endDateFrom),
             endDateTo: toStr(sp.endDateTo),
             groupBy: toStr(sp.groupBy),
+            cf: typeof sp[CF_URL_PARAM] === "string" ? (sp[CF_URL_PARAM] as string) : "",
           })}
           initial={projects}
           initialTotal={total}
@@ -92,20 +135,58 @@ export default async function ProjectsPage({
   );
 }
 
-async function ProjectsOverviewMetrics({ orgId }: { orgId: string }) {
+async function ProjectsOverviewMetrics({
+  orgId,
+  searchParams,
+}: {
+  orgId: string;
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
   const totals = await getProjectTotals(orgId);
   const avgTasksPerProject = totals.projects
     ? Math.round(totals.tasks / totals.projects)
     : 0;
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const lastOfMonth = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+
+  const totalProjectsHref = buildOverviewHref(searchParams);
+  const withManagerHref = buildOverviewHref(searchParams, {
+    bool: { onlyWithManager: true },
+  });
+  const needsDeadlineHref = buildOverviewHref(searchParams, {
+    customFilter: {
+      type: "group",
+      connector: "and",
+      children: [{ type: "rule", field: "end_date", op: "not_set", value: null }],
+    },
+  });
+  const renewalsThisMonthHref = buildOverviewHref(searchParams, {
+    customFilter: {
+      type: "group",
+      connector: "and",
+      children: [
+        {
+          type: "rule",
+          field: "next_renewal_date",
+          op: "between",
+          value: [firstOfMonth, lastOfMonth],
+        },
+      ],
+    },
+  });
 
   return (
-    <div className="grid gap-2.5 sm:grid-cols-2 md:grid-cols-4">
+    <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-6">
       <MetricCard
         label="إجمالي المشاريع"
         value={totals.projects}
         icon={<Briefcase className="size-5" />}
         tone="default"
         size="compact"
+        href={totalProjectsHref}
       />
       <MetricCard
         label="إجمالي المهام"
@@ -129,6 +210,25 @@ async function ProjectsOverviewMetrics({ orgId }: { orgId: string }) {
         icon={<AlertTriangle className="size-5" />}
         tone={totals.withManager === totals.projects ? "success" : "warning"}
         size="compact"
+        href={withManagerHref}
+      />
+      <MetricCard
+        label="تحتاج موعد انتهاء"
+        value={totals.needsDeadline}
+        hint="مشاريع بدون تاريخ انتهاء"
+        icon={<CalendarX2 className="size-5" />}
+        tone={totals.needsDeadline > 0 ? "warning" : "success"}
+        size="compact"
+        href={needsDeadlineHref}
+      />
+      <MetricCard
+        label="تجديدات هذا الشهر"
+        value={totals.renewalsThisMonth}
+        hint="حسب next_renewal_date"
+        icon={<RefreshCcw className="size-5" />}
+        tone={totals.renewalsThisMonth > 0 ? "info" : "default"}
+        size="compact"
+        href={renewalsThisMonthHref}
       />
     </div>
   );
