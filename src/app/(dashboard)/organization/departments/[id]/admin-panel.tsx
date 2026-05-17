@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  EmployeeCombobox,
+  type EmployeeComboboxOption,
+} from "@/components/forms/employee-combobox";
+import {
   setDepartmentHead,
   addTeamLead,
   removeTeamLead,
@@ -45,6 +49,15 @@ export function DepartmentAdminPanel({
   const eligibleForLead = candidates.filter(
     (c) => !currentTeamLeadUserIds.includes(c.user_id),
   );
+
+  // Map department candidates onto the combobox option shape. The picker is
+  // keyed by user_id (the server actions expect auth user_ids here).
+  const toOptions = (rows: Candidate[]): EmployeeComboboxOption[] =>
+    rows.map((c) => ({
+      id: c.user_id,
+      full_name: c.full_name,
+      job_title: c.job_title,
+    }));
 
   function onSetHead() {
     startTransition(async () => {
@@ -97,29 +110,21 @@ export function DepartmentAdminPanel({
 
         {/* Head picker */}
         <div className="space-y-2">
-          <label
-            htmlFor={`head-picker-${departmentId}`}
-            className="flex items-center gap-1.5 text-xs font-medium text-foreground"
-          >
+          <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
             <Crown className="size-3" />
             {t("head")}
-          </label>
+          </span>
           <div className="flex gap-2 flex-wrap">
-            <select
-              id={`head-picker-${departmentId}`}
-              value={headPick}
-              onChange={(e) => setHeadPick(e.target.value)}
+            <EmployeeCombobox
+              className="flex-1 min-w-48"
+              value={headPick || null}
+              onChange={(v) => setHeadPick(v ?? "")}
+              options={toOptions(candidates)}
               disabled={pending}
-              className="flex-1 min-w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan"
-            >
-              <option value="">— {t("noHead")} —</option>
-              {candidates.map((c) => (
-                <option key={c.user_id} value={c.user_id}>
-                  {c.full_name}
-                  {c.job_title ? ` · ${c.job_title}` : ""}
-                </option>
-              ))}
-            </select>
+              placeholder={`— ${t("noHead")} —`}
+              clearLabel={`— ${t("noHead")} —`}
+              ariaLabel={t("head")}
+            />
             <Button
               type="button"
               onClick={onSetHead}
@@ -134,13 +139,10 @@ export function DepartmentAdminPanel({
 
         {/* Team leads list + adder */}
         <div className="space-y-2">
-          <label
-            htmlFor={`lead-picker-${departmentId}`}
-            className="flex items-center gap-1.5 text-xs font-medium text-foreground"
-          >
+          <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
             <Shield className="size-3" />
             {t("teamLeads")}
-          </label>
+          </span>
 
           {currentTeamLeadUserIds.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -169,21 +171,16 @@ export function DepartmentAdminPanel({
           )}
 
           <div className="flex gap-2 flex-wrap">
-            <select
-              id={`lead-picker-${departmentId}`}
-              value={leadPick}
-              onChange={(e) => setLeadPick(e.target.value)}
+            <EmployeeCombobox
+              className="flex-1 min-w-48"
+              value={leadPick || null}
+              onChange={(v) => setLeadPick(v ?? "")}
+              options={toOptions(eligibleForLead)}
               disabled={pending}
-              className="flex-1 min-w-48 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan"
-            >
-              <option value="">{t("pickTeamLead")}</option>
-              {eligibleForLead.map((c) => (
-                <option key={c.user_id} value={c.user_id}>
-                  {c.full_name}
-                  {c.job_title ? ` · ${c.job_title}` : ""}
-                </option>
-              ))}
-            </select>
+              placeholder={t("pickTeamLead")}
+              clearLabel={t("pickTeamLead")}
+              ariaLabel={t("teamLeads")}
+            />
             <Button
               type="button"
               onClick={onAddLead}

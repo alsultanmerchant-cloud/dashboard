@@ -4,9 +4,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Sparkles, UserMinus } from "lucide-react";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { EmployeeCombobox } from "@/components/forms/employee-combobox";
 import { setOrgProjectManagerAction } from "./_actions";
 
 type Employee = {
@@ -40,23 +38,16 @@ export function ProjectManagerPicker({
   return (
     <div className="flex items-center gap-2">
       <Sparkles className="size-3.5 text-muted-foreground" />
-      <Select
-        value={current?.id ?? ""}
-        onValueChange={(v) => commit(v === "" ? null : v)}
+      <EmployeeCombobox
+        className="min-w-64"
+        value={current?.id ?? null}
+        onChange={(v) => commit(v)}
+        options={employees}
         disabled={pending}
-      >
-        <SelectTrigger className="min-w-64 bg-card/50 border-soft-2 text-sm">
-          <SelectValue placeholder="غير محدّد" />
-        </SelectTrigger>
-        <SelectContent>
-          {employees.map((e) => (
-            <SelectItem key={e.id} value={e.id}>
-              {e.full_name}
-              {e.job_title ? ` — ${e.job_title}` : ""}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        placeholder="غير محدّد"
+        clearLabel="غير محدّد"
+        ariaLabel="مدير المشاريع"
+      />
       {current && !pending && (
         <button
           type="button"

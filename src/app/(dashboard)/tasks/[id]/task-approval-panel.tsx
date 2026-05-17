@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmployeeCombobox } from "@/components/forms/employee-combobox";
 import { cn } from "@/lib/utils";
 import {
   approveTaskAction,
@@ -168,20 +169,15 @@ export function TaskApprovalPanel({
         {(canManage || !approvalRequired) && (
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t("pickApprover")}</label>
-            <select
-              value={approverId}
-              onChange={(e) => setApproverId(e.target.value)}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
+            <EmployeeCombobox
+              value={approverId || null}
+              onChange={(v) => setApproverId(v ?? "")}
+              options={employees}
               disabled={pending}
-            >
-              <option value="">{t("noApprover")}</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.full_name}
-                  {e.job_title ? ` — ${e.job_title}` : ""}
-                </option>
-              ))}
-            </select>
+              placeholder={t("noApprover")}
+              clearLabel={t("noApprover")}
+              ariaLabel={t("pickApprover")}
+            />
           </div>
         )}
 

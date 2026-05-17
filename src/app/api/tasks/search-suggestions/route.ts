@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession, hasPermission } from "@/lib/auth-server";
-import { listTaskSearchSuggestions } from "@/lib/data/tasks";
+import {
+  listTaskSearchSuggestions,
+  listTaskTitleSuggestions,
+} from "@/lib/data/tasks";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession();
@@ -12,8 +15,15 @@ export async function GET(request: NextRequest) {
   }
 
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
-  if (!query) return NextResponse.json({ items: [] });
+  if (!query) return NextResponse.json({ tasks: [], items: [] });
 
-  const items = await listTaskSearchSuggestions(session.orgId, query);
-  return NextResponse.json({ items });
+  // Tasks first (the primary thing Gehad searches for — feedback #5), then
+  // projects/stores as a secondary section. Both run in parallel; a failure
+  // in either degrades to an empty list rather than failing the whole call.
+  const [tasks, items] = await Promise.all([
+    listTaskTitleSuggestions(session.orgId, query).catch(() => []),
+    listTaskSearchSuggestions(session.orgId, query).catch(() => []),
+  ]);
+
+  return NextResponse.json({ tasks, items });
 }

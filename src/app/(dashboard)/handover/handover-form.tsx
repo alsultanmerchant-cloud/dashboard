@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
+import { EmployeeCombobox } from "@/components/forms/employee-combobox";
 import { cn } from "@/lib/utils";
 import { submitHandoverAction, type HandoverFormState } from "./_actions";
 
@@ -31,6 +32,7 @@ export function HandoverForm({
 }) {
   const router = useRouter();
   const [urgency, setUrgency] = useState<"low" | "normal" | "high" | "critical">("normal");
+  const [accountManagerId, setAccountManagerId] = useState<string>("");
   const [serviceIds, setServiceIds] = useState<Set<string>>(new Set());
   const [state, formAction, pending] = useActionState<HandoverFormState | undefined, FormData>(
     submitHandoverAction,
@@ -49,6 +51,8 @@ export function HandoverForm({
       );
       setUrgency("normal");
       setServiceIds(new Set());
+      // accountManagerId resets automatically — the form is keyed by
+      // resetKey below, so the whole subtree (and its state) remounts.
       setResetKey((k) => k + 1);
       router.refresh();
     } else if (state?.error) {
@@ -152,17 +156,18 @@ export function HandoverForm({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="h_am">مدير الحساب</Label>
-              <select
-                id="h_am"
+              <EmployeeCombobox
                 name="assigned_account_manager_employee_id"
-                defaultValue=""
-                className="flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <option value="">اختر من الفريق</option>
-                {accountManagers.map((a) => (
-                  <option key={a.id} value={a.id}>{a.label}</option>
-                ))}
-              </select>
+                value={accountManagerId || null}
+                onChange={(v) => setAccountManagerId(v ?? "")}
+                options={accountManagers.map((a) => ({
+                  id: a.id,
+                  full_name: a.label,
+                }))}
+                placeholder="اختر من الفريق"
+                clearLabel="اختر من الفريق"
+                ariaLabel="مدير الحساب"
+              />
             </div>
           </div>
           <div className="space-y-1.5">

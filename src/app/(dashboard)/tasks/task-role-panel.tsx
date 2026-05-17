@@ -17,9 +17,7 @@ import {
   type TaskRoleType,
   type DepartmentKind,
 } from "@/lib/labels";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { EmployeeCombobox } from "@/components/forms/employee-combobox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { assignTaskRoleAction } from "./_actions";
@@ -145,30 +143,16 @@ function SlotRow({
             <AvatarFallback>{current.full_name[0]}</AvatarFallback>
           </Avatar>
         )}
-        <Select
-          value={current?.id ?? ""}
-          onValueChange={(v) => commit(v === "" ? null : v)}
+        <EmployeeCombobox
+          className="flex-1"
+          value={current?.id ?? null}
+          onChange={(v) => commit(v)}
+          options={options}
           disabled={pending}
-        >
-          <SelectTrigger className="flex-1 bg-white/90 dark:bg-black/30 border-soft-2 text-xs text-foreground">
-            {/* Explicit fallback: if Radix can't resolve `value` to a child
-                SelectItem (stale data, async edge), render the current name
-                directly so the user never sees a raw UUID. */}
-            {current ? (
-              <span className="truncate">{current.full_name}</span>
-            ) : (
-              <SelectValue placeholder="غير معيّن" />
-            )}
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((e) => (
-              <SelectItem key={e.id} value={e.id}>
-                {e.full_name}
-                {e.job_title ? ` — ${e.job_title}` : e.department_name ? ` — ${e.department_name}` : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="غير معيّن"
+          clearLabel="غير معيّن"
+          ariaLabel={`تعيين ${TASK_ROLE_LABELS[role]}`}
+        />
         {current && !pending && (
           <button
             type="button"

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { ServiceBadge } from "@/components/status-badges";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { EmployeeCombobox } from "@/components/forms/employee-combobox";
 import { cn } from "@/lib/utils";
 import {
   attachProjectServiceAction,
@@ -551,25 +552,19 @@ export function ProjectServicesPanel({
               employee is picked (Sky Light spec). Role + optional team
               manager keep parity with the per-task assignees panel. */}
           <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_1fr]">
-            <select
-              value={taskForm.assigneeEmployeeId}
-              onChange={(e) =>
+            <EmployeeCombobox
+              value={taskForm.assigneeEmployeeId || null}
+              onChange={(v) =>
                 setTaskForm((f) =>
-                  f ? { ...f, assigneeEmployeeId: e.target.value } : f,
+                  f ? { ...f, assigneeEmployeeId: v ?? "" } : f,
                 )
               }
+              options={employees}
               disabled={pending}
-              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
-              aria-label="المُسنَد"
-            >
-              <option value="">— اختر مُسنَدًا (إلزامي) —</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.full_name}
-                  {e.department_name ? ` · ${e.department_name}` : ""}
-                </option>
-              ))}
-            </select>
+              clearable={false}
+              placeholder="— اختر مُسنَدًا (إلزامي) —"
+              ariaLabel="المُسنَد"
+            />
             <select
               value={taskForm.assigneeRole}
               onChange={(e) =>
@@ -596,26 +591,21 @@ export function ProjectServicesPanel({
                 </option>
               ))}
             </select>
-            <select
-              value={taskForm.teamManagerEmployeeId}
-              onChange={(e) =>
+            <EmployeeCombobox
+              value={taskForm.teamManagerEmployeeId || null}
+              onChange={(v) =>
                 setTaskForm((f) =>
-                  f ? { ...f, teamManagerEmployeeId: e.target.value } : f,
+                  f ? { ...f, teamManagerEmployeeId: v ?? "" } : f,
                 )
               }
+              options={employees.filter(
+                (e) => e.id !== taskForm.assigneeEmployeeId,
+              )}
               disabled={pending}
-              className="rounded-lg border border-soft bg-card px-2 py-1.5 text-xs outline-none focus:border-cyan/50"
-              aria-label="مدير الفريق (اختياري)"
-            >
-              <option value="">— مدير الفريق (اختياري) —</option>
-              {employees
-                .filter((e) => e.id !== taskForm.assigneeEmployeeId)
-                .map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.full_name}
-                  </option>
-                ))}
-            </select>
+              placeholder="— مدير الفريق (اختياري) —"
+              clearLabel="— مدير الفريق (اختياري) —"
+              ariaLabel="مدير الفريق (اختياري)"
+            />
           </div>
         </div>
       )}

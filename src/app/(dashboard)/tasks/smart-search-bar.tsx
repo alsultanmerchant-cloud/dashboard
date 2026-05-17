@@ -1,14 +1,18 @@
 "use client";
 
-// Rwasem-style smart search bar for the tasks list.
-// Click the search input (or the chevron) to reveal a 3-column panel:
-//   • Filters    — predefined filters (Open / Mine / Overdue / Done / All)
-//   • Group By   — current grouping for the kanban view
-//   • Favorites  — placeholder for saved searches (future migration)
+// Tasks smart search bar — an exact replica of Odoo (Rwasem)'s search panel.
+// Clicking the input (or the chevron) reveals a 3-column dropdown:
+//   • Filters   — plain rows, grouped by thin separators, Odoo ordering
+//   • Group By  — plain rows; click order forms the outer→inner group chain
+//   • Favorites — "Save current search" + the user's saved filters
 //
-// The active filter is shown as a removable chip inside the input, mirroring
+// The active filter shows as a removable chip inside the input, mirroring
 // Odoo's "Open Tasks ✕" pattern. All selections write to URL params so the
 // state survives reload and is shareable.
+//
+// Odoo options with no data backing in this schema (Private Tasks, Favorite
+// Projects, Properties, Assignment Date, Category, Add Custom Group) are
+// intentionally omitted — every rendered row maps to a real filter.
 
 import {
   useEffect,
@@ -18,6 +22,7 @@ import {
   useTransition,
 } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import {
   ChevronDown,
   Filter,
@@ -31,8 +36,7 @@ import {
   Save,
   Trash2,
   Loader2,
-  SlidersHorizontal,
-  CalendarRange,
+  ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -84,93 +88,98 @@ type SearchSuggestion = {
   storeName: string | null;
   clientName: string | null;
 };
-
-const FILTER_DEFS: { key: FilterKey; label: string; group?: string }[] = [
-  { key: "open", label: "مفتوحة", group: "الحالة" },
-  { key: "done", label: "مكتملة", group: "الحالة" },
-  { key: "all", label: "كل المهام", group: "الحالة" },
-  { key: "mine", label: "مهامي", group: "ملكية" },
-  { key: "followed", label: "متابَعة", group: "ملكية" },
-  { key: "unassigned", label: "بلا مسؤول", group: "ملكية" },
-  { key: "starred", label: "مميَّزة", group: "ملكية" },
-  { key: "not_started", label: "لم تبدأ (0%)", group: "تقدّم" },
-  { key: "in_progress_pct", label: "قيد التنفيذ", group: "تقدّم" },
-  { key: "completed_pct", label: "منجزة (100%)", group: "تقدّم" },
-  { key: "due_today", label: "تستحق اليوم", group: "جدولة" },
-  { key: "overdue", label: "متأخرة", group: "جدولة" },
-  { key: "behind", label: "خلف الجدول", group: "جدولة" },
-  { key: "ahead", label: "متقدّمة", group: "جدولة" },
-  { key: "critical", label: "تأخير حرج", group: "جدولة" },
-  // #18 — Odoo "Has Start Date" / "Has End Date" presets. start = planned_date,
-  // end = due_date in our schema.
-  { key: "has_start_date", label: "لها تاريخ بدء", group: "جدولة" },
-  { key: "has_end_date", label: "لها تاريخ انتهاء", group: "جدولة" },
-  { key: "no_deadline", label: "بدون موعد", group: "جدولة" },
-  // Rwasem timesheet filters (§5.2 parity).
-  { key: "near_timesheets", label: "تجاوزت 80% من الوقت", group: "الوقت" },
-  { key: "over_timesheets", label: "تجاوزت 100% من الوقت", group: "الوقت" },
-  // Rwasem "Archived" pill — shows ONLY archived tasks (active=false in Odoo).
-  { key: "archived", label: "المؤرشفة", group: "الأرشيف" },
-];
-
-const FILTER_GROUPS = FILTER_DEFS.reduce<Array<{ group: string; items: typeof FILTER_DEFS }>>(
-  (acc, item) => {
-    const group = item.group ?? "أخرى";
-    const last = acc[acc.length - 1];
-    if (!last || last.group !== group) {
-      acc.push({ group, items: [item] as typeof FILTER_DEFS });
-    } else {
-      last.items.push(item);
-    }
-    return acc;
-  },
-  [],
-);
+// Sky Light feedback #5 — task-name autocomplete entries. Clicking one jumps
+// straight to /tasks/[id] instead of running a query.
+type TaskSuggestion = {
+  id: string;
+  title: string;
+  taskCode: string | null;
+  stage: string;
+  projectName: string | null;
+  clientName: string | null;
+};
 
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
 
-const DATE_FIELD_DEFS: { key: DateField; label: string }[] = [
-  { key: "due_date", label: "الموعد النهائي" },
-  { key: "actual_done_date", label: "تاريخ الإقفال" },
-  { key: "stage_entered_at", label: "آخر تحديث للمرحلة" },
-  { key: "created_at", label: "تاريخ الإنشاء" },
+const DATE_FIELD_DEFS: { key: DateField; labelKey: string }[] = [
+  { key: "due_date", labelKey: "dateFields.dueDate" },
+  { key: "actual_done_date", labelKey: "dateFields.actualDoneDate" },
+  { key: "stage_entered_at", labelKey: "dateFields.stageEnteredAt" },
+  { key: "created_at", labelKey: "dateFields.createdAt" },
 ];
 
-const MONTHS_AR = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+// ── Odoo "Filters" column ────────────────────────────────────────────────
+// Ordered exactly as Odoo renders it; `sep` rows draw a thin divider.
+type FilterRow =
+  | { kind: "filter"; key: FilterKey; labelKey: string }
+  | { kind: "date"; field: DateField; labelKey: string }
+  | { kind: "sep" };
+type LocalizedFilterRow =
+  | { kind: "filter"; key: FilterKey; label: string }
+  | { kind: "date"; field: DateField; label: string }
+  | { kind: "sep" };
+
+const ODOO_FILTER_ROWS: FilterRow[] = [
+  { kind: "filter", key: "mine", labelKey: "filters.mine" },
+  { kind: "filter", key: "followed", labelKey: "filters.followed" },
+  { kind: "filter", key: "unassigned", labelKey: "filters.unassigned" },
+  { kind: "sep" },
+  { kind: "filter", key: "starred", labelKey: "filters.starred" },
+  { kind: "sep" },
+  { kind: "date", field: "stage_entered_at", labelKey: "dateFields.stageEnteredAt" },
+  { kind: "date", field: "due_date", labelKey: "dateFields.dueDate" },
+  { kind: "sep" },
+  { kind: "filter", key: "open", labelKey: "filters.open" },
+  { kind: "filter", key: "done", labelKey: "filters.done" },
+  { kind: "date", field: "actual_done_date", labelKey: "dateFields.actualDoneDate" },
+  { kind: "sep" },
+  { kind: "filter", key: "archived", labelKey: "filters.archived" },
+  { kind: "sep" },
+  { kind: "filter", key: "in_progress_pct", labelKey: "filters.inProgressPct" },
+  { kind: "filter", key: "completed_pct", labelKey: "filters.completedPct" },
+  { kind: "filter", key: "not_started", labelKey: "filters.notStarted" },
 ];
+const FILTER_KEYS = new Set<FilterKey>(
+  ODOO_FILTER_ROWS.flatMap((r) => (r.kind === "filter" ? [r.key] : [])),
+);
 
-const sectionCardClassName =
-  "rounded-2xl border border-soft/80 bg-background/80 p-3 shadow-[0_10px_30px_rgba(82,65,195,0.06)]";
+// ── Odoo "Group By" column ───────────────────────────────────────────────
+type GroupRow = { key: GroupBy; labelKey: string } | { sep: true };
+type LocalizedGroupRow = { key: GroupBy; label: string } | { sep: true };
 
-function tokenLabel(token: string): string {
-  // `due_date:2026q3` → `Q3 2026` style label for chips
+const ODOO_GROUP_ROWS: GroupRow[] = [
+  { key: "assignee", labelKey: "groups.assignee" },
+  { key: "stage", labelKey: "groups.stage" },
+  { key: "project", labelKey: "groups.project" },
+  { key: "tags", labelKey: "groups.tags" },
+  { key: "customer", labelKey: "groups.customer" },
+  { key: "created_at", labelKey: "groups.createdAt" },
+  { key: "last_stage_update", labelKey: "groups.lastStageUpdate" },
+  { key: "deadline", labelKey: "groups.deadline" },
+  { sep: true },
+  { key: "progress", labelKey: "groups.progress" },
+];
+const GROUP_KEYS = new Set<GroupBy>(
+  ODOO_GROUP_ROWS.flatMap((r) => ("sep" in r ? [] : [r.key])),
+);
+
+function tokenLabel(
+  token: string,
+  dateFieldLabels: Map<DateField, string>,
+  monthFormatter: Intl.DateTimeFormat,
+): string {
+  // `due_date:2026q3` → `الموعد النهائي: Q3 2026` style label for chips
   const m = token.match(/^([a-z_]+):(\d{4})(?:(q)(\d)|(m)(\d{1,2}))?$/);
   if (!m) return token;
-  const fieldDef = DATE_FIELD_DEFS.find((d) => d.key === m[1]);
-  const fieldLabel = fieldDef?.label ?? m[1];
+  const fieldLabel = dateFieldLabels.get(m[1] as DateField) ?? m[1];
   const year = m[2];
   if (m[3] === "q") return `${fieldLabel}: Q${m[4]} ${year}`;
-  if (m[5] === "m" && m[6]) return `${fieldLabel}: ${MONTHS_AR[Number(m[6]) - 1]} ${year}`;
+  if (m[5] === "m" && m[6]) {
+    const month = new Date(Number(year), Number(m[6]) - 1, 1);
+    return `${fieldLabel}: ${monthFormatter.format(month)}`;
+  }
   return `${fieldLabel}: ${year}`;
 }
-
-const GROUPBY_DEFS: { key: GroupBy; label: string; available?: boolean }[] = [
-  { key: "stage", label: "حسب المرحلة" },
-  { key: "status", label: "حسب الحالة" },
-  { key: "project", label: "حسب المشروع" },
-  { key: "priority", label: "حسب الأولوية" },
-  { key: "progress", label: "حسب نسبة التقدّم" },
-  { key: "deadline", label: "حسب الموعد النهائي" },
-  { key: "start_date", label: "حسب تاريخ البدء" },
-  { key: "assignee", label: "حسب المسؤول" },
-  { key: "customer", label: "حسب العميل" },
-  { key: "service", label: "حسب الخدمة" },
-  { key: "tags", label: "حسب الوسوم" },
-  { key: "created_at", label: "حسب تاريخ الإنشاء" },
-  { key: "last_stage_update", label: "حسب آخر تحديث للمرحلة" },
-];
 
 export type SavedTaskFilter = {
   id: string;
@@ -204,10 +213,54 @@ export function SmartSearchBar({
   variant?: "page" | "topbar";
   savedFilters?: SavedTaskFilter[];
 }) {
+  const t = useTranslations("TasksSearch");
+  const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  // Multi-select: read `?f=open,starred,behind`. Falls back to legacy `filter`
+  const dateFields = useMemo(
+    () => DATE_FIELD_DEFS.map((field) => ({ key: field.key, label: t(field.labelKey) })),
+    [t],
+  );
+  const dateFieldLabels = useMemo(
+    () => new Map(dateFields.map((field) => [field.key, field.label])),
+    [dateFields],
+  );
+  const filterRows = useMemo<LocalizedFilterRow[]>(
+    () => ODOO_FILTER_ROWS.map((row) => {
+      if (row.kind === "sep") return row;
+      if (row.kind === "filter") return { kind: "filter", key: row.key, label: t(row.labelKey) };
+      return { kind: "date", field: row.field, label: t(row.labelKey) };
+    }),
+    [t],
+  );
+  const filterLabels = useMemo(
+    () =>
+      new Map<FilterKey, string>(
+        filterRows.flatMap((row) =>
+          row.kind === "filter" ? [[row.key, row.label] as const] : [],
+        ),
+      ),
+    [filterRows],
+  );
+  const groupRows = useMemo<LocalizedGroupRow[]>(
+    () => ODOO_GROUP_ROWS.map((row) => ("sep" in row ? row : { key: row.key, label: t(row.labelKey) })),
+    [t],
+  );
+  const groupLabels = useMemo(
+    () =>
+      new Map<GroupBy, string>(
+        groupRows.flatMap((row) =>
+          "sep" in row ? [] : [[row.key, row.label] as const],
+        ),
+      ),
+    [groupRows],
+  );
+  const monthFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
+    [locale],
+  );
+  // Multi-select: read `?f=open,starred`. Falls back to legacy `filter`
   // (single key) for shareable links saved before the rollout, and finally to
   // the default `{open}`. Empty `f=` (explicit) means no filters active.
   const currentActive = useMemo<Set<FilterKey>>(() => {
@@ -219,7 +272,7 @@ export function SmartSearchBar({
     return new Set(
       raw.split(",")
         .map((s) => s.trim())
-        .filter((s): s is FilterKey => FILTER_DEFS.some((f) => f.key === s)),
+        .filter((s): s is FilterKey => FILTER_KEYS.has(s as FilterKey)),
     );
   }, [filterKey, params]);
   const currentDates = useMemo<string[]>(() => {
@@ -228,14 +281,14 @@ export function SmartSearchBar({
     return raw.split(",").map((s) => s.trim()).filter(Boolean);
   }, [params]);
   const currentView = view ?? params.get("view") ?? "kanban";
-  // Group-by is now a stack — comma-separated keys form an outer→inner chain.
+  // Group-by is a stack — comma-separated keys form an outer→inner chain.
   // The `groupBy` prop (single legacy value) seeds the array if URL is empty.
   const currentGroupKeys = useMemo<GroupBy[]>(() => {
     const raw = params.get("groupBy");
     const parts = (raw ?? groupBy ?? "stage")
       .split(",")
       .map((s) => s.trim())
-      .filter((s): s is GroupBy => GROUPBY_DEFS.some((g) => g.key === s));
+      .filter((s): s is GroupBy => GROUP_KEYS.has(s as GroupBy));
     return parts.length ? parts : ["stage"];
   }, [params, groupBy]);
   const currentQuery = initialQuery ?? params.get("q") ?? "";
@@ -243,7 +296,9 @@ export function SmartSearchBar({
   const [query, setQuery] = useState(currentQuery);
   const [pending, start] = useTransition();
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
+  const [taskSuggestions, setTaskSuggestions] = useState<TaskSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionError, setSuggestionError] = useState(false);
   // Saved filters: prop wins (server-rendered), otherwise lazy-fetch on first
   // open. Refetch every time the dropdown reopens so newly-added entries
   // surface without a router.refresh().
@@ -267,24 +322,43 @@ export function SmartSearchBar({
     setQuery(currentQuery);
   }, [currentQuery]);
 
+  // Debounced autocomplete. Fires from 1 character — the trigram fallback in
+  // `search_tasks_typeahead` (migration 0117) matches short / partial Arabic
+  // input that the FTS tsvector alone would miss.
   useEffect(() => {
     if (!open) return;
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (trimmed.length < 1) {
       setSuggestions([]);
+      setTaskSuggestions([]);
       setLoadingSuggestions(false);
+      setSuggestionError(false);
       return;
     }
 
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setLoadingSuggestions(true);
+      setSuggestionError(false);
       try {
-        const res = await fetch(`/api/tasks/search-suggestions?q=${encodeURIComponent(trimmed)}`);
-        const data = (await res.json()) as { items?: SearchSuggestion[] };
-        if (!cancelled) setSuggestions(data.items ?? []);
+        const res = await fetch(
+          `/api/tasks/search-suggestions?q=${encodeURIComponent(trimmed)}`,
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          tasks?: TaskSuggestion[];
+          items?: SearchSuggestion[];
+        };
+        if (!cancelled) {
+          setTaskSuggestions(data.tasks ?? []);
+          setSuggestions(data.items ?? []);
+        }
       } catch {
-        if (!cancelled) setSuggestions([]);
+        if (!cancelled) {
+          setTaskSuggestions([]);
+          setSuggestions([]);
+          setSuggestionError(true);
+        }
       } finally {
         if (!cancelled) setLoadingSuggestions(false);
       }
@@ -306,7 +380,9 @@ export function SmartSearchBar({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const activeChips = FILTER_DEFS.filter((f) => currentActive.has(f.key));
+  const activeChips = [...currentActive]
+    .filter((k) => filterLabels.has(k))
+    .map((k) => ({ key: k, label: filterLabels.get(k)! }));
 
   function buildHref(next: Partial<{
     filters: Set<FilterKey>;
@@ -379,45 +455,12 @@ export function SmartSearchBar({
     setOpen(false);
   };
 
-  const chipButtonClassName =
-    "inline-flex items-center justify-between gap-1 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors rtl:flex-row-reverse";
-
-  const filterColumn = useMemo(
-    () =>
-      FILTER_GROUPS.map((group) => (
-        <section key={group.group} className={sectionCardClassName}>
-          <div className="mb-2 flex items-center justify-between gap-2 rtl:flex-row-reverse">
-            <div className="text-[11px] font-semibold text-foreground">{group.group}</div>
-            <div className="text-[10px] tabular-nums text-muted-foreground">
-              {group.items.filter((item) => currentActive.has(item.key)).length}/{group.items.length}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {group.items.map((f) => {
-              const active = currentActive.has(f.key);
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => toggleFilter(f.key)}
-                  className={cn(
-                    chipButtonClassName,
-                    active
-                      ? "border-cyan/30 bg-cyan-dim text-cyan"
-                      : "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
-                  )}
-                >
-                  <span>{f.label}</span>
-                  {active && <Check className="size-3.5" />}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentActive, params.toString()],
-  );
+  // Task autocomplete row — jump straight to the task detail page.
+  const chooseTask = (task: TaskSuggestion) => {
+    setQuery(task.title);
+    navigate(`/tasks/${task.id}`);
+    setOpen(false);
+  };
 
   const toggleGroup = (key: GroupBy) => {
     // Click to add to the chain; click again to remove. Order is the click
@@ -429,50 +472,6 @@ export function SmartSearchBar({
       : [...currentGroupKeys, key];
     navigate(buildHref({ groupBy: next.length ? next : (["stage"] as GroupBy[]), view: "kanban" }));
   };
-
-  const groupColumn = useMemo(
-    () =>
-      GROUPBY_DEFS.map((g) => {
-        const idx = currentGroupKeys.indexOf(g.key);
-        const active = idx >= 0;
-        const disabled = g.available === false;
-        return (
-          <button
-            key={g.key}
-            type="button"
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              toggleGroup(g.key);
-            }}
-            className={cn(
-              "flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-right text-xs transition-colors rtl:flex-row-reverse",
-              disabled && "cursor-not-allowed opacity-40",
-              !disabled && active
-                ? "border-cyan/30 bg-cyan-dim text-cyan"
-                : !disabled && "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
-            )}
-          >
-            <span className="min-w-0 truncate">{g.label}</span>
-            {active && !disabled && (
-              <span className="flex shrink-0 items-center gap-1">
-                <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-cyan/30 px-1 text-[9px] font-semibold leading-none tabular-nums text-cyan">
-                  {idx + 1}
-                </span>
-                <Check className="size-3" />
-              </span>
-            )}
-            {disabled && (
-              <span className="rounded-full border border-soft px-1.5 text-[9px] text-muted-foreground">
-                قريباً
-              </span>
-            )}
-          </button>
-        );
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentGroupKeys, params.toString()],
-  );
 
   const shellClassName =
     variant === "topbar"
@@ -491,9 +490,7 @@ export function SmartSearchBar({
   const countClassName =
     variant === "topbar" ? "text-white/75" : "text-muted-foreground";
   const chevronClassName =
-    variant === "topbar"
-      ? "hover:text-white"
-      : "hover:text-foreground";
+    variant === "topbar" ? "hover:text-white" : "hover:text-foreground";
   const dropdownClassName =
     variant === "topbar"
       ? "border-white/15 bg-popover/98 backdrop-blur-xl"
@@ -517,17 +514,6 @@ export function SmartSearchBar({
         >
           <Search className={cn("size-3.5 shrink-0", iconClassName)} />
         </div>
-        {(activeChips.length > 0 || currentDates.length > 0 || currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
-          <div
-            className={cn(
-              "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold md:inline-flex rtl:flex-row-reverse",
-              variant === "topbar" ? "bg-white/10 text-white/85" : "bg-soft-1 text-muted-foreground",
-            )}
-          >
-            <SlidersHorizontal className="size-3" />
-            {activeChips.length + currentDates.length + (currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage" ? 1 : 0)} مفعّل
-          </div>
-        )}
         {activeChips.map((f) => (
           <span
             key={f.key}
@@ -538,7 +524,7 @@ export function SmartSearchBar({
             <button
               type="button"
               onClick={() => toggleFilter(f.key)}
-              aria-label={`إزالة ${f.label}`}
+              aria-label={t("aria.removeChip", { label: f.label })}
               className="opacity-70 hover:opacity-100"
             >
               <X className="size-3" />
@@ -551,24 +537,26 @@ export function SmartSearchBar({
             className="inline-flex items-center gap-1 rounded-full border border-cyan/20 bg-cyan/12 px-2.5 py-1 text-[11px] font-medium text-cyan rtl:flex-row-reverse"
           >
             <Filter className="size-2.5" />
-            {tokenLabel(token)}
+            {tokenLabel(token, dateFieldLabels, monthFormatter)}
             <button
               type="button"
               onClick={() => toggleDateToken(token)}
-              aria-label={`إزالة ${tokenLabel(token)}`}
+              aria-label={t("aria.removeChip", {
+                label: tokenLabel(token, dateFieldLabels, monthFormatter),
+              })}
               className="opacity-70 hover:opacity-100"
             >
               <X className="size-3" />
             </button>
           </span>
         ))}
-        {/* Group-by chain chip — only render when something other than the
-            implicit default ("stage" alone) is active. Chain joined with "›". */}
+        {/* Group-by chain chip — only when something other than the implicit
+            default ("stage" alone) is active. Chain joined with "‹". */}
         {(currentGroupKeys.length > 1 || currentGroupKeys[0] !== "stage") && (
           <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/8 px-2.5 py-1 text-[11px] font-medium text-primary rtl:flex-row-reverse">
             <Layers className="size-2.5" />
             {currentGroupKeys
-              .map((k) => GROUPBY_DEFS.find((g) => g.key === k)?.label.replace(/^حسب\s+/, ""))
+              .map((k) => groupLabels.get(k))
               .filter(Boolean)
               .join(" ‹ ")}
             <button
@@ -576,7 +564,7 @@ export function SmartSearchBar({
               onClick={() =>
                 navigate(buildHref({ groupBy: ["stage"] as GroupBy[], view: "kanban" }))
               }
-              aria-label="إلغاء التجميع"
+              aria-label={t("aria.clearGrouping")}
               className="opacity-70 hover:opacity-100"
             >
               <X className="size-3" />
@@ -591,7 +579,7 @@ export function SmartSearchBar({
             }}
             className="text-[10px] font-medium text-muted-foreground hover:text-foreground"
           >
-            مسح الكل
+            {t("clearAll")}
           </button>
         )}
         <input
@@ -606,14 +594,14 @@ export function SmartSearchBar({
             }
             if (e.key === "Escape") setOpen(false);
           }}
-          placeholder="ابحث في المهام…"
+          placeholder={t("searchPlaceholder")}
           className={cn("min-w-0 flex-1 bg-transparent text-right focus:outline-none", inputClassName)}
         />
         {query && (
           <button
             type="button"
             onClick={clearQuery}
-            aria-label="مسح البحث"
+            aria-label={t("aria.clearSearch")}
             className={cn(iconClassName, chevronClassName)}
           >
             <X className="size-3.5" />
@@ -627,7 +615,7 @@ export function SmartSearchBar({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          aria-label="فتح خيارات البحث"
+          aria-label={t("aria.openSearchOptions")}
           className={cn(
             "rounded-full p-1 transition-colors",
             iconClassName,
@@ -635,171 +623,271 @@ export function SmartSearchBar({
             open && (variant === "topbar" ? "bg-white/10 text-white" : "bg-soft-1 text-cyan"),
           )}
         >
-          <ChevronDown
-            className={cn(
-              "size-3.5 transition-transform",
-              open && "rotate-180",
-            )}
-          />
+          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         </button>
       </div>
 
-      {/* Smart-search dropdown — 3 columns: Filters / Group By / Favorites.
-          Constrains height to the viewport (minus the trigger + a small
-          margin) and scrolls internally, so the long "التواريخ" date list
-          at the bottom of the Filters column doesn't get clipped below
-          the fold. */}
+      {/* Odoo-style 3-column dropdown: Filters / Group By / Favorites. */}
       {open && (
         <div
           className={cn(
-            "absolute end-0 start-0 top-[calc(100%+10px)] z-30 max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain rounded-[1.75rem] border p-4 text-right shadow-[0_28px_80px_rgba(23,18,70,0.18)]",
+            "absolute end-0 start-0 top-[calc(100%+10px)] z-30 max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain rounded-2xl border p-0 text-right shadow-[0_28px_80px_rgba(23,18,70,0.18)]",
             dropdownClassName,
           )}
         >
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-soft/80 pb-3 rtl:flex-row-reverse">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground rtl:flex-row-reverse">
-                <SlidersHorizontal className="size-4 text-cyan" />
-                تخصيص عرض المهام
-              </div>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                اختر ما تريد رؤيته الآن، ثم احفظه كعرض ثابت إذا كان يتكرر.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full bg-soft-1 px-3 py-1 text-[10px] font-medium text-muted-foreground">
-                {activeChips.length + currentDates.length} فلتر
-              </span>
-              <span className="rounded-full bg-soft-1 px-3 py-1 text-[10px] font-medium text-muted-foreground">
-                {currentGroupKeys.length} تجميع
-              </span>
-            </div>
-          </div>
-          {(loadingSuggestions || suggestions.length > 0) && (
-            <div className="mb-4 rounded-2xl border border-soft/80 bg-soft-1/40 p-3">
-              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                <Search className="size-3.5" />
-                اقتراحات المشروع والمتجر
-              </div>
-              <div className="flex flex-col gap-1">
-                {suggestions.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => chooseSuggestion(item)}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-right text-xs transition-colors hover:border-cyan/15 hover:bg-background rtl:flex-row-reverse"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
-                        <Briefcase className="size-3.5 shrink-0 text-cyan" />
-                        <span className="truncate">{item.projectName}</span>
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
-                        <Store className="size-3 shrink-0" />
-                        <span className="truncate">{item.storeName || "بدون اسم متجر"}</span>
-                        {item.clientName ? <span className="truncate">· {item.clientName}</span> : null}
-                      </span>
-                    </span>
-                    <Check className="size-3.5 shrink-0 text-cyan/70" />
-                  </button>
-                ))}
-                {loadingSuggestions && (
-                  <div className="px-2 py-2 text-[11px] text-muted-foreground">جاري جلب الاقتراحات…</div>
+          {query.trim().length >= 1 && (
+            <div className="border-b border-soft/70 p-3">
+              {/* Loading skeleton */}
+              {loadingSuggestions && (
+                <div className="flex flex-col gap-1.5" aria-hidden>
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-9 animate-pulse rounded-lg bg-soft-1"
+                    />
+                  ))}
+                  <span className="sr-only">{t("suggestions.loading")}</span>
+                </div>
+              )}
+
+              {/* Error state */}
+              {!loadingSuggestions && suggestionError && (
+                <div className="px-2 py-2 text-[11px] text-cc-red">
+                  {t("suggestions.error")}
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!loadingSuggestions &&
+                !suggestionError &&
+                taskSuggestions.length === 0 &&
+                suggestions.length === 0 && (
+                  <div className="px-2 py-2 text-[11px] text-muted-foreground">
+                    {t("suggestions.empty")}
+                  </div>
                 )}
-              </div>
+
+              {/* Task results — primary section (feedback #5). */}
+              {!loadingSuggestions &&
+                !suggestionError &&
+                taskSuggestions.length > 0 && (
+                  <div className="mb-2">
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                      <ListChecks className="size-3.5" />
+                      {t("suggestions.tasksTitle")}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {taskSuggestions.map((task) => (
+                        <button
+                          key={task.id}
+                          type="button"
+                          onClick={() => chooseTask(task)}
+                          className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
+                              <ListChecks className="size-3.5 shrink-0 text-cyan" />
+                              <span className="truncate">{task.title}</span>
+                            </span>
+                            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
+                              {task.taskCode ? (
+                                <span className="shrink-0 tabular-nums">
+                                  {task.taskCode}
+                                </span>
+                              ) : null}
+                              {task.projectName ? (
+                                <span className="truncate">
+                                  · {task.projectName}
+                                </span>
+                              ) : null}
+                            </span>
+                          </span>
+                          <Check className="size-3.5 shrink-0 text-cyan/70" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              {/* Project / store results — secondary section. */}
+              {!loadingSuggestions &&
+                !suggestionError &&
+                suggestions.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                      <Search className="size-3.5" />
+                      {t("suggestions.title")}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {suggestions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => chooseSuggestion(item)}
+                          className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
+                              <Briefcase className="size-3.5 shrink-0 text-cyan" />
+                              <span className="truncate">{item.projectName}</span>
+                            </span>
+                            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
+                              <Store className="size-3 shrink-0" />
+                              <span className="truncate">
+                                {item.storeName || t("suggestions.noStoreName")}
+                              </span>
+                              {item.clientName ? (
+                                <span className="truncate">· {item.clientName}</span>
+                              ) : null}
+                            </span>
+                          </span>
+                          <Check className="size-3.5 shrink-0 text-cyan/70" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
           )}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <div className="min-w-0 lg:col-span-8">
-              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                <Filter className="size-3.5" />
-                الفلاتر السريعة
-              </div>
-              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{filterColumn}</div>
-              <div className={cn("mt-3", sectionCardClassName)}>
-                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                  <CalendarRange className="size-3.5" />
-                  فلاتر التاريخ
-                </div>
-                {/* #18 — Odoo "This Month" preset on due_date. One-click
-                    deadline-of-current-month filter. The existing per-field
-                    expansion below still works for other periods/fields. */}
-                {(() => {
-                  const now = new Date();
-                  const token = `due_date:${now.getFullYear()}m${now.getMonth() + 1}`;
-                  const active = currentDates.includes(token);
+          <div className="grid grid-cols-1 divide-y divide-soft/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0 rtl:sm:divide-x-reverse">
+            {/* ── Filters column ────────────────────────────────────────── */}
+            <section className="min-w-0 p-2">
+              <ColumnHeader icon={<Filter className="size-3.5" />} label={t("columns.filters")} />
+              <div className="flex flex-col">
+                {filterRows.map((row, i) => {
+                  if (row.kind === "sep") {
+                    return <div key={`sep-${i}`} className="my-1 border-t border-soft/60" />;
+                  }
+                  if (row.kind === "date") {
+                    return (
+                      <DateFilterRow
+                        key={row.field}
+                        field={{
+                          key: row.field,
+                          label: row.label,
+                        }}
+                        activeTokens={currentDates}
+                        onToggle={toggleDateToken}
+                      />
+                    );
+                  }
+                  const active = currentActive.has(row.key);
                   return (
-                    <button
-                      type="button"
-                      onClick={() => toggleDateToken(token)}
-                      className={cn(
-                        "mb-2 flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs transition-colors rtl:flex-row-reverse",
-                        active
-                          ? "border-cyan/30 bg-cyan-dim text-cyan"
-                          : "border-soft bg-card text-foreground hover:border-cyan/20 hover:bg-soft-1",
-                      )}
-                    >
-                      <span>هذا الشهر — الموعد النهائي</span>
-                      {active && <Check className="size-3.5" />}
-                    </button>
+                    <MenuRow
+                      key={row.key}
+                      label={row.label}
+                      active={active}
+                      onClick={() => toggleFilter(row.key)}
+                    />
                   );
-                })()}
-                {DATE_FIELD_DEFS.map((d) => (
-                  <DateFieldRow
-                    key={d.key}
-                    field={d}
-                    activeTokens={currentDates}
-                    onToggle={toggleDateToken}
-                  />
-                ))}
+                })}
               </div>
-            </div>
-            <div className="min-w-0 lg:col-span-4">
-              <div className={cn("mb-3", sectionCardClassName)}>
-                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                  <Layers className="size-3.5" />
-                  التجميع
-                </div>
-                <div className="mb-2 text-[11px] leading-5 text-muted-foreground">
-                  رتّب لوحة الكانبان من الخارج للداخل. أول اختيار هو المستوى الرئيسي.
-                </div>
-                <div className="flex flex-col gap-2">{groupColumn}</div>
+            </section>
+
+            {/* ── Group By column ──────────────────────────────────────── */}
+            <section className="min-w-0 p-2">
+              <ColumnHeader icon={<Layers className="size-3.5" />} label={t("columns.groupBy")} />
+              <div className="flex flex-col">
+                {groupRows.map((row, i) => {
+                  if ("sep" in row) {
+                    return <div key={`gsep-${i}`} className="my-1 border-t border-soft/60" />;
+                  }
+                  const idx = currentGroupKeys.indexOf(row.key);
+                  const active = idx >= 0;
+                  return (
+                    <MenuRow
+                      key={row.key}
+                      label={row.label}
+                      active={active}
+                      order={active ? idx + 1 : undefined}
+                      onClick={() => toggleGroup(row.key)}
+                    />
+                  );
+                })}
               </div>
-              <div className={sectionCardClassName}>
-                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                  <Star className="size-3.5" />
-                  المفضلة
-                </div>
-                <SavedFiltersColumn
-                  items={filters}
-                  currentDefinition={{
-                    filter: [...currentActive].join(",") || undefined,
-                    q: currentQuery || undefined,
-                    view: currentView,
-                    groupBy: currentGroupKeys.join(","),
-                    projectId: params.get("projectId") || undefined,
-                  }}
-                  onApply={(def) => {
-                    const url = new URLSearchParams();
-                    if (def.filter) url.set("f", def.filter);
-                    if (def.q) url.set("q", def.q);
-                    if (def.view) url.set("view", def.view);
-                    if (def.groupBy) url.set("groupBy", def.groupBy);
-                    if (def.projectId) url.set("projectId", def.projectId);
-                    start(() => router.push(`${pathname}?${url.toString()}`));
-                    setOpen(false);
-                  }}
-                />
-              </div>
-            </div>
+            </section>
+
+            {/* ── Favorites column ─────────────────────────────────────── */}
+            <section className="min-w-0 p-2">
+              <ColumnHeader icon={<Star className="size-3.5" />} label={t("columns.favorites")} />
+              <SavedFiltersColumn
+                items={filters}
+                currentDefinition={{
+                  filter: [...currentActive].join(",") || undefined,
+                  q: currentQuery || undefined,
+                  view: currentView as "kanban" | "list" | "calendar",
+                  groupBy: currentGroupKeys.join(","),
+                  projectId: params.get("projectId") || undefined,
+                }}
+                onApply={(def) => {
+                  const url = new URLSearchParams();
+                  if (def.filter) url.set("f", def.filter);
+                  if (def.q) url.set("q", def.q);
+                  if (def.view) url.set("view", def.view);
+                  if (def.groupBy) url.set("groupBy", def.groupBy);
+                  if (def.projectId) url.set("projectId", def.projectId);
+                  start(() => router.push(`${pathname}?${url.toString()}`));
+                  setOpen(false);
+                }}
+              />
+            </section>
           </div>
           {pending && (
-            <div className="mt-2 text-[10px] text-muted-foreground">جاري…</div>
+            <div className="border-t border-soft/60 px-3 py-1.5 text-[10px] text-muted-foreground">
+              {t("loading")}
+            </div>
           )}
         </div>
       )}
       <input type="hidden" value={currentView} readOnly />
     </div>
+  );
+}
+
+function ColumnHeader({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="mb-1 flex items-center gap-1.5 px-2 pb-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+      {icon}
+      {label}
+    </div>
+  );
+}
+
+// Plain Odoo-style menu row — text, optional check, optional order badge.
+function MenuRow({
+  label,
+  active,
+  order,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  order?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors rtl:flex-row-reverse",
+        active
+          ? "bg-cyan-dim font-medium text-cyan"
+          : "text-foreground hover:bg-soft-1",
+      )}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+      {active && (
+        <span className="flex shrink-0 items-center gap-1">
+          {order !== undefined && (
+            <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-cyan/30 px-1 text-[9px] font-semibold leading-none tabular-nums text-cyan">
+              {order}
+            </span>
+          )}
+          <Check className="size-3.5" />
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -812,7 +900,9 @@ function SavedFiltersColumn({
   currentDefinition: SavedTaskFilter["definition"];
   onApply: (def: SavedTaskFilter["definition"]) => void;
 }) {
+  const t = useTranslations("TasksSearch.saved");
   const router = useRouter();
+  const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [isShared, setIsShared] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
@@ -821,26 +911,39 @@ function SavedFiltersColumn({
   const handleSave = () =>
     start(async () => {
       const trimmed = name.trim();
-      if (!trimmed) return toast.error("اكتب اسمًا للفلتر");
+      if (!trimmed) {
+        toast.error(t("nameRequired"));
+        return;
+      }
       const res = await saveTaskFilterAction({
         name: trimmed,
-        definition: currentDefinition,
+        definition: {
+          ...currentDefinition,
+          view: currentDefinition.view as "kanban" | "list" | "calendar" | undefined,
+        },
         isShared,
         isDefault,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("تم حفظ الفلتر");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("saved"));
       setName("");
       setIsShared(false);
       setIsDefault(false);
+      setSaving(false);
       router.refresh();
     });
 
   const handleDelete = (id: string) =>
     start(async () => {
       const res = await deleteTaskFilterAction({ id });
-      if ("error" in res) return toast.error(res.error);
-      toast.success("حُذف الفلتر");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("deleted"));
       router.refresh();
     });
 
@@ -850,131 +953,142 @@ function SavedFiltersColumn({
         id: item.id,
         isDefault: !item.is_default,
       });
-      if ("error" in res) return toast.error(res.error);
-      toast.success(item.is_default ? "ألغي التعيين كافتراضي" : "صار افتراضيًا");
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(item.is_default ? t("defaultUnset") : t("defaultSet"));
       router.refresh();
     });
 
   return (
-    <div className="space-y-2">
-      {/* Save form: input on top so it has full width; small button beneath
-          with the two flags inline. Previously the input+button shared one
-          row and the input collapsed to ~2 chars wide in RTL Arabic. */}
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            handleSave();
-          }
-        }}
-        placeholder="اسم الفلتر الجديد…"
-        maxLength={80}
-        disabled={pending}
-        className="h-10 w-full rounded-xl border border-soft bg-background px-3 text-xs placeholder:text-muted-foreground/60"
-      />
-      <div className="flex items-center justify-between gap-2 rtl:flex-row-reverse">
-        <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground rtl:flex-row-reverse">
-          <label className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-soft bg-card px-2 py-1 rtl:flex-row-reverse">
-            <input
-              type="checkbox"
-              checked={isDefault}
-              onChange={(e) => setIsDefault(e.target.checked)}
-              disabled={pending}
-              className="size-3 accent-cyan"
-            />
-            افتراضي
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-soft bg-card px-2 py-1 rtl:flex-row-reverse">
-            <input
-              type="checkbox"
-              checked={isShared}
-              onChange={(e) => setIsShared(e.target.checked)}
-              disabled={pending}
-              className="size-3 accent-cyan"
-            />
-            مُشارَك
-          </label>
-        </div>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={pending || !name.trim()}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan/30 bg-cyan/10 px-3 py-1.5 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
-          title="حفظ الفلتر الحالي"
+    <div className="flex flex-col">
+      {items.map((it) => (
+        <div
+          key={it.id}
+          className="group flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
         >
-          {pending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-          حفظ
-        </button>
-      </div>
-      {items.length === 0 ? (
-        <div className="mt-1 rounded-2xl border border-dashed border-soft/70 bg-soft/20 px-3 py-4 text-center text-[10.5px] leading-tight text-muted-foreground/70">
-          لا توجد فلاتر محفوظة بعد
-          <div className="mt-0.5 text-[9.5px] text-muted-foreground/50">
-            اكتب اسمًا ثم اضغط «حفظ»
-          </div>
-        </div>
-      ) : (
-        <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-          {items.map((it) => (
-            <li
-              key={it.id}
-              className="group flex items-center gap-1 rounded-xl border border-transparent bg-card/70 px-2 py-2 text-xs transition-colors hover:border-cyan/15 hover:bg-soft-1 rtl:flex-row-reverse"
+          <button
+            type="button"
+            onClick={() => onApply(it.definition)}
+            className="min-w-0 flex-1 truncate text-right"
+            title={JSON.stringify(it.definition)}
+          >
+            {it.name}
+          </button>
+          {it.is_shared && (
+            <span
+              className="shrink-0 rounded-full bg-cyan/15 px-1.5 text-[9px] font-medium text-cyan"
+              title={it.owned_by_me === false ? t("sharedByColleague") : t("shared")}
             >
-              <button
-                type="button"
-                onClick={() => onApply(it.definition)}
-                className="min-w-0 flex-1 truncate text-right"
-                title={JSON.stringify(it.definition)}
-              >
-                {it.name}
-              </button>
-              {it.is_shared && (
-                <span
-                  className="shrink-0 rounded-full bg-cyan/15 px-1.5 text-[9px] font-medium text-cyan"
-                  title={it.owned_by_me === false ? "مُشارَك من زميل" : "مُشارَك"}
-                >
-                  مُشارَك
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => toggleDefault(it)}
-                disabled={pending || it.owned_by_me === false}
-                title={
-                  it.owned_by_me === false
-                    ? "لا يمكن تعديل فلتر زميل"
-                    : it.is_default ? "افتراضي" : "اجعله افتراضيًا"
-                }
-                className={cn(
-                  "shrink-0 rounded-full p-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40",
-                  it.is_default ? "text-amber" : "text-muted-foreground/60",
-                )}
-              >
-                <Star className={cn("size-3", it.is_default && "fill-current")} />
-              </button>
-              {it.owned_by_me !== false && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete(it.id)}
-                  disabled={pending}
-                  title="حذف"
-                  className="shrink-0 rounded-full p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
-                >
-                  <Trash2 className="size-3" />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+              {t("shared")}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => toggleDefault(it)}
+            disabled={pending || it.owned_by_me === false}
+            title={
+              it.owned_by_me === false
+                ? t("cannotEditColleagueFilter")
+                : it.is_default ? t("default") : t("makeDefault")
+            }
+            className={cn(
+              "shrink-0 rounded-full p-1 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40",
+              it.is_default ? "text-amber" : "text-muted-foreground/60",
+            )}
+          >
+            <Star className={cn("size-3", it.is_default && "fill-current")} />
+          </button>
+          {it.owned_by_me !== false && (
+            <button
+              type="button"
+              onClick={() => handleDelete(it.id)}
+              disabled={pending}
+              title={t("delete")}
+              className="shrink-0 rounded-full p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-background hover:text-cc-red group-hover:opacity-100"
+            >
+              <Trash2 className="size-3" />
+            </button>
+          )}
+        </div>
+      ))}
+      {items.length > 0 && <div className="my-1 border-t border-soft/60" />}
+
+      {/* "Save current search" — collapsed Odoo row that expands into a form. */}
+      <button
+        type="button"
+        onClick={() => setSaving((v) => !v)}
+        className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
+      >
+        <span className="flex items-center gap-1.5 rtl:flex-row-reverse">
+          <Save className="size-3.5 text-muted-foreground" />
+          {t("saveCurrentSearch")}
+        </span>
+        <ChevronDown className={cn("size-3 transition-transform", saving && "rotate-180")} />
+      </button>
+      {saving && (
+        <div className="mt-1 space-y-2 px-2.5 pb-1">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleSave();
+              }
+            }}
+            placeholder={t("filterNamePlaceholder")}
+            maxLength={80}
+            disabled={pending}
+            autoFocus
+            className="h-9 w-full rounded-lg border border-soft bg-background px-3 text-xs placeholder:text-muted-foreground/60"
+          />
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground rtl:flex-row-reverse">
+            <label className="inline-flex cursor-pointer items-center gap-1 rtl:flex-row-reverse">
+              <input
+                type="checkbox"
+                checked={isDefault}
+                onChange={(e) => setIsDefault(e.target.checked)}
+                disabled={pending}
+                className="size-3 accent-cyan"
+              />
+              {t("default")}
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-1 rtl:flex-row-reverse">
+              <input
+                type="checkbox"
+                checked={isShared}
+                onChange={(e) => setIsShared(e.target.checked)}
+                disabled={pending}
+                className="size-3 accent-cyan"
+              />
+              {t("shared")}
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={pending || !name.trim()}
+            className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-cyan/30 bg-cyan/10 px-3 py-1.5 text-[11px] font-medium text-cyan hover:bg-cyan/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+            {t("save")}
+          </button>
+        </div>
+      )}
+      {items.length === 0 && !saving && (
+        <div className="px-2.5 py-2 text-[10.5px] text-muted-foreground/60">
+          {t("empty")}
+        </div>
       )}
     </div>
   );
 }
 
-function DateFieldRow({
+// Odoo date filter — a row that expands into month / quarter / year buckets.
+function DateFilterRow({
   field,
   activeTokens,
   onToggle,
@@ -983,12 +1097,17 @@ function DateFieldRow({
   activeTokens: string[];
   onToggle: (token: string) => void;
 }) {
+  const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   const fieldActive = activeTokens.some((t) => t.startsWith(`${field.key}:`));
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
   const years = [currentYear, currentYear - 1, currentYear - 2];
   const has = (token: string) => activeTokens.includes(token);
+  const monthFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: "long" }),
+    [locale],
+  );
 
   return (
     <div>
@@ -996,19 +1115,18 @@ function DateFieldRow({
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-xs transition-colors hover:border-cyan/15 hover:bg-soft-1 rtl:flex-row-reverse",
-          fieldActive && "border-cyan/20 bg-cyan-dim/70 text-cyan",
+          "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors rtl:flex-row-reverse",
+          fieldActive ? "bg-cyan-dim font-medium text-cyan" : "text-foreground hover:bg-soft-1",
         )}
       >
         <span className="flex items-center gap-1.5 rtl:flex-row-reverse">
-          {fieldActive && <Check className="size-3" />}
+          {fieldActive && <Check className="size-3.5" />}
           {field.label}
         </span>
         <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
       </button>
       {expanded && (
-        <div className="me-2 ms-2 mt-1 flex flex-col gap-1 border-e border-soft pe-3">
-          {/* Months of current year (most recent 3) */}
+        <div className="me-2 ms-2 mt-1 flex flex-col gap-0.5 border-e border-soft pe-2">
           {[currentMonth, currentMonth - 1, currentMonth - 2]
             .filter((m) => m >= 1)
             .map((m) => {
@@ -1016,14 +1134,13 @@ function DateFieldRow({
               return (
                 <DateBucketBtn
                   key={token}
-                  label={MONTHS_AR[m - 1]}
+                  label={monthFormatter.format(new Date(currentYear, m - 1, 1))}
                   active={has(token)}
                   onClick={() => onToggle(token)}
                 />
               );
             })}
           <div className="my-0.5 border-t border-soft/50" />
-          {/* Quarters of current year */}
           {[4, 3, 2, 1].map((q) => {
             const token = `${field.key}:${currentYear}q${q}`;
             return (
@@ -1036,7 +1153,6 @@ function DateFieldRow({
             );
           })}
           <div className="my-0.5 border-t border-soft/50" />
-          {/* Years */}
           {years.map((y) => {
             const token = `${field.key}:${y}`;
             return (
@@ -1068,10 +1184,8 @@ function DateBucketBtn({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-[11px] transition-colors",
-        active
-          ? "border-cyan/30 bg-cyan-dim text-cyan"
-          : "border-soft/80 bg-card text-foreground hover:border-cyan/15 hover:bg-soft-1",
+        "flex items-center justify-between gap-2 rounded-md px-2.5 py-1 text-[11px] transition-colors rtl:flex-row-reverse",
+        active ? "bg-cyan-dim font-medium text-cyan" : "text-foreground hover:bg-soft-1",
       )}
     >
       <span>{label}</span>
