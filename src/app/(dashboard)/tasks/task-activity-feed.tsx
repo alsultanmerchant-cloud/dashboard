@@ -23,6 +23,19 @@ import {
   Paperclip,
   FileIcon,
   ImageIcon,
+  ListTree,
+  Clock,
+  CalendarClock,
+  CheckCircle2,
+  XCircle,
+  Users,
+  CirclePause,
+  CirclePlay,
+  CalendarDays,
+  Hash,
+  Activity,
+  Link2,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -144,6 +157,7 @@ export function TaskActivityFeed({ items }: { items: TaskActivity[] }) {
                 {item.kind === "odoo_message" && <OdooMessageRow item={item} />}
                 {item.kind === "odoo_stage_change" && <OdooStageRow item={item} />}
                 {item.kind === "odoo_field_change" && <OdooFieldRow item={item} />}
+                {item.kind === "audit_event" && <AuditEventRow item={item} />}
               </li>
             ))}
           </ol>
@@ -509,6 +523,93 @@ function AssigneeRow({
               <span className="text-muted-foreground">إلى</span>
               <span className="font-medium">{subject.full_name}</span>
             </>
+          )}
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatArabicDateTime(item.created_at)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ------- audit_event (generic) ------------------------------------------
+
+// #6: per-action Arabic label + icon for the generic audit_event kind —
+// approvals, sub-tasks, timesheets, scheduled activities, links, followers,
+// hold/resume, deadline edits. Anything not mapped falls back to a neutral
+// "حركة" row so a new action type is never silently dropped from the feed.
+const AUDIT_ACTION_META: Record<string, { label: string; Icon: LucideIcon }> = {
+  "task.assignee_add": { label: "أضاف مُسنَدًا", Icon: GitCompareArrows },
+  "task.assignee_remove": { label: "أزال مُسنَدًا", Icon: GitCompareArrows },
+  "task.subtask_create": { label: "أنشأ مهمة فرعية", Icon: ListTree },
+  "task.timesheet_add": { label: "سجّل وقتًا", Icon: Clock },
+  "task.activity_create": { label: "جدوَل نشاطًا", Icon: CalendarClock },
+  "task.activity_complete": { label: "أنهى نشاطًا مجدوَلًا", Icon: CheckCircle2 },
+  "task.approval_requested": { label: "طلب اعتمادًا", Icon: CheckCircle2 },
+  "task.approved": { label: "اعتمد المهمة", Icon: CheckCircle2 },
+  "task.rejected": { label: "رفض الاعتماد", Icon: XCircle },
+  "task.follower_add": { label: "أضاف متابِعًا", Icon: Users },
+  "task.follower_remove": { label: "أزال متابِعًا", Icon: Users },
+  "task.hold": { label: "علّق المهمة", Icon: CirclePause },
+  "task.resume": { label: "استأنف المهمة", Icon: CirclePlay },
+  "task.deadline_set": { label: "حدّد الموعد النهائي", Icon: CalendarDays },
+  "task.counts_set": { label: "حدّث أعداد المهمة", Icon: Hash },
+  "task.bulk_update": { label: "تعديل جماعي على المهمة", Icon: Activity },
+  "task_link.create": { label: "ربط المهمة بمهمة أخرى", Icon: Link2 },
+  "task_link.update": { label: "حدّث ربط مهمة", Icon: Link2 },
+  "task_link.delete": { label: "أزال ربط مهمة", Icon: Link2 },
+};
+
+// Short, human detail pulled from the audit metadata when present — keeps the
+// row informative without a bespoke renderer per action.
+function auditEventDetail(
+  action: string,
+  meta: Record<string, unknown>,
+): string | null {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const num = (v: unknown) => (typeof v === "number" ? v : null);
+  switch (action) {
+    case "task.subtask_create":
+      return str(meta.title);
+    case "task.timesheet_add": {
+      const h = num(meta.hours);
+      return h != null ? `${h} ساعة` : null;
+    }
+    case "task.hold":
+      return str(meta.reason);
+    case "task.deadline_set":
+      return str(meta.deadline) ?? str(meta.due_date);
+    case "task.activity_create":
+      return str(meta.activity_type);
+    default:
+      return null;
+  }
+}
+
+function AuditEventRow({
+  item,
+}: {
+  item: Extract<TaskActivity, { kind: "audit_event" }>;
+}) {
+  const meta = AUDIT_ACTION_META[item.action] ?? { label: "حركة", Icon: Activity };
+  const Icon = meta.Icon;
+  const detail = auditEventDetail(item.action, item.metadata);
+  return (
+    <div className="flex items-start gap-3 px-1">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-soft-2 bg-card text-muted-foreground">
+        <Icon className="size-3.5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">
+            {item.actor?.name ?? "النظام"}
+          </span>
+          <span className="text-foreground/70">{meta.label}</span>
+          {detail && (
+            <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+              {detail}
+            </span>
           )}
         </div>
         <p className="mt-0.5 text-[11px] text-muted-foreground">

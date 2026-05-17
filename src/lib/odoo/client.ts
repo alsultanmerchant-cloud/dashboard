@@ -110,6 +110,21 @@ export class OdooClient {
   read<T>(model: string, ids: number[], fields: string[] = []): Promise<T[]> {
     return this.executeKw<T[]>(model, "read", [ids], { fields });
   }
+
+  /**
+   * search_count shorthand — returns the total number of rows matching a
+   * domain, ignoring limit/offset. Used to surface truncation: callers
+   * compare it against the length of a limited search_read.
+   */
+  searchCount(
+    model: string,
+    domain: unknown[] = [],
+    opts: { context?: Record<string, unknown> } = {},
+  ): Promise<number> {
+    const kwargs: Record<string, unknown> = {};
+    if (opts.context) kwargs.context = opts.context;
+    return this.executeKw<number>(model, "search_count", [domain], kwargs);
+  }
 }
 
 export function odooFromEnv(): OdooClient {

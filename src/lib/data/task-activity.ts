@@ -99,7 +99,49 @@ export type TaskActivity =
       field: string;
       from_label: string | null;
       to_label: string | null;
+    }
+  | {
+      // #6: generic projection of an audit_logs row. Covers the activity
+      // types that have a writer but no bespoke feed kind — approval gates,
+      // sub-tasks, timesheets, scheduled activities, links/dependencies,
+      // followers, hold/resume, deadline edits. Rendered with a per-action
+      // Arabic label so the feed reflects everything that happened.
+      kind: "audit_event";
+      id: string;
+      created_at: string;
+      actor: { name: string; avatar: string | null } | null;
+      action: string;
+      metadata: Record<string, unknown>;
     };
+
+// #6: audit_logs actions surfaced in the task activity feed. `status_change`
+// and `assignee_change` keep their dedicated feed kinds; every other action
+// here is projected through the generic `audit_event` kind. `comment_add`,
+// `task.create` and `star_toggled` are intentionally excluded — they are
+// already represented by the note / task_created kinds or are pure noise.
+const FEED_AUDIT_ACTIONS = [
+  "task.status_change",
+  "task.assignee_change",
+  "task.assignee_add",
+  "task.assignee_remove",
+  "task.subtask_create",
+  "task.timesheet_add",
+  "task.activity_create",
+  "task.activity_complete",
+  "task.approval_requested",
+  "task.approved",
+  "task.rejected",
+  "task.follower_add",
+  "task.follower_remove",
+  "task.hold",
+  "task.resume",
+  "task.deadline_set",
+  "task.counts_set",
+  "task.bulk_update",
+  "task_link.create",
+  "task_link.update",
+  "task_link.delete",
+] as const;
 
 type OdooMessageInput = {
   id: number;
@@ -224,7 +266,7 @@ export async function getTaskActivityFeed(
       .eq("organization_id", orgId)
       .eq("entity_type", "task")
       .eq("entity_id", taskId)
-      .in("action", ["task.assignee_change", "task.status_change"]),
+      .in("action", FEED_AUDIT_ACTIONS as unknown as string[]),
     supabaseAdmin
       .from("task_attachments")
       .select("id, task_comment_id, filename, mimetype, size_bytes, storage_path, source_url, external_source, external_id")
@@ -406,6 +448,10 @@ export async function getTaskActivityFeed(
     typeof v === "string" && (TASK_STATUSES as readonly string[]).includes(v);
 
   for (const a of audits) {
+    const actor = a.actor_user_id
+      ? profileByUser.get(a.actor_user_id) ?? null
+      : null;
+
     if (a.action === "task.status_change") {
       const meta = (a.metadata ?? {}) as { from?: unknown; to?: unknown };
       if (!isTaskStatus(meta.to)) continue;
@@ -413,30 +459,46 @@ export async function getTaskActivityFeed(
         kind: "status_change",
         id: a.id,
         created_at: a.created_at,
-        actor: a.actor_user_id ? profileByUser.get(a.actor_user_id) ?? null : null,
+        actor,
         from_status: isTaskStatus(meta.from) ? meta.from : null,
         to_status: meta.to,
       });
       continue;
     }
-    const meta = (a.metadata ?? {}) as {
-      role_type?: RoleType;
-      from_employee_id?: string | null;
-      to_employee_id?: string | null;
-    };
-    if (!meta.role_type) continue;
+
+    if (a.action === "task.assignee_change") {
+      const meta = (a.metadata ?? {}) as {
+        role_type?: RoleType;
+        from_employee_id?: string | null;
+        to_employee_id?: string | null;
+      };
+      if (!meta.role_type) continue;
+      items.push({
+        kind: "assignee_change",
+        id: a.id,
+        created_at: a.created_at,
+        actor,
+        role_type: meta.role_type,
+        from_employee: meta.from_employee_id
+          ? employeeById.get(meta.from_employee_id) ?? null
+          : null,
+        to_employee: meta.to_employee_id
+          ? employeeById.get(meta.to_employee_id) ?? null
+          : null,
+      });
+      continue;
+    }
+
+    // #6: every other tracked action — approvals, sub-tasks, timesheets,
+    // scheduled activities, links, followers, hold/resume — is surfaced
+    // through the generic audit_event kind.
     items.push({
-      kind: "assignee_change",
+      kind: "audit_event",
       id: a.id,
       created_at: a.created_at,
-      actor: a.actor_user_id ? profileByUser.get(a.actor_user_id) ?? null : null,
-      role_type: meta.role_type,
-      from_employee: meta.from_employee_id
-        ? employeeById.get(meta.from_employee_id) ?? null
-        : null,
-      to_employee: meta.to_employee_id
-        ? employeeById.get(meta.to_employee_id) ?? null
-        : null,
+      actor,
+      action: a.action,
+      metadata: (a.metadata ?? {}) as Record<string, unknown>,
     });
   }
 

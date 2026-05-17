@@ -801,6 +801,17 @@
     "taskCount": "({count} مهمة)",
     "projectInfo": "معلومات المشروع",
     "allTasks": "عرض كل المهام",
+    "toolbar": {
+      "openTasksFilter": "المهام المفتوحة",
+      "allTasksFilter": "كل المهام",
+      "customFilter": "مُفلتر",
+      "clearFilter": "إزالة الفلتر",
+      "countLabel": "{shown} من {total}",
+      "countAria": "عرض {shown} من {total} مهمة",
+      "kpiNoDeadline": "مهام بدون موعد نهائي",
+      "kpiNoDeadlineHint": "مهام مفتوحة بدون تاريخ مخطط أو موعد نهائي",
+      "kpiError": "تعذّر حساب العدد"
+    },
     "views": {
       "kanban": "Kanban",
       "list": "قائمة",
@@ -935,6 +946,8 @@
     },
     "form": {
       "project": "المشروع",
+      "assignees": "المُسنَدون",
+      "tags": "الوسوم",
       "service": "الخدمة",
       "priority": "الأولوية",
       "progress": "التقدم",
@@ -942,6 +955,7 @@
       "progressVariance": "انحراف التقدم",
       "allocatedTime": "الوقت المخصص",
       "deadline": "الموعد النهائي",
+      "plannedDate": "التاريخ المخطط",
       "plannedDeadline": "الموعد المخطط",
       "actualDoneDate": "اليوم الفعلي للإنجاز",
       "completedAt": "تم الإنجاز في",

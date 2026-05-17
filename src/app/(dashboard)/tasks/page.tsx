@@ -1,9 +1,10 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Briefcase } from "lucide-react";
+import { Briefcase, CalendarOff } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { cn } from "@/lib/utils";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { ViewSwitcher } from "./view-switcher";
 import { MonthQuickPick } from "./month-quick-pick";
@@ -265,6 +266,34 @@ export default async function TasksPage({
     scopedTaskCount = count ?? 0;
   }
 
+  // #1/#2: the count chip reports "<shown> of <total>" so the active filter
+  // is unambiguous — matching Rwasem's search_default_my_open_tasks header.
+  // #13: the "no deadline" KPI tile surfaces open tasks missing a date.
+  const shownCount = view === "kanban" ? boardTasks.length : tasks.length;
+  const baseTaskQuery = () =>
+    supabaseAdmin
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", session.orgId)
+      .is("archived_at", null);
+  let totalScope = baseTaskQuery();
+  if (resolvedProjectId) totalScope = totalScope.eq("project_id", resolvedProjectId);
+  let noDeadlineScope = baseTaskQuery()
+    .neq("stage", "done")
+    .is("planned_date", null)
+    .is("due_date", null);
+  if (resolvedProjectId) noDeadlineScope = noDeadlineScope.eq("project_id", resolvedProjectId);
+  const [totalRes, noDeadlineRes] = await Promise.all([totalScope, noDeadlineScope]);
+  const totalCount = totalRes.count ?? 0;
+  const noDeadlineCount = noDeadlineRes.error ? null : noDeadlineRes.count ?? 0;
+
+  const filterLabel = (() => {
+    if (active.size === 1 && active.has("open")) return t("toolbar.openTasksFilter");
+    if (active.size === 0 || active.has("all")) return t("toolbar.allTasksFilter");
+    return t("toolbar.customFilter");
+  })();
+  const noDeadlineActive = active.size === 1 && active.has("no_deadline");
+
   return (
     <div>
       {/* Sky Light §2.5: when /tasks is project-scoped via ?projectId=, render
@@ -312,6 +341,41 @@ export default async function TasksPage({
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         <ViewSwitcher current={view} />
         <MonthQuickPick />
+        {/* #1/#2: filter + count chip — makes the active domain unambiguous,
+            mirroring Rwasem's "Open Tasks · N of M" header. */}
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-soft bg-soft-1/50 px-2.5 py-1 text-[11px] font-medium"
+          aria-label={t("toolbar.countAria", { shown: shownCount, total: totalCount })}
+        >
+          <span className="text-foreground">{filterLabel}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="tabular-nums text-foreground/70">
+            {t("toolbar.countLabel", { shown: shownCount, total: totalCount })}
+          </span>
+        </span>
+        {/* #13: "tasks without deadline" KPI tile — toggles the no_deadline filter. */}
+        <Link
+          href={noDeadlineActive ? "/tasks" : "/tasks?f=no_deadline"}
+          title={
+            noDeadlineCount === null
+              ? t("toolbar.kpiError")
+              : t("toolbar.kpiNoDeadlineHint")
+          }
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+            noDeadlineActive
+              ? "border-cyan/40 bg-cyan-dim text-cyan"
+              : "border-soft bg-card text-foreground/70 hover:text-foreground",
+          )}
+        >
+          <CalendarOff className="size-3.5" />
+          {t("toolbar.kpiNoDeadline")}
+          {noDeadlineCount !== null && (
+            <span className="tabular-nums rounded-full bg-soft-2/60 px-1.5 text-[10px]">
+              {noDeadlineCount}
+            </span>
+          )}
+        </Link>
       </div>
 
       {view === "list" && <TasksListView tasks={tasks} />}

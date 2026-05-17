@@ -801,6 +801,17 @@
     "taskCount": "({count} tasks)",
     "projectInfo": "Project info",
     "allTasks": "View all tasks",
+    "toolbar": {
+      "openTasksFilter": "Open Tasks",
+      "allTasksFilter": "All Tasks",
+      "customFilter": "Filtered",
+      "clearFilter": "Clear filter",
+      "countLabel": "{shown} of {total}",
+      "countAria": "Showing {shown} of {total} tasks",
+      "kpiNoDeadline": "Tasks without deadline",
+      "kpiNoDeadlineHint": "Open tasks with no planned or due date",
+      "kpiError": "Count unavailable"
+    },
     "views": {
       "kanban": "Kanban",
       "list": "List",
@@ -935,6 +946,8 @@
     },
     "form": {
       "project": "Project",
+      "assignees": "Assignees",
+      "tags": "Tags",
       "service": "Service",
       "priority": "Priority",
       "progress": "Progress",
@@ -942,6 +955,7 @@
       "progressVariance": "Progress variance",
       "allocatedTime": "Allocated time",
       "deadline": "Deadline",
+      "plannedDate": "Planned date",
       "plannedDeadline": "Planned deadline",
       "actualDoneDate": "Actual completion date",
       "completedAt": "Completed at",

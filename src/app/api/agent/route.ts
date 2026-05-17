@@ -10,7 +10,7 @@ export const maxDuration = 60;
 import {
   listLiveProjects,
   listLiveClients,
-  listLiveTasks,
+  listLiveTasksWithCount,
   listLiveEmployees,
   getLiveProject,
   getLiveClient,
@@ -165,6 +165,7 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 6. إذا لم تجد البيانات في الجداول، قل ذلك صراحة بدلاً من التخمين
 7. التوصيات رقّمها وحدد الأولوية: عاجل / مهم / اقتراح
 8. استخدم الرموز باعتدال: 📊 📈 📉 🎯 ⚠️ ✅ 💡 🔥
+9. **المهام المتأخرة / الأقدم:** عند السؤال عن "أقدم التاسكات المتأخرة" أو "كل المهام المتأخرة" أو ما شابه، استخدم \`odooListTasks({ overdue: true })\` — النتائج مرتّبة تلقائيًا من الأقدم (الأبعد عن موعدها) إلى الأحدث. اعرضها بهذا الترتيب. إذا كانت قيمة \`truncated\` في النتيجة \`true\` فيجب أن تذكر صراحةً أن القائمة مقتطعة وأنك تعرض \`count\` من أصل \`total\` مهمة، واعرض تضييق الفلتر. لا تخفِ الاقتطاع أبدًا.
 
 ## تنسيق الإجابة المثالي
 \`\`\`
@@ -402,19 +403,32 @@ export async function POST(req: Request) {
           },
         }),
         odooListTasks: tool({
-          description: "List tasks from live Odoo with optional filters. Use overdue=true for late tasks, stage to filter by mapped stage keys (new, in_progress, manager_review, specialist_review, ready_to_send, sent_to_client, client_changes, done). Returns analytics summary alongside the rows.",
+          description: "List tasks from live Odoo with optional filters. Use overdue=true for late tasks, stage to filter by mapped stage keys (new, in_progress, manager_review, specialist_review, ready_to_send, sent_to_client, client_changes, done). Overdue results are ordered oldest-deadline-first, so the most delayed tasks always come back even when capped. Returns `total` (all matching rows in Odoo) and `truncated` — when truncated is true you MUST tell the user the list was capped at `count` of `total` and offer to narrow the filter.",
           inputSchema: z.object({
             overdue: z.boolean().optional().describe("Only past-deadline, non-done tasks"),
             stage: z.array(z.string()).optional().describe("Mapped stage keys to include"),
             projectOdooId: z.number().optional().describe("Filter to a specific Odoo project id"),
             assigneeUserId: z.number().optional().describe("Filter to tasks assigned to this Odoo res.users id"),
-            limit: z.number().default(200),
+            limit: z.number().default(1000).describe("Max rows to return — kept high so full overdue lists come back in one shot"),
           }),
           execute: async ({ overdue, stage, projectOdooId, assigneeUserId, limit }) => {
             try {
-              const tasks = await listLiveTasks({ overdue, stage, projectOdooId, assigneeUserId, limit });
-              const analytics = computeTaskAnalytics(tasks);
-              return { success: true as const, count: tasks.length, analytics, data: tasks };
+              const { rows, total, truncated } = await listLiveTasksWithCount({
+                overdue,
+                stage,
+                projectOdooId,
+                assigneeUserId,
+                limit,
+              });
+              const analytics = computeTaskAnalytics(rows);
+              return {
+                success: true as const,
+                count: rows.length,
+                total,
+                truncated,
+                analytics,
+                data: rows,
+              };
             } catch (err) {
               return { success: false as const, error: err instanceof Error ? err.message : "Odoo fetch failed" };
             }

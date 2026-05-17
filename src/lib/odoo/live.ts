@@ -465,7 +465,36 @@ export interface ListLiveTasksOptions {
   limit?: number;
 }
 
+/**
+ * Result of {@link listLiveTasksWithCount}: the (possibly limited) rows plus
+ * `total`, the count of *all* rows matching the filter in Odoo. When
+ * `total > rows.length` the agent must disclose the result is capped — this
+ * is the fix for issue #14 (the AI silently truncating overdue-task lists).
+ */
+export interface LiveTasksWithCount {
+  rows: LiveTask[];
+  total: number;
+  truncated: boolean;
+}
+
 export async function listLiveTasks(opts: ListLiveTasksOptions = {}): Promise<LiveTask[]> {
+  const { rows } = await listLiveTasksWithCount(opts);
+  return rows;
+}
+
+/**
+ * Same as {@link listLiveTasks} but also reports the total number of matching
+ * rows in Odoo so callers can detect (and disclose) truncation.
+ *
+ * Ordering: when `overdue` is requested the rows are ordered by
+ * `date_deadline asc` (oldest first) so that, even when capped by `limit`,
+ * the OLDEST overdue tasks are the ones returned — not dropped off the
+ * bottom of an `id desc` page. This matches what users mean by "أقدم
+ * التاسكات المتأخرة" (the oldest delayed tasks).
+ */
+export async function listLiveTasksWithCount(
+  opts: ListLiveTasksOptions = {},
+): Promise<LiveTasksWithCount> {
   const odoo = odooFromEnv();
 
   // Load stage names once
@@ -485,16 +514,21 @@ export async function listLiveTasks(opts: ListLiveTasksOptions = {}): Promise<Li
     const today = new Date().toISOString().slice(0, 10);
     domain.push(["date_deadline", "<", today], ["stage_id.name", "!=", "Done"]);
   }
-  if (opts.stage?.length) {
-    // Map dashboard stage keys back to Odoo stage names for filtering
-    // We filter client-side after fetching since mapping is small
-  }
+
+  // When asking for overdue tasks, order oldest-deadline-first so a capped
+  // page never silently drops the earliest (most delayed) tasks.
+  const order = opts.overdue ? "date_deadline asc" : "id desc";
+  const limit = opts.limit ?? 500;
+
+  // Total matching count BEFORE the limit is applied — surfaced to callers
+  // so truncation can be disclosed instead of hidden.
+  const total = await odoo.searchCount("project.task", domain);
 
   const rows = await odoo.searchRead<Record<string, unknown>>(
     "project.task",
     domain,
     ["id", "name", "project_id", "stage_id", "date_deadline", "priority", "user_ids"],
-    { limit: opts.limit ?? 500, order: "id desc" },
+    { limit, order },
   );
 
   let tasks: LiveTask[] = rows.map((r) => {
@@ -518,15 +552,28 @@ export async function listLiveTasks(opts: ListLiveTasksOptions = {}): Promise<Li
     };
   });
 
-  if (opts.stage?.length) {
-    tasks = tasks.filter((t) => opts.stage!.includes(t.stage));
-  }
+  // The `overdue` post-filter only re-applies the domain (defensive) so it
+  // never reduces the row count below `total`. The `stage` filter, however,
+  // is applied client-side — when it is in play we cannot trust the
+  // domain-only `total`, so fall back to the filtered row count.
   if (opts.overdue) {
     const today = new Date().toISOString().slice(0, 10);
     tasks = tasks.filter((t) => t.deadline && t.deadline < today && t.stage !== "done");
   }
 
-  return tasks;
+  let effectiveTotal = total;
+  if (opts.stage?.length) {
+    tasks = tasks.filter((t) => opts.stage!.includes(t.stage));
+    // Stage filtering happens after the limited fetch, so the true total
+    // is unknowable without a full scan — report what we actually have.
+    effectiveTotal = tasks.length;
+  }
+
+  return {
+    rows: tasks,
+    total: effectiveTotal,
+    truncated: tasks.length < effectiveTotal,
+  };
 }
 
 // Reverse map: dashboard stage key → Odoo stage name (for server-side filtering)
@@ -738,7 +785,7 @@ export async function listLiveTaskMessages(odooId: number): Promise<LiveTaskMess
   // its own so a schema mismatch on one Odoo version doesn't kill the
   // chatter feed. Both are best-effort enrichments.
   let trackingRows: Record<string, unknown>[] = [];
-  let fieldNameById = new Map<number, { name: string; label: string }>();
+  const fieldNameById = new Map<number, { name: string; label: string }>();
   if (trackingIds.length) {
     try {
       trackingRows = await odoo.searchRead<Record<string, unknown>>(
