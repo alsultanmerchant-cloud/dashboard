@@ -895,6 +895,7 @@ export type Database = {
           organization_id: string
           phone: string | null
           position: string | null
+          team_leader_employee_id: string | null
           updated_at: string
           user_id: string | null
         }
@@ -913,6 +914,7 @@ export type Database = {
           organization_id: string
           phone?: string | null
           position?: string | null
+          team_leader_employee_id?: string | null
           updated_at?: string
           user_id?: string | null
         }
@@ -931,10 +933,18 @@ export type Database = {
           organization_id?: string
           phone?: string | null
           position?: string | null
+          team_leader_employee_id?: string | null
           updated_at?: string
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "employee_profiles_team_leader_employee_id_fkey"
+            columns: ["team_leader_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "employee_profiles_department_id_fkey"
             columns: ["department_id"]
