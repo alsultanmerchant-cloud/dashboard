@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { OriginBadge } from "@/components/origin-badge";
 
 // Rwasem prints datetimes as `MM/DD/YYYY HH:MM:SS`. Source values are
 // either a date (`YYYY-MM-DD`) or a full ISO timestamp; both are normalised
@@ -132,6 +133,9 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           >
             {p.name}
           </Link>
+
+          {/* PR-F (#3): origin badge — renders only for Odoo-synced projects. */}
+          <OriginBadge source={p.externalSource} />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

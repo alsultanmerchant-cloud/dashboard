@@ -16,6 +16,22 @@
     "switchToEnglish": "Switch to English",
     "switchToArabic": "Switch to Arabic"
   },
+  "OriginBadge": {
+    "odoo": "Odoo",
+    "odooTooltip": "Synced from Odoo",
+    "dashboard": "Dashboard"
+  },
+  "ProjectsSearch": {
+    "fields": {
+      "externalSource": "Record source"
+    },
+    "options": {
+      "externalSource": {
+        "odoo": "Odoo",
+        "dashboard": "Dashboard"
+      }
+    }
+  },
   "Actions": {
     "create": "Create",
     "save": "Save",

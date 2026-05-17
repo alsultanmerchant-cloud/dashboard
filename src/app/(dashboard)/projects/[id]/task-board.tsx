@@ -112,6 +112,8 @@ export type BoardTask = {
   // them (Rwasem parity).
   tags?: Array<{ id: string; name: string; color: number }>;
   created_at?: string;
+  // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
+  external_source?: string | null;
 };
 
 // -------- helpers --------------------------------------------------------

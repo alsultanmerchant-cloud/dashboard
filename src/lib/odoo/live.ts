@@ -41,6 +41,10 @@ export interface LiveProject {
   target: "on_target" | "off_target" | "out" | "sales_deposit" | "renewed" | null;
   stageId: number | null;
   stageName: string | null;
+  // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
+  // Populated by the Supabase-backed mapper; the pure-Odoo XML-RPC path
+  // leaves it "odoo" since every such row is by definition Odoo-sourced.
+  externalSource?: string | null;
   // Display fields derived from partner
   siteAddress: string | null;
   /** Members (Odoo favorite_user_ids), shown as overlapping avatars in card footer. */

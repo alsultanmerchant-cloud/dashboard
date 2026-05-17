@@ -54,6 +54,7 @@ function toListRow(t: RawTask): ListTaskRow | null {
     task_code?: string | null;
     design_count?: number | null;
     closed_subtask_count?: number | null;
+    external_source?: string | null;
   };
 
   return {
@@ -82,6 +83,7 @@ function toListRow(t: RawTask): ListTaskRow | null {
     role_slots,
     design_count: tx.design_count ?? 0,
     closed_subtask_count: tx.closed_subtask_count ?? 0,
+    external_source: tx.external_source ?? null,
     status: t.status,
     created_at: t.created_at,
     client_name: client?.name ?? null,
@@ -132,6 +134,7 @@ export async function loadTaskBoardForGlobalView(
     >,
     design_count: t.design_count,
     closed_subtask_count: t.closed_subtask_count,
+    external_source: t.external_source ?? null,
     tags: t.tags,
     created_at: t.created_at,
   }));

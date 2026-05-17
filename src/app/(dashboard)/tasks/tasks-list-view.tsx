@@ -38,6 +38,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { OriginBadge } from "@/components/origin-badge";
 import type { ListTaskRow } from "./_loaders";
 import { bulkUpdateTasksAction } from "./_bulk_actions";
 
@@ -236,6 +237,8 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
                         </span>
                       )}
                       {t.title}
+                      {/* PR-F (#3): origin badge — Odoo-synced rows only. */}
+                      <OriginBadge source={t.external_source} className="ms-1.5 align-middle" />
                     </Link>
                   </DataTableCell>
                   <DataTableCell className="max-w-[200px] text-xs">

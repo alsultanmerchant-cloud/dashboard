@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import { OriginBadge } from "@/components/origin-badge";
 import { cn } from "@/lib/utils";
 import {
   updateEmployeeAction,
@@ -188,11 +189,8 @@ export function EmployeesAdmin({
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">
                             {r.full_name}
-                            {r.external_source === "odoo" && (
-                              <span className="ms-2 rounded-full bg-cyan/10 px-1.5 py-0.5 text-[9px] font-semibold text-cyan">
-                                Odoo
-                              </span>
-                            )}
+                            {/* PR-F (#3): origin badge — Odoo-synced rows only. */}
+                            <OriginBadge source={r.external_source} className="ms-2 align-middle" />
                           </p>
                           {r.email && (
                             <p className="text-[11px] text-muted-foreground truncate" dir="ltr">

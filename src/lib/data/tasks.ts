@@ -77,6 +77,8 @@ export type BoardTaskData = {
   allocated_time_minutes?: number | null;
   delay_days?: number | null;
   completed_at?: string | null;
+  // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
+  external_source?: string | null;
   task_code: string | null;
   project_id: string;
   project_name: string;
@@ -120,6 +122,8 @@ type TaskBundleRow = {
   actual_done_date: string | null;
   created_at: string;
   project_id: string;
+  // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
+  external_source: string | null;
   // #19: counts surfaced as new task list columns. Both default to 0.
   design_count: number | null;
   closed_subtask_count: number | null;
@@ -242,6 +246,7 @@ export async function listBoardTasks(
       allocated_time_minutes: t.allocated_time_minutes ?? null,
       delay_days: t.delay_days ?? null,
       completed_at: t.completed_at ?? null,
+      external_source: t.external_source ?? null,
       task_code: t.task_code ?? null,
       project_id: project?.id ?? t.project_id,
       project_name: project?.name ?? "—",
@@ -285,6 +290,55 @@ export async function listTaskSearchSuggestions(orgId: string, query: string) {
   });
 }
 
+// Sky Light feedback #5 — a forgiving "type to find a task" autocomplete.
+// Backed by the `search_tasks_typeahead` RPC (migration 0117): arabic FTS +
+// pg_trgm similarity so short / partial Arabic words still match. Mirrors
+// Odoo's name_search behaviour (substring + relevance ranking).
+export type TaskSearchSuggestion = {
+  id: string;
+  title: string;
+  taskCode: string | null;
+  stage: string;
+  projectName: string | null;
+  clientName: string | null;
+};
+
+export async function listTaskTitleSuggestions(
+  orgId: string,
+  query: string,
+): Promise<TaskSearchSuggestion[]> {
+  const search = query.trim();
+  if (!search) return [];
+
+  // Strip characters that break websearch_to_tsquery / similarity input.
+  const sanitized = search.replace(/[%,()]/g, " ").trim();
+  if (!sanitized) return [];
+
+  const { data, error } = await supabaseAdmin.rpc("search_tasks_typeahead", {
+    p_org_id: orgId,
+    p_query: sanitized,
+    p_limit: 8,
+  });
+  if (error) throw error;
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    title: string;
+    taskCode: string | null;
+    stage: string;
+    projectName: string | null;
+    clientName: string | null;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    taskCode: row.taskCode ?? null,
+    stage: row.stage,
+    projectName: row.projectName ?? null,
+    clientName: row.clientName ?? null,
+  }));
+}
+
 export async function getTask(orgId: string, id: string) {
   const { data, error } = await supabaseAdmin
     .from("tasks")
@@ -314,10 +368,11 @@ export async function getTaskSummary(orgId: string, id: string) {
       approval_requested_at, approval_decided_at, stage_owner_positions,
       actual_done_date, allocated_time_minutes,
       progress_percent, expected_progress_percent, progress_slip_percent,
-      delay_days, hold_reason, hold_since,
+      delay_days, hold_reason, hold_since, is_important,
       design_count, revision_count,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name, slug ),
+      task_tag_assignments ( tag:project_tags ( id, name, color ) ),
       task_assignees ( id, role_type, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, avatar_url, job_title, position, department:departments!employee_profiles_department_id_fkey ( id, name ) ) )
     `)
     .eq("organization_id", orgId)

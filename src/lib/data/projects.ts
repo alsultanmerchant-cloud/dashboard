@@ -96,6 +96,8 @@ type BundleRow = {
   start_date: string | null;
   end_date: string | null;
   external_id: string | null;
+  // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
+  external_source: string | null;
   client: { id: string; name: string; address: string | null; external_id: string | null } | null;
   project_manager: { id: string; full_name: string; external_id: string | null; avatar_url: string | null } | null;
   account_manager: { id: string; full_name: string; external_id: string | null; avatar_url: string | null } | null;
@@ -268,6 +270,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       siteAddress: r.client?.address ?? null,
       members: r.members.map((m) => ({ name: m.full_name, avatarUrl: m.avatar_url })),
       customTags: tagsByProject.get(r.id) ?? [],
+      externalSource: r.external_source ?? null,
     };
   });
 

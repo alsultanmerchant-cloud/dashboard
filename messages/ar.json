@@ -16,6 +16,22 @@
     "switchToEnglish": "التبديل إلى الإنجليزية",
     "switchToArabic": "التبديل إلى العربية"
   },
+  "OriginBadge": {
+    "odoo": "أودو",
+    "odooTooltip": "تمت المزامنة من أودو",
+    "dashboard": "لوحة التحكم"
+  },
+  "ProjectsSearch": {
+    "fields": {
+      "externalSource": "مصدر السجل"
+    },
+    "options": {
+      "externalSource": {
+        "odoo": "أودو",
+        "dashboard": "لوحة التحكم"
+      }
+    }
+  },
   "Actions": {
     "create": "إنشاء",
     "save": "حفظ",

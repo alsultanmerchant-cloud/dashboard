@@ -50,7 +50,26 @@ function ilikePattern(value: unknown): string {
   return `*${raw}*`;
 }
 
-function compileRule(rule: Rule, lookup: FieldLookup): string | null {
+// PR-F (#3): the origin saved-filter chip offers a "Dashboard" picklist
+// value, but dashboard-created rows have `external_source IS NULL` (there is
+// no literal "dashboard" stored). When the user picks the `__dashboard__`
+// sentinel we rewrite the rule to a NULL check so the chip behaves like the
+// "Odoo / Dashboard" toggle the spec asks for.
+const DASHBOARD_SENTINEL = "__dashboard__";
+
+function rewriteOriginSentinel(rule: Rule): Rule {
+  if (rule.field !== "external_source") return rule;
+  if (rule.op === "=" && rule.value === DASHBOARD_SENTINEL) {
+    return { ...rule, op: "not_set" };
+  }
+  if (rule.op === "!=" && rule.value === DASHBOARD_SENTINEL) {
+    return { ...rule, op: "set" };
+  }
+  return rule;
+}
+
+function compileRule(rawRule: Rule, lookup: FieldLookup): string | null {
+  const rule = rewriteOriginSentinel(rawRule);
   const field = lookup(rule.field);
   if (!field) return null;
 
