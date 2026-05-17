@@ -152,6 +152,7 @@ const UpdateSchema = z.object({
   job_title: z.string().trim().max(160).nullable().optional(),
   department_id: z.string().uuid().nullable().optional(),
   manager_employee_id: z.string().uuid().nullable().optional(),
+  team_leader_employee_id: z.string().uuid().nullable().optional(),
   position: z.string().trim().max(40).nullable().optional(),
 });
 
@@ -163,6 +164,7 @@ export async function updateEmployeeAction(input: {
   jobTitle?: string | null;
   departmentId?: string | null;
   managerEmployeeId?: string | null;
+  teamLeaderEmployeeId?: string | null;
   position?: string | null;
 }): Promise<ActionResult> {
   let session;
@@ -180,6 +182,7 @@ export async function updateEmployeeAction(input: {
     job_title: input.jobTitle ?? null,
     department_id: input.departmentId ?? null,
     manager_employee_id: input.managerEmployeeId ?? null,
+    team_leader_employee_id: input.teamLeaderEmployeeId ?? null,
     position: input.position ?? null,
   });
   if (!parsed.success) {
@@ -188,6 +191,11 @@ export async function updateEmployeeAction(input: {
   // Self-reference guard: can't be your own manager.
   if (parsed.data.manager_employee_id === parsed.data.id) {
     return { error: "لا يمكن أن يكون الموظف مديرًا لنفسه" };
+  }
+  // #11: can't be your own team leader. Deeper cycles are caught by the
+  // trg_employee_team_leader_no_cycle trigger from migration 0120.
+  if (parsed.data.team_leader_employee_id === parsed.data.id) {
+    return { error: "لا يمكن أن يكون الموظف قائدًا لفريق نفسه" };
   }
 
   const { data: existing } = await supabaseAdmin
@@ -207,6 +215,7 @@ export async function updateEmployeeAction(input: {
       job_title: parsed.data.job_title,
       department_id: parsed.data.department_id,
       manager_employee_id: parsed.data.manager_employee_id,
+      team_leader_employee_id: parsed.data.team_leader_employee_id,
       position: parsed.data.position,
     })
     .eq("id", parsed.data.id);

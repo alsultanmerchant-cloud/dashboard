@@ -40,6 +40,9 @@ export type EmployeeRow = {
   department_name: string | null;
   manager_employee_id: string | null;
   manager_name: string | null;
+  team_leader_employee_id: string | null;
+  team_leader_name: string | null;
+  department_head_name: string | null;
   external_source: string | null;
 };
 
@@ -166,6 +169,8 @@ export function EmployeesAdmin({
                 <th className="px-3 py-2 text-start font-medium">المسمى</th>
                 <th className="px-3 py-2 text-start font-medium">القسم</th>
                 <th className="px-3 py-2 text-start font-medium">المدير</th>
+                <th className="px-3 py-2 text-start font-medium">قائد الفريق</th>
+                <th className="px-3 py-2 text-start font-medium">رئيس القسم</th>
                 <th className="px-3 py-2 text-start font-medium">الحالة</th>
                 {canManage && <th className="px-3 py-2 text-start font-medium" />}
               </tr>
@@ -203,6 +208,8 @@ export function EmployeesAdmin({
                     <td className="px-3 py-2 text-xs">{r.job_title ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">{r.department_name ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">{r.manager_name ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">{r.team_leader_name ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">{r.department_head_name ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">
                       {terminated ? (
                         <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
@@ -337,6 +344,9 @@ function EditEmployeeDialog({
   const [jobTitle, setJobTitle] = useState(employee.job_title ?? "");
   const [departmentId, setDepartmentId] = useState(employee.department_id ?? "");
   const [managerId, setManagerId] = useState(employee.manager_employee_id ?? "");
+  const [teamLeaderId, setTeamLeaderId] = useState(
+    employee.team_leader_employee_id ?? "",
+  );
   const [pending, start] = useTransition();
 
   const managerOptions = allEmployees.filter(
@@ -353,6 +363,7 @@ function EditEmployeeDialog({
         jobTitle: jobTitle || null,
         departmentId: departmentId || null,
         managerEmployeeId: managerId || null,
+        teamLeaderEmployeeId: teamLeaderId || null,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -431,6 +442,21 @@ function EditEmployeeDialog({
             </select>
           </Field>
         </div>
+        <Field label="قائد الفريق">
+          <select
+            value={teamLeaderId}
+            onChange={(e) => setTeamLeaderId(e.target.value)}
+            disabled={pending}
+            className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
+          >
+            <option value="">— بدون —</option>
+            {managerOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.full_name}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
         <Button variant="ghost" size="sm" onClick={onClose} disabled={pending}>

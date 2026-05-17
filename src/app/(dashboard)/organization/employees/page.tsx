@@ -35,24 +35,40 @@ export default async function EmployeesPage() {
   const empById = new Map<string, string>(
     employees.map((e) => [e.id, e.full_name]),
   );
+  // #11: department-head lookup so each employee row can resolve "رئيس القسم"
+  // from their department's head_employee_id.
+  const deptHeadById = new Map<string, string | null>(
+    departments.map((d) => [d.id, d.head_employee_id ?? null]),
+  );
 
-  const rows: EmployeeRow[] = employees.map((e) => ({
-    id: e.id,
-    user_id: e.user_id ?? null,
-    full_name: e.full_name,
-    email: e.email ?? null,
-    phone: e.phone ?? null,
-    job_title: e.job_title ?? null,
-    position: (e as { position?: string | null }).position ?? null,
-    employment_status: e.employment_status ?? "active",
-    department_id: e.department_id ?? null,
-    department_name: e.department_id ? (deptById.get(e.department_id) ?? null) : null,
-    manager_employee_id: (e as { manager_employee_id?: string | null }).manager_employee_id ?? null,
-    manager_name: (e as { manager_employee_id?: string | null }).manager_employee_id
-      ? (empById.get((e as { manager_employee_id?: string }).manager_employee_id!) ?? null)
-      : null,
-    external_source: (e as { external_source?: string | null }).external_source ?? null,
-  }));
+  const rows: EmployeeRow[] = employees.map((e) => {
+    const teamLeaderId =
+      (e as { team_leader_employee_id?: string | null }).team_leader_employee_id ?? null;
+    const deptHeadId = e.department_id
+      ? (deptHeadById.get(e.department_id) ?? null)
+      : null;
+    return {
+      id: e.id,
+      user_id: e.user_id ?? null,
+      full_name: e.full_name,
+      email: e.email ?? null,
+      phone: e.phone ?? null,
+      job_title: e.job_title ?? null,
+      position: (e as { position?: string | null }).position ?? null,
+      employment_status: e.employment_status ?? "active",
+      department_id: e.department_id ?? null,
+      department_name: e.department_id ? (deptById.get(e.department_id) ?? null) : null,
+      manager_employee_id:
+        (e as { manager_employee_id?: string | null }).manager_employee_id ?? null,
+      manager_name: (e as { manager_employee_id?: string | null }).manager_employee_id
+        ? (empById.get((e as { manager_employee_id?: string }).manager_employee_id!) ?? null)
+        : null,
+      team_leader_employee_id: teamLeaderId,
+      team_leader_name: teamLeaderId ? (empById.get(teamLeaderId) ?? null) : null,
+      department_head_name: deptHeadId ? (empById.get(deptHeadId) ?? null) : null,
+      external_source: (e as { external_source?: string | null }).external_source ?? null,
+    };
+  });
 
   const deptOptions: DeptOption[] = departments.map((d) => ({
     id: d.id,

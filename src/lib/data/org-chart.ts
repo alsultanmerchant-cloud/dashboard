@@ -74,11 +74,10 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
   if (deptErr) throw deptErr;
   if (empErr) throw empErr;
 
-  const empById = new Map<string, OrgEmployee>();
-  const employees: OrgEmployee[] = [];
+  const rawEmployees: OrgEmployee[] = [];
   for (const raw of emps ?? []) {
     const e = raw as unknown as OrgEmployee & { position?: string | null };
-    const norm: OrgEmployee = {
+    rawEmployees.push({
       id: e.id,
       user_id: e.user_id ?? null,
       full_name: e.full_name,
@@ -88,6 +87,39 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       manager_employee_id: e.manager_employee_id ?? null,
       employment_status: e.employment_status,
       position: e.position ?? null,
+    });
+  }
+
+  // #8: collapse exact duplicate employees — the seed in migration 0043
+  // inserted some people twice, so the chart rendered them as separate
+  // nodes. Two rows are "the same person" when name + role + department all
+  // match. Keep the row with a linked user account (and active status), and
+  // remap any manager pointers from the dropped twin to the kept one so the
+  // hierarchy stays intact.
+  const dedupKey = (e: OrgEmployee) =>
+    `${e.full_name.trim().toLowerCase()}|${e.position ?? ""}|${e.department_id ?? ""}`;
+  const score = (e: OrgEmployee) =>
+    (e.user_id ? 2 : 0) + (e.employment_status === "active" ? 1 : 0);
+  const keptByKey = new Map<string, OrgEmployee>();
+  for (const e of rawEmployees) {
+    const k = dedupKey(e);
+    const existing = keptByKey.get(k);
+    if (!existing || score(e) > score(existing)) keptByKey.set(k, e);
+  }
+  const idRemap = new Map<string, string>(); // dropped employee id → kept id
+  for (const e of rawEmployees) {
+    const kept = keptByKey.get(dedupKey(e));
+    if (kept && kept.id !== e.id) idRemap.set(e.id, kept.id);
+  }
+  const resolveId = (id: string | null): string | null =>
+    id ? (idRemap.get(id) ?? id) : null;
+
+  const empById = new Map<string, OrgEmployee>();
+  const employees: OrgEmployee[] = [];
+  for (const e of keptByKey.values()) {
+    const norm: OrgEmployee = {
+      ...e,
+      manager_employee_id: resolveId(e.manager_employee_id),
     };
     employees.push(norm);
     empById.set(norm.id, norm);
@@ -110,10 +142,13 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
     });
   }
 
-  // Resolve heads via head_employee_id.
+  // Resolve heads via head_employee_id — through the dedup remap so a head
+  // pointed at a dropped duplicate still resolves to the kept row.
   for (const dept of byId.values()) {
     if (dept.head_employee_id) {
-      dept.head = empById.get(dept.head_employee_id) ?? null;
+      const headId = resolveId(dept.head_employee_id);
+      dept.head_employee_id = headId;
+      dept.head = headId ? empById.get(headId) ?? null : null;
     }
   }
 
