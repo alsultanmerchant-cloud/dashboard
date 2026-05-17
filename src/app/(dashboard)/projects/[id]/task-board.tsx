@@ -256,11 +256,11 @@ function TaskCard({
       />
 
       {/* ── Row 1: stacked meta to avoid clipped inline content ── */}
-      <div className="mb-1 space-y-1 text-[11px] text-muted-foreground/80">
+      <div className="mb-1 space-y-1 text-[11px] text-foreground/70">
         <div className="flex items-start justify-between gap-2 leading-none">
           <span className="tabular-nums font-mono shrink-0">{ref}</span>
           {hasAssignee && (
-            <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-foreground/70">
               {t("assigned")}
             </span>
           )}
@@ -274,7 +274,7 @@ function TaskCard({
           </div>
         )}
         {dl && dl.tone === "future" && (
-          <div className="tabular-nums text-muted-foreground/60">{dl.label}</div>
+          <div className="tabular-nums text-foreground/70">{dl.label}</div>
         )}
       </div>
 
@@ -335,7 +335,7 @@ function TaskCard({
       <dl className="mt-1.5 space-y-1 text-[10px] leading-snug">
         {(task.due_date || task.planned_date) && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">{t("deadline")}:</dt>
+            <dt className="text-foreground/70">{t("deadline")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80" dir="ltr">
               {(task.due_date ?? task.planned_date ?? "").slice(0, 10)}
             </dd>
@@ -343,7 +343,7 @@ function TaskCard({
         )}
         {task.completed_at && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">{t("completionDate")}:</dt>
+            <dt className="text-foreground/70">{t("completionDate")}:</dt>
             <dd className="break-words tabular-nums text-emerald-700 dark:text-emerald-300" dir="ltr">
               {task.completed_at.slice(0, 10)}
             </dd>
@@ -351,7 +351,7 @@ function TaskCard({
         )}
         {task.allocated_time_minutes != null && task.allocated_time_minutes > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">{t("allocatedTime")}:</dt>
+            <dt className="text-foreground/70">{t("allocatedTime")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80">
               {task.allocated_time_minutes >= 60
                 ? locale.startsWith("en")
@@ -365,7 +365,7 @@ function TaskCard({
         )}
         {task.delay_days != null && task.delay_days > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">{t("delayDays")}:</dt>
+            <dt className="text-foreground/70">{t("delayDays")}:</dt>
             <dd className="break-words font-semibold tabular-nums text-red-600 dark:text-red-400">
               {task.delay_days}
             </dd>
@@ -373,7 +373,7 @@ function TaskCard({
         )}
         {expected != null && expected > 0 && (
           <div className="space-y-0.5">
-            <dt className="text-muted-foreground/80">{t("expectedProgress")}:</dt>
+            <dt className="text-foreground/70">{t("expectedProgress")}:</dt>
             <dd className="break-words tabular-nums text-foreground/80">{expected.toFixed(1)}%</dd>
           </div>
         )}
@@ -436,7 +436,7 @@ function TaskCard({
       {/* ── Row 6 (footer): duration | star · ← → · avatar stack ── */}
       <div className="mt-2 flex items-center justify-between gap-1.5">
         {/* left: stage duration */}
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[11px] text-foreground/70">
           <span className="inline-flex items-center gap-0.5 tabular-nums" title={t("timeInStage")}>
             <Clock className="size-3" />
             {stageDuration}
@@ -460,7 +460,7 @@ function TaskCard({
                 </Avatar>
               ))}
               {assigneeList.length > 3 && (
-                <span className="grid size-6 place-items-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground ring-2 ring-card">
+                <span className="grid size-6 place-items-center rounded-full bg-muted text-[9px] font-semibold text-foreground/70 ring-2 ring-card">
                   +{assigneeList.length - 3}
                 </span>
               )}
@@ -473,7 +473,7 @@ function TaskCard({
               disabled={advancing}
               onClick={(e) => { e.stopPropagation(); e.preventDefault(); onRetreat(prv); }}
               onPointerDown={(e) => e.stopPropagation()}
-              className="inline-flex items-center rounded border border-border bg-muted/50 p-0.5 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary disabled:opacity-40"
+              className="inline-flex items-center rounded border border-border bg-muted/50 p-0.5 text-foreground/70 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary disabled:opacity-40"
               title={`${t("moveBackTo")}: ${stageLabel(prv, locale)}`}
             >
               <ChevronRight className="size-3.5 icon-flip-rtl" />
@@ -552,7 +552,7 @@ function VisibleTaskList({
         <button
           type="button"
           onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_CARDS)}
-          className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+          className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-2 text-xs font-medium text-foreground/70 transition-colors hover:border-primary/30 hover:text-foreground"
         >
           {t("showMore", {
             count: Math.min(INITIAL_VISIBLE_CARDS, remainingCount),
@@ -678,7 +678,7 @@ function StageColumn({
               )}
             />
             {tasks.length === 0 && !onQuickCreate && (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[11px] text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[11px] text-foreground/70">
                 {isMoving ? "…" : "—"}
               </div>
             )}
@@ -731,12 +731,12 @@ function ProjectColumn({
             {projectName}
           </Link>
           {clientName && (
-            <div className="line-clamp-1 text-[10px] text-muted-foreground">
+            <div className="line-clamp-1 text-[10px] text-foreground/70">
               {clientName}
             </div>
           )}
         </div>
-        <span className="tabular-nums text-xs text-muted-foreground">
+        <span className="tabular-nums text-xs text-foreground/70">
           {tasks.length}
         </span>
       </div>
@@ -754,7 +754,7 @@ function ProjectColumn({
           )}
         />
         {tasks.length === 0 && (
-          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-foreground/70">
             —
           </div>
         )}
@@ -774,7 +774,7 @@ function BucketColumn({
     <div className="flex w-72 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
       <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
         <div className="line-clamp-1 text-xs font-semibold">{title}</div>
-        <span className="tabular-nums text-xs text-muted-foreground">
+        <span className="tabular-nums text-xs text-foreground/70">
           {tasks.length}
         </span>
       </div>
@@ -792,7 +792,7 @@ function BucketColumn({
           )}
         />
         {tasks.length === 0 && (
-          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-foreground/70">
             —
           </div>
         )}
@@ -818,7 +818,7 @@ function NestedColumn({
     <div className="flex w-80 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
       <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
         <div className="line-clamp-1 text-xs font-semibold">{title}</div>
-        <span className="tabular-nums text-xs text-muted-foreground">
+        <span className="tabular-nums text-xs text-foreground/70">
           {tasks.length}
         </span>
       </div>
@@ -827,7 +827,7 @@ function NestedColumn({
           <NestedSubsection key={sub.id} title={sub.name} tasks={sub.tasks} />
         ))}
         {tasks.length === 0 && (
-          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-foreground/70">
             —
           </div>
         )}
@@ -851,10 +851,10 @@ function NestedSubsection({
         onClick={() => setCollapsed((c) => !c)}
         className="flex w-full items-center justify-between gap-2 rounded-t-lg px-2 py-1.5 hover:bg-soft-1"
       >
-        <span className="line-clamp-1 text-[11px] font-semibold text-muted-foreground">
+        <span className="line-clamp-1 text-[11px] font-semibold text-foreground/70">
           {title}
         </span>
-        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground">
+        <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground/70">
           {tasks.length}
         </span>
       </button>
@@ -1443,7 +1443,7 @@ export function TaskBoard({
           />
         ))}
         {outerCols.length === 0 && (
-          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
             {t("noTasksToShow")}
           </div>
         )}
@@ -1464,7 +1464,7 @@ export function TaskBoard({
           />
         ))}
         {projectColumns.length === 0 && (
-          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
             {t("noTasksToShow")}
           </div>
         )}
@@ -1480,7 +1480,7 @@ export function TaskBoard({
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
         {cols.length === 0 && (
-          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
             {t("noTasksToShow")}
           </div>
         )}
@@ -1500,7 +1500,7 @@ export function TaskBoard({
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
         {customColumns.length === 0 && (
-          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
             {t("noTasksToShow")}
           </div>
         )}
@@ -1522,7 +1522,7 @@ export function TaskBoard({
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
         {cols.length === 0 && (
-          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-muted-foreground">
+          <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
             {t("noTasksToShow")}
           </div>
         )}
