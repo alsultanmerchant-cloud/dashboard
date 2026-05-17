@@ -11,6 +11,7 @@ import {
 } from "@/components/data-table-shell";
 import { StageOwnerEditor } from "./stage-owner-editor";
 import { AddTemplateItemDialog } from "./add-item-dialog";
+import { EditTemplateItemDialog } from "./edit-item-dialog";
 import { listDepartments } from "@/lib/data/employees";
 
 // Server-side helper — renders the distinct roles used across stages as a
@@ -82,6 +83,7 @@ export default async function TaskTemplateDetailPage({
               <DataTableHeaderCell>المدة (يوم)</DataTableHeaderCell>
               <DataTableHeaderCell>الأولوية</DataTableHeaderCell>
               <DataTableHeaderCell>مالك كل مرحلة</DataTableHeaderCell>
+              <DataTableHeaderCell>تعديل</DataTableHeaderCell>
             </tr>
           </DataTableHead>
           <tbody>
@@ -122,6 +124,25 @@ export default async function TaskTemplateDetailPage({
                         )}
                       </span>
                     </div>
+                  </DataTableCell>
+                  <DataTableCell>
+                    <EditTemplateItemDialog
+                      item={{
+                        id: it.id,
+                        title: it.title,
+                        description: it.description ?? null,
+                        default_role_key: it.default_role_key ?? null,
+                        default_department_id: dept?.id ?? null,
+                        offset_days_from_project_start:
+                          it.offset_days_from_project_start,
+                        duration_days: it.duration_days,
+                        priority: it.priority,
+                      }}
+                      departments={departments.map((d) => ({
+                        id: d.id,
+                        name: d.name,
+                      }))}
+                    />
                   </DataTableCell>
                 </DataTableRow>
               );

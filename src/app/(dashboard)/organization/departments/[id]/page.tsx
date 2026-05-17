@@ -11,7 +11,9 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { DepartmentAdminPanel } from "./admin-panel";
+import { EditDepartmentDialog } from "../edit-department-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,24 @@ export default async function DepartmentDetailPage({
   if (!dept) notFound();
 
   const canEdit = hasPermission(session, "org.manage_structure");
+
+  // #12: raw department row for the edit dialog — the org-chart node does not
+  // carry slug / description in editable form.
+  let editRow: {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+  } | null = null;
+  if (canEdit) {
+    const { data } = await supabaseAdmin
+      .from("departments")
+      .select("id, name, slug, description")
+      .eq("id", id)
+      .eq("organization_id", session.orgId)
+      .maybeSingle();
+    editRow = data;
+  }
 
   // Build user list for the picker (org-scoped, has user_id, employed).
   const candidates = chart.employees
@@ -63,6 +83,12 @@ export default async function DepartmentDetailPage({
           { label: dept.name },
         ]}
       />
+
+      {canEdit && editRow && (
+        <div className="flex justify-end">
+          <EditDepartmentDialog department={editRow} />
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
