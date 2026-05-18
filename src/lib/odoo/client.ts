@@ -31,17 +31,31 @@ export class OdooError extends Error {
   }
 }
 
+// A stalled Odoo connection (accepted but never answered) would otherwise
+// hang the whole sync indefinitely — `fetch` has no default timeout. 120s is
+// well above the slowest legitimate Rwasem search_read.
+const JSONRPC_TIMEOUT_MS = 120_000;
+
 async function jsonrpc<T>(url: string, params: unknown): Promise<T> {
-  const res = await fetch(url + JSONRPC_PATH, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "call",
-      params,
-      id: Date.now(),
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url + JSONRPC_PATH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "call",
+        params,
+        id: Date.now(),
+      }),
+      signal: AbortSignal.timeout(JSONRPC_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new OdooError(`Odoo request timed out after ${JSONRPC_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
   if (!res.ok) throw new OdooError(`Odoo HTTP ${res.status}`);
   const body = (await res.json()) as JsonRpcResponse<T>;
   if (body.error) {

@@ -26,6 +26,12 @@ function toEnabled(value: string | string[] | undefined) {
   return value === "1" || value === "true";
 }
 
+// Odoo opens the project view with a "With Active Categories" facet applied.
+// Mirror that: the filter is on unless the URL explicitly carries `=0`.
+function toEnabledDefaultOn(value: string | string[] | undefined) {
+  return value !== "0" && value !== "false";
+}
+
 function toStr(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
@@ -71,7 +77,7 @@ export default async function ProjectsPage({
     pageSize: PAGE_SIZE,
     includeTotals: false,
     search: typeof sp.q === "string" ? sp.q : "",
-    onlyWithCategories: toEnabled(sp.onlyWithCategories),
+    onlyWithCategories: toEnabledDefaultOn(sp.onlyWithCategories),
     onlyFavorites: toEnabled(sp.onlyFavorites),
     onlyWithManager: toEnabled(sp.onlyWithManager),
     onlyMine: toEnabled(sp.onlyMine),
@@ -111,7 +117,7 @@ export default async function ProjectsPage({
         <ProjectsList
           key={JSON.stringify({
             q: typeof sp.q === "string" ? sp.q : "",
-            onlyWithCategories: toEnabled(sp.onlyWithCategories),
+            onlyWithCategories: toEnabledDefaultOn(sp.onlyWithCategories),
             onlyFavorites: toEnabled(sp.onlyFavorites),
             onlyWithManager: toEnabled(sp.onlyWithManager),
             onlyMine: toEnabled(sp.onlyMine),
@@ -153,9 +159,6 @@ async function ProjectsOverviewMetrics({
   const lastOfMonth = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
 
   const totalProjectsHref = buildOverviewHref(searchParams);
-  const withManagerHref = buildOverviewHref(searchParams, {
-    bool: { onlyWithManager: true },
-  });
   const needsDeadlineHref = buildOverviewHref(searchParams, {
     customFilter: {
       type: "group",
@@ -204,13 +207,13 @@ async function ProjectsOverviewMetrics({
         size="compact"
       />
       <MetricCard
-        label="مشاريع بمدير"
-        value={totals.withManager}
-        hint={`${totals.projects - totals.withManager} بدون مدير`}
+        label="المهام المفتوحة بدون ديدلاين"
+        value={totals.openTasksNoDeadline}
+        hint="مهام غير مكتملة بدون تاريخ"
         icon={<AlertTriangle className="size-5" />}
-        tone={totals.withManager === totals.projects ? "success" : "warning"}
+        tone={totals.openTasksNoDeadline > 0 ? "warning" : "success"}
         size="compact"
-        href={withManagerHref}
+        href="/tasks?f=no_deadline"
       />
       <MetricCard
         label="تحتاج موعد انتهاء"

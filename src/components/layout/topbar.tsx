@@ -14,16 +14,6 @@ import { CommandPaletteTrigger, QuickCreateTrigger } from "@/components/command-
 import { ThemeToggle } from "@/components/theme-toggle";
 import { intlLocale } from "@/lib/utils-format";
 
-const SmartSearchBar = dynamic(
-  () =>
-    import("@/app/(dashboard)/tasks/smart-search-bar").then((mod) => ({
-      default: mod.SmartSearchBar,
-    })),
-  {
-    loading: () => <div className="h-10 rounded-xl border border-white/30 bg-white/8" />,
-  },
-);
-
 const ProjectsSearchBar = dynamic(
   () =>
     import("@/app/(dashboard)/projects/projects-search-bar").then((mod) => ({
@@ -104,7 +94,8 @@ export function Topbar({
   const title = pageMeta?.title ?? (meta ? tTitles(meta.titleKey) : tGroups("dashboard"));
   const subtitle = pageMeta?.subtitle ?? (meta?.subtitleKey ? tTitles(meta.subtitleKey) : tApp("title"));
   const showRefresh = pathname === "/dashboard" && !!onRefresh;
-  const showTaskSearch = pathname === "/tasks";
+  // /tasks renders its search bar inline in the page toolbar (Rwasem-style),
+  // so the topbar only carries the projects search.
   const showProjectSearch = pathname === "/projects";
   const formattedLastUpdated = lastUpdatedAt
     ? new Intl.DateTimeFormat(intlLocale(locale), {
@@ -162,11 +153,7 @@ export function Topbar({
 
           <div className="hidden md:flex items-center gap-2">
             <QuickCreateTrigger className={primaryCreateClass} />
-            {showTaskSearch ? (
-              <div className="w-[min(42vw,34rem)]">
-                <SmartSearchBar variant="topbar" />
-              </div>
-            ) : showProjectSearch ? (
+            {showProjectSearch ? (
               <div className="w-[min(42vw,34rem)]">
                 <ProjectsSearchBar />
               </div>

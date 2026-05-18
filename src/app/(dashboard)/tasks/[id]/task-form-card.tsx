@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Briefcase } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { PriorityBadge, ServiceBadge } from "@/components/status-badges";
+import { avatarUrlFor } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { DesignCountsRow } from "./design-counts-row";
 import { DeadlineEditor } from "./deadline-editor";
@@ -76,11 +78,25 @@ function Row({
   );
 }
 
+type AssigneeChip = {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+};
+
+type TagChip = {
+  id: string;
+  name: string;
+  color: number;
+};
+
 export function TaskFormCard({
   task,
   project,
   client,
   service,
+  assignees,
+  tags,
   computedDelayDays,
   overdue,
   formattedCompletedAt,
@@ -91,6 +107,8 @@ export function TaskFormCard({
   project: Project;
   client: Client;
   service: Service;
+  assignees: AssigneeChip[];
+  tags: TagChip[];
   computedDelayDays: number | null;
   overdue: boolean;
   formattedCompletedAt: string | null;
@@ -133,6 +151,55 @@ export function TaskFormCard({
               <div className="text-[11px] text-muted-foreground">
                 {client.name}
               </div>
+            )}
+          </Row>
+          <Row label={t("assignees")}>
+            {assignees.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {assignees.map((a) => (
+                  <span
+                    key={a.id}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-soft-1 py-0.5 ps-0.5 pe-2"
+                    title={a.full_name}
+                  >
+                    <Avatar className="size-5">
+                      {a.avatar_url ? (
+                        <AvatarImage
+                          src={a.avatar_url}
+                          fallbackSrc={avatarUrlFor(a.full_name)}
+                          alt={a.full_name}
+                        />
+                      ) : null}
+                      <AvatarFallback className="bg-cyan/20 text-[9px] font-semibold text-cyan">
+                        {a.full_name.slice(0, 1)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-[11px]">{a.full_name}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </Row>
+          <Row label={t("tags")}>
+            {tags.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1 rounded-full bg-soft-1 px-2 py-0.5 text-[11px]"
+                  >
+                    <span
+                      className="size-1.5 rounded-full bg-cyan"
+                      aria-hidden="true"
+                    />
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">—</span>
             )}
           </Row>
           <Row label={t("service")}>
@@ -195,6 +262,15 @@ export function TaskFormCard({
               overdue={overdue}
               canEdit={canEditDeadline}
             />
+          </Row>
+          <Row label={t("plannedDate")}>
+            {task.planned_date ? (
+              <span className="tabular-nums" dir="ltr">
+                {task.planned_date}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
           </Row>
           {task.due_date &&
             task.planned_date &&

@@ -20,8 +20,9 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Loader2, Calendar, Clock, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { Loader2, Clock, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { avatarUrlFor } from "@/lib/utils-format";
 import {
   TASK_STAGES,
   TASK_STAGE_LABELS,
@@ -67,7 +68,7 @@ function prevStage(s: TaskStage): TaskStage | null {
   if (i <= 0) return null;
   return TASK_STAGES[i - 1];
 }
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { moveTaskStageAction, quickCreateTaskAction } from "../../tasks/_actions";
 
 const INITIAL_VISIBLE_CARDS = 24;
@@ -88,6 +89,11 @@ export type BoardTask = {
   progress_slip_percent?: number | null;
   allocated_time_minutes?: number | null;
   delay_days?: number | null;
+  // Odoo's pre-formatted time-in-stage string ("2d 22h 47m").
+  current_stage_duration?: string | null;
+  // Odoo manual kanban-sort field + Odoo task id — drive in-column order.
+  sequence?: number | null;
+  external_id?: string | null;
   completed_at?: string | null;
   // tasks.status — distinct from stage. Used by the "Status" group-by (#18)
   // to mirror Odoo's `state` filter. Optional because legacy callers pre-#18
@@ -150,18 +156,34 @@ function serviceColor(slug: string): string {
   return PALETTE[h % PALETTE.length];
 }
 
+// Precise "Xd Yh Zm" duration (mirrors Rwasem's task-card "Duration" line).
 function formatDuration(fromIso: string, locale: string): string {
-  const ms = Date.now() - new Date(fromIso).getTime();
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours < 1) {
-    const m = Math.max(0, Math.floor(ms / 60_000));
-    return locale.startsWith("en") ? `${m}m` : `${m}د`;
-  }
-  if (hours < 48) return locale.startsWith("en") ? `${hours}h` : `${hours}س`;
-  return locale.startsWith("en") ? `${Math.floor(hours / 24)}d` : `${Math.floor(hours / 24)}ي`;
+  const ms = Math.max(0, Date.now() - new Date(fromIso).getTime());
+  const totalMin = Math.floor(ms / 60_000);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
+  const m = totalMin % 60;
+  const en = locale.startsWith("en");
+  const parts: string[] = [];
+  if (d) parts.push(en ? `${d}d` : `${d}ي`);
+  if (h) parts.push(en ? `${h}h` : `${h}س`);
+  if (m || parts.length === 0) parts.push(en ? `${m}m` : `${m}د`);
+  return parts.join(" ");
 }
 
-// Relative deadline label — mirrors Rwasem: "متأخرة ب X يوم" / "اليوم" / "خلال X أيام".
+// Odoo's 12-slot kanban tag palette (color index 0-11) → hex, so synced task
+// tags (HOLD, Extra Focus, …) render with the same colour as in Rwasem.
+const ODOO_TAG_HEX: Record<number, string> = {
+  0: "#9c9c9c", 1: "#e6586a", 2: "#f0a04b", 3: "#f6c344",
+  4: "#4ea0c4", 5: "#9b6dc4", 6: "#e0c3a0", 7: "#4aa39a",
+  8: "#3597d3", 9: "#d4607f", 10: "#5fa85f", 11: "#7b6dd4",
+};
+function tagHex(color: number | null | undefined): string {
+  return ODOO_TAG_HEX[color ?? 0] ?? ODOO_TAG_HEX[0];
+}
+
+// Relative deadline label — mirrors Rwasem's wording exactly:
+// "In X days" / "Today" / "Tomorrow" / "X days ago".
 function deadlineLabel(deadline: string | null, locale: string): {
   label: string;
   tone: "late" | "today" | "soon" | "future";
@@ -170,18 +192,43 @@ function deadlineLabel(deadline: string | null, locale: string): {
   const days = Math.round(
     (new Date(deadline).getTime() - Date.now()) / 86_400_000,
   );
-  if (locale.startsWith("en")) {
-    if (days < 0) return { label: `${-days}d overdue`, tone: "late" };
-    if (days === 0) return { label: "Today", tone: "today" };
-    if (days === 1) return { label: "Tomorrow", tone: "soon" };
-    if (days <= 7) return { label: `In ${days} days`, tone: "soon" };
-    return { label: `${days}d left`, tone: "future" };
+  const en = locale.startsWith("en");
+  if (days < 0) {
+    const n = -days;
+    return {
+      label: en ? `${n} ${n === 1 ? "day" : "days"} ago` : `منذ ${n} يوم`,
+      tone: "late",
+    };
   }
-  if (days < 0) return { label: `متأخرة ب ${-days} يوم`, tone: "late" };
-  if (days === 0) return { label: "اليوم", tone: "today" };
-  if (days === 1) return { label: "غداً", tone: "soon" };
-  if (days <= 7) return { label: `خلال ${days} أيام`, tone: "soon" };
-  return { label: `لـ ${days} يوم`, tone: "future" };
+  if (days === 0) return { label: en ? "Today" : "اليوم", tone: "today" };
+  if (days === 1) return { label: en ? "Tomorrow" : "غداً", tone: "soon" };
+  return {
+    label: en ? `In ${days} days` : `خلال ${days} يوم`,
+    tone: days <= 7 ? "soon" : "future",
+  };
+}
+
+// Rwasem `project.task` kanban order for cards inside a stage column:
+// `priority desc, sequence asc, date_deadline asc (nulls last), id desc`.
+const PRIORITY_RANK: Record<string, number> = {
+  urgent: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+};
+function compareTasksOdoo(a: BoardTask, b: BoardTask): number {
+  const pr = (PRIORITY_RANK[b.priority] ?? 1) - (PRIORITY_RANK[a.priority] ?? 1);
+  if (pr !== 0) return pr;
+  const seq = (a.sequence ?? 10) - (b.sequence ?? 10);
+  if (seq !== 0) return seq;
+  const ad = a.planned_date ?? a.due_date;
+  const bd = b.planned_date ?? b.due_date;
+  if (ad && bd) {
+    if (ad !== bd) return ad < bd ? -1 : 1;
+  } else if (ad) return -1; // task with a deadline sorts before one without
+  else if (bd) return 1;
+  // Final tiebreak — Odoo task id descending.
+  return (Number(b.external_id) || 0) - (Number(a.external_id) || 0);
 }
 
 function stageLabel(stage: TaskStage, locale: string): string {
@@ -205,7 +252,10 @@ function TaskCard({
 }) {
   const t = useTranslations("TasksBoard");
   const locale = useLocale();
-  const stageDuration = formatDuration(task.stage_entered_at, locale);
+  // Prefer Odoo's pre-formatted time-in-stage string; fall back to a local
+  // estimate for dashboard-created tasks that have no Odoo value.
+  const duration =
+    task.current_stage_duration ?? formatDuration(task.stage_entered_at, locale);
   const deadline = task.planned_date ?? task.due_date;
   const dl = deadlineLabel(task.stage === "done" ? null : deadline, locale);
   const progress =
@@ -220,15 +270,18 @@ function TaskCard({
       : task.expected_progress_percent
         ? parseFloat(String(task.expected_progress_percent))
         : null;
-  const slip = expected != null ? expected - progress : null;
+  // "Behind %" — use Odoo's own progress_slip value when synced, so the card
+  // matches Rwasem exactly; otherwise derive it from expected − progress.
+  const slip =
+    typeof task.progress_slip_percent === "number"
+      ? task.progress_slip_percent
+      : expected != null
+        ? expected - progress
+        : null;
   const nxt = nextStage(task.stage);
   const prv = prevStage(task.stage);
-  const ref = task.task_code ?? `TSK-${String(task.id).slice(0, 8).toUpperCase()}`;
-  const hasAssignee = TASK_ROLE_TYPES.some((r) => task.role_slots[r]);
   const svcColor = task.service ? serviceColor(task.service.slug) : null;
 
-  // Index in the 8-stage Rwasem sequence — drives the bottom progress dots.
-  const stageIndex = TASK_STAGES.indexOf(task.stage);
   // Up to 3 distinct assignees collapsed to an overlap stack.
   const assigneeList = TASK_ROLE_TYPES
     .map((r) => task.role_slots[r])
@@ -255,30 +308,7 @@ function TaskCard({
         style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
       />
 
-      {/* ── Row 1: stacked meta to avoid clipped inline content ── */}
-      <div className="mb-1 space-y-1 text-[11px] text-foreground/70">
-        <div className="flex items-start justify-between gap-2 leading-none">
-          <span className="tabular-nums font-mono shrink-0">{ref}</span>
-          {hasAssignee && (
-            <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-foreground/70">
-              {t("assigned")}
-            </span>
-          )}
-        </div>
-        {task.project && (
-          <div className="leading-relaxed break-words">
-            <span>{task.project.name}</span>
-            {task.project.client_name && (
-              <span className="opacity-60"> - {task.project.client_name}</span>
-            )}
-          </div>
-        )}
-        {dl && dl.tone === "future" && (
-          <div className="tabular-nums text-foreground/70">{dl.label}</div>
-        )}
-      </div>
-
-      {/* ── Row 2: Task title ── */}
+      {/* ── Title ── */}
       <Link
         href={`/tasks/${task.id}`}
         className="block break-words text-[13px] font-bold leading-snug text-foreground transition-colors hover:text-primary"
@@ -287,163 +317,114 @@ function TaskCard({
         {task.title}
       </Link>
 
-      {/* ── Row 3: service badge · overdue badge · Behind % ── */}
-      <div className="mt-1.5 flex flex-col items-start gap-1">
-        {task.service && (
+      {/* ── Tags (HOLD, Extra Focus, …) — Odoo kanban colours ── */}
+      {task.tags && task.tags.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {task.tags.map((tag) => (
+            <span
+              key={tag.id}
+              className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide text-foreground"
+              style={{ backgroundColor: `${tagHex(tag.color)}40` }}
+            >
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* ── Relative deadline — muted ahead, red once due/overdue ── */}
+      {dl && (
+        <div
+          className={cn(
+            "mt-1.5 text-[11px] tabular-nums",
+            dl.tone === "late" || dl.tone === "today"
+              ? "font-semibold text-red-600 dark:text-red-400"
+              : "text-muted-foreground",
+          )}
+          title={deadline ?? undefined}
+        >
+          {dl.label}
+        </div>
+      )}
+
+      {/* ── Duration ── */}
+      <div className="mt-1.5 flex items-center gap-1 text-[12px] text-foreground">
+        <Clock className="size-3.5 shrink-0 text-muted-foreground" />
+        <span>
+          {t("duration")}: <span className="tabular-nums">{duration}</span>
+        </span>
+      </div>
+
+      {/* ── Service badge with colour dot ── */}
+      {task.service && (
+        <div className="mt-1.5">
           <span
-            className="inline-flex max-w-full items-center rounded-full bg-muted/60 px-2.5 py-1 text-[10px] text-foreground"
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] text-foreground"
             title={task.service.name}
           >
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
+            />
             <span className="break-words whitespace-normal leading-none">
               {task.service.name}
             </span>
           </span>
-        )}
-        {dl && dl.tone !== "future" && (
-          <span
-            className={cn(
-              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
-              dl.tone === "late"  && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-              dl.tone === "today" && "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-              dl.tone === "soon"  && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-            )}
-            title={deadline ?? undefined}
-          >
-            <Calendar className="size-2.5 shrink-0" />
-            {dl.label}
-          </span>
-        )}
-        {slip != null && slip > 5 && (
-          <span
-            className="inline-flex items-center rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-400 tabular-nums"
-            title={t("progressVariance")}
-          >
-            {t("behind")} {Math.round(slip)}%
-          </span>
-        )}
-        {slip != null && slip < -2 && (
-          <span
-            className="inline-flex items-center rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums"
-            title={t("progressVariance")}
-          >
-            {t("ahead")} {Math.round(-slip)}%
-          </span>
-        )}
-      </div>
-
-      {/* ── Row 3.5: one-column detail rows so card data never compresses ── */}
-      <dl className="mt-1.5 space-y-1 text-[10px] leading-snug">
-        {(task.due_date || task.planned_date) && (
-          <div className="space-y-0.5">
-            <dt className="text-foreground/70">{t("deadline")}:</dt>
-            <dd className="break-words tabular-nums text-foreground/80" dir="ltr">
-              {(task.due_date ?? task.planned_date ?? "").slice(0, 10)}
-            </dd>
-          </div>
-        )}
-        {task.completed_at && (
-          <div className="space-y-0.5">
-            <dt className="text-foreground/70">{t("completionDate")}:</dt>
-            <dd className="break-words tabular-nums text-emerald-700 dark:text-emerald-300" dir="ltr">
-              {task.completed_at.slice(0, 10)}
-            </dd>
-          </div>
-        )}
-        {task.allocated_time_minutes != null && task.allocated_time_minutes > 0 && (
-          <div className="space-y-0.5">
-            <dt className="text-foreground/70">{t("allocatedTime")}:</dt>
-            <dd className="break-words tabular-nums text-foreground/80">
-              {task.allocated_time_minutes >= 60
-                ? locale.startsWith("en")
-                  ? `${(task.allocated_time_minutes / 60).toFixed(1)} h`
-                  : `${(task.allocated_time_minutes / 60).toFixed(1)} س`
-                : locale.startsWith("en")
-                  ? `${task.allocated_time_minutes} m`
-                  : `${task.allocated_time_minutes} د`}
-            </dd>
-          </div>
-        )}
-        {task.delay_days != null && task.delay_days > 0 && (
-          <div className="space-y-0.5">
-            <dt className="text-foreground/70">{t("delayDays")}:</dt>
-            <dd className="break-words font-semibold tabular-nums text-red-600 dark:text-red-400">
-              {task.delay_days}
-            </dd>
-          </div>
-        )}
-        {expected != null && expected > 0 && (
-          <div className="space-y-0.5">
-            <dt className="text-foreground/70">{t("expectedProgress")}:</dt>
-            <dd className="break-words tabular-nums text-foreground/80">{expected.toFixed(1)}%</dd>
-          </div>
-        )}
-      </dl>
-
-      {/* ── Row 4: progress bar (only when meaningful) ── */}
-      {(progress > 0 || (expected != null && expected > 0)) && (
-        <div
-          className="mt-2"
-          title={
-            expected != null
-              ? `${t("progress")} ${progress.toFixed(0)}% / ${t("expected")} ${expected.toFixed(0)}%`
-              : `${t("progress")} ${progress.toFixed(0)}%`
-          }
-        >
-          <div className="relative h-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn(
-                "h-full rounded-full transition-all",
-                slip != null && slip > 10
-                  ? "bg-red-500"
-                  : slip != null && slip > 0
-                    ? "bg-amber-500"
-                    : "bg-emerald-500",
-              )}
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-            />
-            {expected != null && expected > 0 && (
-              <div
-                className="absolute top-0 h-full w-0.5 bg-foreground/40"
-                style={{ insetInlineStart: `${Math.min(100, Math.max(0, expected))}%` }}
-                aria-hidden
-              />
-            )}
-          </div>
         </div>
       )}
 
-      {/* ── Row 5: stage progression strip (Odoo-style 8-step dots) ── */}
+      {/* ── Progress bar ── */}
       <div
-        className="mt-2 flex items-center gap-1"
-        title={`${t("stage")}: ${stageLabel(task.stage, locale)} (${stageIndex + 1}/${TASK_STAGES.length})`}
+        className="mt-2"
+        title={
+          expected != null
+            ? `${t("progress")} ${progress.toFixed(0)}% / ${t("expected")} ${expected.toFixed(0)}%`
+            : `${t("progress")} ${progress.toFixed(0)}%`
+        }
       >
-        {TASK_STAGES.map((s, i) => (
-          <span
-            key={s}
-            aria-hidden
+        <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
             className={cn(
-              "h-1 flex-1 rounded-full transition-colors",
-              i < stageIndex
-                ? "bg-primary/50"
-                : i === stageIndex
-                  ? "bg-primary"
-                  : "bg-muted",
+              "h-full rounded-full transition-all",
+              slip != null && slip > 10
+                ? "bg-red-500"
+                : slip != null && slip > 0
+                  ? "bg-amber-500"
+                  : "bg-emerald-500",
             )}
+            style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
           />
-        ))}
+          {expected != null && expected > 0 && (
+            <div
+              className="absolute top-0 h-full w-0.5 bg-foreground/40"
+              style={{ insetInlineStart: `${Math.min(100, Math.max(0, expected))}%` }}
+              aria-hidden
+            />
+          )}
+        </div>
       </div>
 
-      {/* ── Row 6 (footer): duration | star · ← → · avatar stack ── */}
-      <div className="mt-2 flex items-center justify-between gap-1.5">
-        {/* left: stage duration */}
-        <div className="flex items-center gap-1.5 text-[11px] text-foreground/70">
-          <span className="inline-flex items-center gap-0.5 tabular-nums" title={t("timeInStage")}>
-            <Clock className="size-3" />
-            {stageDuration}
-          </span>
+      {/* ── Behind / ahead variance ── */}
+      {slip != null && slip > 5 && (
+        <div className="mt-1 text-[11px] font-medium tabular-nums text-red-600 dark:text-red-400">
+          {t("behind")}: {Math.round(slip)}%
+        </div>
+      )}
+      {slip != null && slip < -2 && (
+        <div className="mt-1 text-[11px] font-medium tabular-nums text-emerald-600 dark:text-emerald-400">
+          {t("ahead")}: {Math.round(-slip)}%
+        </div>
+      )}
+
+      {/* ── Footer: priority star · time-in-stage · assignees · stage nav ── */}
+      <div className="mt-2 flex items-center justify-between gap-1.5 border-t border-soft/70 pt-2">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <PriorityStar priority={task.priority} />
+          <Clock className="size-3.5" aria-label={t("timeInStage")} />
         </div>
 
-        {/* right: avatar stack · priority · prev ← · next → */}
+        {/* right: avatar stack · prev ← · next → */}
         <div className="flex items-center gap-1.5">
           {assigneeList.length > 0 && (
             <div className="flex -space-x-1.5 -space-x-reverse">
@@ -454,6 +435,13 @@ function TaskCard({
                   className="size-6 ring-2 ring-card"
                   title={e.full_name}
                 >
+                  {e.avatar_url && (
+                    <AvatarImage
+                      src={e.avatar_url}
+                      fallbackSrc={avatarUrlFor(e.full_name)}
+                      alt={e.full_name}
+                    />
+                  )}
                   <AvatarFallback className="bg-primary/20 text-[9px] text-primary">
                     {e.full_name[0]}
                   </AvatarFallback>
@@ -466,7 +454,6 @@ function TaskCard({
               )}
             </div>
           )}
-          <PriorityStar priority={task.priority} />
           {prv && onRetreat && (
             <button
               type="button"
@@ -1148,7 +1135,14 @@ export function TaskBoard({
   const t = useTranslations("TasksBoard");
   const locale = useLocale();
   const router = useRouter();
-  const [tasks, setTasks] = useState(initialTasks);
+  const [taskState, setTasks] = useState(initialTasks);
+  // Cards are always rendered in Rwasem's kanban order. `taskState` holds the
+  // raw set (drag-drop mutates it); `tasks` is the sorted view every column
+  // grouping reads from.
+  const tasks = useMemo(
+    () => [...taskState].sort(compareTasksOdoo),
+    [taskState],
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pending, start] = useTransition();
   // Folded columns — Rwasem defaults "done" to folded; user can unfold and

@@ -18,6 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
+import {
+  SearchableSelect,
+  type SearchableOption,
+} from "@/components/ui/searchable-select";
 import { OriginBadge } from "@/components/origin-badge";
 import { cn } from "@/lib/utils";
 import {
@@ -349,9 +353,13 @@ function EditEmployeeDialog({
   );
   const [pending, start] = useTransition();
 
-  const managerOptions = allEmployees.filter(
-    (e) => e.id !== employee.id && e.employment_status === "active",
-  );
+  const employeeOptions: SearchableOption[] = allEmployees
+    .filter((e) => e.id !== employee.id && e.employment_status === "active")
+    .map((e) => ({
+      value: e.id,
+      label: e.full_name,
+      hint: [e.job_title, e.department_name].filter(Boolean).join(" • ") || null,
+    }));
 
   function save() {
     start(async () => {
@@ -427,35 +435,35 @@ function EditEmployeeDialog({
             </select>
           </Field>
           <Field label="المدير المباشر">
-            <select
+            <SearchableSelect
               value={managerId}
-              onChange={(e) => setManagerId(e.target.value)}
+              onValueChange={setManagerId}
+              options={[
+                { value: "", label: "— بدون —" },
+                ...employeeOptions,
+              ]}
               disabled={pending}
-              className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
-            >
-              <option value="">— بدون —</option>
-              {managerOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.full_name}
-                </option>
-              ))}
-            </select>
+              placeholder="— بدون —"
+              searchPlaceholder="ابحث عن موظف..."
+              emptyMessage="لا توجد نتائج"
+              ariaLabel="المدير المباشر"
+            />
           </Field>
         </div>
         <Field label="قائد الفريق">
-          <select
+          <SearchableSelect
             value={teamLeaderId}
-            onChange={(e) => setTeamLeaderId(e.target.value)}
+            onValueChange={setTeamLeaderId}
+            options={[
+              { value: "", label: "— بدون —" },
+              ...employeeOptions,
+            ]}
             disabled={pending}
-            className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
-          >
-            <option value="">— بدون —</option>
-            {managerOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.full_name}
-              </option>
-            ))}
-          </select>
+            placeholder="— بدون —"
+            searchPlaceholder="ابحث عن موظف..."
+            emptyMessage="لا توجد نتائج"
+            ariaLabel="قائد الفريق"
+          />
         </Field>
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">

@@ -138,16 +138,18 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           <OriginBadge source={p.externalSource} />
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                onClick={(e) => e.stopPropagation()}
-                className="relative shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="إجراءات"
-                title="المزيد"
-              >
-                <MoreVertical className="size-4" />
-              </button>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={(e) => e.stopPropagation()}
+                  className="relative shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="إجراءات"
+                  title="المزيد"
+                />
+              }
+            >
+              <MoreVertical className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -299,7 +301,7 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
         {/* Footer: task count · activity icon · avatar · status dot */}
         <div className="mt-2.5 flex items-center justify-between border-t border-border pt-2">
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary group-hover:underline">
-            {p.taskCount} {p.taskCount === 1 ? "مهمة" : "مهام"}
+            {p.openTaskCount} {p.openTaskCount === 1 ? "مهمة" : "مهام"}
           </span>
           <Timer className="size-3.5 text-muted-foreground" aria-hidden />
           <div className="flex items-center gap-1.5">

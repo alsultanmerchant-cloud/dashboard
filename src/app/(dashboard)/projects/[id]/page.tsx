@@ -29,7 +29,6 @@ import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate, type Emp
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
 import { ProjectHolidaysPanel, type ProjectHolidayRow } from "./project-holidays-panel";
-import { AttachmentsTab, type AttachmentRow } from "../../tasks/[id]/attachments-tab";
 import { ProjectNotesPanel, type ProjectNoteRow } from "./project-notes-panel";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
 import { listProjectRenewalCycles, daysUntilRenewal } from "@/lib/data/renewals";
@@ -37,6 +36,7 @@ import { RenewalsPanel } from "./renewals/renewals-panel";
 import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
 import { buildTaskFiltersFromParams } from "../../tasks/_filter_params";
 import { SmartSearchBar } from "../../tasks/smart-search-bar";
+import { ProjectDocumentsPanel } from "./project-documents-panel";
 
 function formatShortDate(
   value: string | Date | null | undefined,
@@ -406,14 +406,7 @@ export default async function ProjectDetailPage({
       />
       <Card className="mb-8">
         <CardContent className="p-4">
-          <Suspense
-            fallback={<div className="text-sm text-muted-foreground">{t("loading.attachments")}</div>}
-          >
-            <ProjectDocumentsSection
-              orgId={session.orgId}
-              projectId={project.id}
-            />
-          </Suspense>
+          <ProjectDocumentsPanel projectId={project.id} />
         </CardContent>
       </Card>
 
@@ -899,86 +892,6 @@ async function ProjectNotesSection({
       canCreate={canCreate}
     />
   );
-}
-
-async function ProjectDocumentsSection({
-  orgId,
-  projectId,
-}: {
-  orgId: string;
-  projectId: string;
-}) {
-  // Aggregate from BOTH tables: attachments directly on the project AND those
-  // on each task. In parallel, then merge + sort by created_at desc.
-  const [projAttach, taskAttach] = await Promise.all([
-    supabaseAdmin
-      .from("project_attachments")
-      .select(
-        "id, filename, mimetype, size_bytes, storage_path, source_url, created_at",
-      )
-      .eq("organization_id", orgId)
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(200),
-    supabaseAdmin
-      .from("task_attachments")
-      .select(
-        "id, task_id, filename, mimetype, size_bytes, storage_path, source_url, created_at, task:tasks!task_attachments_task_id_fkey!inner ( id, task_code, project_id )",
-      )
-      .eq("organization_id", orgId)
-      .eq("task.project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(500),
-  ]);
-
-  const projectTasks = ((taskAttach.data ?? []) as Array<{
-    id: string;
-    task_id: string;
-    filename: string;
-    mimetype: string | null;
-    size_bytes: number | null;
-    storage_path: string | null;
-    source_url: string | null;
-    created_at: string;
-    task:
-      | { id: string; task_code: string | null; project_id: string }
-      | { id: string; task_code: string | null; project_id: string }[]
-      | null;
-  }>)
-    .map((r) => {
-      const t = Array.isArray(r.task) ? r.task[0] : r.task;
-      return {
-        id: r.id,
-        task_id: r.task_id,
-        task_code: t?.task_code ?? null,
-        task_title: null,
-        filename: r.filename,
-        mimetype: r.mimetype,
-        size_bytes: r.size_bytes,
-        storage_path: r.storage_path,
-        source_url: r.source_url,
-        created_at: r.created_at,
-      } satisfies AttachmentRow;
-    });
-
-  const projectLevel: AttachmentRow[] = (projAttach.data ?? []).map((r) => ({
-    id: r.id as string,
-    task_id: "",
-    task_code: null,
-    task_title: null,
-    filename: r.filename as string,
-    mimetype: (r.mimetype as string | null) ?? null,
-    size_bytes: (r.size_bytes as number | null) ?? null,
-    storage_path: (r.storage_path as string | null) ?? null,
-    source_url: (r.source_url as string | null) ?? null,
-    created_at: r.created_at as string,
-  }));
-
-  const rows: AttachmentRow[] = [...projectLevel, ...projectTasks].sort(
-    (a, b) => (a.created_at < b.created_at ? 1 : -1),
-  );
-
-  return <AttachmentsTab rows={rows} showTaskColumn />;
 }
 
 async function ProjectHolidaysSection({

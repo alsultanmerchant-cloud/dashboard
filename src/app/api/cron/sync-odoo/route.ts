@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { odooFromEnv } from "@/lib/odoo/client";
-import { runImport } from "@/lib/odoo/importer";
+import { runImport, type ImportPhase } from "@/lib/odoo/importer";
 import { syncStageHistory } from "@/lib/odoo/syncs/stage-history";
 import { syncProjectFollowers } from "@/lib/odoo/syncs/project-followers";
 import { syncTaskFollowers } from "@/lib/odoo/syncs/task-followers";
@@ -19,17 +19,22 @@ import { syncTaskAssigneeManagers } from "@/lib/odoo/syncs/task-assignee-manager
 //   ?only=<csv>   Run ONLY these steps. Everything else is skipped.
 //   ?skip=<csv>   Run everything EXCEPT these steps.
 //
-// Step names: core, stage-history, assignee-managers, followers, members,
-// attachments. When neither param is set, all steps run sequentially.
+// Step names: core, core-base, core-projects, core-tasks, core-comments,
+// stage-history, assignee-managers, followers, members, attachments.
+// `core` runs the whole import in one go (manual full runs); the `core-*`
+// slices run one phase each so the staggered cron never blows the function
+// budget. When neither param is set, all steps run sequentially.
 //
-// Staggered cron layout (4 jobs, each comfortably under 280s):
-//   :00  ?only=core
-//   :15  ?only=stage-history,assignee-managers
-//   :30  ?only=followers
-//   :45  ?only=members,attachments
+// Staggered cron layout (see migration 0116) — one phase per job:
+//   :00  core-base       :30  core-comments
+//   :08  core-projects   :38  stage-history,assignee-managers
+//   :16  core-tasks      :46  followers
+//                        :54  members,attachments
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// 800s headroom for manual full `?only=core` runs (Vercel Pro). The staggered
+// cron uses the core-* phase slices, each of which fits well under 300s.
+export const maxDuration = 800;
 export const dynamic = "force-dynamic";
 
 const DEFAULT_ORG_SLUG = process.env.NEXT_PUBLIC_DEFAULT_ORG_SLUG ?? "rawasm-demo";
@@ -106,6 +111,25 @@ async function handle(request: NextRequest) {
     }
   }
 
+  // Phased core slices. The full `core` is too heavy for a single 300s
+  // function, so the staggered cron runs one phase per entry. Each is
+  // isolated — a partial failure doesn't abort the others — and rebuilds its
+  // ID maps from already-synced rows, so order across cron runs is enough.
+  const CORE_PHASE_STEPS: Record<string, ImportPhase> = {
+    "core-base": "base",
+    "core-projects": "projects",
+    "core-tasks": "tasks",
+    "core-comments": "comments",
+  };
+  const corePhaseSteps: Record<string, StepStatus> = {};
+  for (const [stepName, phase] of Object.entries(CORE_PHASE_STEPS)) {
+    if (shouldRun(stepName)) {
+      corePhaseSteps[stepName] = await runStep(() =>
+        runImport(odoo, orgSlug, [phase]),
+      );
+    }
+  }
+
   // Supplementary steps — each isolated so a partial failure is acceptable.
   const stageHistoryStep = shouldRun("stage-history")
     ? await runStep(() => syncStageHistory(odoo, orgSlug))
@@ -128,6 +152,7 @@ async function handle(request: NextRequest) {
 
   const steps = {
     core: coreStep,
+    ...corePhaseSteps,
     assigneeManagers: assigneeManagersStep,
     stageHistory: stageHistoryStep,
     followers: followersStep,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Network, Trash2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  OPERATORS_BY_KIND,
   defaultValueFor,
   emptyRule,
+  getOperatorOptions,
   type FieldDef,
   type FilterTree,
   type Group,
@@ -53,6 +54,7 @@ export function CustomFilterDialog({
   onIncludeArchivedChange: (next: boolean) => void;
   onApply: (tree: FilterTree | null) => void;
 }) {
+  const t = useTranslations("CustomFilter");
   const defaultField = fields[0];
   const [tree, setTree] = useState<FilterTree>(
     initialTree ?? { type: "group", connector: "or", children: [emptyRule(defaultField)] },
@@ -72,18 +74,18 @@ export function CustomFilterDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Custom Filter</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-1 text-xs text-foreground">
-              <span>Match</span>
+              <span>{t("match")}</span>
               <ConnectorSelect
                 value={tree.connector}
                 onChange={(c) => setTree({ ...tree, connector: c })}
               />
-              <span>of the following rules:</span>
+              <span>{t("ofFollowingRules")}</span>
             </div>
             <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <input
@@ -92,7 +94,7 @@ export function CustomFilterDialog({
                 checked={includeArchived}
                 onChange={(e) => onIncludeArchivedChange(e.target.checked)}
               />
-              Include archived
+              {t("includeArchived")}
             </label>
           </div>
 
@@ -110,7 +112,7 @@ export function CustomFilterDialog({
             }
             className="text-xs font-medium text-cyan hover:underline"
           >
-            + New Rule
+            + {t("newRule")}
           </button>
         </div>
 
@@ -122,14 +124,14 @@ export function CustomFilterDialog({
               onOpenChange(false);
             }}
           >
-            Add
+            {t("add")}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("cancel")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -144,14 +146,15 @@ function ConnectorSelect({
   value: "and" | "or";
   onChange: (v: "and" | "or") => void;
 }) {
+  const t = useTranslations("CustomFilter");
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as "and" | "or")}
       className="rounded-md border border-soft bg-card/50 px-1.5 py-0.5 text-xs text-cyan focus:border-cyan focus:outline-none"
     >
-      <option value="or">any</option>
-      <option value="and">all</option>
+      <option value="or">{t("connectors.any")}</option>
+      <option value="and">{t("connectors.all")}</option>
     </select>
   );
 }
@@ -237,6 +240,7 @@ function NestedGroup({
   onAddBranch: () => void;
   depth: number;
 }) {
+  const t = useTranslations("CustomFilter");
   return (
     <div className="rounded-md border border-soft bg-soft-1/40 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -245,7 +249,7 @@ function NestedGroup({
             value={group.connector}
             onChange={(c) => onChange({ ...group, connector: c })}
           />
-          <span>of:</span>
+          <span>{t("of")}</span>
         </div>
         <RowActions onAddRule={onAddRule} onAddBranch={onAddBranch} onDelete={onDelete} />
       </div>
@@ -255,7 +259,7 @@ function NestedGroup({
         onClick={() => onChange({ ...group, children: [...group.children, emptyRule(fields[0])] })}
         className="mt-2 text-[11px] font-medium text-cyan hover:underline"
       >
-        + New Rule
+        + {t("newRule")}
       </button>
     </div>
   );
@@ -276,8 +280,9 @@ function RuleRow({
   onAddRule: () => void;
   onAddBranch: () => void;
 }) {
+  const t = useTranslations("CustomFilter");
   const field = fields.find((f) => f.name === rule.field) ?? fields[0];
-  const ops = OPERATORS_BY_KIND[field.kind];
+  const ops = getOperatorOptions(field.kind, t);
 
   return (
     <div className="flex items-start gap-2">
@@ -290,8 +295,8 @@ function RuleRow({
               onChange({
                 type: "rule",
                 field: nextField.name,
-                op: OPERATORS_BY_KIND[nextField.kind][0].op,
-                value: defaultValueFor(nextField, OPERATORS_BY_KIND[nextField.kind][0].op),
+                op: getOperatorOptions(nextField.kind)[0].op,
+                value: defaultValueFor(nextField, getOperatorOptions(nextField.kind)[0].op),
               })
             }
           />
@@ -338,12 +343,13 @@ function RowActions({
   onAddBranch: () => void;
   onDelete: () => void;
 }) {
+  const t = useTranslations("CustomFilter");
   return (
     <div className="flex shrink-0 items-center gap-1 pt-1 text-muted-foreground">
       <button
         type="button"
         onClick={onAddRule}
-        title="Add new rule"
+        title={t("actions.addRule")}
         className="rounded p-1 transition-colors hover:bg-soft-1 hover:text-foreground"
       >
         <Plus className="size-3.5" />
@@ -351,7 +357,7 @@ function RowActions({
       <button
         type="button"
         onClick={onAddBranch}
-        title="Add branch (nested group)"
+        title={t("actions.addBranch")}
         className="rounded p-1 transition-colors hover:bg-soft-1 hover:text-foreground"
       >
         <Network className="size-3.5" />
@@ -359,7 +365,7 @@ function RowActions({
       <button
         type="button"
         onClick={onDelete}
-        title="Delete"
+        title={t("actions.delete")}
         className="rounded p-1 transition-colors hover:bg-soft-1 hover:text-cc-red"
       >
         <Trash2 className="size-3.5" />

@@ -23,13 +23,106 @@
   },
   "ProjectsSearch": {
     "fields": {
-      "externalSource": "مصدر السجل"
+      "externalSource": "مصدر السجل",
+      "projectManager": "مدير المشروع",
+      "accountManager": "مدير الحساب",
+      "client": "العميل",
+      "socialSpecialist": "أخصائي السوشيال",
+      "mediaSpecialist": "أخصائي الميديا",
+      "seoSpecialist": "أخصائي تحسين محركات البحث",
+      "socialManager": "مدير السوشيال",
+      "mediaManager": "مدير الميديا",
+      "seoManager": "مدير تحسين محركات البحث",
+      "name": "الاسم",
+      "projectCode": "كود المشروع",
+      "description": "الوصف",
+      "storeName": "اسم المتجر",
+      "target": "الهدف",
+      "package": "الباقة",
+      "durationLabel": "المدة",
+      "siteAddress": "عنوان الموقع",
+      "status": "الحالة",
+      "priority": "الأولوية",
+      "startDate": "تاريخ البدء",
+      "endDate": "تاريخ الانتهاء",
+      "nextRenewalDate": "تاريخ التجديد التالي",
+      "createdOn": "تاريخ الإنشاء",
+      "lastUpdatedOn": "آخر تحديث",
+      "heldOn": "تاريخ الإيقاف",
+      "favorite": "مفضّل",
+      "cycleLengthMonths": "مدة الدورة (أشهر)",
+      "progress": "التقدّم",
+      "documentCount": "عدد المستندات",
+      "color": "اللون",
+      "taskSequence": "تسلسل المهام"
     },
     "options": {
       "externalSource": {
         "odoo": "أودو",
         "dashboard": "لوحة التحكم"
+      },
+      "status": {
+        "active": "نشط",
+        "onHold": "موقوف",
+        "completed": "مكتمل",
+        "cancelled": "ملغى"
+      },
+      "priority": {
+        "low": "منخفضة",
+        "medium": "متوسطة",
+        "high": "عالية",
+        "urgent": "عاجلة"
       }
+    },
+    "searchPlaceholder": "ابحث في المشاريع…",
+    "aria": {
+      "projectFilters": "فلاتر المشاريع",
+      "clearSearch": "مسح البحث",
+      "openProjectOptions": "فتح خيارات المشاريع"
+    },
+    "chips": {
+      "dateFilter": "فلتر التاريخ",
+      "groupedBy": "مُجمّع حسب {label}"
+    },
+    "actions": {
+      "editCustomFilter": "تعديل الفلتر المخصص",
+      "addCustomFilter": "إضافة فلتر مخصص",
+      "moreFilters": "فلاتر إضافية",
+      "addCustomGroup": "إضافة تجميع مخصص",
+      "clearAllFilters": "مسح كل الفلاتر"
+    },
+    "columns": {
+      "filters": "الفلاتر",
+      "groupBy": "التجميع",
+      "favorites": "المفضّلة"
+    },
+    "dateSections": {
+      "startDate": "تاريخ البدء",
+      "endDate": "تاريخ الانتهاء"
+    },
+    "favorites": {
+      "copyCurrentSearchUrl": "نسخ رابط البحث الحالي",
+      "help": "الفلاتر والتجميع محفوظة في الرابط — انسخ الرابط لحفظ أو مشاركة هذا البحث."
+    },
+    "boolFilters": {
+      "onlyMine": "مشاريعي",
+      "onlyFavorites": "المفضّلة",
+      "onlyUnassigned": "غير مُسندة",
+      "onlyWithCategories": "لديها فئات خدمات",
+      "archived": "المؤرشفة",
+      "onlyWithManager": "لديها مدير",
+      "overTimesheets": "تجاوز السجل الزمني",
+      "allCategoriesArchived": "كل الفئات مؤرشفة"
+    },
+    "groupOptions": {
+      "projectManager": "مدير المشروع",
+      "status": "الحالة",
+      "tags": "الوسوم",
+      "accountManager": "مدير الحساب",
+      "client": "العميل",
+      "target": "الهدف",
+      "startMonth": "شهر البدء",
+      "endMonth": "شهر الانتهاء"
     }
   },
   "Actions": {
@@ -71,16 +164,46 @@
     "placeholderNotes": "أضف ملاحظاتك…"
   },
   "Empty": {
-    "clients": { "title": "لا يوجد عملاء بعد", "description": "أضف أول عميل لتبدأ في إنشاء المشاريع وتوزيع المهام على الفريق." },
-    "projects": { "title": "لا توجد مشاريع", "description": "أنشئ مشروعك الأول من العميل المناسب وحدد الخدمات المقدمة." },
-    "tasks": { "title": "لا توجد مهام في هذا العرض", "description": "غيّر التصفية أو أضف مهمة جديدة لتظهر هنا." },
-    "handovers": { "title": "لا توجد نماذج تسليم", "description": "نماذج التسليم من المبيعات تظهر هنا فور إرسالها وتتحول تلقائيًا إلى مشاريع." },
-    "notifications": { "title": "لا توجد تنبيهات جديدة", "description": "ستظهر هنا الإشارات والتسليمات وتحديثات المهام." },
-    "aiInsights": { "title": "لم يتم تجميع رؤى بعد", "description": "مع بدء استخدام النظام ستتراكم الأحداث وتظهر رؤى مفيدة في هذه اللوحة." },
-    "serviceCategories": { "title": "لا توجد تصنيفات بعد", "description": "أضف تصنيفًا أو استورد تصنيفات Odoo لتظهر هنا قوالب المهام المرتبطة." },
-    "renewalCycles": { "title": "لا توجد دورات تجديد", "description": "اضبط جدول التجديد ثم ابدأ دورة جديدة لتُولَّد المهام تلقائيًا." },
-    "escalations": { "title": "لا توجد تصعيدات", "description": "ستظهر هنا التصعيدات الموجَّهة إليك تلقائيًا عند خرق SLA." },
-    "exceptions": { "title": "لا توجد استثناءات", "description": "افتح استثناءً يدويًا من صفحة المهمة عندما يستدعي الموقف ذلك." }
+    "clients": {
+      "title": "لا يوجد عملاء بعد",
+      "description": "أضف أول عميل لتبدأ في إنشاء المشاريع وتوزيع المهام على الفريق."
+    },
+    "projects": {
+      "title": "لا توجد مشاريع",
+      "description": "أنشئ مشروعك الأول من العميل المناسب وحدد الخدمات المقدمة."
+    },
+    "tasks": {
+      "title": "لا توجد مهام في هذا العرض",
+      "description": "غيّر التصفية أو أضف مهمة جديدة لتظهر هنا."
+    },
+    "handovers": {
+      "title": "لا توجد نماذج تسليم",
+      "description": "نماذج التسليم من المبيعات تظهر هنا فور إرسالها وتتحول تلقائيًا إلى مشاريع."
+    },
+    "notifications": {
+      "title": "لا توجد تنبيهات جديدة",
+      "description": "ستظهر هنا الإشارات والتسليمات وتحديثات المهام."
+    },
+    "aiInsights": {
+      "title": "لم يتم تجميع رؤى بعد",
+      "description": "مع بدء استخدام النظام ستتراكم الأحداث وتظهر رؤى مفيدة في هذه اللوحة."
+    },
+    "serviceCategories": {
+      "title": "لا توجد تصنيفات بعد",
+      "description": "أضف تصنيفًا أو استورد تصنيفات Odoo لتظهر هنا قوالب المهام المرتبطة."
+    },
+    "renewalCycles": {
+      "title": "لا توجد دورات تجديد",
+      "description": "اضبط جدول التجديد ثم ابدأ دورة جديدة لتُولَّد المهام تلقائيًا."
+    },
+    "escalations": {
+      "title": "لا توجد تصعيدات",
+      "description": "ستظهر هنا التصعيدات الموجَّهة إليك تلقائيًا عند خرق SLA."
+    },
+    "exceptions": {
+      "title": "لا توجد استثناءات",
+      "description": "افتح استثناءً يدويًا من صفحة المهمة عندما يستدعي الموقف ذلك."
+    }
   },
   "NotFound": {
     "title": "الصفحة غير موجودة",
@@ -173,8 +296,17 @@
     "pageDescription": "صندوق وارد التصعيدات الموجَّهة إليك. تتبَّع الاستثناءات المفتوحة وأقرَّها أو أغلقها.",
     "exceptions": "الاستثناءات",
     "escalationsSection": "التصعيدات",
-    "kindLabels": { "client": "عميل", "deadline": "موعد", "quality": "جودة", "resource": "موارد" },
-    "statusLabels": { "open": "مفتوح", "acknowledged": "مُقَرّ به", "closed": "مغلق" },
+    "kindLabels": {
+      "client": "عميل",
+      "deadline": "موعد",
+      "quality": "جودة",
+      "resource": "موارد"
+    },
+    "statusLabels": {
+      "open": "مفتوح",
+      "acknowledged": "مُقَرّ به",
+      "closed": "مغلق"
+    },
     "isOpen": "مفتوح",
     "isClosed": "مغلق",
     "openedAt": "فُتح",
@@ -484,6 +616,11 @@
       "renewals": "جاري تحميل دورات التجديد...",
       "board": "جاري تحميل لوحة المهام..."
     },
+    "attachmentsPanel": {
+      "show": "عرض المرفقات",
+      "hide": "إخفاء المرفقات",
+      "error": "تعذر تحميل المرفقات."
+    },
     "empty": {
       "team": "لا يوجد أعضاء فريق مضافون بعد.",
       "followers": "لا يوجد متابعون.",
@@ -648,7 +785,8 @@
       "role": "الدور المسؤول",
       "offsetDays": "الإزاحة (يوم)",
       "durationDays": "المدة (يوم)",
-      "priority": "الأولوية"
+      "priority": "الأولوية",
+      "edit": "تعديل"
     }
   },
   "ServiceCategoriesPage": {
@@ -762,7 +900,8 @@
       "department": "القسم",
       "slug": "المعرّف",
       "description": "الوصف",
-      "employeeCount": "عدد الموظفين"
+      "employeeCount": "عدد الموظفين",
+      "edit": "تعديل"
     }
   },
   "OrganizationEmployeesPage": {
@@ -867,7 +1006,8 @@
       "sent_to_client": "أرسلت للعميل",
       "client_changes": "تعديلات العميل",
       "done": "مكتملة"
-    }
+    },
+    "duration": "المدة"
   },
   "TaskDetailPage": {
     "breadcrumbs": {
@@ -1295,6 +1435,10 @@
       "title": "تعذر تحميل المهمة",
       "description": "قد يكون الرابط غير صحيح، أو المهمة محذوفة، أو لا تملك صلاحية الاطلاع عليها.",
       "back": "الرجوع إلى المهام"
+    },
+    "star": {
+      "star": "إضافة إلى المفضّلة",
+      "unstar": "إزالة من المفضّلة"
     }
   },
   "TaskLabels": {
@@ -1662,5 +1806,122 @@
     "hrSubtitle": "ينطلق في مرحلة لاحقة",
     "financeTitle": "المالية",
     "financeSubtitle": "ينطلق في مرحلة لاحقة"
+  },
+  "CustomFilter": {
+    "title": "إضافة فلتر مخصص",
+    "match": "طابق",
+    "ofFollowingRules": "من القواعد التالية:",
+    "includeArchived": "تضمين المؤرشفة",
+    "newRule": "قاعدة جديدة",
+    "add": "إضافة",
+    "cancel": "إلغاء",
+    "of": "من:",
+    "connectors": {
+      "any": "أيّ",
+      "all": "كل",
+      "and": "و",
+      "or": "أو"
+    },
+    "actions": {
+      "addRule": "إضافة قاعدة",
+      "addBranch": "إضافة فرع",
+      "delete": "حذف"
+    },
+    "operators": {
+      "eq": "=",
+      "neq": "≠",
+      "gt": ">",
+      "gte": "≥",
+      "lt": "<",
+      "lte": "≤",
+      "contains": "يحتوي",
+      "notContains": "لا يحتوي",
+      "isIn": "ضمن",
+      "isNotIn": "ليس ضمن",
+      "between": "بين",
+      "isSet": "محدّد",
+      "isNotSet": "غير محدّد"
+    },
+    "boolean": {
+      "true": "نعم",
+      "false": "لا"
+    },
+    "selectField": "اختر حقلاً",
+    "searchPlaceholder": "ابحث في الحقول…",
+    "noFieldsMatch": "لا توجد حقول مطابقة",
+    "valuePlaceholder": "القيمة",
+    "multiValuePlaceholder": "قيم مفصولة بفواصل"
+  },
+  "TasksSearch": {
+    "searchPlaceholder": "ابحث في المهام…",
+    "clearAll": "مسح الكل",
+    "loading": "جارٍ التحميل…",
+    "aria": {
+      "removeChip": "إزالة {label}",
+      "clearGrouping": "مسح التجميع",
+      "clearSearch": "مسح البحث",
+      "openSearchOptions": "فتح خيارات البحث"
+    },
+    "columns": {
+      "filters": "الفلاتر",
+      "groupBy": "التجميع",
+      "favorites": "المفضّلة"
+    },
+    "suggestions": {
+      "loading": "جارٍ البحث…",
+      "error": "فشل البحث",
+      "empty": "لا نتائج",
+      "tasksTitle": "المهام",
+      "title": "المشاريع",
+      "noStoreName": "بدون اسم متجر"
+    },
+    "saved": {
+      "saveCurrentSearch": "حفظ البحث الحالي",
+      "filterNamePlaceholder": "اسم الفلتر",
+      "nameRequired": "الاسم مطلوب",
+      "save": "حفظ",
+      "delete": "حذف",
+      "deleted": "تم حذف الفلتر",
+      "empty": "لا فلاتر محفوظة بعد",
+      "saved": "محفوظة",
+      "default": "افتراضي",
+      "defaultSet": "تم التعيين كافتراضي",
+      "defaultUnset": "تم إلغاء الافتراضي",
+      "makeDefault": "اجعله افتراضياً",
+      "shared": "مُشارَك",
+      "sharedByColleague": "مُشارَك من زميل",
+      "cannotEditColleagueFilter": "لا يمكنك تعديل فلتر زميل"
+    },
+    "dateFields": {
+      "actualDoneDate": "تاريخ الإغلاق",
+      "createdAt": "تاريخ الإنشاء",
+      "dueDate": "الموعد النهائي",
+      "stageEnteredAt": "آخر تحديث للمرحلة"
+    },
+    "filters": {
+      "mine": "مهامي",
+      "followed": "المتابَعة",
+      "unassigned": "غير مُسندة",
+      "starred": "المهام المميّزة",
+      "nearTimesheets": "الجداول الزمنية 80٪",
+      "overTimesheets": "الجداول الزمنية >100٪",
+      "open": "المهام المفتوحة",
+      "done": "المهام المغلقة",
+      "archived": "مؤرشفة",
+      "inProgressPct": "قيد التنفيذ (1–99٪)",
+      "completedPct": "مكتملة (100٪)",
+      "notStarted": "لم تبدأ (0٪)"
+    },
+    "groups": {
+      "assignee": "المسؤولون",
+      "stage": "المرحلة",
+      "project": "المشروع",
+      "tags": "الوسوم",
+      "customer": "العميل",
+      "createdAt": "تاريخ الإنشاء",
+      "lastStageUpdate": "آخر تحديث للمرحلة",
+      "deadline": "الموعد النهائي",
+      "progress": "نطاق التقدّم"
+    }
   }
 }

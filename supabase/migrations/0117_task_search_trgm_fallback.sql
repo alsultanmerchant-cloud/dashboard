@@ -313,6 +313,10 @@ begin
       'created_at', t.created_at,
       'archived_at', t.archived_at,
       'project_id', t.project_id,
+      -- PR-F (#3): origin so the UI can render the "أودو" badge. Carried here
+      -- so this file stays consistent with 0118 regardless of apply order —
+      -- whichever of 0117/0118 lands last, the row payload is identical.
+      'external_source', t.external_source,
       'design_count', coalesce(t.design_count, 0),
       'closed_subtask_count', coalesce(t.closed_subtask_count, 0),
       'project', case when p.id is null then null else

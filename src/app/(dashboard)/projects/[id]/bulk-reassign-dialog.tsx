@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Loader2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -10,6 +10,10 @@ import {
   DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import {
+  EmployeeCombobox,
+  type EmployeeComboboxOption,
+} from "@/components/forms/employee-combobox";
 import { bulkReassignAction } from "./_bulk_actions";
 
 type EmployeeOption = { id: string; full_name: string; user_id: string | null; job_title: string | null };
@@ -44,13 +48,18 @@ export function BulkReassignDialog({
       else next.add(id);
       return next;
     });
-  const toggleActor = (id: string) =>
-    setActorIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Followers must resolve to an auth user; employees without one are shown
+  // but disabled (the combobox renders them greyed-out and unpickable).
+  const employeeOptions: EmployeeComboboxOption[] = useMemo(
+    () =>
+      employees.map((e) => ({
+        id: e.id,
+        full_name: e.full_name,
+        job_title: e.job_title,
+        disabled: target === "followers" && !e.user_id,
+      })),
+    [employees, target],
+  );
 
   const onSubmit = () =>
     start(async () => {
@@ -87,11 +96,9 @@ export function BulkReassignDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          <Users className="ml-1 size-3.5" />
-          {t("trigger")}
-        </Button>
+      <DialogTrigger render={<Button size="sm" variant="outline" />}>
+        <Users className="ml-1 size-3.5" />
+        {t("trigger")}
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
@@ -179,37 +186,14 @@ export function BulkReassignDialog({
               <label className="text-xs font-medium text-muted-foreground">
                 {target === "followers" ? t("targets.followers") : t("employeesLabel")}
               </label>
-              <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-md border bg-muted/20 p-2 sm:grid-cols-2">
-                {employees.map((e) => {
-                  const disabled = target === "followers" && !e.user_id;
-                  return (
-                    <button
-                      key={e.id}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => toggleActor(e.id)}
-                      className={
-                        "flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-start text-xs transition-colors " +
-                        (actorIds.has(e.id)
-                          ? "border-cyan/60 bg-cyan/15"
-                          : "border-border bg-background hover:bg-muted/40") +
-                        (disabled ? " opacity-40 cursor-not-allowed" : "")
-                      }
-                      title={disabled ? t("employeeWithoutUser") : ""}
-                    >
-                      <span className="truncate">
-                        <span className="font-medium">{e.full_name}</span>
-                        {e.job_title && (
-                          <span className="ms-1 text-[10px] text-muted-foreground">
-                            · {e.job_title}
-                          </span>
-                        )}
-                      </span>
-                      {actorIds.has(e.id) && <span className="text-cyan">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              <EmployeeCombobox
+                multiple
+                value={Array.from(actorIds)}
+                onChange={(next) => setActorIds(new Set(next))}
+                options={employeeOptions}
+                disabled={pending}
+                placeholder={t("employeesLabel")}
+              />
             </div>
           )}
         </div>

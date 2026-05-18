@@ -144,7 +144,7 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                   )}
                 </td>
                 <td className="px-2 py-2 text-end align-middle tabular-nums font-semibold text-primary">
-                  {p.taskCount}
+                  {p.openTaskCount}
                 </td>
               </tr>
             );

@@ -107,6 +107,8 @@ export interface OdooTask {
   id: number;
   name: string;
   active?: boolean;
+  // Manual kanban-sort field — drives card order inside a stage column.
+  sequence?: number;
   project_id: OdooMany2one;
   stage_id: OdooMany2one;
   user_ids: OdooMany2many;
@@ -139,6 +141,10 @@ export interface OdooTask {
   document_count?: number;
   // Odoo core
   email_cc?: string | false;
+  // project.task.tag_ids — m2m → project.tags (shared with project tags).
+  tag_ids?: OdooMany2many;
+  // ks_gantt addon — "Mark As Important" boolean (the form-header star).
+  ks_mark_important?: boolean;
 }
 
 // Map Odoo stage names → dashboard task_stage enum.

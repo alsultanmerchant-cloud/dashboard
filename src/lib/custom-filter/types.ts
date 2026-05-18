@@ -118,6 +118,40 @@ export const OPERATORS_BY_KIND: Record<FieldKind, OperatorOption[]> = {
   ],
 };
 
+export function getOperatorLabel(
+  op: Operator,
+  t?: (key: string) => string,
+): string {
+  const keyMap: Record<Operator, string> = {
+    "=": "eq",
+    "!=": "neq",
+    ">": "gt",
+    ">=": "gte",
+    "<": "lt",
+    "<=": "lte",
+    "ilike": "contains",
+    "not ilike": "notContains",
+    "in": "isIn",
+    "not in": "isNotIn",
+    "between": "between",
+    "set": "isSet",
+    "not_set": "isNotSet",
+  };
+  return t ? t(`operators.${keyMap[op]}`) : op;
+}
+
+export function getOperatorOptions(
+  kind: FieldKind,
+  t?: (key: string) => string,
+): OperatorOption[] {
+  const options = OPERATORS_BY_KIND[kind];
+  if (!t) return options;
+  return options.map((option) => ({
+    ...option,
+    label: getOperatorLabel(option.op, t),
+  }));
+}
+
 /** A leaf rule: `<field> <operator> <value>`. */
 export type Rule = {
   type: "rule";

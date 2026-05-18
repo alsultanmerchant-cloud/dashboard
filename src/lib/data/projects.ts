@@ -293,8 +293,13 @@ const aggregateProjectTotals = cache(async (organizationId: string) => {
   const firstOfMonth = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
   const lastOfMonth = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
 
-  const [projectsCount, tasksCount, withMgrCount, needsDeadlineCount, renewalsThisMonthCount] =
-    await Promise.all([
+  const [
+    projectsCount,
+    tasksCount,
+    openTasksNoDeadlineCount,
+    needsDeadlineCount,
+    renewalsThisMonthCount,
+  ] = await Promise.all([
     supabaseAdmin
       .from("projects")
       .select("id", { count: "exact", head: true })
@@ -307,11 +312,13 @@ const aggregateProjectTotals = cache(async (organizationId: string) => {
       .is("archived_at", null)
       .neq("project.status", "archived"),
     supabaseAdmin
-      .from("projects")
+      .from("tasks")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
-      .neq("status", "archived")
-      .not("project_manager_employee_id", "is", null),
+      .is("archived_at", null)
+      .neq("stage", "done")
+      .is("planned_date", null)
+      .is("due_date", null),
     supabaseAdmin
       .from("projects")
       .select("id", { count: "exact", head: true })
@@ -329,7 +336,7 @@ const aggregateProjectTotals = cache(async (organizationId: string) => {
   return {
     projects: projectsCount.count ?? 0,
     tasks: tasksCount.count ?? 0,
-    withManager: withMgrCount.count ?? 0,
+    openTasksNoDeadline: openTasksNoDeadlineCount.count ?? 0,
     needsDeadline: needsDeadlineCount.count ?? 0,
     renewalsThisMonth: renewalsThisMonthCount.count ?? 0,
   };

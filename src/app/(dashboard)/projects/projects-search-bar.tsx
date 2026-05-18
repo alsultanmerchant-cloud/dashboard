@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown,
   Check,
@@ -15,7 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CustomFilterDialog } from "@/components/custom-filter/dialog";
-import { PROJECT_FIELDS, getProjectField } from "@/lib/custom-filter/projects-fields";
+import { buildProjectFields } from "@/lib/custom-filter/projects-fields";
 import {
   URL_PARAM as CF_URL_PARAM,
   encodeFilterToUrl,
@@ -39,26 +40,6 @@ type BoolFilterKey =
   | "overTimesheets"
   | "allCategoriesArchived";
 
-// "Primary" filters — always visible. The rest live behind "Add Custom Filter"
-// (mirrors Odoo's filter list which only shows the 4-5 most-used filters
-// above-the-fold and tucks the rest under a custom-filter expander).
-const BOOL_FILTERS_PRIMARY: { key: BoolFilterKey; label: string }[] = [
-  { key: "onlyMine", label: "My Projects" },
-  { key: "onlyFavorites", label: "My Favorites" },
-  { key: "onlyUnassigned", label: "Unassigned" },
-  { key: "onlyWithCategories", label: "With Active Categories" },
-  { key: "archived", label: "Archived (On Hold)" },
-];
-const BOOL_FILTERS_CUSTOM: { key: BoolFilterKey; label: string }[] = [
-  { key: "onlyWithManager", label: "Has Project Manager" },
-  { key: "overTimesheets", label: "Timesheets >100%" },
-  { key: "allCategoriesArchived", label: "All Categories Archived" },
-];
-const BOOL_FILTERS: { key: BoolFilterKey; label: string }[] = [
-  ...BOOL_FILTERS_PRIMARY,
-  ...BOOL_FILTERS_CUSTOM,
-];
-
 type GroupKey =
   | ""
   | "project_manager"
@@ -72,28 +53,43 @@ type GroupKey =
   | "start_month"
   | "end_month";
 
-const GROUP_OPTIONS_PRIMARY: { key: GroupKey; label: string }[] = [
-  { key: "project_manager", label: "Project Manager" },
-  { key: "status", label: "Status" },
-  { key: "tags", label: "Tags" },
-];
-const GROUP_OPTIONS_CUSTOM: { key: GroupKey; label: string }[] = [
-  { key: "account_manager", label: "Account Manager" },
-  { key: "client", label: "Client" },
-  { key: "target", label: "Target" },
-  { key: "start_month", label: "Start Date (Month)" },
-  { key: "end_month", label: "End Date (Month)" },
-];
-const GROUP_OPTIONS: { key: GroupKey; label: string }[] = [
-  ...GROUP_OPTIONS_PRIMARY,
-  ...GROUP_OPTIONS_CUSTOM,
+const BOOL_FILTERS: { key: BoolFilterKey; labelKey: string; section: "primary" | "custom" }[] = [
+  { key: "onlyMine", labelKey: "boolFilters.onlyMine", section: "primary" },
+  { key: "onlyFavorites", labelKey: "boolFilters.onlyFavorites", section: "primary" },
+  { key: "onlyUnassigned", labelKey: "boolFilters.onlyUnassigned", section: "primary" },
+  { key: "onlyWithCategories", labelKey: "boolFilters.onlyWithCategories", section: "primary" },
+  { key: "archived", labelKey: "boolFilters.archived", section: "primary" },
+  { key: "onlyWithManager", labelKey: "boolFilters.onlyWithManager", section: "custom" },
+  { key: "overTimesheets", labelKey: "boolFilters.overTimesheets", section: "custom" },
+  { key: "allCategoriesArchived", labelKey: "boolFilters.allCategoriesArchived", section: "custom" },
 ];
 
-function isEnabled(value: string | null) {
-  return value === "1" || value === "true";
+const GROUP_OPTIONS: { key: GroupKey; labelKey: string; section: "primary" | "custom" }[] = [
+  { key: "project_manager", labelKey: "groupOptions.projectManager", section: "primary" },
+  { key: "status", labelKey: "groupOptions.status", section: "primary" },
+  { key: "tags", labelKey: "groupOptions.tags", section: "primary" },
+  { key: "account_manager", labelKey: "groupOptions.accountManager", section: "custom" },
+  { key: "client", labelKey: "groupOptions.client", section: "custom" },
+  { key: "target", labelKey: "groupOptions.target", section: "custom" },
+  { key: "start_month", labelKey: "groupOptions.startMonth", section: "custom" },
+  { key: "end_month", labelKey: "groupOptions.endMonth", section: "custom" },
+];
+
+// Filters that are ON by default (parity with Odoo's default search facets).
+// They stay on unless the URL explicitly carries `?<key>=0`.
+const DEFAULT_ON_FILTERS: Partial<Record<BoolFilterKey, boolean>> = {
+  onlyWithCategories: true,
+};
+
+function isEnabled(value: string | null, key?: BoolFilterKey) {
+  if (value === "0" || value === "false") return false;
+  if (value === "1" || value === "true") return true;
+  return key ? Boolean(DEFAULT_ON_FILTERS[key]) : false;
 }
 
 export function ProjectsSearchBar() {
+  const t = useTranslations("ProjectsSearch");
+  const customFilterT = useTranslations("CustomFilter");
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -102,18 +98,40 @@ export function ProjectsSearchBar() {
   const [query, setQuery] = useState(currentQuery);
   const [open, setOpen] = useState(false);
 
+  const projectFields = useMemo(() => buildProjectFields(t), [t]);
+  const projectFieldMap = useMemo(
+    () => Object.fromEntries(projectFields.map((field) => [field.name, field])),
+    [projectFields],
+  );
+  const getProjectField = useCallback(
+    (name: string) => projectFieldMap[name],
+    [projectFieldMap],
+  );
+  const boolFilters = useMemo(
+    () => BOOL_FILTERS.map((f) => ({ key: f.key, label: t(f.labelKey), section: f.section })),
+    [t],
+  );
+  const boolFiltersPrimary = boolFilters.filter((f) => f.section === "primary");
+  const boolFiltersCustom = boolFilters.filter((f) => f.section === "custom");
+  const groupOptions = useMemo(
+    () => GROUP_OPTIONS.map((g) => ({ key: g.key, label: t(g.labelKey), section: g.section })),
+    [t],
+  );
+  const groupOptionsPrimary = groupOptions.filter((g) => g.section === "primary");
+  const groupOptionsCustom = groupOptions.filter((g) => g.section === "custom");
+
   const filters = useMemo(() => {
     const out = {} as Record<BoolFilterKey, boolean>;
-    for (const f of BOOL_FILTERS) out[f.key] = isEnabled(params.get(f.key));
+    for (const f of boolFilters) out[f.key] = isEnabled(params.get(f.key), f.key);
     return out;
-  }, [params]);
-  const activeFilterKeys = BOOL_FILTERS.filter(({ key }) => filters[key]).map(
+  }, [boolFilters, params]);
+  const activeFilterKeys = boolFilters.filter(({ key }) => filters[key]).map(
     ({ key }) => key,
   );
   // Custom-section expanders. Auto-open when a "custom" item is active so
   // the user can see what they've toggled on a fresh popup open.
-  const customFilterActive = BOOL_FILTERS_CUSTOM.some(({ key }) => filters[key]);
-  const customGroupActive = GROUP_OPTIONS_CUSTOM.some(
+  const customFilterActive = boolFiltersCustom.some(({ key }) => filters[key]);
+  const customGroupActive = groupOptionsCustom.some(
     ({ key }) => (params.get("groupBy") ?? "") === key,
   );
   const [customFilterOpen, setCustomFilterOpen] = useState(customFilterActive);
@@ -175,12 +193,37 @@ export function ProjectsSearchBar() {
     return () => {
       cancelled = true;
     };
-  }, [customTree, relationLabels]);
+  }, [customTree, getProjectField, relationLabels]);
 
   const customFilterLabel = useMemo(() => {
     if (!customTree) return "";
-    return formatFilterTree(customTree, getProjectField, (_model, id) => relationLabels[id]);
-  }, [customTree, relationLabels]);
+    return formatFilterTree(
+      customTree,
+      getProjectField,
+      (_model, id) => relationLabels[id],
+      {
+        operatorLabel: (op) => customFilterT(`operators.${{
+          "=": "eq",
+          "!=": "neq",
+          ">": "gt",
+          ">=": "gte",
+          "<": "lt",
+          "<=": "lte",
+          "ilike": "contains",
+          "not ilike": "notContains",
+          "in": "isIn",
+          "not in": "isNotIn",
+          "between": "between",
+          "set": "isSet",
+          "not_set": "isNotSet",
+        }[op]}`),
+        booleanTrue: customFilterT("boolean.true"),
+        booleanFalse: customFilterT("boolean.false"),
+        and: customFilterT("connectors.and"),
+        or: customFilterT("connectors.or"),
+      },
+    );
+  }, [customFilterT, customTree, getProjectField, relationLabels]);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
 
   const startDateFrom = params.get("startDateFrom") ?? "";
@@ -224,8 +267,17 @@ export function ProjectsSearchBar() {
 
   const toggleFilter = (key: BoolFilterKey) => {
     updateParams((sp) => {
-      if (isEnabled(sp.get(key))) sp.delete(key);
-      else sp.set(key, "1");
+      const enabled = isEnabled(sp.get(key), key);
+      if (DEFAULT_ON_FILTERS[key]) {
+        // Default-on filter: explicit `=0` disables it; removing the param
+        // reverts to the on-by-default state.
+        if (enabled) sp.set(key, "0");
+        else sp.delete(key);
+      } else if (enabled) {
+        sp.delete(key);
+      } else {
+        sp.set(key, "1");
+      }
     });
   };
 
@@ -244,12 +296,17 @@ export function ProjectsSearchBar() {
   };
 
   const clearFilter = (key: BoolFilterKey) => {
-    updateParams((sp) => sp.delete(key));
+    updateParams((sp) => {
+      // Removing a default-on filter's chip means "turn it off", which needs
+      // an explicit `=0` (a bare delete would just revert it back to on).
+      if (DEFAULT_ON_FILTERS[key]) sp.set(key, "0");
+      else sp.delete(key);
+    });
   };
 
   const clearAllFilters = () => {
     updateParams((sp) => {
-      for (const { key } of BOOL_FILTERS) sp.delete(key);
+      for (const { key } of boolFilters) sp.delete(key);
       sp.delete("startDateFrom");
       sp.delete("startDateTo");
       sp.delete("endDateFrom");
@@ -279,7 +336,7 @@ export function ProjectsSearchBar() {
   };
 
   const labelOf = (key: BoolFilterKey) =>
-    BOOL_FILTERS.find((f) => f.key === key)?.label ?? key;
+    boolFilters.find((f) => f.key === key)?.label ?? key;
 
   return (
     <div ref={wrapperRef} className="relative min-w-0 flex-1">
@@ -291,7 +348,7 @@ export function ProjectsSearchBar() {
       >
         <button
           type="button"
-          aria-label="فلاتر المشاريع"
+          aria-label={t("aria.projectFilters")}
           onClick={() => setOpen((v) => !v)}
           className="grid size-6 shrink-0 place-items-center rounded-full bg-white/10 text-white/80 transition-colors hover:bg-white/16 hover:text-white"
         >
@@ -316,7 +373,7 @@ export function ProjectsSearchBar() {
         ))}
         {hasDateFilter && (
           <span className="inline-flex items-center gap-1 rounded-full bg-cyan/15 px-2 py-0.5 text-[11px] font-medium text-cyan">
-            Date filter
+            {t("chips.dateFilter")}
             <button
               type="button"
               aria-label="إزالة فلتر التاريخ"
@@ -336,7 +393,9 @@ export function ProjectsSearchBar() {
         )}
         {groupBy && (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-[11px] font-medium text-amber-200">
-            Grouped by {GROUP_OPTIONS.find((g) => g.key === groupBy)?.label}
+            {t("chips.groupedBy", {
+              label: groupOptions.find((g) => g.key === groupBy)?.label ?? groupBy,
+            })}
             <button
               type="button"
               onClick={() => setGroup("")}
@@ -357,7 +416,7 @@ export function ProjectsSearchBar() {
                 setOpen(false);
               }}
               className="hover:underline"
-              title="Edit custom filter"
+              title={t("actions.editCustomFilter")}
             >
               {customFilterLabel}
             </button>
@@ -384,14 +443,14 @@ export function ProjectsSearchBar() {
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
           }}
-          placeholder="ابحث باسم المشروع أو اسم المتجر…"
+          placeholder={t("searchPlaceholder")}
           className="min-w-0 flex-1 bg-transparent text-white placeholder:text-white/60 focus:outline-none"
         />
         {query && (
           <button
             type="button"
             onClick={clearQuery}
-            aria-label="مسح البحث"
+            aria-label={t("aria.clearSearch")}
             className="text-white/80 transition-colors hover:text-white"
           >
             <X className="size-3.5" />
@@ -400,7 +459,7 @@ export function ProjectsSearchBar() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          aria-label="فتح خيارات المشاريع"
+          aria-label={t("aria.openProjectOptions")}
           className={cn(
             "rounded p-0.5 text-white/80 transition-colors hover:text-white",
             open && "text-cyan",
@@ -418,10 +477,10 @@ export function ProjectsSearchBar() {
             {/* Filters column */}
             <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                <Filter className="size-3.5" /> Filters
+                <Filter className="size-3.5" /> {t("columns.filters")}
               </div>
               <div className="flex flex-col gap-0.5">
-                {BOOL_FILTERS_PRIMARY.map((f) => (
+                {boolFiltersPrimary.map((f) => (
                   <button
                     key={f.key}
                     type="button"
@@ -450,7 +509,7 @@ export function ProjectsSearchBar() {
                   className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-cyan transition-colors hover:bg-cyan-dim"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Sliders className="size-3" /> Add Custom Filter
+                    <Sliders className="size-3" /> {t("actions.addCustomFilter")}
                   </span>
                 </button>
                 <div className="my-1 border-t border-soft" />
@@ -465,7 +524,7 @@ export function ProjectsSearchBar() {
                   aria-expanded={customFilterOpen}
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Plus className="size-3" /> More filters
+                    <Plus className="size-3" /> {t("actions.moreFilters")}
                   </span>
                   <ChevronDown
                     className={cn(
@@ -476,7 +535,7 @@ export function ProjectsSearchBar() {
                 </button>
                 {customFilterOpen && (
                   <div className="ms-2 me-0 flex flex-col gap-0.5 border-s border-soft ps-2">
-                    {BOOL_FILTERS_CUSTOM.map((f) => (
+                    {boolFiltersCustom.map((f) => (
                       <button
                         key={f.key}
                         type="button"
@@ -496,7 +555,7 @@ export function ProjectsSearchBar() {
                 )}
                 <div className="my-2 border-t border-soft" />
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Start Date
+                  {t("dateSections.startDate")}
                 </div>
                 <div className="flex items-center gap-1 px-2 pb-1">
                   <input
@@ -514,7 +573,7 @@ export function ProjectsSearchBar() {
                   />
                 </div>
                 <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  End Date
+                  {t("dateSections.endDate")}
                 </div>
                 <div className="flex items-center gap-1 px-2 pb-1">
                   <input
@@ -537,10 +596,10 @@ export function ProjectsSearchBar() {
             {/* Group By column */}
             <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                <Layers className="size-3.5" /> Group By
+                <Layers className="size-3.5" /> {t("columns.groupBy")}
               </div>
               <div className="flex flex-col gap-0.5">
-                {GROUP_OPTIONS_PRIMARY.map((g) => (
+                {groupOptionsPrimary.map((g) => (
                   <button
                     key={g.key}
                     type="button"
@@ -568,7 +627,7 @@ export function ProjectsSearchBar() {
                   aria-expanded={customGroupOpen}
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <Plus className="size-3" /> Add Custom Group
+                    <Plus className="size-3" /> {t("actions.addCustomGroup")}
                   </span>
                   <ChevronDown
                     className={cn(
@@ -579,7 +638,7 @@ export function ProjectsSearchBar() {
                 </button>
                 {customGroupOpen && (
                   <div className="ms-2 me-0 flex flex-col gap-0.5 border-s border-soft ps-2">
-                    {GROUP_OPTIONS_CUSTOM.map((g) => (
+                    {groupOptionsCustom.map((g) => (
                       <button
                         key={g.key}
                         type="button"
@@ -603,7 +662,7 @@ export function ProjectsSearchBar() {
             {/* Favorites / quick saves column */}
             <div className="min-w-0">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                <Star className="size-3.5" /> Favorites
+                <Star className="size-3.5" /> {t("columns.favorites")}
               </div>
               <button
                 type="button"
@@ -616,12 +675,11 @@ export function ProjectsSearchBar() {
                 }}
                 className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-foreground hover:bg-soft-1"
               >
-                <span>Copy current search URL</span>
+                <span>{t("favorites.copyCurrentSearchUrl")}</span>
                 <ChevronDown className="size-3.5 opacity-60" />
               </button>
               <p className="mt-2 px-2 text-[10px] leading-relaxed text-muted-foreground">
-                Bookmark the page after applying filters — the URL captures every
-                filter, group-by, and search term.
+                {t("favorites.help")}
               </p>
             </div>
           </div>
@@ -634,7 +692,7 @@ export function ProjectsSearchBar() {
                 onClick={clearAllFilters}
                 className="flex w-full items-center justify-center rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground"
               >
-                إزالة كل الفلاتر
+                {t("actions.clearAllFilters")}
               </button>
             </>
           )}
@@ -646,7 +704,7 @@ export function ProjectsSearchBar() {
       <CustomFilterDialog
         open={customDialogOpen}
         onOpenChange={setCustomDialogOpen}
-        fields={PROJECT_FIELDS}
+        fields={projectFields}
         initialTree={customTree}
         includeArchived={filters.archived}
         onIncludeArchivedChange={(next) => {

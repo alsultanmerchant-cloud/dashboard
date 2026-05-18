@@ -48,34 +48,34 @@ type DeptKind =
 // teal (admin), light-blue (sub-departments), green (support).
 const KIND_TONES: Record<DeptKind, { bg: string; border: string; text: string; chip: string }> = {
   group: {
-    bg: "bg-violet-500/[0.18]",
-    border: "border-violet-400/40",
-    text: "text-violet-50",
-    chip: "bg-violet-400/20 text-violet-100",
+    bg: "bg-violet-500/[0.18] dark:bg-violet-500/[0.18]",
+    border: "border-violet-500/35 dark:border-violet-400/40",
+    text: "text-violet-950 dark:text-violet-50",
+    chip: "bg-violet-500/18 text-violet-900 dark:bg-violet-400/20 dark:text-violet-100",
   },
   account_management: {
-    bg: "bg-cyan/15",
-    border: "border-cyan/40",
-    text: "text-cyan-50",
-    chip: "bg-cyan/20 text-cyan-100",
+    bg: "bg-cyan/15 dark:bg-cyan/15",
+    border: "border-cyan/45 dark:border-cyan/40",
+    text: "text-sky-950 dark:text-cyan-50",
+    chip: "bg-cyan/18 text-sky-900 dark:bg-cyan/20 dark:text-cyan-100",
   },
   main_section: {
-    bg: "bg-blue-500/[0.18]",
-    border: "border-blue-400/40",
-    text: "text-blue-50",
-    chip: "bg-blue-400/20 text-blue-100",
+    bg: "bg-blue-500/[0.18] dark:bg-blue-500/[0.18]",
+    border: "border-blue-500/35 dark:border-blue-400/40",
+    text: "text-blue-950 dark:text-blue-50",
+    chip: "bg-blue-500/18 text-blue-900 dark:bg-blue-400/20 dark:text-blue-100",
   },
   supporting_section: {
-    bg: "bg-emerald-500/[0.16]",
-    border: "border-emerald-400/35",
-    text: "text-emerald-50",
-    chip: "bg-emerald-400/20 text-emerald-100",
+    bg: "bg-emerald-500/[0.16] dark:bg-emerald-500/[0.16]",
+    border: "border-emerald-500/35 dark:border-emerald-400/35",
+    text: "text-emerald-950 dark:text-emerald-50",
+    chip: "bg-emerald-500/18 text-emerald-900 dark:bg-emerald-400/20 dark:text-emerald-100",
   },
   quality_control: {
-    bg: "bg-amber-500/[0.16]",
-    border: "border-amber-400/40",
-    text: "text-amber-50",
-    chip: "bg-amber-400/20 text-amber-100",
+    bg: "bg-amber-500/[0.16] dark:bg-amber-500/[0.16]",
+    border: "border-amber-500/35 dark:border-amber-400/40",
+    text: "text-amber-950 dark:text-amber-50",
+    chip: "bg-amber-500/18 text-amber-900 dark:bg-amber-400/20 dark:text-amber-100",
   },
   other: {
     bg: "bg-soft-2",
@@ -169,7 +169,7 @@ function DeptNode({ id, data }: NodeProps<Node<NodeData>>) {
       </div>
 
       {data.headName && (
-        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-white/5 px-2 py-0.5 text-[11px]">
+        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-black/6 px-2 py-0.5 text-[11px] dark:bg-white/5">
           <Crown className="size-3 opacity-70" />
           <span className="font-medium">{data.headName}</span>
         </div>
@@ -290,7 +290,10 @@ function OrgChartFlowInner({
         source: d.parent_department_id!,
         target: d.id,
         type: "smoothstep",
-        style: { stroke: "rgba(255,255,255,0.25)", strokeWidth: 1.5 },
+        style: {
+          stroke: "color-mix(in srgb, var(--foreground) 22%, transparent)",
+          strokeWidth: 1.5,
+        },
       }));
   }, [departments]);
 

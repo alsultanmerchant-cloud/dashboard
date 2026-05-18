@@ -3,14 +3,21 @@
 // =========================================================================
 // EmployeeCombobox — reusable typeahead employee picker (Sky Light issue #9).
 //
-// Replicates Odoo's stock many2one widget behavior (search-as-you-type +
-// filtered scrollable list) — the "زي رواسم" reference. Replaces the long
-// scrolling <select> / Radix <Select> employee pickers across the app.
+// Client feedback: "محتاجين اوبشن كتابة هنا عشان نوصل للاسماء اسرع لان عدد
+// الموظفين كبير" — long static <select> lists were unusable once the employee
+// count grew. This component replaces them with a search-as-you-type widget
+// (Odoo many2one "زي رواسم" reference).
 //
-// Single-value only (the existing SearchableSelect already covers multi).
-// Caller supplies the option list and an onChange callback; an optional
-// `name` renders a hidden <input> so the picker works inside a native
-// <form> with no extra formData wiring.
+// Two selection modes via the `multiple` discriminated prop:
+//   - single  (default)  → value: string | null,  onChange: (string|null)
+//   - multiple            → value: string[],       onChange: (string[])
+//
+// Single mode renders the picked employee inside the trigger; multiple mode
+// renders removable chips below the trigger (relational-picker style).
+//
+// An optional `name` renders hidden <input>(s) so the picker works inside a
+// native <form> with no extra formData wiring (one input in single mode, one
+// per selected id in multiple mode).
 //
 // States: skeleton (loading), empty (no employees), error (load failure),
 // no-results (search miss). RTL-correct, Tajawal inherited from <body>.
@@ -39,12 +46,11 @@ export type EmployeeComboboxOption = {
   job_title?: string | null;
   department_name?: string | null;
   avatar_url?: string | null;
+  /** When true, the row is shown but cannot be picked (e.g. employee w/o user). */
+  disabled?: boolean;
 };
 
-export type EmployeeComboboxProps = {
-  /** Selected option id, or "" / null when nothing is picked. */
-  value: string | null;
-  onChange: (next: string | null) => void;
+type CommonProps = {
   options: EmployeeComboboxOption[];
   /** Hidden <input name> for native <form> integration. Omit for state-only use. */
   name?: string;
@@ -55,8 +61,6 @@ export type EmployeeComboboxProps = {
   loading?: boolean;
   /** When set, render an error row in place of the list. */
   error?: string | null;
-  /** Allow clearing the selection back to null. Defaults to true. */
-  clearable?: boolean;
   className?: string;
   /** i18n strings — every label is caller-supplied so the component carries no
    *  hardcoded copy. All have Arabic-first defaults. */
@@ -64,38 +68,70 @@ export type EmployeeComboboxProps = {
   searchPlaceholder?: string;
   emptyMessage?: string;
   noResultsMessage?: string;
-  clearLabel?: string;
   ariaLabel?: string;
 };
 
-export function EmployeeCombobox({
-  value,
-  onChange,
-  options,
-  name,
-  required,
-  disabled,
-  loading = false,
-  error = null,
-  clearable = true,
-  className,
-  placeholder = "اختر موظفًا",
-  searchPlaceholder = "ابحث بالاسم أو الوظيفة…",
-  emptyMessage = "لا يوجد موظفون",
-  noResultsMessage = "لا توجد نتائج",
-  clearLabel = "بدون تعيين",
-  ariaLabel = "اختيار موظف",
-}: EmployeeComboboxProps) {
+type SingleProps = CommonProps & {
+  multiple?: false;
+  /** Selected option id, or "" / null when nothing is picked. */
+  value: string | null;
+  onChange: (next: string | null) => void;
+  /** Allow clearing the selection back to null. Defaults to true. */
+  clearable?: boolean;
+  clearLabel?: string;
+};
+
+type MultiProps = CommonProps & {
+  multiple: true;
+  /** Selected option ids. */
+  value: string[];
+  onChange: (next: string[]) => void;
+};
+
+export type EmployeeComboboxProps = SingleProps | MultiProps;
+
+export function EmployeeCombobox(props: EmployeeComboboxProps) {
+  const {
+    options,
+    name,
+    required,
+    disabled,
+    loading = false,
+    error = null,
+    className,
+    placeholder = "اختر موظفًا",
+    searchPlaceholder = "ابحث بالاسم أو الوظيفة…",
+    emptyMessage = "لا يوجد موظفون",
+    noResultsMessage = "لا توجد نتائج",
+    ariaLabel = "اختيار موظف",
+  } = props;
+  const multiple = props.multiple === true;
+
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
   const triggerRef = React.useRef<HTMLButtonElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const selected = React.useMemo(
-    () => options.find((o) => o.id === value) ?? null,
-    [options, value],
+  // Normalised selection set — works for both modes.
+  const selectedIds = React.useMemo<string[]>(
+    () =>
+      multiple
+        ? (props.value as string[])
+        : props.value
+          ? [props.value as string]
+          : [],
+    [multiple, props.value],
   );
+
+  const selectedOptions = React.useMemo(
+    () =>
+      selectedIds
+        .map((id) => options.find((o) => o.id === id))
+        .filter(Boolean) as EmployeeComboboxOption[],
+    [selectedIds, options],
+  );
+  const singleSelected = !multiple ? (selectedOptions[0] ?? null) : null;
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -119,10 +155,39 @@ export function EmployeeCombobox({
     if (open) inputRef.current?.focus({ preventScroll: true });
   }, [open]);
 
-  function pick(next: string | null) {
-    onChange(next);
+  function emitSingle(next: string | null) {
+    (props as SingleProps).onChange(next);
     setOpen(false);
     setQuery("");
+  }
+
+  function emitMulti(next: string[]) {
+    (props as MultiProps).onChange(next);
+    // Keep the popover open in multi-select so several picks are quick.
+    setQuery("");
+    inputRef.current?.focus({ preventScroll: true });
+  }
+
+  function pick(option: EmployeeComboboxOption) {
+    if (option.disabled) return;
+    if (multiple) {
+      const has = selectedIds.includes(option.id);
+      emitMulti(
+        has
+          ? selectedIds.filter((v) => v !== option.id)
+          : [...selectedIds, option.id],
+      );
+    } else {
+      emitSingle(option.id);
+    }
+  }
+
+  function remove(id: string) {
+    if (multiple) {
+      emitMulti(selectedIds.filter((v) => v !== id));
+    } else {
+      emitSingle(null);
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -147,7 +212,7 @@ export function EmployeeCombobox({
       e.preventDefault();
       e.stopPropagation();
       const target = filtered[activeIndex];
-      if (target) pick(target.id);
+      if (target) pick(target);
     }
   }
 
@@ -160,16 +225,35 @@ export function EmployeeCombobox({
     );
   }
 
+  const clearable = multiple
+    ? false
+    : (props as SingleProps).clearable !== false;
+  const clearLabel = !multiple
+    ? ((props as SingleProps).clearLabel ?? "بدون تعيين")
+    : "";
+
+  const triggerLabel = multiple
+    ? selectedOptions.length === 0
+      ? placeholder
+      : `${selectedOptions.length} مختار`
+    : (singleSelected?.full_name ?? placeholder);
+
   return (
     <div className={cn("relative", className)}>
-      {name && (
+      {/* Hidden inputs for native <form> integration. */}
+      {name && !multiple && (
         <input
           type="hidden"
           name={name}
-          value={value ?? ""}
+          value={(props.value as string | null) ?? ""}
           required={required}
         />
       )}
+      {name &&
+        multiple &&
+        selectedIds.map((id) => (
+          <input key={id} type="hidden" name={name} value={id} />
+        ))}
 
       <button
         ref={triggerRef}
@@ -181,28 +265,49 @@ export function EmployeeCombobox({
         aria-label={ariaLabel}
         className={cn(
           "flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60",
-          !selected && "text-muted-foreground",
+          selectedOptions.length === 0 && "text-muted-foreground",
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
-          {selected ? (
+          {!multiple && singleSelected ? (
             <Avatar size="sm" className="shrink-0">
-              {selected.avatar_url ? (
-                <AvatarImage src={selected.avatar_url} alt="" />
+              {singleSelected.avatar_url ? (
+                <AvatarImage src={singleSelected.avatar_url} alt="" />
               ) : null}
               <AvatarFallback className="text-[10px]">
-                {selected.full_name[0]}
+                {singleSelected.full_name[0]}
               </AvatarFallback>
             </Avatar>
           ) : (
             <Users className="size-4 shrink-0 opacity-60" />
           )}
-          <span className="truncate text-start">
-            {selected?.full_name ?? placeholder}
-          </span>
+          <span className="truncate text-start">{triggerLabel}</span>
         </span>
         <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
       </button>
+
+      {/* Multi-select chips. */}
+      {multiple && selectedOptions.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {selectedOptions.map((o) => (
+            <span
+              key={o.id}
+              className="inline-flex items-center gap-1 rounded-full bg-cyan-dim px-2 py-0.5 text-[11px] font-medium text-cyan"
+            >
+              {o.full_name}
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => remove(o.id)}
+                className="opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                aria-label={`إزالة ${o.full_name}`}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       <AnchoredPopover
         anchorRef={triggerRef}
@@ -239,20 +344,20 @@ export function EmployeeCombobox({
             )}
           </div>
 
-          {/* Clear-selection row */}
-          {clearable && (
+          {/* Clear-selection row (single mode only) */}
+          {clearable && !multiple && (
             <div className="border-b border-soft px-2.5 py-1">
               <button
                 type="button"
-                onClick={() => pick(null)}
+                onClick={() => emitSingle(null)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs transition-colors hover:bg-soft-2",
-                  value === null && "bg-cyan-dim/60 text-foreground",
+                  selectedIds.length === 0 && "bg-cyan-dim/60 text-foreground",
                 )}
               >
                 <UserMinus className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{clearLabel}</span>
-                {value === null && (
+                {selectedIds.length === 0 && (
                   <Check className="ms-auto size-3.5 shrink-0" />
                 )}
               </button>
@@ -274,6 +379,7 @@ export function EmployeeCombobox({
             <ul
               role="listbox"
               aria-label={ariaLabel}
+              aria-multiselectable={multiple || undefined}
               className="max-h-64 overflow-y-auto py-1"
             >
               {filtered.length === 0 ? (
@@ -283,15 +389,16 @@ export function EmployeeCombobox({
               ) : (
                 filtered.map((o, idx) => {
                   const isActive = idx === activeIndex;
-                  const isSelected = o.id === value;
+                  const isSelected = selectedIds.includes(o.id);
                   return (
                     <li key={o.id} role="option" aria-selected={isSelected}>
                       <button
                         type="button"
+                        disabled={o.disabled}
                         onMouseEnter={() => setActiveIndex(idx)}
-                        onClick={() => pick(o.id)}
+                        onClick={() => pick(o)}
                         className={cn(
-                          "flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-sm transition-colors",
+                          "flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                           isActive
                             ? "bg-cyan-dim/60 text-foreground"
                             : "hover:bg-soft-2",

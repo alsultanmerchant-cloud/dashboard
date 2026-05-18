@@ -11,6 +11,7 @@ import {
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
 import { NewDepartmentDialog } from "./new-department-dialog";
+import { EditDepartmentDialog } from "./edit-department-dialog";
 
 async function getDepartmentsWithCounts(orgId: string) {
   const departments = await listDepartments(orgId);
@@ -59,6 +60,7 @@ export default async function DepartmentsPage() {
                     <DataTableHeaderCell>{t("table.slug")}</DataTableHeaderCell>
                     <DataTableHeaderCell>{t("table.description")}</DataTableHeaderCell>
                     <DataTableHeaderCell>{t("table.employeeCount")}</DataTableHeaderCell>
+                    <DataTableHeaderCell>{t("table.edit")}</DataTableHeaderCell>
                   </tr>
                 </DataTableHead>
                 <tbody>
@@ -72,6 +74,16 @@ export default async function DepartmentsPage() {
                           <Users className="size-3" />
                           {d.employeeCount}
                         </span>
+                      </DataTableCell>
+                      <DataTableCell>
+                        <EditDepartmentDialog
+                          department={{
+                            id: d.id,
+                            name: d.name,
+                            slug: d.slug,
+                            description: d.description ?? null,
+                          }}
+                        />
                       </DataTableCell>
                     </DataTableRow>
                   ))}

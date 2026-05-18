@@ -126,6 +126,9 @@ const ODOO_FILTER_ROWS: FilterRow[] = [
   { kind: "sep" },
   { kind: "filter", key: "starred", labelKey: "filters.starred" },
   { kind: "sep" },
+  { kind: "filter", key: "near_timesheets", labelKey: "filters.nearTimesheets" },
+  { kind: "filter", key: "over_timesheets", labelKey: "filters.overTimesheets" },
+  { kind: "sep" },
   { kind: "date", field: "stage_entered_at", labelKey: "dateFields.stageEnteredAt" },
   { kind: "date", field: "due_date", labelKey: "dateFields.dueDate" },
   { kind: "sep" },
@@ -137,7 +140,6 @@ const ODOO_FILTER_ROWS: FilterRow[] = [
   { kind: "sep" },
   { kind: "filter", key: "in_progress_pct", labelKey: "filters.inProgressPct" },
   { kind: "filter", key: "completed_pct", labelKey: "filters.completedPct" },
-  { kind: "filter", key: "not_started", labelKey: "filters.notStarted" },
 ];
 const FILTER_KEYS = new Set<FilterKey>(
   ODOO_FILTER_ROWS.flatMap((r) => (r.kind === "filter" ? [r.key] : [])),

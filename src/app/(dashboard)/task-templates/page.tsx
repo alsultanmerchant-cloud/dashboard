@@ -4,6 +4,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { listTaskTemplates, getTaskTemplate } from "@/lib/data/templates";
 import { listDepartments } from "@/lib/data/employees";
 import { AddTemplateItemDialog } from "./[id]/add-item-dialog";
+import { EditTemplateItemDialog } from "./[id]/edit-item-dialog";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { ConfigShell, type ConfigItem } from "@/components/config-shell";
@@ -97,6 +98,7 @@ export default async function TaskTemplatesPage({
                   offsetDays: t("table.offsetDays"),
                   durationDays: t("table.durationDays"),
                   priority: t("table.priority"),
+                  edit: t("table.edit"),
                 }}
                 tRoles={tRoles}
               />
@@ -127,6 +129,7 @@ function TemplateDetail({
     offsetDays: string;
     durationDays: string;
     priority: string;
+    edit: string;
   };
   tRoles: Awaited<ReturnType<typeof getTranslations<"RoleLabels">>>;
 }) {
@@ -170,6 +173,7 @@ function TemplateDetail({
               <DataTableHeaderCell>{labels.offsetDays}</DataTableHeaderCell>
               <DataTableHeaderCell>{labels.durationDays}</DataTableHeaderCell>
               <DataTableHeaderCell>{labels.priority}</DataTableHeaderCell>
+              <DataTableHeaderCell>{labels.edit}</DataTableHeaderCell>
             </tr>
           </DataTableHead>
           <tbody>
@@ -211,6 +215,22 @@ function TemplateDetail({
                   </DataTableCell>
                   <DataTableCell>
                     <PriorityBadge priority={it.priority} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <EditTemplateItemDialog
+                      item={{
+                        id: it.id,
+                        title: it.title,
+                        description: it.description ?? null,
+                        default_role_key: it.default_role_key ?? null,
+                        default_department_id: dept?.id ?? null,
+                        offset_days_from_project_start:
+                          it.offset_days_from_project_start,
+                        duration_days: it.duration_days,
+                        priority: it.priority,
+                      }}
+                      departments={departments}
+                    />
                   </DataTableCell>
                 </DataTableRow>
               );

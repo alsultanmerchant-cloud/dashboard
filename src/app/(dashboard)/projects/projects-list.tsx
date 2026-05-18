@@ -70,8 +70,11 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   const filters = useMemo<ProjectFilters>(() => {
     const flag = (k: string) => params.get(k) === "1" || params.get(k) === "true";
     const str = (k: string) => params.get(k) || undefined;
+    // Odoo applies "With Active Categories" by default — on unless `=0`.
+    const flagDefaultOn = (k: string) =>
+      params.get(k) !== "0" && params.get(k) !== "false";
     return {
-      onlyWithCategories: flag("onlyWithCategories"),
+      onlyWithCategories: flagDefaultOn("onlyWithCategories"),
       onlyFavorites: flag("onlyFavorites"),
       onlyWithManager: flag("onlyWithManager"),
       onlyMine: flag("onlyMine"),

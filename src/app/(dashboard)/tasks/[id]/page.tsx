@@ -15,21 +15,17 @@ import {
 } from "@/lib/data/task-detail";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  PriorityBadge,
-  ServiceBadge,
-  TaskStageBadge,
-  TaskStatusBadge,
-} from "@/components/status-badges";
 import type { TaskStage } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
+import { TaskStarToggle } from "./task-star-toggle";
 import { RecordPagination } from "./record-pagination";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { MessageButton } from "@/components/dm/message-button";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { TaskRoleType } from "@/lib/labels";
-import { isOverdue } from "@/lib/utils-format";
+import { avatarUrlFor, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { listEmployees } from "@/lib/data/employees";
 import { loadOrgChart } from "@/lib/data/org-chart";
@@ -196,11 +192,21 @@ export default async function TaskDetailPage({
     return out;
   })();
 
+  const taskTags = (
+    (task as {
+      task_tag_assignments?: Array<{
+        tag:
+          | { id: string; name: string; color: number }
+          | { id: string; name: string; color: number }[]
+          | null;
+      }>;
+    }).task_tag_assignments ?? []
+  )
+    .map((row) => (Array.isArray(row.tag) ? row.tag[0] : row.tag))
+    .filter((x): x is { id: string; name: string; color: number } => Boolean(x));
+
   const project = Array.isArray(task.project) ? task.project[0] : task.project;
-  const client = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
-  const service = Array.isArray(task.service) ? task.service[0] : task.service;
   const deadline = task.planned_date ?? task.due_date;
-  const overdue = isOverdue(deadline) && task.stage !== "done";
   // For DONE tasks, prefer the stored generated column (migration 0023):
   // it freezes at the actual completion delay and survives re-renders.
   // For in-flight tasks, compute the running delay from "now".
@@ -214,9 +220,6 @@ export default async function TaskDetailPage({
       ? diffDaysFromNow(deadline)
       : null;
   const showDelayBanner = delayDays !== null && delayDays > 0;
-  const formattedCompletedAt = task.completed_at
-    ? formatDateTime(task.completed_at, locale)
-    : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl">
@@ -259,90 +262,83 @@ export default async function TaskDetailPage({
               currentUserId={session.userId}
               isFollowing={isFollowing}
             />
-            <TaskStatusSelect taskId={task.id} currentStatus={task.status} />
           </div>
         }
       />
 
-      <Card className="mb-4 overflow-hidden">
-        <CardContent className="space-y-4 p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <TaskStageBadge stage={task.stage} />
-                <TaskStatusBadge status={task.status} />
-                <PriorityBadge priority={task.priority} />
-                {service ? <ServiceBadge slug={service.slug ?? ""} name={service.name} /> : null}
-                {showDelayBanner ? (
-                  <span className="inline-flex h-5 items-center rounded-full border border-cc-red/30 bg-cc-red/10 px-2 text-[11px] font-medium text-cc-red">
-                    {t("delayPill", { count: delayDays ?? 0 })}
-                  </span>
-                ) : null}
-              </div>
-              <div className="space-y-1">
-                {/* §2.1: project name leads, task_code moves to a small chip
-                    beside it. Users recognise their project name; "PRJ-036"
-                    is meaningless on first glance. */}
-                <div className="flex items-center gap-2 flex-wrap text-[11px] font-medium text-muted-foreground">
-                  {project ? (
-                    <Link
-                      href={`/projects/${project.id}`}
-                      className="text-cyan hover:text-cyan/80 hover:underline transition-colors"
-                    >
-                      {project.name}
-                    </Link>
-                  ) : (
-                    <span>—</span>
-                  )}
-                  {(task as { task_code?: string | null }).task_code && (
-                    <span className="inline-flex items-center rounded-md bg-soft px-1.5 py-0.5 font-mono tracking-tight text-[10px] text-muted-foreground">
-                      {(task as { task_code?: string | null }).task_code}
-                    </span>
-                  )}
-                </div>
-                <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
-                  {task.title}
-                </h1>
-                {task.description ? (
-                  <p className="max-w-3xl text-sm leading-6 text-muted-foreground line-clamp-2">
-                    {task.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()}
-                  </p>
-                ) : null}
-              </div>
+      <div className="mb-6">
+        <StageStepper
+          taskId={task.id}
+          currentStage={task.stage as TaskStage}
+          stageEnteredAt={task.stage_entered_at ?? null}
+        />
+      </div>
+
+      {/* Odoo-style form header — ★ favorite, project/code line, title, and
+          the kanban-state button on the right. No badges/stat panel: stage
+          lives in the pipeline bar above, the rest in the field grid below. */}
+      <div className="mb-6 flex items-start justify-between gap-3 rtl:flex-row-reverse">
+        <div className="flex min-w-0 items-start gap-2 rtl:flex-row-reverse">
+          <TaskStarToggle
+            taskId={task.id}
+            initialStarred={(task as { is_important?: boolean }).is_important ?? false}
+          />
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-muted-foreground rtl:flex-row-reverse">
+              {project ? (
+                <Link
+                  href={`/projects/${project.id}`}
+                  className="text-cyan transition-colors hover:text-cyan/80 hover:underline"
+                >
+                  {project.name}
+                </Link>
+              ) : (
+                <span>—</span>
+              )}
+              {(task as { task_code?: string | null }).task_code && (
+                <span className="inline-flex items-center rounded-md bg-soft px-1.5 py-0.5 font-mono text-[10px] tracking-tight text-muted-foreground">
+                  {(task as { task_code?: string | null }).task_code}
+                </span>
+              )}
             </div>
-
-            <dl className="grid min-w-0 gap-3 rounded-xl border border-soft/60 bg-soft/20 p-3 text-sm sm:grid-cols-3 lg:min-w-[30rem]">
-              <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                <dt className="text-[11px] text-muted-foreground">{t("summary.project")}</dt>
-                <dd className="text-pretty break-words font-medium leading-6 text-foreground">
-                  {project?.name ?? "—"}
-                </dd>
-                <p className="text-[11px] text-muted-foreground break-words">
-                  {client?.name ?? t("summary.noClient")}
-                </p>
-              </div>
-              <div>
-                <dt className="text-[11px] text-muted-foreground">{t("summary.deadline")}</dt>
-                <dd className={cn("font-medium tabular-nums", overdue && "text-cc-red")}>
-                  {deadline ?? "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-muted-foreground">{t("summary.lastCompletion")}</dt>
-                <dd className="font-medium tabular-nums">
-                  {formattedCompletedAt ?? "—"}
-                </dd>
-              </div>
-            </dl>
+            <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
+              {task.title}
+            </h1>
           </div>
+        </div>
+        <div className="shrink-0">
+          <TaskStatusSelect taskId={task.id} currentStatus={task.status} />
+        </div>
+      </div>
 
-          <div className="border-t border-soft/40 pt-3">
-            <Suspense fallback={<div className="h-10" />}>
-              <TaskSmartButtonsSection orgId={session.orgId} taskId={task.id} />
-            </Suspense>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="mb-6">
+        <TaskFormSection
+          task={task}
+          assignees={allAssignees.map((a) => ({
+            id: a.id,
+            full_name: a.full_name,
+            avatar_url: a.avatar_url,
+          }))}
+          tags={taskTags}
+          canEditCounts={
+            task.created_by === session.userId ||
+            hasPermission(session, "tasks.manage") ||
+            hasPermission(session, "task.view_all")
+          }
+          canEditDeadline={
+            task.created_by === session.userId ||
+            hasPermission(session, "tasks.manage") ||
+            hasPermission(session, "task.view_all")
+          }
+          locale={locale}
+        />
+      </div>
+
+      <div className="mb-6">
+        <Suspense fallback={<div className="h-10" />}>
+          <TaskSmartButtonsSection orgId={session.orgId} taskId={task.id} />
+        </Suspense>
+      </div>
 
       {(hasOpenException || canOpenException) && (
         <div className="mb-4">
@@ -371,14 +367,6 @@ export default async function TaskDetailPage({
       )}
 
       <div className="mb-6">
-        <StageStepper
-          taskId={task.id}
-          currentStage={task.stage as TaskStage}
-          stageEnteredAt={task.stage_entered_at ?? null}
-        />
-      </div>
-
-      <div className="mb-6">
         <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.approvals")}</CardContent></Card>}>
           <TaskApprovalSection
             orgId={session.orgId}
@@ -399,23 +387,6 @@ export default async function TaskDetailPage({
             }
           />
         </Suspense>
-      </div>
-
-      <div className="mb-6">
-        <TaskFormSection
-          task={task}
-          canEditCounts={
-            task.created_by === session.userId ||
-            hasPermission(session, "tasks.manage") ||
-            hasPermission(session, "task.view_all")
-          }
-          canEditDeadline={
-            task.created_by === session.userId ||
-            hasPermission(session, "tasks.manage") ||
-            hasPermission(session, "task.view_all")
-          }
-          locale={locale}
-        />
       </div>
 
       {(() => {
@@ -471,18 +442,18 @@ export default async function TaskDetailPage({
               </div>
               {owner ? (
                 <div className="flex items-center gap-2 rounded-xl border border-soft bg-card px-3 py-2">
-                  {owner.avatar_url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={owner.avatar_url}
-                      alt={owner.full_name}
-                      className="size-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <span className="grid size-8 place-items-center rounded-full bg-cyan/20 text-xs font-semibold text-cyan">
+                  <Avatar className="size-8">
+                    {owner.avatar_url ? (
+                      <AvatarImage
+                        src={owner.avatar_url}
+                        fallbackSrc={avatarUrlFor(owner.full_name)}
+                        alt={owner.full_name}
+                      />
+                    ) : null}
+                    <AvatarFallback className="bg-cyan/20 text-xs font-semibold text-cyan">
                       {owner.full_name.slice(0, 1)}
-                    </span>
-                  )}
+                    </AvatarFallback>
+                  </Avatar>
                   <div>
                     <p className="text-sm font-medium leading-tight">{owner.full_name}</p>
                     {owner.job_title && (
@@ -654,16 +625,16 @@ function diffDaysFromNow(date: string): number {
 }
 
 const TASK_TABS = [
-  "activity",
   "description",
+  "gantt",
+  "timesheets",
   "subtasks",
   "links",
-  "timesheets",
+  "extra",
+  "history",
+  "activity",
   "activities",
   "documents",
-  "history",
-  "gantt",
-  "extra",
 ] as const;
 type TaskTab = (typeof TASK_TABS)[number];
 
@@ -1062,11 +1033,15 @@ async function TaskFollowersSection({
 
 function TaskFormSection({
   task,
+  assignees,
+  tags,
   canEditCounts,
   canEditDeadline,
   locale,
 }: {
   task: NonNullable<Awaited<ReturnType<typeof getTaskSummary>>>;
+  assignees: Array<{ id: string; full_name: string; avatar_url: string | null }>;
+  tags: Array<{ id: string; name: string; color: number }>;
   canEditCounts: boolean;
   canEditDeadline: boolean;
   locale: string;
@@ -1118,6 +1093,8 @@ function TaskFormSection({
       project={project ? { id: project.id, name: project.name } : null}
       client={client ? { id: client.id, name: client.name } : null}
       service={service ? { id: service.id, slug: service.slug, name: service.name } : null}
+      assignees={assignees}
+      tags={tags}
       computedDelayDays={delayDays}
       overdue={overdue}
       formattedCompletedAt={formattedCompletedAt}
@@ -1136,16 +1113,16 @@ async function TaskTabNav({
 }) {
   const t = await getTranslations("TaskDetailPage.tabs");
   const tabs: Array<{ key: TaskTab; label: string }> = [
-    { key: "activity", label: t("activity") },
     { key: "description", label: t("description") },
+    { key: "gantt", label: t("gantt") },
+    { key: "timesheets", label: t("timesheets") },
     { key: "subtasks", label: t("subtasks") },
     { key: "links", label: t("links") },
-    { key: "timesheets", label: t("timesheets") },
+    { key: "extra", label: t("extra") },
+    { key: "history", label: t("history") },
+    { key: "activity", label: t("activity") },
     { key: "activities", label: t("activities") },
     { key: "documents", label: t("documents") },
-    { key: "history", label: t("history") },
-    { key: "gantt", label: t("gantt") },
-    { key: "extra", label: t("extra") },
   ];
 
   return (

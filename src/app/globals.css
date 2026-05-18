@@ -82,7 +82,10 @@
   --secondary: #ffffff;
   --secondary-foreground: #1b1b1b;
   --muted: #f3f3f3;
-  --muted-foreground: #6c757d;
+  /* Client feedback #7: #6c757d failed WCAG AA (~4.0:1 on white, worse on
+     pale/pastel kanban columns). Darkened so muted text stays legible on
+     tinted light-mode surfaces. Dark mode keeps its own value below. */
+  --muted-foreground: #54595f;
   --accent: #f0eefb;
   --accent-foreground: #5241c3;
   --destructive: #dc3545;

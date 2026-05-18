@@ -40,15 +40,23 @@ function AvatarImage({
   onLoad,
   onError,
   src,
+  fallbackSrc,
   alt = "",
   ...props
-}: React.ComponentProps<"img">) {
+}: React.ComponentProps<"img"> & {
+  fallbackSrc?: string | null
+}) {
   const context = React.useContext(AvatarStatusContext)
   const imageRef = React.useRef<HTMLImageElement | null>(null)
+  const [resolvedSrc, setResolvedSrc] = React.useState(src)
+
+  React.useEffect(() => {
+    setResolvedSrc(src)
+  }, [src])
 
   React.useEffect(() => {
     if (!context) return
-    if (!src) {
+    if (!resolvedSrc) {
       context.setStatus("error")
       return
     }
@@ -60,7 +68,7 @@ function AvatarImage({
     }
 
     context.setStatus("idle")
-  }, [context, src])
+  }, [context, resolvedSrc])
 
   return (
     // We intentionally use a plain img here because this primitive needs
@@ -75,14 +83,19 @@ function AvatarImage({
         context?.status === "loaded" ? "opacity-100" : "opacity-0",
         className
       )}
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       onLoad={(event) => {
         context?.setStatus("loaded")
         onLoad?.(event)
       }}
       onError={(event) => {
-        context?.setStatus("error")
+        if (fallbackSrc && resolvedSrc && resolvedSrc !== fallbackSrc) {
+          context?.setStatus("idle")
+          setResolvedSrc(fallbackSrc)
+        } else {
+          context?.setStatus("error")
+        }
         onError?.(event)
       }}
       {...props}

@@ -248,8 +248,14 @@ export async function getTaskActivityFeed(
   orgId: string,
   taskId: string,
 ): Promise<TaskActivity[]> {
-  // Fan out four reads in parallel.
-  const [commentsRes, stageHistoryRes, auditRes, attachmentsRes] = await Promise.all([
+  // Fan out reads in parallel.
+  const [taskRes, commentsRes, stageHistoryRes, auditRes, attachmentsRes] = await Promise.all([
+    supabaseAdmin
+      .from("tasks")
+      .select("external_source")
+      .eq("organization_id", orgId)
+      .eq("id", taskId)
+      .maybeSingle(),
     supabaseAdmin
       .from("task_comments")
       .select("id, body, is_internal, created_at, author_user_id, kind, external_author_name, external_author_avatar_url")
@@ -275,8 +281,13 @@ export async function getTaskActivityFeed(
       .not("task_comment_id", "is", null),
   ]);
 
+  // For Odoo-imported tasks the synced chatter already carries "Task Created"
+  // and stage-move notifications, so the task_stage_history-derived feed items
+  // would just duplicate them (with a generic "النظام" actor). Suppress them
+  // and let Odoo's chatter be the single source for those events.
+  const isOdooTask = taskRes.data?.external_source === "odoo";
   const comments = commentsRes.data ?? [];
-  const stageHistory = stageHistoryRes.data ?? [];
+  const stageHistory = isOdooTask ? [] : stageHistoryRes.data ?? [];
   const audits = auditRes.data ?? [];
   const attachments = attachmentsRes.data ?? [];
 
@@ -327,9 +338,14 @@ export async function getTaskActivityFeed(
   const userIds = new Set<string>();
   const employeeIds = new Set<string>();
   const mentionCommentIds: string[] = [];
+  // Odoo-imported notes have no author_user_id and only carry the partner
+  // name + an Odoo /web/image URL that needs an Odoo session to load. Collect
+  // those names so we can swap in the local employee avatar instead.
+  const externalAuthorNames = new Set<string>();
 
   for (const c of comments) {
     if (c.author_user_id) userIds.add(c.author_user_id);
+    else if (c.external_author_name) externalAuthorNames.add(c.external_author_name);
     mentionCommentIds.push(c.id);
   }
   for (const h of stageHistory) {
@@ -344,7 +360,7 @@ export async function getTaskActivityFeed(
       employeeIds.add(meta.to_employee_id);
   }
 
-  const [profilesRes, employeesRes, mentionsRes] = await Promise.all([
+  const [profilesRes, employeesRes, mentionsRes, externalAuthorsRes] = await Promise.all([
     userIds.size
       ? supabaseAdmin
           .from("employee_profiles")
@@ -367,6 +383,13 @@ export async function getTaskActivityFeed(
           )
           .in("task_comment_id", mentionCommentIds)
       : Promise.resolve({ data: [] as never[] }),
+    externalAuthorNames.size
+      ? supabaseAdmin
+          .from("employee_profiles")
+          .select("full_name, avatar_url")
+          .eq("organization_id", orgId)
+          .in("full_name", Array.from(externalAuthorNames))
+      : Promise.resolve({ data: [] as { full_name: string; avatar_url: string | null }[] }),
   ]);
 
   const profileByUser = new Map<string, { name: string; avatar: string | null }>();
@@ -377,6 +400,12 @@ export async function getTaskActivityFeed(
   const employeeById = new Map<string, { id: string; full_name: string }>();
   for (const e of employeesRes.data ?? []) {
     employeeById.set(e.id, { id: e.id, full_name: e.full_name });
+  }
+  // Local avatar by employee name — used to give Odoo-imported notes the same
+  // avatar shown for assignees/followers instead of an unreachable Odoo image.
+  const avatarByName = new Map<string, string | null>();
+  for (const p of externalAuthorsRes.data ?? []) {
+    if (!avatarByName.has(p.full_name)) avatarByName.set(p.full_name, p.avatar_url);
   }
   const mentionsByComment = new Map<
     string,
@@ -405,7 +434,15 @@ export async function getTaskActivityFeed(
     const localActor = c.author_user_id ? profileByUser.get(c.author_user_id) : null;
     const actor = localActor
       ?? (c.external_author_name
-        ? { name: c.external_author_name, avatar: c.external_author_avatar_url ?? null }
+        ? {
+            name: c.external_author_name,
+            // Prefer the synced local avatar (matches assignees/followers);
+            // the Odoo /web/image URL needs an Odoo session and won't load.
+            avatar:
+              avatarByName.get(c.external_author_name)
+              ?? c.external_author_avatar_url
+              ?? null,
+          }
         : null);
     items.push({
       kind: "note",

@@ -6,8 +6,8 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { OdooClient } from "./client";
+import { fetchOdooUsersWithAvatars, odooAvatarDataUrl } from "./avatars";
 import {
-  OdooEmployee,
   OdooMany2one,
   OdooPartner,
   OdooProject,
@@ -85,20 +85,7 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
   // Tasks reference users by res.users.id in their user_ids M2M, so we MUST
   // import from res.users (not hr.employee) to resolve task assignees.
   // share=false excludes portal/customer accounts.
-  type OdooUser = {
-    id: number;
-    name: string;
-    login: string | false;
-    active: boolean;
-    share: boolean;
-    partner_id: OdooMany2one;
-  };
-  const users = await ctx.odoo.searchRead<OdooUser>(
-    "res.users",
-    [["active", "=", true], ["share", "=", false]],
-    ["id", "name", "login", "active", "share", "partner_id"],
-    { limit: 500 },
-  );
+  const users = await fetchOdooUsersWithAvatars(ctx.odoo);
 
   // Pull partner phone/mobile in one batch so we can hydrate emp.phone.
   // OdooMany2one is `[id, name] | false`, so guard before indexing.
@@ -121,6 +108,9 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
   const odooBase = process.env.ODOO_URL?.replace(/\/+$/, "") ?? "";
   for (const u of users) {
     const partner = u.partner_id ? partnerMap.get(u.partner_id[0]) : undefined;
+    const avatarUrl =
+      odooAvatarDataUrl(u) ??
+      (odooBase ? `${odooBase}/web/image/res.users/${u.id}/avatar_1` : null);
     const row = {
       organization_id: ctx.organizationId,
       external_source: SOURCE,
@@ -129,7 +119,7 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
       email: nullable(u.login),
       phone: nullable(partner?.phone) ?? nullable(partner?.mobile),
       job_title: nullable(partner?.function),
-      avatar_url: odooBase ? `${odooBase}/web/image/res.users/${u.id}/avatar_1` : null,
+      avatar_url: avatarUrl,
       employment_status: "active",
     };
     const { data, error } = await supabaseAdmin
@@ -548,6 +538,7 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "id",
       "name",
       "active",
+      "sequence",
       "partner_id",
       "user_id",
       "date_start",
@@ -628,6 +619,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       external_source: SOURCE,
       external_id: p.id,
       name: p.name,
+      // Odoo's manual kanban-sort field — keeps the dashboard list order in
+      // sync with `project.project._order` = `sequence, name, id`.
+      sequence: typeof p.sequence === "number" ? p.sequence : 10,
       client_id: clientUuid,
       project_manager_employee_id: projectManagerUuid,
       account_manager_employee_id: accountManagerUuid,
@@ -954,6 +948,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     "id",
     "name",
     "active",
+    "sequence",
     "project_id",
     "stage_id",
     "user_ids",
@@ -980,9 +975,15 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     "design_count",
     "document_count",
     "email_cc",
+    "tag_ids",
+    "ks_mark_important",
   ];
   const PROJECTS_PER_BATCH = 10;
   const tasks: OdooTask[] = [];
+  // Odoo project ids whose task fetch succeeded — only these are eligible
+  // for the delete-reconciliation pass below. A skipped (timed-out) batch
+  // must never let reconciliation nuke that project's live tasks.
+  const coveredProjectOdooIds = new Set<number>();
   for (let i = 0; i < projectOdooIds.length; i += PROJECTS_PER_BATCH) {
     const slice = projectOdooIds.slice(i, i + PROJECTS_PER_BATCH);
     try {
@@ -995,6 +996,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         { limit: 5000, context: { active_test: false } },
       );
       tasks.push(...rows);
+      for (const pid of slice) coveredProjectOdooIds.add(pid);
       console.log(
         `[odoo-import] tasks batch ${Math.min(i + PROJECTS_PER_BATCH, projectOdooIds.length)}/${projectOdooIds.length} → ${rows.length} rows`,
       );
@@ -1018,6 +1020,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     row: Record<string, unknown>;
     agentEmployeeIds: string[];
     amEmployeeId: string | null;
+    tagOdooIds: number[];
   };
 
   const stagedRows: TaskRowInput[] = [];
@@ -1041,6 +1044,9 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         project_id: projectUuid,
         service_id: serviceUuid,
         title: t.name,
+        // Odoo's manual kanban-sort field — keeps in-column card order in
+        // sync with Rwasem (`project.task._order` = sequence, deadline, …).
+        sequence: typeof t.sequence === "number" ? t.sequence : 10,
         description: nullable(t.description),
         stage,
         planned_date: nullable(t.date_deadline),
@@ -1053,6 +1059,11 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         date_assign: nullable(t.date_assign),
         start_date: nullable(t.date_start),
         duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
+        // Odoo's pre-formatted "Xd Yh Zm" string — shown verbatim on cards.
+        current_stage_duration:
+          typeof t.current_stage_duration === "string"
+            ? t.current_stage_duration
+            : null,
         working_days_open:
           typeof t.working_days_open === "number" ? t.working_days_open : null,
         working_days_close:
@@ -1070,31 +1081,134 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         design_count: typeof t.design_count === "number" ? t.design_count : 0,
         document_count: typeof t.document_count === "number" ? t.document_count : 0,
         email_cc: nullable(t.email_cc),
+        is_important: t.ks_mark_important === true,
         archived_at: t.active === false ? new Date().toISOString() : null,
       },
       agentEmployeeIds: (Array.isArray(t.user_ids) ? t.user_ids : [])
         .map((uid) => ctx.odooUserToEmployee.get(uid))
         .filter((x): x is string => Boolean(x)),
       amEmployeeId: projectRoleById.get(projectUuid)?.accountManagerId ?? null,
+      tagOdooIds: Array.isArray(t.tag_ids) ? t.tag_ids : [],
     });
   }
 
   if (stagedRows.length === 0) return 0;
+
+  // ── Assign task_code up-front (bypass the per-row DB trigger) ──────────
+  // `tg_set_task_code` derives codes from a per-project counter. Under a
+  // bulk INSERT...ON CONFLICT that counter can hand two rows the same code
+  // and abort the whole chunk (`tasks_project_task_code_unique`). We instead
+  // compute every code here, where assignment is strictly sequential:
+  //   - existing tasks keep their current task_code/code_seq
+  //   - new tasks get `<project_code>-<n>`, continuing past the highest
+  //     number already used on that project (across ANY code prefix).
+  // Setting task_code on the row makes `tg_set_task_code` a no-op.
+  {
+    const projectCodeByUuid = new Map<string, string>();
+    {
+      const { data } = await supabaseAdmin
+        .from("projects")
+        .select("id, project_code")
+        .eq("organization_id", ctx.organizationId);
+      for (const r of data ?? []) {
+        projectCodeByUuid.set(r.id as string, (r.project_code as string) ?? "PRJ-?");
+      }
+    }
+    // Existing Odoo tasks: external_id → current code; per-project highest
+    // number seen (max of code_seq and the numeric suffix of task_code, so
+    // legacy prefix drift like PRJ-003-/PRJ-01631- can never collide).
+    const existingCodeByExt = new Map<
+      number,
+      { task_code: string | null; code_seq: number | null }
+    >();
+    const maxNumByProject = new Map<string, number>();
+    {
+      const PREFETCH_PAGE = 1000;
+      for (let from = 0; ; from += PREFETCH_PAGE) {
+        const { data, error } = await supabaseAdmin
+          .from("tasks")
+          .select("external_id, project_id, task_code, code_seq")
+          .eq("organization_id", ctx.organizationId)
+          .eq("external_source", SOURCE)
+          .range(from, from + PREFETCH_PAGE - 1);
+        if (error) {
+          console.warn(`[odoo-import] task_code prefetch: ${error.message}`);
+          break;
+        }
+        if (!data || data.length === 0) break;
+        for (const r of data) {
+          const ext = r.external_id == null ? NaN : Number(r.external_id);
+          if (Number.isFinite(ext)) {
+            existingCodeByExt.set(ext, {
+              task_code: (r.task_code as string) ?? null,
+              code_seq: (r.code_seq as number) ?? null,
+            });
+          }
+          const pid = r.project_id as string;
+          const suffix = (r.task_code as string | null)?.match(/-(\d+)$/);
+          const num = Math.max(
+            typeof r.code_seq === "number" ? r.code_seq : 0,
+            suffix ? Number(suffix[1]) : 0,
+          );
+          if (num > (maxNumByProject.get(pid) ?? 0)) maxNumByProject.set(pid, num);
+        }
+        if (data.length < PREFETCH_PAGE) break;
+      }
+    }
+    const nextNumByProject = new Map<string, number>();
+    for (const s of stagedRows) {
+      const existing = existingCodeByExt.get(s.odoo_id);
+      if (existing && existing.task_code) {
+        s.row.task_code = existing.task_code;
+        s.row.code_seq = existing.code_seq;
+      } else {
+        const num =
+          nextNumByProject.get(s.projectUuid) ??
+          (maxNumByProject.get(s.projectUuid) ?? 0) + 1;
+        nextNumByProject.set(s.projectUuid, num + 1);
+        const pcode = projectCodeByUuid.get(s.projectUuid) ?? "PRJ-?";
+        s.row.task_code = `${pcode}-${String(num).padStart(3, "0")}`;
+        s.row.code_seq = num;
+      }
+    }
+  }
 
   // 1) Bulk-upsert tasks in chunks of 200.
   const TASK_CHUNK = 200;
   const odooToTaskUuid = new Map<number, string>();
   for (let i = 0; i < stagedRows.length; i += TASK_CHUNK) {
     const chunk = stagedRows.slice(i, i + TASK_CHUNK);
-    const { data, error } = await supabaseAdmin
-      .from("tasks")
-      .upsert(
-        chunk.map((s) => s.row),
-        { onConflict: "organization_id,external_source,external_id" },
-      )
-      .select("id, external_id");
-    if (error) throw new Error(`tasks bulk upsert: ${error.message}`);
-    for (const r of data ?? []) {
+    // Retry transient network/timeout failures — a single stalled request to
+    // Supabase must not abort the whole 11k-row task import.
+    let rows: { id: string; external_id: string }[] = [];
+    for (let attempt = 1; ; attempt++) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .upsert(
+          chunk.map((s) => s.row),
+          { onConflict: "organization_id,external_source,external_id" },
+        )
+        .select("id, external_id");
+      if (!error) {
+        rows = (data ?? []) as { id: string; external_id: string }[];
+        break;
+      }
+      const detail =
+        `${error.message}` +
+        (error.details ? ` | details: ${error.details}` : "") +
+        (error.hint ? ` | hint: ${error.hint}` : "");
+      const transient = /timeout|timed out|fetch failed|network|ECONNRESET|socket|EAI_AGAIN/i.test(
+        error.message,
+      );
+      if (!transient || attempt >= 4) {
+        throw new Error(`tasks bulk upsert: ${detail}`);
+      }
+      console.warn(
+        `[odoo-import] tasks chunk @${i} attempt ${attempt} failed (${error.message}); retrying…`,
+      );
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+    for (const r of rows) {
       const ext = Number(r.external_id);
       if (Number.isFinite(ext)) odooToTaskUuid.set(ext, r.id as string);
     }
@@ -1211,6 +1325,115 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     `[odoo-import] task_assignees inserted: ${assigneesInserted}`,
   );
 
+  // 7) Sync task tag assignments (Odoo project.task.tag_ids → project_tags).
+  //    Wipe-and-reinsert per re-import, mirroring the assignee phase.
+  for (let i = 0; i < allTaskUuids.length; i += DEL_CHUNK) {
+    const slice = allTaskUuids.slice(i, i + DEL_CHUNK);
+    const { error } = await supabaseAdmin
+      .from("task_tag_assignments")
+      .delete()
+      .in("task_id", slice);
+    if (error) console.warn(`task_tag_assignments delete batch: ${error.message}`);
+  }
+  const tagInserts: {
+    organization_id: string;
+    task_id: string;
+    tag_id: string;
+  }[] = [];
+  for (const [taskUuid, s] of stagedByTaskUuid) {
+    for (const odooTagId of s.tagOdooIds) {
+      const tagUuid = ctx.tagIdMap.get(odooTagId);
+      if (tagUuid) {
+        tagInserts.push({
+          organization_id: ctx.organizationId,
+          task_id: taskUuid,
+          tag_id: tagUuid,
+        });
+      }
+    }
+  }
+  let tagsInserted = 0;
+  for (let i = 0; i < tagInserts.length; i += INS_CHUNK) {
+    const slice = tagInserts.slice(i, i + INS_CHUNK);
+    const { error } = await supabaseAdmin
+      .from("task_tag_assignments")
+      .insert(slice);
+    if (error) console.warn(`task_tag_assignments bulk insert: ${error.message}`);
+    else tagsInserted += slice.length;
+  }
+  console.log(`[odoo-import] task_tag_assignments inserted: ${tagsInserted}`);
+
+  // ── Reconciliation — Odoo is the source of truth ──────────────────────
+  // Hard-delete dashboard task rows that should no longer exist:
+  //   (a) Odoo-sourced tasks whose Odoo id was NOT returned this run — they
+  //       were deleted/unlinked in Odoo. Scoped to projects whose task
+  //       fetch succeeded so a skipped batch never deletes live data.
+  //   (b) tasks created in the dashboard (external_source is null) — Odoo
+  //       is authoritative for this phase, mirroring importProjects().
+  // Every task child row (assignees, comments, timesheets, activities,
+  // stage history, …) is FK `on delete cascade`, so a plain delete is clean.
+  const liveOdooTaskIds = new Set(tasks.map((t) => t.id));
+  const coveredProjectUuids = new Set<string>();
+  for (const odooId of coveredProjectOdooIds) {
+    const uuid = ctx.projectIdMap.get(odooId);
+    if (uuid) coveredProjectUuids.add(uuid);
+  }
+
+  const ghostTaskIds: string[] = [];
+  const RECON_PAGE = 1000;
+  for (let from = 0; ; from += RECON_PAGE) {
+    const { data: rows, error } = await supabaseAdmin
+      .from("tasks")
+      .select("id, external_id, project_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .range(from, from + RECON_PAGE - 1);
+    if (error) {
+      console.warn(`[odoo-import] reconcile select: ${error.message}`);
+      break;
+    }
+    if (!rows || rows.length === 0) break;
+    for (const r of rows) {
+      if (!coveredProjectUuids.has(r.project_id as string)) continue;
+      const ext = r.external_id == null ? NaN : Number(r.external_id);
+      if (!Number.isFinite(ext) || !liveOdooTaskIds.has(ext)) {
+        ghostTaskIds.push(r.id as string);
+      }
+    }
+    if (rows.length < RECON_PAGE) break;
+  }
+  for (let i = 0; i < ghostTaskIds.length; i += DEL_CHUNK) {
+    const { error } = await supabaseAdmin
+      .from("tasks")
+      .delete()
+      .in("id", ghostTaskIds.slice(i, i + DEL_CHUNK));
+    if (error) console.warn(`[odoo-import] reconcile delete ghosts: ${error.message}`);
+  }
+  if (ghostTaskIds.length > 0) {
+    console.log(
+      `[odoo-import] reconcile: deleted ${ghostTaskIds.length} tasks no longer in Odoo`,
+    );
+  }
+
+  const { data: nativeTaskRows, error: nativeErr } = await supabaseAdmin
+    .from("tasks")
+    .select("id")
+    .eq("organization_id", ctx.organizationId)
+    .is("external_source", null);
+  if (nativeErr) {
+    console.warn(`[odoo-import] reconcile native select: ${nativeErr.message}`);
+  } else if (nativeTaskRows && nativeTaskRows.length > 0) {
+    const ids = nativeTaskRows.map((r) => r.id as string);
+    for (let i = 0; i < ids.length; i += DEL_CHUNK) {
+      const { error } = await supabaseAdmin
+        .from("tasks")
+        .delete()
+        .in("id", ids.slice(i, i + DEL_CHUNK));
+      if (error) console.warn(`[odoo-import] reconcile delete native: ${error.message}`);
+    }
+    console.log(`[odoo-import] reconcile: deleted ${ids.length} non-Odoo tasks`);
+  }
+
   return stagedRows.length;
 }
 
@@ -1218,17 +1441,26 @@ async function importTasks(ctx: ImportContext): Promise<number> {
 // searchable and cached locally. Idempotent on (org, external_source, external_id).
 async function importTaskComments(ctx: ImportContext): Promise<number> {
   // Build Odoo task id → Supabase task uuid map by hydrating from the DB.
-  const { data: taskRows } = await supabaseAdmin
-    .from("tasks")
-    .select("id, external_id")
-    .eq("organization_id", ctx.organizationId)
-    .eq("external_source", SOURCE);
+  // Page through the task map: PostgREST caps a single select at ~1000 rows,
+  // and there are far more synced tasks than that. Without paging, messages
+  // for every task past the cap silently drop (their res_id never resolves).
   const taskUuidByOdooId = new Map<number, string>();
-  for (const r of taskRows ?? []) {
-    if (r.external_id != null) {
-      const n = Number(r.external_id);
-      if (Number.isFinite(n)) taskUuidByOdooId.set(n, r.id as string);
+  const TASK_PAGE = 1000;
+  for (let from = 0; ; from += TASK_PAGE) {
+    const { data: taskRows } = await supabaseAdmin
+      .from("tasks")
+      .select("id, external_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .range(from, from + TASK_PAGE - 1);
+    if (!taskRows || taskRows.length === 0) break;
+    for (const r of taskRows) {
+      if (r.external_id != null) {
+        const n = Number(r.external_id);
+        if (Number.isFinite(n)) taskUuidByOdooId.set(n, r.id as string);
+      }
     }
+    if (taskRows.length < TASK_PAGE) break;
   }
   if (taskUuidByOdooId.size === 0) return 0;
 
@@ -1271,23 +1503,38 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
     if (typeof f === "number") return String(f);
     return "—";
   };
+  // Page through mail.message instead of a single capped read. A 500-task
+  // chunk can hold tens of thousands of messages; a fixed `limit` would
+  // silently drop everything past the cap (e.g. with `order: date asc` the
+  // newest notes vanish). Keyset-paginate on `id` (`id > lastId`) rather than
+  // `offset` — deep offsets force Odoo/Postgres to scan and discard every
+  // preceding row, which blows past the JSON-RPC timeout on a busy chunk.
+  const MSG_PAGE = 2000;
   for (let i = 0; i < odooTaskIds.length; i += CHUNK) {
     const slice = odooTaskIds.slice(i, i + CHUNK);
-    const messages = await ctx.odoo.searchRead<OdooMessage>(
-      "mail.message",
-      [
-        ["model", "=", "project.task"],
-        ["res_id", "in", slice],
-        // Pull comments/emails AND notifications (which carry stage/priority/
-        // assignee tracking changes via tracking_value_ids).
-        ["message_type", "in", ["comment", "email", "notification"]],
-      ],
-      [
-        "id", "res_id", "body", "author_id", "date", "message_type",
-        "subtype_id", "tracking_value_ids", "attachment_ids",
-      ],
-      { limit: 5000, order: "date asc" },
-    );
+    const messages: OdooMessage[] = [];
+    let lastId = 0;
+    for (;;) {
+      const page = await ctx.odoo.searchRead<OdooMessage>(
+        "mail.message",
+        [
+          ["model", "=", "project.task"],
+          ["res_id", "in", slice],
+          // Pull comments/emails AND notifications (which carry stage/priority/
+          // assignee tracking changes via tracking_value_ids).
+          ["message_type", "in", ["comment", "email", "notification"]],
+          ["id", ">", lastId],
+        ],
+        [
+          "id", "res_id", "body", "author_id", "date", "message_type",
+          "subtype_id", "tracking_value_ids", "attachment_ids",
+        ],
+        { limit: MSG_PAGE, order: "id asc" },
+      );
+      messages.push(...page);
+      if (page.length < MSG_PAGE) break;
+      lastId = page[page.length - 1].id;
+    }
 
     if (messages.length === 0) continue;
 
@@ -1380,7 +1627,18 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
 
         if (m.message_type === "notification") {
           const tvs = tvByMessage.get(m.id) ?? [];
-          if (tvs.length === 0) return null;
+          if (tvs.length === 0) {
+            // Lifecycle notifications (e.g. "Task Created") carry no tracking
+            // values — keep them anyway, using the subtype label as the body
+            // so the timeline matches Odoo's chatter. Drop only when even the
+            // subtype name is missing (pure noise).
+            const subtypeLabel =
+              Array.isArray(m.subtype_id) && typeof m.subtype_id[1] === "string"
+                ? (m.subtype_id[1] as string)
+                : null;
+            if (!subtypeLabel) return null;
+            return { ...baseRow, body: `<p><strong>${subtypeLabel}</strong></p>` };
+          }
           const lines = tvs.map((tv) => {
             const fid = Array.isArray(tv.field_id) ? (tv.field_id[0] as number) : null;
             const label = (fid && fieldLabelById.get(fid)) || "Field";
@@ -1409,9 +1667,20 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
 
     if (rows.length === 0) continue;
 
-    const { error } = await supabaseAdmin
-      .from("task_comments")
-      .upsert(rows, { onConflict: "organization_id,external_source,external_id" });
+    // Upsert in sub-batches: a keyset-paged chunk can hold tens of thousands
+    // of rows, too large for a single PostgREST request.
+    let error: { message: string } | null = null;
+    for (let r = 0; r < rows.length; r += 1000) {
+      const { error: batchError } = await supabaseAdmin
+        .from("task_comments")
+        .upsert(rows.slice(r, r + 1000), {
+          onConflict: "organization_id,external_source,external_id",
+        });
+      if (batchError) {
+        error = batchError;
+        break;
+      }
+    }
     if (error) {
       console.warn(`task_comments chunk @${i}: ${error.message}`);
     } else {
@@ -1433,18 +1702,24 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
     );
     if (attachmentIds.length === 0) continue;
 
-    // Map Odoo message id → Supabase comment uuid for this chunk.
+    // Map Odoo message id → Supabase comment uuid for this chunk. The lookup
+    // is paged: a chunk can hold far more than PostgREST's ~1000-row cap, and
+    // an un-paged read would leave later attachments unlinked.
     const odooMsgIdsInChunk = messages.map((m) => String(m.id));
-    const { data: commentRows } = await supabaseAdmin
-      .from("task_comments")
-      .select("id, task_id, external_id")
-      .eq("organization_id", ctx.organizationId)
-      .eq("external_source", SOURCE)
-      .in("external_id", odooMsgIdsInChunk);
     const commentByOdooMsgId = new Map<number, { id: string; task_id: string }>();
-    for (const c of commentRows ?? []) {
-      const n = Number(c.external_id);
-      if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, task_id: c.task_id });
+    for (let j = 0; j < odooMsgIdsInChunk.length; j += 1000) {
+      const idSlice = odooMsgIdsInChunk.slice(j, j + 1000);
+      const { data: commentRows } = await supabaseAdmin
+        .from("task_comments")
+        .select("id, task_id, external_id")
+        .eq("organization_id", ctx.organizationId)
+        .eq("external_source", SOURCE)
+        .in("external_id", idSlice)
+        .range(0, idSlice.length - 1);
+      for (const c of commentRows ?? []) {
+        const n = Number(c.external_id);
+        if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, task_id: c.task_id });
+      }
     }
 
     type OdooAttachment = {
@@ -1532,17 +1807,24 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
 // project_comments + project_attachments, parallel to importTaskComments.
 // Same idempotency contract: (organization_id, external_source, external_id).
 async function importProjectComments(ctx: ImportContext): Promise<number> {
-  const { data: projectRows } = await supabaseAdmin
-    .from("projects")
-    .select("id, external_id")
-    .eq("organization_id", ctx.organizationId)
-    .eq("external_source", SOURCE);
+  // Page the project map past PostgREST's ~1000-row select cap.
   const projectUuidByOdooId = new Map<number, string>();
-  for (const r of projectRows ?? []) {
-    if (r.external_id != null) {
-      const n = Number(r.external_id);
-      if (Number.isFinite(n)) projectUuidByOdooId.set(n, r.id as string);
+  const PROJECT_PAGE = 1000;
+  for (let from = 0; ; from += PROJECT_PAGE) {
+    const { data: projectRows } = await supabaseAdmin
+      .from("projects")
+      .select("id, external_id")
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .range(from, from + PROJECT_PAGE - 1);
+    if (!projectRows || projectRows.length === 0) break;
+    for (const r of projectRows) {
+      if (r.external_id != null) {
+        const n = Number(r.external_id);
+        if (Number.isFinite(n)) projectUuidByOdooId.set(n, r.id as string);
+      }
     }
+    if (projectRows.length < PROJECT_PAGE) break;
   }
   if (projectUuidByOdooId.size === 0) return 0;
 
@@ -1562,23 +1844,34 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
     attachment_ids: number[] | false;
   };
 
+  // Keyset-paginate messages so a busy chunk is neither truncated by a fixed
+  // cap nor slowed by deep offsets.
+  const MSG_PAGE = 2000;
   for (let i = 0; i < odooProjectIds.length; i += CHUNK) {
     const slice = odooProjectIds.slice(i, i + CHUNK);
-    const messages = await ctx.odoo.searchRead<OdooMessage>(
-      "mail.message",
-      [
-        ["model", "=", "project.project"],
-        ["res_id", "in", slice],
-        // Project chatter is normally human comments/emails; notification
-        // tracking on projects is rare so we focus on real notes here.
-        ["message_type", "in", ["comment", "email"]],
-      ],
-      [
-        "id", "res_id", "body", "author_id", "date", "message_type",
-        "subtype_id", "attachment_ids",
-      ],
-      { limit: 5000, order: "date asc" },
-    );
+    const messages: OdooMessage[] = [];
+    let lastId = 0;
+    for (;;) {
+      const page = await ctx.odoo.searchRead<OdooMessage>(
+        "mail.message",
+        [
+          ["model", "=", "project.project"],
+          ["res_id", "in", slice],
+          // Project chatter is normally human comments/emails; notification
+          // tracking on projects is rare so we focus on real notes here.
+          ["message_type", "in", ["comment", "email"]],
+          ["id", ">", lastId],
+        ],
+        [
+          "id", "res_id", "body", "author_id", "date", "message_type",
+          "subtype_id", "attachment_ids",
+        ],
+        { limit: MSG_PAGE, order: "id asc" },
+      );
+      messages.push(...page);
+      if (page.length < MSG_PAGE) break;
+      lastId = page[page.length - 1].id;
+    }
 
     if (messages.length === 0) continue;
 
@@ -1630,9 +1923,19 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
 
     if (rows.length === 0) continue;
 
-    const { error } = await supabaseAdmin
-      .from("project_comments")
-      .upsert(rows, { onConflict: "organization_id,external_source,external_id" });
+    // Upsert in sub-batches — a keyset-paged chunk can exceed a single request.
+    let error: { message: string } | null = null;
+    for (let r = 0; r < rows.length; r += 1000) {
+      const { error: batchError } = await supabaseAdmin
+        .from("project_comments")
+        .upsert(rows.slice(r, r + 1000), {
+          onConflict: "organization_id,external_source,external_id",
+        });
+      if (batchError) {
+        error = batchError;
+        break;
+      }
+    }
     if (error) {
       console.warn(`project_comments chunk @${i}: ${error.message}`);
       continue;
@@ -1649,17 +1952,22 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
     );
     if (attachmentIds.length === 0) continue;
 
+    // Paged lookup — a chunk can exceed PostgREST's ~1000-row cap.
     const odooMsgIdsInChunk = messages.map((m) => String(m.id));
-    const { data: commentRows } = await supabaseAdmin
-      .from("project_comments")
-      .select("id, project_id, external_id")
-      .eq("organization_id", ctx.organizationId)
-      .eq("external_source", SOURCE)
-      .in("external_id", odooMsgIdsInChunk);
     const commentByOdooMsgId = new Map<number, { id: string; project_id: string }>();
-    for (const c of commentRows ?? []) {
-      const n = Number(c.external_id);
-      if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, project_id: c.project_id });
+    for (let j = 0; j < odooMsgIdsInChunk.length; j += 1000) {
+      const idSlice = odooMsgIdsInChunk.slice(j, j + 1000);
+      const { data: commentRows } = await supabaseAdmin
+        .from("project_comments")
+        .select("id, project_id, external_id")
+        .eq("organization_id", ctx.organizationId)
+        .eq("external_source", SOURCE)
+        .in("external_id", idSlice)
+        .range(0, idSlice.length - 1);
+      for (const c of commentRows ?? []) {
+        const n = Number(c.external_id);
+        if (Number.isFinite(n)) commentByOdooMsgId.set(n, { id: c.id, project_id: c.project_id });
+      }
     }
 
     type OdooAttachment = {
@@ -1737,9 +2045,21 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
   return imported;
 }
 
+// The core import is split into phases so a single Vercel function (300s)
+// never has to do all of it. Each phase rebuilds the ID maps it needs from
+// already-synced rows via hydrateExistingMaps(), so they stitch together
+// across separate cron invocations.
+//   base     — employees, departments, HR, clients, services, tags
+//   projects — projects (+ project tag assignments)
+//   tasks    — tasks (+ task assignees + task tag assignments)
+//   comments — task & project comments (chatter / notes)
+export type ImportPhase = "base" | "projects" | "tasks" | "comments";
+const ALL_IMPORT_PHASES: ImportPhase[] = ["base", "projects", "tasks", "comments"];
+
 export async function runImport(
   odoo: OdooClient,
   organizationSlug: string,
+  phases: ImportPhase[] = ALL_IMPORT_PHASES,
 ): Promise<ImportSummary> {
   const organizationId = await resolveOrganizationId(organizationSlug);
   const ctx: ImportContext = {
@@ -1773,64 +2093,76 @@ export async function runImport(
     errors: [],
   };
 
-  // Hydrate already-synced rows so partial imports stitch together.
+  // Hydrate already-synced rows so partial / phased imports stitch together.
   await hydrateExistingMaps(ctx);
+  const run = new Set(phases);
 
-  try {
-    summary.employees = await importEmployees(ctx);
-  } catch (e) {
-    summary.errors.push(`employees: ${(e as Error).message}`);
+  if (run.has("base")) {
+    try {
+      summary.employees = await importEmployees(ctx);
+    } catch (e) {
+      summary.errors.push(`employees: ${(e as Error).message}`);
+    }
+    // Departments + HR records: order is departments → employee-HR backfill so
+    // emp_profile.department_id can resolve a uuid. Both before clients/projects
+    // since neither downstream entity depends on hr data, but having dept and
+    // position populated keeps the rest of the import logging more useful.
+    try {
+      summary.departments = await importDepartments(ctx);
+    } catch (e) {
+      summary.errors.push(`departments: ${(e as Error).message}`);
+    }
+    try {
+      summary.employeesHydrated = await importEmployeeHR(ctx);
+    } catch (e) {
+      summary.errors.push(`employee_hr: ${(e as Error).message}`);
+    }
+    try {
+      summary.clients = await importClients(ctx);
+    } catch (e) {
+      summary.errors.push(`clients: ${(e as Error).message}`);
+    }
+    try {
+      summary.services = await importServices(ctx);
+    } catch (e) {
+      summary.errors.push(`services: ${(e as Error).message}`);
+    }
+    // Tags must load before projects so syncProjectTagAssignments can resolve them.
+    try {
+      summary.tags = await importProjectTags(ctx);
+    } catch (e) {
+      summary.errors.push(`tags: ${(e as Error).message}`);
+    }
   }
-  // Departments + HR records: order is departments → employee-HR backfill so
-  // emp_profile.department_id can resolve a uuid. Both before clients/projects
-  // since neither downstream entity depends on hr data, but having dept and
-  // position populated keeps the rest of the import logging more useful.
-  try {
-    summary.departments = await importDepartments(ctx);
-  } catch (e) {
-    summary.errors.push(`departments: ${(e as Error).message}`);
+
+  if (run.has("projects")) {
+    try {
+      summary.projects = await importProjects(ctx);
+    } catch (e) {
+      summary.errors.push(`projects: ${(e as Error).message}`);
+    }
   }
-  try {
-    summary.employeesHydrated = await importEmployeeHR(ctx);
-  } catch (e) {
-    summary.errors.push(`employee_hr: ${(e as Error).message}`);
+
+  if (run.has("tasks")) {
+    try {
+      summary.tasks = await importTasks(ctx);
+      summary.taskAssignees = ctx.assigneeCount;
+    } catch (e) {
+      summary.errors.push(`tasks: ${(e as Error).message}`);
+    }
   }
-  try {
-    summary.clients = await importClients(ctx);
-  } catch (e) {
-    summary.errors.push(`clients: ${(e as Error).message}`);
-  }
-  try {
-    summary.services = await importServices(ctx);
-  } catch (e) {
-    summary.errors.push(`services: ${(e as Error).message}`);
-  }
-  // Tags must load before projects so syncProjectTagAssignments can resolve them.
-  try {
-    summary.tags = await importProjectTags(ctx);
-  } catch (e) {
-    summary.errors.push(`tags: ${(e as Error).message}`);
-  }
-  try {
-    summary.projects = await importProjects(ctx);
-  } catch (e) {
-    summary.errors.push(`projects: ${(e as Error).message}`);
-  }
-  try {
-    summary.tasks = await importTasks(ctx);
-    summary.taskAssignees = ctx.assigneeCount;
-  } catch (e) {
-    summary.errors.push(`tasks: ${(e as Error).message}`);
-  }
-  try {
-    summary.taskComments = await importTaskComments(ctx);
-  } catch (e) {
-    summary.errors.push(`task_comments: ${(e as Error).message}`);
-  }
-  try {
-    summary.projectComments = await importProjectComments(ctx);
-  } catch (e) {
-    summary.errors.push(`project_comments: ${(e as Error).message}`);
+
+  if (run.has("comments")) {
+    try {
+      summary.taskComments = await importTaskComments(ctx);
+    } catch (e) {
+      summary.errors.push(`task_comments: ${(e as Error).message}`);
+    }
+    try {
+      summary.projectComments = await importProjectComments(ctx);
+    } catch (e) {
+      summary.errors.push(`project_comments: ${(e as Error).message}`);
+    }
   }
 
   return summary;
@@ -1927,6 +2259,14 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
       if (row.external_id != null) map.set(Number(row.external_id), row.id);
     }
   }
+  // employee_profiles.external_id IS the Odoo res.users id (see importEmployees),
+  // and task.user_ids / project members reference users by that same id. So the
+  // employee map doubles as odooUserToEmployee — copy it across so the projects
+  // and tasks phases resolve assignees even when run without the base phase.
+  for (const [odooUserId, profileId] of ctx.employeeIdMap) {
+    ctx.odooUserToEmployee.set(odooUserId, profileId);
+  }
+
   // Hydrate the unassigned-client placeholder if it already exists.
   const { data: unassigned } = await supabaseAdmin
     .from("clients")

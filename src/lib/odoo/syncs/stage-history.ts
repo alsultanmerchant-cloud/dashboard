@@ -112,6 +112,12 @@ export async function syncStageHistory(
     );
     if (rows.length === 0) continue;
 
+    // Rows arrive ordered by (task_id, stage_in_date), so for each task the
+    // first row is the genuine creation (from_stage = null) and every later
+    // row's from_stage is the previous row's stage. Without this chaining
+    // every transition would land with from_stage = null and the activity
+    // feed would render each one as a duplicate "task created" event.
+    const prevStageByTask = new Map<string, string>();
     const upserts = rows
       .map((r) => {
         const tid = Array.isArray(r.task_id) ? r.task_id[0] : null;
@@ -126,10 +132,12 @@ export async function syncStageHistory(
         const enteredAt = typeof r.stage_in_date === "string" ? r.stage_in_date : null;
         const exitedAt = typeof r.stage_out_date === "string" ? r.stage_out_date : null;
         if (!enteredAt) return null;
+        const fromStage = prevStageByTask.get(taskUuid) ?? null;
+        prevStageByTask.set(taskUuid, stageEnum);
         return {
           organization_id: orgId,
           task_id: taskUuid,
-          from_stage: null,
+          from_stage: fromStage,
           to_stage: stageEnum,
           entered_at: enteredAt,
           exited_at: exitedAt,

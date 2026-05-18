@@ -23,13 +23,106 @@
   },
   "ProjectsSearch": {
     "fields": {
-      "externalSource": "Record source"
+      "externalSource": "Record source",
+      "projectManager": "Project Manager",
+      "accountManager": "Account Manager",
+      "client": "Client",
+      "socialSpecialist": "Social Specialist",
+      "mediaSpecialist": "Media Specialist",
+      "seoSpecialist": "SEO Specialist",
+      "socialManager": "Social Manager",
+      "mediaManager": "Media Manager",
+      "seoManager": "SEO Manager",
+      "name": "Name",
+      "projectCode": "Project Code",
+      "description": "Description",
+      "storeName": "Store Name",
+      "target": "Target",
+      "package": "Package",
+      "durationLabel": "Duration",
+      "siteAddress": "Site Address",
+      "status": "Status",
+      "priority": "Priority",
+      "startDate": "Start Date",
+      "endDate": "End Date",
+      "nextRenewalDate": "Next Renewal Date",
+      "createdOn": "Created On",
+      "lastUpdatedOn": "Last Updated On",
+      "heldOn": "Held On",
+      "favorite": "Favorite",
+      "cycleLengthMonths": "Cycle Length (months)",
+      "progress": "Progress",
+      "documentCount": "Document Count",
+      "color": "Color",
+      "taskSequence": "Task Sequence"
     },
     "options": {
       "externalSource": {
         "odoo": "Odoo",
         "dashboard": "Dashboard"
+      },
+      "status": {
+        "active": "Active",
+        "onHold": "On Hold",
+        "completed": "Completed",
+        "cancelled": "Cancelled"
+      },
+      "priority": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "urgent": "Urgent"
       }
+    },
+    "searchPlaceholder": "Search projects…",
+    "aria": {
+      "projectFilters": "Project filters",
+      "clearSearch": "Clear search",
+      "openProjectOptions": "Open project options"
+    },
+    "chips": {
+      "dateFilter": "Date filter",
+      "groupedBy": "Grouped by {label}"
+    },
+    "actions": {
+      "editCustomFilter": "Edit custom filter",
+      "addCustomFilter": "Add Custom Filter",
+      "moreFilters": "More filters",
+      "addCustomGroup": "Add Custom Group",
+      "clearAllFilters": "Clear all filters"
+    },
+    "columns": {
+      "filters": "Filters",
+      "groupBy": "Group By",
+      "favorites": "Favorites"
+    },
+    "dateSections": {
+      "startDate": "Start date",
+      "endDate": "End date"
+    },
+    "favorites": {
+      "copyCurrentSearchUrl": "Copy current search URL",
+      "help": "Filters and grouping live in the URL — copy the link to save or share this search."
+    },
+    "boolFilters": {
+      "onlyMine": "My projects",
+      "onlyFavorites": "Favorites",
+      "onlyUnassigned": "Unassigned",
+      "onlyWithCategories": "With service categories",
+      "archived": "Archived",
+      "onlyWithManager": "With manager",
+      "overTimesheets": "Over timesheets",
+      "allCategoriesArchived": "All categories archived"
+    },
+    "groupOptions": {
+      "projectManager": "Project Manager",
+      "status": "Status",
+      "tags": "Tags",
+      "accountManager": "Account Manager",
+      "client": "Client",
+      "target": "Target",
+      "startMonth": "Start Month",
+      "endMonth": "End Month"
     }
   },
   "Actions": {
@@ -71,16 +164,46 @@
     "placeholderNotes": "Add your notes…"
   },
   "Empty": {
-    "clients": { "title": "No clients yet", "description": "Add your first client to start creating projects and assigning tasks to the team." },
-    "projects": { "title": "No projects", "description": "Create your first project from the relevant client and specify the services provided." },
-    "tasks": { "title": "No tasks in this view", "description": "Change the filter or add a new task to show it here." },
-    "handovers": { "title": "No handover forms", "description": "Sales handover forms appear here as soon as they are submitted and automatically convert to projects." },
-    "notifications": { "title": "No new notifications", "description": "Signals, handovers, and task updates will show up here." },
-    "aiInsights": { "title": "No insights yet", "description": "As the system is used, events will accumulate and useful insights will appear in this panel." },
-    "serviceCategories": { "title": "No categories yet", "description": "Add a category or import Odoo categories to display linked task templates here." },
-    "renewalCycles": { "title": "No renewal cycles", "description": "Set the renewal schedule then start a new cycle to auto-generate tasks." },
-    "escalations": { "title": "No escalations", "description": "Escalations directed to you will appear here automatically when an SLA is breached." },
-    "exceptions": { "title": "No exceptions", "description": "Open an exception manually from the task page when the situation calls for it." }
+    "clients": {
+      "title": "No clients yet",
+      "description": "Add your first client to start creating projects and assigning tasks to the team."
+    },
+    "projects": {
+      "title": "No projects",
+      "description": "Create your first project from the relevant client and specify the services provided."
+    },
+    "tasks": {
+      "title": "No tasks in this view",
+      "description": "Change the filter or add a new task to show it here."
+    },
+    "handovers": {
+      "title": "No handover forms",
+      "description": "Sales handover forms appear here as soon as they are submitted and automatically convert to projects."
+    },
+    "notifications": {
+      "title": "No new notifications",
+      "description": "Signals, handovers, and task updates will show up here."
+    },
+    "aiInsights": {
+      "title": "No insights yet",
+      "description": "As the system is used, events will accumulate and useful insights will appear in this panel."
+    },
+    "serviceCategories": {
+      "title": "No categories yet",
+      "description": "Add a category or import Odoo categories to display linked task templates here."
+    },
+    "renewalCycles": {
+      "title": "No renewal cycles",
+      "description": "Set the renewal schedule then start a new cycle to auto-generate tasks."
+    },
+    "escalations": {
+      "title": "No escalations",
+      "description": "Escalations directed to you will appear here automatically when an SLA is breached."
+    },
+    "exceptions": {
+      "title": "No exceptions",
+      "description": "Open an exception manually from the task page when the situation calls for it."
+    }
   },
   "NotFound": {
     "title": "Page not found",
@@ -173,8 +296,17 @@
     "pageDescription": "Inbox for escalations directed to you. Track open exceptions and acknowledge or close them.",
     "exceptions": "Exceptions",
     "escalationsSection": "Escalations",
-    "kindLabels": { "client": "Client", "deadline": "Deadline", "quality": "Quality", "resource": "Resource" },
-    "statusLabels": { "open": "Open", "acknowledged": "Acknowledged", "closed": "Closed" },
+    "kindLabels": {
+      "client": "Client",
+      "deadline": "Deadline",
+      "quality": "Quality",
+      "resource": "Resource"
+    },
+    "statusLabels": {
+      "open": "Open",
+      "acknowledged": "Acknowledged",
+      "closed": "Closed"
+    },
     "isOpen": "Open",
     "isClosed": "Closed",
     "openedAt": "Opened",
@@ -484,6 +616,11 @@
       "renewals": "Loading renewal cycles…",
       "board": "Loading task board…"
     },
+    "attachmentsPanel": {
+      "show": "Show attachments",
+      "hide": "Hide attachments",
+      "error": "Could not load attachments."
+    },
     "empty": {
       "team": "No project team members yet.",
       "followers": "No followers.",
@@ -648,7 +785,8 @@
       "role": "Responsible role",
       "offsetDays": "Offset (days)",
       "durationDays": "Duration (days)",
-      "priority": "Priority"
+      "priority": "Priority",
+      "edit": "Edit"
     }
   },
   "ServiceCategoriesPage": {
@@ -762,7 +900,8 @@
       "department": "Department",
       "slug": "Slug",
       "description": "Description",
-      "employeeCount": "Employees"
+      "employeeCount": "Employees",
+      "edit": "Edit"
     }
   },
   "OrganizationEmployeesPage": {
@@ -867,7 +1006,8 @@
       "sent_to_client": "Sent to Client",
       "client_changes": "Client Changes",
       "done": "Done"
-    }
+    },
+    "duration": "Duration"
   },
   "TaskDetailPage": {
     "breadcrumbs": {
@@ -1295,6 +1435,10 @@
       "title": "Failed to load task",
       "description": "The link may be invalid, the task may have been deleted, or you may not have permission to view it.",
       "back": "Back to tasks"
+    },
+    "star": {
+      "star": "Add to favorites",
+      "unstar": "Remove from favorites"
     }
   },
   "TaskLabels": {
@@ -1662,5 +1806,122 @@
     "hrSubtitle": "Launches in a later phase",
     "financeTitle": "Finance",
     "financeSubtitle": "Launches in a later phase"
+  },
+  "CustomFilter": {
+    "title": "Add Custom Filter",
+    "match": "Match",
+    "ofFollowingRules": "of the following rules:",
+    "includeArchived": "Include archived",
+    "newRule": "New Rule",
+    "add": "Add",
+    "cancel": "Cancel",
+    "of": "of:",
+    "connectors": {
+      "any": "any",
+      "all": "all",
+      "and": "and",
+      "or": "or"
+    },
+    "actions": {
+      "addRule": "Add rule",
+      "addBranch": "Add branch",
+      "delete": "Delete"
+    },
+    "operators": {
+      "eq": "=",
+      "neq": "!=",
+      "gt": ">",
+      "gte": ">=",
+      "lt": "<",
+      "lte": "<=",
+      "contains": "contains",
+      "notContains": "does not contain",
+      "isIn": "is in",
+      "isNotIn": "is not in",
+      "between": "is between",
+      "isSet": "is set",
+      "isNotSet": "is not set"
+    },
+    "boolean": {
+      "true": "true",
+      "false": "false"
+    },
+    "selectField": "Select field",
+    "searchPlaceholder": "Search fields…",
+    "noFieldsMatch": "No fields match",
+    "valuePlaceholder": "Value",
+    "multiValuePlaceholder": "Comma-separated values"
+  },
+  "TasksSearch": {
+    "searchPlaceholder": "Search tasks…",
+    "clearAll": "Clear all",
+    "loading": "Loading…",
+    "aria": {
+      "removeChip": "Remove {label}",
+      "clearGrouping": "Clear grouping",
+      "clearSearch": "Clear search",
+      "openSearchOptions": "Open search options"
+    },
+    "columns": {
+      "filters": "Filters",
+      "groupBy": "Group By",
+      "favorites": "Favorites"
+    },
+    "suggestions": {
+      "loading": "Searching…",
+      "error": "Search failed",
+      "empty": "No matches",
+      "tasksTitle": "Tasks",
+      "title": "Projects",
+      "noStoreName": "No store name"
+    },
+    "saved": {
+      "saveCurrentSearch": "Save current search",
+      "filterNamePlaceholder": "Filter name",
+      "nameRequired": "Name is required",
+      "save": "Save",
+      "delete": "Delete",
+      "deleted": "Filter deleted",
+      "empty": "No saved filters yet",
+      "saved": "Saved",
+      "default": "Default",
+      "defaultSet": "Set as default",
+      "defaultUnset": "Default removed",
+      "makeDefault": "Make default",
+      "shared": "Shared",
+      "sharedByColleague": "Shared by a colleague",
+      "cannotEditColleagueFilter": "You cannot edit a colleague’s filter"
+    },
+    "dateFields": {
+      "actualDoneDate": "Closed On",
+      "createdAt": "Created on",
+      "dueDate": "Deadline",
+      "stageEnteredAt": "Last Stage Update"
+    },
+    "filters": {
+      "mine": "My Tasks",
+      "followed": "Followed",
+      "unassigned": "Unassigned",
+      "starred": "Starred Tasks",
+      "nearTimesheets": "Timesheets 80%",
+      "overTimesheets": "Timesheets >100%",
+      "open": "Open Tasks",
+      "done": "Closed Tasks",
+      "archived": "Archived",
+      "inProgressPct": "In Progress (1–99%)",
+      "completedPct": "Completed (100%)",
+      "notStarted": "Not started (0%)"
+    },
+    "groups": {
+      "assignee": "Assignees",
+      "stage": "Stage",
+      "project": "Project",
+      "tags": "Tags",
+      "customer": "Client",
+      "createdAt": "Creation Date",
+      "lastStageUpdate": "Last Stage Update",
+      "deadline": "Deadline",
+      "progress": "Progress Range"
+    }
   }
 }

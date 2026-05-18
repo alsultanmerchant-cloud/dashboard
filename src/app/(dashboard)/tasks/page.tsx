@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { ViewSwitcher } from "./view-switcher";
 import { MonthQuickPick } from "./month-quick-pick";
+import { SmartSearchBar } from "./smart-search-bar";
 import { loadTaskBoardForGlobalView, loadTasksForGlobalView } from "./_loaders";
 import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
 
@@ -336,9 +337,11 @@ export default async function TasksPage({
         </div>
       )}
 
-      {/* Top toolbar — Rwasem-style smart search bar (Filters / Group By /
-          Favorites in a single dropdown) on the right, view switcher on the left. */}
+      {/* Top toolbar — Rwasem-style: the smart search bar (Filters / Group By /
+          Favorites in a single dropdown) is the prominent inline element, with
+          the view switcher and KPI chips beside it. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
+        <SmartSearchBar variant="page" view={view} totalCount={totalCount} />
         <ViewSwitcher current={view} />
         <MonthQuickPick />
         {/* #1/#2: filter + count chip — makes the active domain unambiguous,

@@ -48,10 +48,8 @@ export function TaskExceptionBadge({
       )}
       {canOpen && (
         <Dialog open={openDialog} onOpenChange={setOpenDialog}>
-          <DialogTrigger asChild>
-            <Button size="sm" variant="outline">
-              فتح استثناء
-            </Button>
+          <DialogTrigger render={<Button size="sm" variant="outline" />}>
+            فتح استثناء
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>

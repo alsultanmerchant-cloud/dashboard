@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { RelationalPicker } from "./relational-picker";
 import type { FieldDef, Operator } from "@/lib/custom-filter/types";
 import { operatorHasValue } from "@/lib/custom-filter/types";
@@ -18,6 +19,7 @@ export function ValueInput({
   value: unknown;
   onChange: (next: unknown) => void;
 }) {
+  const t = useTranslations("CustomFilter");
   if (!operatorHasValue(op)) return null;
 
   // "is between" → two inputs of the matching type.
@@ -29,12 +31,18 @@ export function ValueInput({
           field={field}
           value={arr[0]}
           onChange={(v) => onChange([v, arr[1]])}
+          textPlaceholder={t("valuePlaceholder")}
+          trueLabel={t("boolean.true")}
+          falseLabel={t("boolean.false")}
         />
         <span className="text-[10px] text-muted-foreground">→</span>
         <ScalarInput
           field={field}
           value={arr[1]}
           onChange={(v) => onChange([arr[0], v])}
+          textPlaceholder={t("valuePlaceholder")}
+          trueLabel={t("boolean.true")}
+          falseLabel={t("boolean.false")}
         />
       </div>
     );
@@ -63,7 +71,7 @@ export function ValueInput({
     }
     // Text / number multi: free-form chip input.
     const values = Array.isArray(value) ? (value as (string | number)[]) : [];
-    return <ChipMulti values={values} onChange={onChange} />;
+    return <ChipMulti values={values} onChange={onChange} placeholder={t("multiValuePlaceholder")} />;
   }
 
   // Single-value operators (=, !=, >, contains, …).
@@ -78,17 +86,32 @@ export function ValueInput({
       />
     );
   }
-  return <ScalarInput field={field} value={value} onChange={onChange} />;
+  return (
+    <ScalarInput
+      field={field}
+      value={value}
+      onChange={onChange}
+      textPlaceholder={t("valuePlaceholder")}
+      trueLabel={t("boolean.true")}
+      falseLabel={t("boolean.false")}
+    />
+  );
 }
 
 function ScalarInput({
   field,
   value,
   onChange,
+  textPlaceholder,
+  trueLabel,
+  falseLabel,
 }: {
   field: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
+  textPlaceholder: string;
+  trueLabel: string;
+  falseLabel: string;
 }) {
   const baseInput =
     "min-w-0 flex-1 rounded-md border border-soft bg-card/50 px-2 py-1.5 text-xs text-foreground focus:border-cyan focus:outline-none";
@@ -100,8 +123,8 @@ function ScalarInput({
           onChange={(e) => onChange(e.target.value === "true")}
           className={baseInput}
         >
-          <option value="true">True</option>
-          <option value="false">False</option>
+          <option value="true">{trueLabel}</option>
+          <option value="false">{falseLabel}</option>
         </select>
       );
     case "number":
@@ -155,7 +178,7 @@ function ScalarInput({
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
           className={baseInput}
-          placeholder="…"
+          placeholder={textPlaceholder}
         />
       );
   }
@@ -200,9 +223,11 @@ function SelectionMulti({
 function ChipMulti({
   values,
   onChange,
+  placeholder,
 }: {
   values: (string | number)[];
   onChange: (next: (string | number)[]) => void;
+  placeholder: string;
 }) {
   return (
     <input
@@ -215,7 +240,7 @@ function ChipMulti({
           .filter(Boolean);
         onChange(next);
       }}
-      placeholder="value, value, …"
+      placeholder={placeholder}
       className="min-w-0 flex-1 rounded-md border border-soft bg-card/50 px-2 py-1.5 text-xs text-foreground focus:border-cyan focus:outline-none"
     />
   );

@@ -76,6 +76,11 @@ export type BoardTaskData = {
   progress_slip_percent?: number | null;
   allocated_time_minutes?: number | null;
   delay_days?: number | null;
+  // Odoo's pre-formatted time-in-current-stage string ("2d 22h 47m").
+  current_stage_duration?: string | null;
+  // Odoo manual kanban-sort field + Odoo task id — drive in-column order.
+  sequence?: number | null;
+  external_id?: string | null;
   completed_at?: string | null;
   // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
   external_source?: string | null;
@@ -115,6 +120,7 @@ type TaskBundleRow = {
   progress_slip_percent: number | null;
   allocated_time_minutes: number | null;
   delay_days: number | null;
+  current_stage_duration: string | null;
   task_code: string | null;
   priority: string;
   due_date: string | null;
@@ -216,7 +222,7 @@ export async function listBoardTasks(
     filters.projectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT,
   );
 
-  return data.map((t) => {
+  const rows = data.map((t) => {
     const project = t.project;
     const client = project?.client ?? null;
     const service = t.service;
@@ -245,6 +251,7 @@ export async function listBoardTasks(
       progress_slip_percent: t.progress_slip_percent ?? null,
       allocated_time_minutes: t.allocated_time_minutes ?? null,
       delay_days: t.delay_days ?? null,
+      current_stage_duration: t.current_stage_duration ?? null,
       completed_at: t.completed_at ?? null,
       external_source: t.external_source ?? null,
       task_code: t.task_code ?? null,
@@ -261,6 +268,56 @@ export async function listBoardTasks(
       created_at: t.created_at,
     };
   });
+
+  // `current_stage_duration` and task tags aren't part of the
+  // list_tasks_bundle RPC payload — attach them with two batched reads.
+  if (rows.length > 0) {
+    const ids = rows.map((r) => r.id);
+
+    const { data: durRows } = await supabaseAdmin
+      .from("tasks")
+      .select("id, current_stage_duration, sequence, external_id")
+      .in("id", ids);
+    const extraMap = new Map(
+      (durRows ?? []).map((d) => [
+        d.id as string,
+        {
+          duration: (d.current_stage_duration as string | null) ?? null,
+          sequence: typeof d.sequence === "number" ? d.sequence : 10,
+          external_id: (d.external_id as string | null) ?? null,
+        },
+      ]),
+    );
+    for (const r of rows) {
+      const e = extraMap.get(r.id);
+      r.current_stage_duration = e?.duration ?? null;
+      r.sequence = e?.sequence ?? 10;
+      r.external_id = e?.external_id ?? null;
+    }
+
+    type TagRow = {
+      task_id: string;
+      tag:
+        | { id: string; name: string; color: number }
+        | { id: string; name: string; color: number }[]
+        | null;
+    };
+    const { data: tagRows } = await supabaseAdmin
+      .from("task_tag_assignments")
+      .select("task_id, tag:project_tags ( id, name, color )")
+      .in("task_id", ids);
+    const tagsByTask = new Map<string, { id: string; name: string; color: number }[]>();
+    for (const row of (tagRows ?? []) as TagRow[]) {
+      const tag = Array.isArray(row.tag) ? row.tag[0] : row.tag;
+      if (!tag) continue;
+      const list = tagsByTask.get(row.task_id) ?? [];
+      list.push(tag);
+      tagsByTask.set(row.task_id, list);
+    }
+    for (const r of rows) r.tags = tagsByTask.get(r.id) ?? [];
+  }
+
+  return rows;
 }
 
 export async function listTaskSearchSuggestions(orgId: string, query: string) {
