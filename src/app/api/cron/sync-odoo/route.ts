@@ -32,9 +32,10 @@ import { syncTaskAssigneeManagers } from "@/lib/odoo/syncs/task-assignee-manager
 //                        :54  members,attachments
 
 export const runtime = "nodejs";
-// 800s headroom for manual full `?only=core` runs (Vercel Pro). The staggered
-// cron uses the core-* phase slices, each of which fits well under 300s.
-export const maxDuration = 800;
+// Hobby plan serverless functions top out at 300s. Full `?only=core` runs are
+// therefore not suitable on Vercel Hobby; use the phased `core-*` cron slices
+// (and the supplementary step slices) instead.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 const DEFAULT_ORG_SLUG = process.env.NEXT_PUBLIC_DEFAULT_ORG_SLUG ?? "rawasm-demo";
