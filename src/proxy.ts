@@ -6,7 +6,7 @@ import { createMiddlewareClient } from "@/lib/supabase/middleware";
 // Kept public so we can demo primitives without touching auth/RBAC.
 const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev", "/api/cron"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request);
   const { pathname } = request.nextUrl;
 

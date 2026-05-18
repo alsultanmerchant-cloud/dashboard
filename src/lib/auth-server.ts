@@ -20,12 +20,28 @@ export type ServerSession = {
   isOwner: boolean;
 };
 
+function isExpectedDynamicServerUsage(err: unknown) {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "digest" in err &&
+    err.digest === "DYNAMIC_SERVER_USAGE"
+  );
+}
+
 export const getServerSession = cache(async (): Promise<ServerSession | null> => {
   try {
     return await loadSession();
   } catch (err) {
-    // Surface as a logged error and treat as "no session" so callers redirect
-    // to /auth/sign-out instead of 503'ing the page. Common cause:
+    // Next.js throws this during static generation to mark the route dynamic
+    // when session lookup touches cookies(). That is expected for protected
+    // pages, so don't spam build logs.
+    if (isExpectedDynamicServerUsage(err)) {
+      return null;
+    }
+
+    // Treat unexpected auth/session bootstrap failures as "no session" so
+    // callers redirect instead of 503'ing the page. Common cause:
     // SUPABASE_SERVICE_ROLE_KEY missing in this environment (see admin.ts).
     console.error("[getServerSession] failed:", err);
     return null;

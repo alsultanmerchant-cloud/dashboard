@@ -17,10 +17,6 @@ const nextConfig: NextConfig = {
     // (helpers in src/lib/data/*.ts) and re-enable strict checks.
     ignoreBuildErrors: true,
   },
-  eslint: {
-    // ESLint runs in CI separately; keep the production build fast.
-    ignoreDuringBuilds: true,
-  },
 };
 
 export default withNextIntl(nextConfig);
