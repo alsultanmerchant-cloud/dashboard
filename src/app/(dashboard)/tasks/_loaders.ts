@@ -3,7 +3,13 @@ import "server-only";
 // Adapts listTasks() output into the BoardTask shape used by task-board.tsx
 // and into the row shape used by the rich Odoo-style list view.
 
-import { listBoardTasks, listTasks, type TaskFilters } from "@/lib/data/tasks";
+import {
+  listBoardTasks,
+  listBoardTasksPage,
+  listTasks,
+  listTasksPage,
+  type TaskFilters,
+} from "@/lib/data/tasks";
 import type { BoardTask } from "../projects/[id]/task-board";
 import type { TaskStage, TaskRoleType } from "@/lib/labels";
 
@@ -102,6 +108,20 @@ export async function loadTasksForGlobalView(
     .filter((x): x is ListTaskRow => x !== null);
 }
 
+export async function loadTasksPageForGlobalView(
+  orgId: string,
+  filters: TaskFilters,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<{ rows: ListTaskRow[]; totalCount: number }> {
+  const bundle = await listTasksPage(orgId, filters, opts);
+  return {
+    rows: bundle.rows
+      .map(toListRow)
+      .filter((x): x is ListTaskRow => x !== null),
+    totalCount: bundle.totalCount,
+  };
+}
+
 export async function loadTaskBoardForGlobalView(
   orgId: string,
   filters: TaskFilters,
@@ -141,4 +161,49 @@ export async function loadTaskBoardForGlobalView(
     tags: t.tags,
     created_at: t.created_at,
   }));
+}
+
+export async function loadTaskBoardPageForGlobalView(
+  orgId: string,
+  filters: TaskFilters,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<{ rows: BoardTask[]; totalCount: number }> {
+  const bundle = await listBoardTasksPage(orgId, filters, opts);
+  return {
+    rows: bundle.rows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      task_code: t.task_code ?? null,
+      stage: t.stage as TaskStage,
+      stage_entered_at: t.stage_entered_at,
+      planned_date: t.planned_date,
+      due_date: t.due_date,
+      priority: t.priority,
+      progress_percent: t.progress_percent,
+      expected_progress_percent: t.expected_progress_percent,
+      progress_slip_percent: t.progress_slip_percent ?? null,
+      allocated_time_minutes: t.allocated_time_minutes ?? null,
+      delay_days: t.delay_days ?? null,
+      current_stage_duration: t.current_stage_duration ?? null,
+      sequence: t.sequence ?? 10,
+      external_id: t.external_id ?? null,
+      completed_at: t.completed_at ?? null,
+      status: t.status,
+      service: t.service,
+      project: {
+        id: t.project_id,
+        name: t.project_name,
+        client_name: t.client_name,
+      },
+      role_slots: t.role_slots as Partial<
+        Record<TaskRoleType, { id: string; full_name: string; avatar_url: string | null }>
+      >,
+      design_count: t.design_count,
+      closed_subtask_count: t.closed_subtask_count,
+      external_source: t.external_source ?? null,
+      tags: t.tags,
+      created_at: t.created_at,
+    })),
+    totalCount: bundle.totalCount,
+  };
 }

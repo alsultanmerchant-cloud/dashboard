@@ -4,7 +4,6 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { getTaskTemplate } from "@/lib/data/templates";
 import { PageHeader } from "@/components/page-header";
 import { ServiceBadge, PriorityBadge } from "@/components/status-badges";
-import { ROLE_LABELS } from "@/lib/labels";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
@@ -12,25 +11,19 @@ import {
 import { AddTemplateItemDialog } from "./add-item-dialog";
 import { EditTemplateItemDialog } from "./edit-item-dialog";
 import { listDepartments } from "@/lib/data/employees";
+import { listPositions } from "@/lib/data/positions";
 
-// Server-side helper — renders the distinct roles used across stages as a
-// compact preview (e.g. "المتخصص · المنفذ · مدير الحساب"). Lives here so
-// the read-only render path doesn't import the client editor module.
-const ROLE_LABEL_PREVIEW: Record<string, string> = {
-  specialist: "المتخصص",
-  manager: "مدير القسم",
-  agent: "المنفذ",
-  account_manager: "مدير الحساب",
-  supporting_lead: "قائد القسم المساند",
-  supporting_agent: "منفذ القسم المساند",
-};
+// Renders the distinct positions used across stages as a compact preview
+// (e.g. "المتخصص · المنفذ · مدير الحساب"). `bySlug` maps a stored position
+// slug to its display name.
 function stageOwnerPreview(
   mapping: Record<string, string | null> | null | undefined,
+  bySlug: Map<string, string>,
 ): string {
   if (!mapping) return "—";
   const distinct = Array.from(
     new Set(Object.values(mapping).filter((v): v is string => Boolean(v))),
-  ).map((r) => ROLE_LABEL_PREVIEW[r] ?? r);
+  ).map((slug) => bySlug.get(slug) ?? slug);
   return distinct.length > 0 ? distinct.join(" · ") : "—";
 }
 
@@ -41,11 +34,15 @@ export default async function TaskTemplateDetailPage({
 }) {
   const { id } = await params;
   const session = await requirePagePermission("templates.manage");
-  const [tpl, departments] = await Promise.all([
+  const [tpl, departments, positions] = await Promise.all([
     getTaskTemplate(session.orgId, id),
     listDepartments(session.orgId),
+    listPositions(session.orgId),
   ]);
   if (!tpl) notFound();
+
+  const positionOptions = positions.map((p) => ({ slug: p.slug, name: p.name }));
+  const positionNameBySlug = new Map(positions.map((p) => [p.slug, p.name]));
 
   const service = Array.isArray(tpl.service) ? tpl.service[0] : tpl.service;
   const items = tpl.task_template_items ?? [];
@@ -65,6 +62,7 @@ export default async function TaskTemplateDetailPage({
             <AddTemplateItemDialog
               templateId={tpl.id}
               departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+              positions={positionOptions}
             />
           </div>
         }
@@ -97,7 +95,9 @@ export default async function TaskTemplateDetailPage({
                   </DataTableCell>
                   <DataTableCell className="text-xs text-muted-foreground">{dept?.name ?? "—"}</DataTableCell>
                   <DataTableCell className="text-xs text-muted-foreground">
-                    {it.default_role_key ? ROLE_LABELS[it.default_role_key] ?? it.default_role_key : "—"}
+                    {it.default_role_key
+                      ? positionNameBySlug.get(it.default_role_key) ?? it.default_role_key
+                      : "—"}
                   </DataTableCell>
                   <DataTableCell className="tabular-nums" dir="ltr">
                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -111,6 +111,7 @@ export default async function TaskTemplateDetailPage({
                     {stageOwnerPreview(
                       (it as { stage_owner_positions?: Record<string, string | null> | null })
                         .stage_owner_positions ?? null,
+                      positionNameBySlug,
                     )}
                   </DataTableCell>
                   <DataTableCell>
@@ -133,6 +134,7 @@ export default async function TaskTemplateDetailPage({
                         id: d.id,
                         name: d.name,
                       }))}
+                      positions={positionOptions}
                     />
                   </DataTableCell>
                 </DataTableRow>

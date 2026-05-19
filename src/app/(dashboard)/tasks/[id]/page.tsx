@@ -28,6 +28,7 @@ import type { TaskRoleType } from "@/lib/labels";
 import { avatarUrlFor, isOverdue } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { listEmployees } from "@/lib/data/employees";
+import { listPositions } from "@/lib/data/positions";
 import { loadOrgChart } from "@/lib/data/org-chart";
 import { CommentComposer } from "../comment-composer";
 import { TaskSmartButtons } from "./task-smart-buttons";
@@ -129,6 +130,11 @@ export default async function TaskDetailPage({
       .limit(1),
   ]);
   if (!task) notFound();
+  const positions = await listPositions(session.orgId);
+  const positionNameBySlug = new Map(positions.map((p) => [p.slug, p.name]));
+  const positionRoleBySlug: Record<string, string> = Object.fromEntries(
+    positions.map((p) => [p.slug, p.role]),
+  );
   const hasOpenException = (openExc ?? []).length > 0;
   const canOpenException = hasPermission(session, "exception.open");
   const isFollowing = (followingRes.data ?? []).length > 0;
@@ -400,14 +406,10 @@ export default async function TaskDetailPage({
             .stage_owner_positions ?? null;
         const ownerPosition = stageOwnerMap?.[task.stage as string] ?? null;
         if (!ownerPosition) return null;
-        const ROLE_LABEL: Record<string, string> = {
-          account_manager: t("roles.account_manager"),
-          specialist: t("roles.specialist"),
-          manager: t("roles.manager"),
-          agent: t("roles.agent"),
-          supporting_lead: t("roles.supporting_lead"),
-          supporting_agent: t("roles.supporting_agent"),
-        };
+        // stage_owner_positions stores a position slug; resolve it to its
+        // structural role to find the matching assignee slot.
+        const ownerRole = positionRoleBySlug[ownerPosition] ?? ownerPosition;
+        const ownerLabel = positionNameBySlug.get(ownerPosition) ?? ownerPosition;
         const STAGE_LABEL: Record<string, string> = {
           new: t("stages.new"),
           in_progress: t("stages.in_progress"),
@@ -419,7 +421,7 @@ export default async function TaskDetailPage({
           done: t("stages.done"),
         };
         const owner = roleSlots.find(
-          (s) => s.role_type === ownerPosition,
+          (s) => s.role_type === ownerRole,
         )?.employee ?? null;
         return (
           <Card className="mb-6 border-cyan/30 bg-cyan-dim/15">
@@ -437,7 +439,7 @@ export default async function TaskDetailPage({
                   </span>
                   <span className="text-[11px] text-muted-foreground">→</span>
                   <span className="rounded-full bg-soft-1 px-2 py-0.5 text-[11px] font-medium">
-                    {ROLE_LABEL[ownerPosition] ?? ownerPosition}
+                    {ownerLabel}
                   </span>
                 </div>
               </div>
@@ -472,7 +474,7 @@ export default async function TaskDetailPage({
                 </div>
               ) : (
                 <p className="text-xs text-amber-400">
-                  {t("noStageOwnerPrefix")} {ROLE_LABEL[ownerPosition] ?? ownerPosition} {t("noStageOwnerSuffix")}
+                  {t("noStageOwnerPrefix")} {ownerLabel} {t("noStageOwnerSuffix")}
                 </p>
               )}
             </CardContent>
@@ -489,6 +491,7 @@ export default async function TaskDetailPage({
           hasPermission(session, "task.view_all") ? (
             <TaskStageOwnerEditor
               taskId={task.id}
+              positions={positions.map((p) => ({ slug: p.slug, name: p.name }))}
               initial={
                 (task as { stage_owner_positions?: Record<string, string | null> | null })
                   .stage_owner_positions ?? null
@@ -513,6 +516,7 @@ export default async function TaskDetailPage({
                 (task as { stage_owner_positions?: Record<string, string | null> | null })
                   .stage_owner_positions ?? null
               }
+              positionRoleBySlug={positionRoleBySlug}
             />
           </Suspense>
         </CardContent>
@@ -812,12 +816,14 @@ async function TaskAssigneesSection({
   canManage,
   currentStage,
   stageOwnerPositions,
+  positionRoleBySlug,
 }: {
   orgId: string;
   taskId: string;
   canManage: boolean;
   currentStage: string | null;
   stageOwnerPositions: Record<string, string | null> | null;
+  positionRoleBySlug: Record<string, string>;
 }) {
   const [{ data: assigneesRaw }, employees, orgChart] = await Promise.all([
     supabaseAdmin
@@ -988,6 +994,7 @@ async function TaskAssigneesSection({
       canManage={canManage}
       currentStage={currentStage}
       stageOwnerPositions={stageOwnerPositions}
+      positionRoleBySlug={positionRoleBySlug}
     />
   );
 }

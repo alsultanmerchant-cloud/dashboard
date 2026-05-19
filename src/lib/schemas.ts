@@ -206,7 +206,11 @@ export const EmployeeInviteSchema = z.object({
   full_name: z.string().trim().min(2, { message: "الاسم قصير جدًا" }),
   email: arabicEmail,
   phone: optionalString,
-  job_title: optionalString,
+  position_id: z
+    .union([z.literal(""), uuidLoose])
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
   department_id: z
     .union([z.literal(""), uuidLoose])
     .optional()

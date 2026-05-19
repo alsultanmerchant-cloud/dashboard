@@ -33,6 +33,59 @@ export const InsightsSchema = z.object({
     .enum(["excellent", "good", "concerning", "critical"])
     .describe("التقييم العام للوكالة"),
 
+  // Executive briefing — the 3-5 things the CEO must know today, ranked by
+  // business impact. This is the headline of the whole report.
+  topPriorities: z
+    .array(
+      z.object({
+        title: z.string().describe("عنوان قصير حاسم"),
+        category: z
+          .enum(["money_clients", "delivery", "people", "growth"])
+          .describe("العدسة: المال/العملاء، التسليم، الأفراد، النمو"),
+        severity: z.enum(["critical", "high", "medium"]),
+        finding: z.string().describe("الحقيقة الرقمية المستندة للبيانات"),
+        businessImpact: z.string().describe("ماذا يعني هذا للأعمال (مال/عميل/سمعة)"),
+        recommendedAction: z.string().describe("القرار المقترح — من يتحرك وماذا يفعل"),
+      }),
+    )
+    .max(5)
+    .describe("أهم 3-5 أمور يجب أن يعرفها الرئيس التنفيذي اليوم، مرتّبة بالأثر"),
+
+  // Delivery reliability trend — this month vs last month.
+  deliveryTrend: z
+    .object({
+      direction: z.enum(["improving", "stable", "declining"]),
+      onTimePctThisMonth: z.number().int().min(0).max(100),
+      onTimePctLastMonth: z.number().int().min(0).max(100),
+      completedThisMonth: z.number().int(),
+      completedLastMonth: z.number().int(),
+      narrative: z.string().describe("جملتان تشرحان الاتجاه وسببه"),
+    })
+    .nullable()
+    .describe("اتجاه موثوقية التسليم مقارنةً بالشهر الماضي"),
+
+  // Per-employee performance — productivity, on-time rate, load, trend.
+  peoplePerformance: z
+    .array(
+      z.object({
+        employeeName: z.string(),
+        role: ROLE.nullable(),
+        tier: z
+          .enum(["top", "solid", "at_risk"])
+          .describe("متميز / مستقر / متعثّر — محسوب مسبقًا"),
+        trend: z.enum(["improving", "stable", "declining"]),
+        completedLast30: z.number().int(),
+        onTimePct: z.number().int().min(0).max(100).nullable(),
+        avgDelayDays: z.number().nullable(),
+        openLoad: z.number().int(),
+        overdueLoad: z.number().int(),
+        assessment: z.string().describe("جملة تقييم واقعية تستند للأرقام"),
+        recommendation: z.string().describe("توصية محددة: دعم، تخفيف حمل، تقدير"),
+      }),
+    )
+    .max(8)
+    .describe("أداء الموظفين — المتميزون والمتعثّرون والمحمّلون فوق طاقتهم"),
+
   stageBottlenecks: z
     .array(
       z.object({

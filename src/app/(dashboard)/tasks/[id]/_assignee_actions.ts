@@ -481,20 +481,13 @@ const STAGE_KEYS = [
   "done",
 ] as const;
 
-const STAGE_OWNER_ROLE_KEYS = [
-  "specialist",
-  "manager",
-  "agent",
-  "account_manager",
-  "supporting_lead",
-  "supporting_agent",
-] as const;
-
 const TaskStageOwnerSchema = z.object({
   task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  // Values are position slugs from the org catalog; the combobox constrains
+  // the input, so a light string check is enough here.
   mapping: z.record(
     z.string(),
-    z.union([z.enum(STAGE_OWNER_ROLE_KEYS), z.null()]),
+    z.union([z.string().trim().max(64), z.null()]),
   ),
 });
 

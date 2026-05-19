@@ -46,6 +46,11 @@ export type TaskFilters = {
   followedByUserId?: string;
   assignedToEmployeeId?: string;
   search?: string;
+  // Rwasem-parity faceted search (migration 0127). Each facet is one
+  // field/value pair built in the search bar. Facets on DIFFERENT fields AND
+  // together; facets on the SAME field OR together. Allowed fields are listed
+  // in `SEARCH_FACET_FIELDS`.
+  searchFacets?: Array<{ field: SearchFacetField; value: string }>;
   // Resolved task-id allow-list from the Odoo-style "Add Custom Filter" rule
   // tree (?cf= param). undefined/null → no custom filter is active. An empty
   // array → the rule matched nothing. Applied post-fetch (like noDeadline).
@@ -64,6 +69,17 @@ export const DATE_FIELDS = [
   "created_at",
 ] as const;
 export type DateField = (typeof DATE_FIELDS)[number];
+
+// Fields the Rwasem-style faceted search can match against. Kept in sync with
+// the CASE branches in migration 0127's list_tasks_bundle.
+export const SEARCH_FACET_FIELDS = [
+  "title",
+  "tags",
+  "assignee",
+  "project",
+  "stage",
+] as const;
+export type SearchFacetField = (typeof SEARCH_FACET_FIELDS)[number];
 
 export type BoardTaskData = {
   id: string;
@@ -104,9 +120,9 @@ export type BoardTaskData = {
   created_at: string;
 };
 
-const GLOBAL_BOARD_LIMIT = 120;
-const PROJECT_BOARD_LIMIT = 400;
-const LIST_LIMIT = 200;
+export const GLOBAL_BOARD_LIMIT = 120;
+export const PROJECT_BOARD_LIMIT = 400;
+export const LIST_LIMIT = 200;
 
 // Row shape returned by list_tasks_bundle (migration 0085). Mirrors the
 // previous PostgREST embed shape so _loaders.ts and existing callers keep
@@ -153,7 +169,12 @@ type TaskBundleRow = {
   }>;
 };
 
-type TaskBundleResult = { rows: TaskBundleRow[] };
+type TaskBundleResult = { rows: TaskBundleRow[]; total_count?: number | null };
+
+type TaskBundlePage = {
+  rows: TaskBundleRow[];
+  totalCount: number;
+};
 
 /**
  * Single round-trip task fetch backed by the `list_tasks_bundle` RPC
@@ -167,13 +188,15 @@ async function fetchTaskBundle(
   orgId: string,
   filters: TaskFilters,
   limit: number,
-): Promise<TaskBundleRow[]> {
+  offset = 0,
+): Promise<TaskBundlePage> {
   const search = filters.search?.trim();
   const sanitizedSearch = search ? search.replace(/[%,()]/g, " ").trim() : "";
 
   const { data, error } = await supabaseAdmin.rpc("list_tasks_bundle", {
     p_org_id: orgId,
     p_limit: limit,
+    p_offset: offset,
     p_status: filters.status?.length ? filters.status : null,
     p_stage: filters.stage?.length ? filters.stage : null,
     p_priority: filters.priority?.length ? filters.priority : null,
@@ -193,44 +216,52 @@ async function fetchTaskBundle(
     p_date_filters: filters.dateFilters?.length ? filters.dateFilters : null,
     p_has_start_date: !!filters.hasStartDate,
     p_has_end_date: !!filters.hasEndDate,
+    p_no_deadline: !!filters.noDeadline,
     p_unassigned: !!filters.unassigned,
     p_over_timesheets: !!filters.overTimesheets,
     p_near_timesheets: !!filters.nearTimesheets,
     p_archived: !!filters.archived,
     p_include_archived: !!filters.includeArchived,
+    p_search_facets: filters.searchFacets?.length ? filters.searchFacets : null,
+    p_task_ids:
+      filters.customFilterTaskIds != null
+        ? filters.customFilterTaskIds
+        : null,
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [] }) as TaskBundleResult;
-  let rows = bundle.rows;
-  if (filters.noDeadline) {
-    rows = rows.filter(
-      (r) =>
-        (r as { planned_date?: string | null }).planned_date == null &&
-        (r as { due_date?: string | null }).due_date == null,
-    );
-  }
-  if (filters.customFilterTaskIds != null) {
-    const allow = new Set(filters.customFilterTaskIds);
-    rows = rows.filter((r) => allow.has(r.id));
-  }
-  return rows;
+  return {
+    rows: bundle.rows ?? [],
+    totalCount: Math.max(0, Number(bundle.total_count ?? 0)),
+  };
 }
 
 export async function listTasks(orgId: string, filters: TaskFilters = {}) {
-  return fetchTaskBundle(orgId, filters, LIST_LIMIT);
+  const bundle = await fetchTaskBundle(orgId, filters, LIST_LIMIT);
+  return bundle.rows;
+}
+
+export async function listTasksPage(
+  orgId: string,
+  filters: TaskFilters = {},
+  opts: { limit?: number; offset?: number } = {},
+) {
+  const limit = opts.limit ?? LIST_LIMIT;
+  const offset = opts.offset ?? 0;
+  return fetchTaskBundle(orgId, filters, limit, offset);
 }
 
 export async function listBoardTasks(
   orgId: string,
   filters: TaskFilters = {},
 ): Promise<BoardTaskData[]> {
-  const data = await fetchTaskBundle(
+  const bundle = await fetchTaskBundle(
     orgId,
     filters,
     filters.projectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT,
   );
 
-  const rows = data.map((t) => {
+  const rows = bundle.rows.map((t) => {
     const project = t.project;
     const client = project?.client ?? null;
     const service = t.service;
@@ -323,6 +354,94 @@ export async function listBoardTasks(
       tagsByTask.set(row.task_id, list);
     }
     for (const r of rows) r.tags = tagsByTask.get(r.id) ?? [];
+  }
+
+  return rows;
+}
+
+export async function listBoardTasksPage(
+  orgId: string,
+  filters: TaskFilters = {},
+  opts: { limit?: number; offset?: number } = {},
+) {
+  const limit = opts.limit ?? (filters.projectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT);
+  const offset = opts.offset ?? 0;
+  const bundle = await fetchTaskBundle(orgId, filters, limit, offset);
+  const rows = await listBoardTasksFromRows(bundle.rows);
+  return { rows, totalCount: bundle.totalCount };
+}
+
+async function listBoardTasksFromRows(data: TaskBundleRow[]): Promise<BoardTaskData[]> {
+  const rows = data.map((t) => {
+    const project = t.project;
+    const client = project?.client ?? null;
+    const service = t.service;
+    const role_slots: BoardTaskData["role_slots"] = {};
+    for (const ta of t.task_assignees ?? []) {
+      const employee = ta.employee;
+      if (!employee) continue;
+      role_slots[ta.role_type as TaskRoleType] = {
+        id: employee.id,
+        full_name: employee.full_name,
+        avatar_url: employee.avatar_url,
+      };
+    }
+
+    return {
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      stage: t.stage as TaskStage,
+      stage_entered_at: t.stage_entered_at ?? t.created_at,
+      planned_date: t.planned_date ?? null,
+      due_date: t.due_date ?? null,
+      priority: t.priority,
+      progress_percent: t.progress_percent ?? null,
+      expected_progress_percent: t.expected_progress_percent ?? null,
+      progress_slip_percent: t.progress_slip_percent ?? null,
+      allocated_time_minutes: t.allocated_time_minutes ?? null,
+      delay_days: t.delay_days ?? null,
+      current_stage_duration: t.current_stage_duration ?? null,
+      completed_at: t.completed_at ?? null,
+      external_source: t.external_source ?? null,
+      task_code: t.task_code ?? null,
+      project_id: project?.id ?? t.project_id,
+      project_name: project?.name ?? "—",
+      client_name: client?.name ?? null,
+      service: service
+        ? { id: service.id, name: service.name, slug: service.slug }
+        : null,
+      role_slots,
+      design_count: t.design_count ?? 0,
+      closed_subtask_count: t.closed_subtask_count ?? 0,
+      tags: t.tags ?? [],
+      created_at: t.created_at,
+    };
+  });
+
+  if (rows.length > 0) {
+    const ids = rows.map((r) => r.id);
+
+    const { data: durRows } = await supabaseAdmin
+      .from("tasks")
+      .select("id, current_stage_duration, sequence, external_id")
+      .in("id", ids);
+    const extraMap = new Map(
+      (durRows ?? []).map((d) => [
+        d.id as string,
+        {
+          duration: (d.current_stage_duration as string | null) ?? null,
+          sequence: typeof d.sequence === "number" ? d.sequence : 10,
+          external_id: (d.external_id as string | null) ?? null,
+        },
+      ]),
+    );
+    for (const r of rows) {
+      const e = extraMap.get(r.id);
+      r.current_stage_duration = e?.duration ?? null;
+      r.sequence = e?.sequence ?? 10;
+      r.external_id = e?.external_id ?? null;
+    }
   }
 
   return rows;

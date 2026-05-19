@@ -683,7 +683,11 @@
     "account_manager": "Account manager",
     "specialist": "Specialist",
     "designer": "Designer",
-    "viewer": "Viewer"
+    "viewer": "Viewer",
+    "agent": "Agent",
+    "team_lead": "Team leader",
+    "supporting_lead": "Supporting lead",
+    "supporting_agent": "Supporting agent"
   },
   "ClientsPage": {
     "title": "Clients",
@@ -1867,15 +1871,16 @@
       "groupBy": "Group By",
       "favorites": "Favorites"
     },
-    "suggestions": {
-      "loading": "Searching…",
-      "error": "Search failed",
-      "empty": "No matches",
-      "tasksTitle": "Tasks",
-      "title": "Projects",
-      "noStoreName": "No store name",
-      "inThisProject": "In this project",
-      "otherProjects": "Other projects"
+    "facets": {
+      "heading": "Search for",
+      "searchFor": "Search {field} for",
+      "fields": {
+        "title": "Tasks",
+        "tags": "Tags",
+        "assignee": "Assignees",
+        "stage": "Stage",
+        "project": "Project"
+      }
     },
     "saved": {
       "saveCurrentSearch": "Save current search",

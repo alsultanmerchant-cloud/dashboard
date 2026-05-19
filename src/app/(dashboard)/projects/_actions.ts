@@ -49,6 +49,32 @@ export async function createProjectAction(
     }
   }
 
+  // Per-service position → employee assignment from the ServiceTeamPanel.
+  type TeamEntry = {
+    serviceId: string;
+    positionSlug: string;
+    employeeId: string;
+    isExtra: boolean;
+  };
+  let serviceTeam: TeamEntry[] = [];
+  const teamRaw = formData.get("service_team");
+  if (typeof teamRaw === "string" && teamRaw.length > 0) {
+    try {
+      const parsedTeam = JSON.parse(teamRaw);
+      if (Array.isArray(parsedTeam)) {
+        serviceTeam = parsedTeam.filter(
+          (e): e is TeamEntry =>
+            !!e &&
+            typeof e.serviceId === "string" &&
+            typeof e.positionSlug === "string" &&
+            typeof e.employeeId === "string",
+        );
+      }
+    } catch {
+      // ignore — an unparseable blob just means no team assignment.
+    }
+  }
+
   const parsed = ProjectCreateSchema.safeParse({
     client_id: formData.get("client_id"),
     name: formData.get("name"),
@@ -163,6 +189,51 @@ export async function createProjectAction(
         payload: { service_id: sid, week_split: splitBySid.get(sid)?.week_split ?? false },
         importance: "low",
       });
+    }
+  }
+
+  // Persist the per-service team assignment. Each (service, position) maps to
+  // one employee; task generation reads this to fill task_assignees.
+  const teamForServices = serviceTeam.filter((e) =>
+    parsed.data.service_ids.includes(e.serviceId),
+  );
+  if (teamForServices.length > 0) {
+    const slugs = Array.from(new Set(teamForServices.map((e) => e.positionSlug)));
+    const { data: positionRows } = await supabaseAdmin
+      .from("positions")
+      .select("id, slug")
+      .eq("organization_id", session.orgId)
+      .in("slug", slugs);
+    const positionIdBySlug = new Map(
+      (positionRows ?? []).map((p) => [p.slug, p.id]),
+    );
+    // Dedupe on (service, position) — the table's unique key.
+    const seen = new Set<string>();
+    const teamRows = teamForServices
+      .map((e) => {
+        const positionId = positionIdBySlug.get(e.positionSlug);
+        if (!positionId) return null;
+        const key = `${e.serviceId}|${positionId}`;
+        if (seen.has(key)) return null;
+        seen.add(key);
+        return {
+          organization_id: session!.orgId,
+          project_id: project.id,
+          service_id: e.serviceId,
+          position_id: positionId,
+          employee_id: e.employeeId,
+          is_extra: e.isExtra === true,
+          created_by: session!.userId,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (teamRows.length > 0) {
+      const { error: teamErr } = await supabaseAdmin
+        .from("project_service_team")
+        .insert(teamRows);
+      if (teamErr) {
+        console.error("[createProject_team_failed]", teamErr.message);
+      }
     }
   }
 

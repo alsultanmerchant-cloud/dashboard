@@ -16,20 +16,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ROLE_LABELS } from "@/lib/labels";
 import { createTaskTemplateItemAction } from "./_actions";
 
-const SELECT_CLASS =
-  "flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+export type PositionLite = { slug: string; name: string };
 
-const ROLE_KEYS = [
-  "specialist",
-  "manager",
-  "agent",
-  "account_manager",
-  "supporting_lead",
-  "supporting_agent",
-] as const;
+const SELECT_CLASS =
+  "flex h-10 w-full rounded-lg border border-input bg-input px-3 text-sm text-foreground transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input dark:text-foreground";
 
 const PRIORITY_KEYS = ["low", "medium", "high", "urgent"] as const;
 
@@ -103,9 +95,11 @@ type DepartmentOpt = { id: string; name: string };
 export function AddTemplateItemDialog({
   templateId,
   departments,
+  positions,
 }: {
   templateId: string;
   departments: DepartmentOpt[];
+  positions: PositionLite[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -143,9 +137,7 @@ export function AddTemplateItemDialog({
         title: title.trim(),
         description: description.trim() || null,
         default_role_key:
-          role && (ROLE_KEYS as readonly string[]).includes(role)
-            ? (role as (typeof ROLE_KEYS)[number])
-            : null,
+          role && positions.some((p) => p.slug === role) ? role : null,
         default_department_id: departmentId || null,
         offset_days_from_project_start: Number(offset) || 0,
         duration_days: Math.max(1, Number(duration) || 1),
@@ -240,9 +232,9 @@ export function AddTemplateItemDialog({
                   disabled={pending}
                 >
                   <option value="">— بدون —</option>
-                  {ROLE_KEYS.map((r) => (
-                    <option key={r} value={r}>
-                      {ROLE_LABELS[r] ?? r}
+                  {positions.map((p) => (
+                    <option key={p.slug} value={p.slug}>
+                      {p.name}
                     </option>
                   ))}
                 </select>
@@ -313,7 +305,7 @@ export function AddTemplateItemDialog({
                       {s.label}
                     </span>
                     <select
-                      className={SELECT_CLASS + " h-9 w-full bg-white/90"}
+                      className={SELECT_CLASS + " h-9 w-full"}
                       value={stageOwners[s.key] ?? ""}
                       onChange={(e) =>
                         setStageOwners((m) => ({
@@ -325,11 +317,11 @@ export function AddTemplateItemDialog({
                       aria-label={`الدور المسؤول عن مرحلة ${s.label}`}
                     >
                       <option value="">— بدون —</option>
-                      {ROLE_KEYS.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABELS[r] ?? r}
-                        </option>
-                      ))}
+                      {positions.map((p) => (
+                    <option key={p.slug} value={p.slug}>
+                      {p.name}
+                    </option>
+                  ))}
                     </select>
                   </div>
                 ))}

@@ -190,5 +190,10 @@ const serviceTone: Record<string, keyof typeof tones> = {
 
 export function ServiceBadge({ slug, name, className }: { slug: string; name: string; className?: string }) {
   const t = serviceTone[slug] ?? "blue";
-  return <span className={cn(baseChip, tones[t], className)}>{name}</span>;
+  return (
+    <span className={cn(baseChip, tones[t], className)}>
+      <Dot tone={t} />
+      {name}
+    </span>
+  );
 }

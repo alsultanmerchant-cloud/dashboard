@@ -23,6 +23,10 @@ import {
   type SearchableOption,
 } from "@/components/ui/searchable-select";
 import { OriginBadge } from "@/components/origin-badge";
+import {
+  PositionPicker,
+  type PositionOption,
+} from "@/components/forms/position-picker";
 import { cn } from "@/lib/utils";
 import {
   updateEmployeeAction,
@@ -39,6 +43,7 @@ export type EmployeeRow = {
   phone: string | null;
   job_title: string | null;
   position: string | null;
+  position_id: string | null;
   employment_status: string;
   department_id: string | null;
   department_name: string | null;
@@ -59,14 +64,19 @@ export type DeptOption = {
 export function EmployeesAdmin({
   rows,
   departments,
+  positions: positionsProp,
   canManage,
 }: {
   rows: EmployeeRow[];
   departments: DeptOption[];
+  positions: PositionOption[];
   canManage: boolean;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  // Lifted so a position created from one edit dialog stays available to the
+  // next one without a full page refresh.
+  const [positions, setPositions] = useState<PositionOption[]>(positionsProp);
   const [statusFilter, setStatusFilter] = useState<"active" | "terminated" | "all">("active");
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<EmployeeRow | null>(null);
@@ -287,6 +297,12 @@ export function EmployeesAdmin({
           employee={editing}
           departments={departments}
           allEmployees={rows}
+          positions={positions}
+          onPositionCreated={(p) =>
+            setPositions((prev) =>
+              prev.some((x) => x.id === p.id) ? prev : [...prev, p],
+            )
+          }
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -337,19 +353,23 @@ function EditEmployeeDialog({
   employee,
   departments,
   allEmployees,
+  positions,
+  onPositionCreated,
   onClose,
   onSaved,
 }: {
   employee: EmployeeRow;
   departments: DeptOption[];
   allEmployees: EmployeeRow[];
+  positions: PositionOption[];
+  onPositionCreated: (position: PositionOption) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [fullName, setFullName] = useState(employee.full_name);
   const [email, setEmail] = useState(employee.email ?? "");
   const [phone, setPhone] = useState(employee.phone ?? "");
-  const [jobTitle, setJobTitle] = useState(employee.job_title ?? "");
+  const [positionId, setPositionId] = useState(employee.position_id ?? "");
   const [departmentId, setDepartmentId] = useState(employee.department_id ?? "");
   const [managerId, setManagerId] = useState(employee.manager_employee_id ?? "");
   const [teamLeaderId, setTeamLeaderId] = useState(
@@ -380,7 +400,7 @@ function EditEmployeeDialog({
         fullName,
         email: email || null,
         phone: phone || null,
-        jobTitle: jobTitle || null,
+        positionId: positionId || null,
         departmentId: departmentId || null,
         managerEmployeeId: managerId || null,
         teamLeaderEmployeeId: teamLeaderId || null,
@@ -425,9 +445,11 @@ function EditEmployeeDialog({
           </Field>
         </div>
         <Field label="المسمى الوظيفي">
-          <Input
-            value={jobTitle}
-            onChange={(e) => setJobTitle(e.target.value)}
+          <PositionPicker
+            positions={positions}
+            value={positionId}
+            onChange={setPositionId}
+            onPositionCreated={onPositionCreated}
             disabled={pending}
           />
         </Field>
@@ -451,7 +473,7 @@ function EditEmployeeDialog({
               ))}
             </select>
           </Field>
-          <Field label="المدير المباشر">
+          <Field label="المدير">
             <SearchableSelect
               value={managerId}
               onValueChange={setManagerId}
@@ -463,7 +485,7 @@ function EditEmployeeDialog({
               placeholder="— بدون —"
               searchPlaceholder="ابحث عن موظف..."
               emptyMessage="لا توجد نتائج"
-              ariaLabel="المدير المباشر"
+              ariaLabel="المدير"
             />
           </Field>
         </div>

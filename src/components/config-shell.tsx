@@ -77,12 +77,26 @@ export function ConfigShell({
                         )}
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-semibold leading-snug">
-                            {it.label}
+                          <div className="flex items-center truncate font-semibold leading-snug">
+                            {it.stripeColor && (
+                              <span
+                                aria-hidden
+                                className="me-2.5 size-3 shrink-0 rounded-full"
+                                style={{ backgroundColor: it.stripeColor }}
+                              />
+                            )}
+                            <span className="truncate">{it.label}</span>
                           </div>
                           {it.hint && (
-                            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                              {it.hint}
+                            <div className="mt-0.5 flex items-center truncate text-[11px] text-muted-foreground">
+                              {it.stripeColor && (
+                                <span
+                                  aria-hidden
+                                  className="me-2.5 size-3 shrink-0 rounded-full opacity-85"
+                                  style={{ backgroundColor: it.stripeColor }}
+                                />
+                              )}
+                              <span className="truncate">{it.hint}</span>
                             </div>
                           )}
                         </div>

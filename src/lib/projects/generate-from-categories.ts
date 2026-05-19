@@ -3,6 +3,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAiEvent } from "@/lib/audit";
 import { expandTemplates, type TemplateInput } from "./offsets";
 import { listTemplatesForServices } from "@/lib/data/service-categories";
+import { buildOwnerResolver } from "@/lib/workflows/resolve-task-owners";
+import type { Database } from "@/lib/supabase/types";
+
+type TaskRoleType = Database["public"]["Enums"]["task_role_type"];
 
 /**
  * T4 task generator. Reads task_templates (+ items) for the selected
@@ -134,44 +138,50 @@ export async function generateTasksFromCategories(args: {
     return { count: 0, error: error.message };
   }
 
-  // Role-slot assignments (best-effort). Each role referenced by a task's
-  // stage_owner_positions is resolved to a real employee from the org chart
-  // (plus specialist + account_manager so legacy behaviour never regresses).
-  type ResolvableRole = "account_manager" | "specialist" | "manager";
+  // Role-slot assignments (best-effort). Each task's stage_owner_positions
+  // references positions (by slug); resolve position → role → employee.
   type SlotRow = {
     organization_id: string;
     task_id: string;
     employee_id: string;
-    role_type: ResolvableRole;
+    role_type: TaskRoleType;
     assigned_by: string | null;
   };
-  // agent / supporting_* have no single org-chart position → left unassigned.
-  const resolveRole = (role: string, serviceId: string | null): string | null => {
-    if (role === "account_manager") return args.accountManagerEmployeeId ?? null;
-    if (role === "specialist") {
-      return serviceId ? specialistByServiceId.get(serviceId) ?? null : null;
-    }
-    if (role === "manager") {
-      return serviceId ? deptHeadByServiceId.get(serviceId) ?? null : null;
-    }
-    return null;
-  };
+  const resolver = await buildOwnerResolver({
+    organizationId: args.organizationId,
+    projectId: args.projectId,
+    serviceIds,
+    accountManagerEmployeeId: args.accountManagerEmployeeId,
+    specialistByServiceId,
+    deptHeadByServiceId,
+  });
   const slotRows: SlotRow[] = [];
   for (const t of inserted ?? []) {
-    const roles = new Set<string>(["account_manager", "specialist"]);
+    const slugs = new Set<string>(["account_manager", "specialist"]);
     const sop = (t as { stage_owner_positions?: Record<string, string | null> | null })
       .stage_owner_positions;
     if (sop) {
-      for (const v of Object.values(sop)) if (v) roles.add(v);
+      for (const v of Object.values(sop)) if (v) slugs.add(v);
     }
-    for (const role of roles) {
-      const employeeId = resolveRole(role, t.service_id);
-      if (!employeeId) continue;
+    // One slot per structural role — dedupe so two positions sharing a role
+    // don't violate the unique(task_id, role_type) index.
+    const byRole = new Map<string, string>();
+    for (const slug of slugs) {
+      const role = resolver.roleOf(slug);
+      if (!role || byRole.has(role)) continue;
+      const employeeId = resolver.resolve(slug, t.service_id);
+      if (employeeId) byRole.set(role, employeeId);
+    }
+    // Extra people pinned on the service join every one of its tasks.
+    for (const ex of resolver.extrasFor(t.service_id)) {
+      if (!byRole.has(ex.role)) byRole.set(ex.role, ex.employeeId);
+    }
+    for (const [role, employeeId] of byRole) {
       slotRows.push({
         organization_id: args.organizationId,
         task_id: t.id,
         employee_id: employeeId,
-        role_type: role as ResolvableRole,
+        role_type: role as TaskRoleType,
         assigned_by: args.createdByUserId ?? null,
       });
     }

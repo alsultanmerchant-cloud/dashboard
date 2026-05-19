@@ -683,7 +683,11 @@
     "account_manager": "مدير حساب",
     "specialist": "متخصص",
     "designer": "مصمم",
-    "viewer": "قارئ فقط"
+    "viewer": "قارئ فقط",
+    "agent": "المنفذ",
+    "team_lead": "قائد الفريق",
+    "supporting_lead": "قائد القسم المساند",
+    "supporting_agent": "منفذ القسم المساند"
   },
   "ClientsPage": {
     "title": "العملاء",
@@ -1867,15 +1871,16 @@
       "groupBy": "التجميع",
       "favorites": "المفضّلة"
     },
-    "suggestions": {
-      "loading": "جارٍ البحث…",
-      "error": "فشل البحث",
-      "empty": "لا نتائج",
-      "tasksTitle": "المهام",
-      "title": "المشاريع",
-      "noStoreName": "بدون اسم متجر",
-      "inThisProject": "في هذا المشروع",
-      "otherProjects": "مشاريع أخرى"
+    "facets": {
+      "heading": "ابحث عن",
+      "searchFor": "بحث في {field} عن",
+      "fields": {
+        "title": "المهام",
+        "tags": "الوسوم",
+        "assignee": "المسؤولون",
+        "stage": "المرحلة",
+        "project": "المشروع"
+      }
     },
     "saved": {
       "saveCurrentSearch": "حفظ البحث الحالي",

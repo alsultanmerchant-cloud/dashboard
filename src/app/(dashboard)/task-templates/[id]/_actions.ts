@@ -24,21 +24,12 @@ const STAGE_KEYS = [
   "done",
 ] as const;
 
-const ROLE_KEYS = [
-  "specialist",
-  "manager",
-  "agent",
-  "account_manager",
-  "supporting_lead",
-  "supporting_agent",
-] as const;
-
 // Schema fragment + cleaner for the per-stage owner map, embedded inline in
 // create/update so the "تعديل مهمة القالب" modal sets per-phase owners in
 // one save. Map: stage → role-key (or null). Unknown roles are rejected;
 // unknown stages are dropped by cleanStageOwnerMap.
 const StageOwnerMapSchema = z
-  .record(z.string(), z.union([z.enum(ROLE_KEYS), z.null()]))
+  .record(z.string(), z.union([z.string().trim().max(64), z.null()]))
   .optional();
 
 function cleanStageOwnerMap(
@@ -62,7 +53,7 @@ const CreateItemSchema = z.object({
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
   default_role_key: z
-    .enum(ROLE_KEYS)
+    .string().trim().min(1).max(64)
     .nullable()
     .optional()
     .transform((v) => v ?? null),
@@ -86,7 +77,7 @@ export async function createTaskTemplateItemAction(input: {
   templateId: string;
   title: string;
   description?: string | null;
-  default_role_key?: (typeof ROLE_KEYS)[number] | null;
+  default_role_key?: string | null;
   default_department_id?: string | null;
   offset_days_from_project_start: number;
   duration_days: number;
@@ -194,7 +185,7 @@ const UpdateItemSchema = z.object({
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
   default_role_key: z
-    .enum(ROLE_KEYS)
+    .string().trim().min(1).max(64)
     .nullable()
     .optional()
     .transform((v) => v ?? null),
@@ -214,7 +205,7 @@ export async function updateTaskTemplateItemAction(input: {
   itemId: string;
   title: string;
   description?: string | null;
-  default_role_key?: (typeof ROLE_KEYS)[number] | null;
+  default_role_key?: string | null;
   default_department_id?: string | null;
   offset_days_from_project_start: number;
   duration_days: number;

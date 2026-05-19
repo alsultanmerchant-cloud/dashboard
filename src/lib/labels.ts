@@ -157,6 +157,32 @@ export const ROLE_LABELS: Record<string, string> = {
   viewer: "قارئ فقط",
 };
 
+// Roles a task-template item (or a per-stage override) can be assigned to.
+// Selected in the template item dialogs and the per-task stage-owner editor;
+// stored in `default_role_key` (text) and `stage_owner_positions` (jsonb).
+// account_manager / specialist / manager resolve to an org-chart employee at
+// task-generation time; the rest stay unassigned until set manually.
+export const TASK_OWNER_ROLE_KEYS = [
+  "specialist",
+  "manager",
+  "team_lead",
+  "agent",
+  "account_manager",
+  "supporting_lead",
+  "supporting_agent",
+] as const;
+export type TaskOwnerRoleKey = (typeof TASK_OWNER_ROLE_KEYS)[number];
+
+export const TASK_OWNER_ROLE_LABELS: Record<TaskOwnerRoleKey, string> = {
+  specialist: "المتخصص",
+  manager: "مدير القسم",
+  team_lead: "قائد الفريق",
+  agent: "المنفذ",
+  account_manager: "مدير الحساب",
+  supporting_lead: "قائد القسم المساند",
+  supporting_agent: "منفذ القسم المساند",
+};
+
 // Sky Light / Rwasem 8-stage workflow.
 // Order matters — used to render the kanban left-to-right.
 export const TASK_STAGES = [

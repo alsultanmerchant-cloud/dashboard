@@ -99,6 +99,8 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
     [tasks, selected],
   );
 
+  const ids = useMemo(() => [...selected], [selected]);
+
   if (tasks.length === 0) {
     return (
       <EmptyState
@@ -110,7 +112,7 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
   }
 
   const toggleAll = () => {
-    setSelected((curr) => {
+    setSelected(() => {
       if (allChecked) return new Set();
       return new Set(tasks.map((t) => t.id));
     });
@@ -124,8 +126,6 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
       return next;
     });
   };
-
-  const ids = useMemo(() => [...selected], [selected]);
 
   const reportResult = (
     res: Awaited<ReturnType<typeof bulkUpdateTasksAction>>,

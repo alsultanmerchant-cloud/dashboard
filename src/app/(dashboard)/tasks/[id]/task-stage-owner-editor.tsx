@@ -27,23 +27,19 @@ const STAGES: { key: string; label: string; tone: string }[] = [
   { key: "done",              label: "مكتملة",         tone: "bg-zinc-500/15 text-zinc-300" },
 ];
 
-const ROLE_OPTIONS: { key: string; label: string }[] = [
-  { key: "",                 label: "— لا يوجد —" },
-  { key: "specialist",       label: "المتخصص" },
-  { key: "manager",          label: "مدير القسم" },
-  { key: "agent",            label: "المنفذ" },
-  { key: "account_manager",  label: "مدير الحساب" },
-  { key: "supporting_lead",  label: "قائد القسم المساند" },
-  { key: "supporting_agent", label: "منفذ القسم المساند" },
-];
-
 export function TaskStageOwnerEditor({
   taskId,
   initial,
+  positions,
 }: {
   taskId: string;
   initial: Record<string, string | null> | null;
+  positions: { slug: string; name: string }[];
 }) {
+  const roleOptions = [
+    { key: "", label: "— لا يوجد —" },
+    ...positions.map((p) => ({ key: p.slug, label: p.name })),
+  ];
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -102,7 +98,7 @@ export function TaskStageOwnerEditor({
                 className="rounded-md border border-input bg-input px-2 py-1 text-xs"
                 disabled={pending}
               >
-                {ROLE_OPTIONS.map((r) => (
+                {roleOptions.map((r) => (
                   <option key={r.key || "none"} value={r.key}>
                     {r.label}
                   </option>

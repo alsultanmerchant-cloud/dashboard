@@ -5,7 +5,13 @@ import "server-only";
 // URL params on both surfaces; this keeps the server-side parsing in one
 // place so the two pages can't drift.
 
-import { DATE_FIELDS, type DateField, type TaskFilters } from "@/lib/data/tasks";
+import {
+  DATE_FIELDS,
+  SEARCH_FACET_FIELDS,
+  type DateField,
+  type SearchFacetField,
+  type TaskFilters,
+} from "@/lib/data/tasks";
 
 const OPEN_STAGES = [
   "new",
@@ -111,8 +117,39 @@ export type TaskQueryParams = {
   d?: string;
   filter?: string;
   q?: string;
+  sf?: string;
   groupBy?: string;
 };
+
+const FACET_FIELD_SET: ReadonlySet<string> = new Set(SEARCH_FACET_FIELDS);
+
+/**
+ * Parse the `sf` param — a JSON array of {field,value} search facets written
+ * by the SmartSearchBar. Rejects unknown fields and empty values so a
+ * hand-edited URL can't reach the RPC with garbage.
+ */
+export function parseSearchFacets(
+  raw: string | undefined,
+): Array<{ field: SearchFacetField; value: string }> | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const out: Array<{ field: SearchFacetField; value: string }> = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") continue;
+    const field = (entry as { field?: unknown }).field;
+    const value = (entry as { value?: unknown }).value;
+    if (typeof field !== "string" || !FACET_FIELD_SET.has(field)) continue;
+    if (typeof value !== "string" || !value.trim()) continue;
+    out.push({ field: field as SearchFacetField, value: value.trim() });
+  }
+  return out.length ? out : undefined;
+}
 
 /**
  * Build server-side TaskFilters from the URL-param surface used by both the
@@ -132,6 +169,7 @@ export function buildTaskFiltersFromParams(
   const active = parseFilterKeys(sp.f, sp.filter);
   const dateFilters = parseDateFilters(sp.d);
   const search = sp.q?.trim() || undefined;
+  const searchFacets = parseSearchFacets(sp.sf);
 
   const stageFilter: string[] | undefined = (() => {
     if (active.has("all")) return undefined;
@@ -139,7 +177,6 @@ export function buildTaskFiltersFromParams(
     if (active.has("open")) stages.push(...OPEN_STAGES);
     if (active.has("done")) stages.push("done");
     if (stages.length === 0) return undefined;
-    if (view === "kanban" && active.has("open") && !active.has("done")) return undefined;
     return stages;
   })();
 
@@ -168,6 +205,7 @@ export function buildTaskFiltersFromParams(
     assignedToEmployeeId: active.has("mine") ? (opts.employeeId ?? undefined) : undefined,
     projectId: opts.projectId,
     search,
+    searchFacets,
     dateFilters,
   };
 

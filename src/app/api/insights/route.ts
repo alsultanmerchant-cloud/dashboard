@@ -10,7 +10,21 @@ const INSIGHT_MODEL = "gemini-3-flash-preview";
 // How long a stored insight is considered fresh. Clicking "تحديث التحليل"
 // within this window returns the cached run instead of burning another
 // Gemini call. Pass ?force=1 to bypass.
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Run a read-only aggregate query through the analytics RPC. Used for the
+// trend / per-employee metrics that are far cleaner expressed as SQL than
+// re-implemented in JS.
+async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+  const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
+    p_sql: sql,
+  });
+  if (error) {
+    console.warn(`insights: analytics query failed: ${error.message}`);
+    return [];
+  }
+  return (data ?? []) as T[];
+}
 
 type InsightRunRow = {
   id: string;
@@ -290,6 +304,186 @@ async function buildSignalPack(orgId: string): Promise<{
   const totalOverdue = openTasks.filter((t) => t.is_overdue).length;
   const totalDoneWeek = (doneWeekRes.data ?? []).length;
 
+  // ── Executive metrics (SQL-backed) ──────────────────────────────────────
+  const esc = orgId.replace(/'/g, "");
+
+  const [trendRows, peopleRows, pipelineRows] = await Promise.all([
+    // Delivery reliability — this month vs last month.
+    runSql<{
+      done_this: number;
+      done_last: number;
+      due_this: number;
+      due_last: number;
+      ontime_this: number;
+      ontime_last: number;
+    }>(
+      `select
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now())) as done_this,
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now()-interval '1 month')) as done_last,
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now()) and due_date is not null) as due_this,
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now()-interval '1 month') and due_date is not null) as due_last,
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now()) and due_date is not null and actual_done_date is not null and actual_done_date<=due_date) as ontime_this,
+         count(*) filter (where date_trunc('month',completed_at)=date_trunc('month',now()-interval '1 month') and due_date is not null and actual_done_date is not null and actual_done_date<=due_date) as ontime_last
+       from tasks
+       where stage='done' and archived_at is null and organization_id='${esc}'`,
+    ),
+    // Per-employee performance — last 30d throughput, on-time, load, prior 30d.
+    runSql<{
+      full_name: string;
+      role: string | null;
+      completed30: number;
+      completed_prev30: number;
+      withdue: number | null;
+      ontime: number | null;
+      avg_delay: number | null;
+      open_load: number;
+      overdue_load: number;
+    }>(
+      `with done30 as (
+         select a.employee_id,
+           count(*) total,
+           count(*) filter (where t.due_date is not null) withdue,
+           count(*) filter (where t.due_date is not null and t.actual_done_date is not null and t.actual_done_date<=t.due_date) ontime,
+           round(avg(t.delay_days)::numeric,1) avg_delay,
+           mode() within group (order by a.role_type) role
+         from task_assignees a join tasks t on t.id=a.task_id
+         where t.archived_at is null and t.stage='done' and t.completed_at>=now()-interval '30 days'
+         group by 1
+       ),
+       prev30 as (
+         select a.employee_id, count(*) total
+         from task_assignees a join tasks t on t.id=a.task_id
+         where t.archived_at is null and t.stage='done'
+           and t.completed_at>=now()-interval '60 days' and t.completed_at<now()-interval '30 days'
+         group by 1
+       ),
+       openload as (
+         select a.employee_id,
+           count(*) open_cnt,
+           count(*) filter (where t.is_overdue) overdue_cnt
+         from task_assignees a join tasks t on t.id=a.task_id
+         where t.archived_at is null and t.stage<>'done'
+         group by 1
+       )
+       select e.full_name,
+         d.role as role,
+         coalesce(d.total,0) as completed30,
+         coalesce(p.total,0) as completed_prev30,
+         d.withdue, d.ontime, d.avg_delay,
+         coalesce(o.open_cnt,0) as open_load,
+         coalesce(o.overdue_cnt,0) as overdue_load
+       from employee_profiles e
+       left join done30 d on d.employee_id=e.id
+       left join prev30 p on p.employee_id=e.id
+       left join openload o on o.employee_id=e.id
+       where e.organization_id='${esc}'
+         and (coalesce(d.total,0)>0 or coalesce(o.open_cnt,0)>0)
+       order by coalesce(o.overdue_cnt,0) desc, coalesce(d.total,0) desc
+       limit 30`,
+    ),
+    // Money & growth — contract renewals and sales-handover pipeline.
+    runSql<{
+      renewals_30d: number;
+      renewals_60d: number;
+      handovers_30d: number;
+      handovers_prev30: number;
+      handovers_pending: number;
+    }>(
+      `select
+         (select count(*) from projects where organization_id='${esc}' and status='active' and end_date is not null and end_date between current_date and current_date+interval '30 days') as renewals_30d,
+         (select count(*) from projects where organization_id='${esc}' and status='active' and end_date is not null and end_date > current_date+interval '30 days' and end_date <= current_date+interval '60 days') as renewals_60d,
+         (select count(*) from sales_handover_forms where organization_id='${esc}' and created_at>=now()-interval '30 days') as handovers_30d,
+         (select count(*) from sales_handover_forms where organization_id='${esc}' and created_at>=now()-interval '60 days' and created_at<now()-interval '30 days') as handovers_prev30,
+         (select count(*) from sales_handover_forms where organization_id='${esc}' and status in ('submitted','in_review')) as handovers_pending`,
+    ),
+  ]);
+
+  // Delivery trend — derive direction + on-time % server-side.
+  const tr = trendRows[0];
+  const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+  const deliveryTrend = tr
+    ? (() => {
+        const otThis = pct(tr.ontime_this, tr.due_this);
+        const otLast = pct(tr.ontime_last, tr.due_last);
+        const direction: "improving" | "stable" | "declining" =
+          otThis - otLast >= 8
+            ? "improving"
+            : otLast - otThis >= 8
+              ? "declining"
+              : "stable";
+        return {
+          direction,
+          onTimePctThisMonth: otThis,
+          onTimePctLastMonth: otLast,
+          completedThisMonth: Number(tr.done_this) || 0,
+          completedLastMonth: Number(tr.done_last) || 0,
+        };
+      })()
+    : null;
+
+  // People performance — classify tier + trend server-side, model only narrates.
+  const peoplePerformance = peopleRows.map((r) => {
+    const completed30 = Number(r.completed30) || 0;
+    const prev30 = Number(r.completed_prev30) || 0;
+    const withdue = r.withdue == null ? 0 : Number(r.withdue);
+    const ontime = r.ontime == null ? 0 : Number(r.ontime);
+    const onTimePct = withdue > 0 ? Math.round((ontime / withdue) * 100) : null;
+    const avgDelay = r.avg_delay == null ? null : Number(r.avg_delay);
+    const openLoad = Number(r.open_load) || 0;
+    const overdueLoad = Number(r.overdue_load) || 0;
+
+    const trend: "improving" | "stable" | "declining" =
+      prev30 > 0 && completed30 > prev30 * 1.2
+        ? "improving"
+        : prev30 > 0 && completed30 < prev30 * 0.7
+          ? "declining"
+          : "stable";
+
+    const tier: "top" | "solid" | "at_risk" =
+      (onTimePct != null && onTimePct < 60) ||
+      overdueLoad >= 4 ||
+      (avgDelay != null && avgDelay >= 3)
+        ? "at_risk"
+        : completed30 >= 4 &&
+            (onTimePct == null || onTimePct >= 85) &&
+            overdueLoad <= 1
+          ? "top"
+          : "solid";
+
+    return {
+      employeeName: r.full_name,
+      role: r.role,
+      tier,
+      trend,
+      completedLast30: completed30,
+      onTimePct,
+      avgDelayDays: avgDelay,
+      openLoad,
+      overdueLoad,
+    };
+  });
+  // Surface the most decision-relevant people first: at-risk, then top.
+  const tierRank = { at_risk: 0, top: 1, solid: 2 } as const;
+  const peopleForModel = [...peoplePerformance]
+    .sort(
+      (a, b) =>
+        tierRank[a.tier] - tierRank[b.tier] ||
+        b.overdueLoad - a.overdueLoad ||
+        b.openLoad - a.openLoad,
+    )
+    .slice(0, 8);
+
+  const pl = pipelineRows[0];
+  const moneyAndGrowth = pl
+    ? {
+        renewalsNext30d: Number(pl.renewals_30d) || 0,
+        renewalsIn30to60d: Number(pl.renewals_60d) || 0,
+        handoversLast30d: Number(pl.handovers_30d) || 0,
+        handoversPrev30d: Number(pl.handovers_prev30) || 0,
+        handoversPending: Number(pl.handovers_pending) || 0,
+      }
+    : null;
+
   const payloadForModel = {
     today,
     headline: {
@@ -298,6 +492,9 @@ async function buildSignalPack(orgId: string): Promise<{
       overdueTasks: totalOverdue,
       doneThisWeek: totalDoneWeek,
     },
+    deliveryTrend,
+    moneyAndGrowth,
+    peoplePerformance: peopleForModel,
     stageBottlenecks,
     serviceHealth,
     clientsAtRisk,
@@ -385,24 +582,30 @@ export async function POST(req: Request) {
     const { object } = await generateObject({
       model: google(INSIGHT_MODEL),
       schema: InsightsSchema,
-      prompt: `أنت مستشار عمليات لوكالة تسويق سعودية تتبع منهجية Sky Light (8 مراحل، 4 أدوار).
-ستجد أدناه إشارات تم احتسابها مسبقًا من قاعدة البيانات. **لا تخترع أرقامًا**.
-- استخدم الأرقام كما هي.
-- استشهد بأكواد المهام (task_code) والمشاريع (project_code) الحقيقية الواردة في الإشارات.
-- لكل قسم، اكتب فقط البنود التي تستند فعلاً للبيانات — اترك المصفوفة فارغة إذا لم يوجد ما يستحق الذكر.
-- اللغة: العربية الفصحى الواضحة، أسلوب مدير عمليات، لا تشجيعي ولا تعميمي.
+      prompt: `أنت رئيس أركان (Chief of Staff) للرئيس التنفيذي لوكالة تسويق سعودية تتبع منهجية Sky Light (8 مراحل، 4 أدوار).
+مهمتك: تحويل الإشارات المحتسبة مسبقًا أدناه إلى **تقرير تنفيذي يساعد الشركة على التحسّن**.
+
+قواعد صارمة:
+- **لا تخترع أرقامًا** — استخدم الأرقام كما وردت تمامًا.
+- استشهد بأكواد المهام/المشاريع الحقيقية الواردة في الإشارات.
+- اللغة: عربية فصحى، أسلوب رئيس أركان يخاطب الرئيس التنفيذي — حاسم، موجز، موجّه للقرار. لا تشجيعي ولا تعميمي.
+- لكل قسم، اكتب فقط البنود المستندة فعلاً للبيانات — اترك المصفوفة فارغة إن لم يوجد ما يستحق.
 
 البيانات:
 \`\`\`json
 ${JSON.stringify(payloadForModel)}
 \`\`\`
 
-ملاحظات تحليلية:
-- "stage_bottlenecks" = مراحل تتراكم فيها المهام أكثر من 3 أيام. اكتب narrative يشرح الأثر التشغيلي.
-- "clients_at_risk" = عملاء بمشاريع متعددة المتأخرات أو عقد ينتهي قريبًا. الاقتراح يجب أن يكون إجراءً ملموسًا.
-- "service_health" = أعطِ note قصيرة لكل خدمة تشخص الفجوة (مثلاً "تأخر في تصاميم الأسبوع 2").
-- "team_hotspots" = اقترح إعادة توزيع أو دعم محدد. لا تُضِف بنودًا تكميلية.
-- "quick_wins" = إجراءات يمكن إنجازها هذا الأسبوع، كل واحدة مربوطة بأكواد مهام محددة.`,
+تعليمات لكل قسم:
+- **topPriorities** (الأهم — 3 إلى 5 بنود): انظر عبر كل العدسات (المال/العملاء، التسليم، الأفراد، النمو) واختر أهم ما يجب أن يعرفه الرئيس التنفيذي اليوم، مرتّبًا بالأثر على الأعمال. لكل بند: finding (الحقيقة الرقمية)، businessImpact (الأثر: مال/عميل/سمعة)، recommendedAction (من يتحرك وماذا يفعل). category وseverity إلزاميان.
+- **deliveryTrend**: انسخ الأرقام كما هي من deliveryTrend في البيانات (direction, onTimePctThisMonth, onTimePctLastMonth, completedThisMonth, completedLastMonth) واكتب narrative من جملتين يشرح الاتجاه وسببه. إذا كان deliveryTrend في البيانات null، أعِد null.
+- **peoplePerformance**: لكل موظف في القائمة، انسخ الحقول الرقمية وtier وtrend كما هي، واكتب assessment (تقييم واقعي مبني على الأرقام) وrecommendation (دعم، تخفيف حمل، أو تقدير للمتميزين). أبرز المتعثّرين (at_risk) والمحمّلين فوق طاقتهم والمتميزين بوضوح.
+- **stageBottlenecks**: مراحل تتراكم فيها المهام >3 أيام — narrative يشرح الأثر التشغيلي.
+- **clientsAtRisk**: الاقتراح إجراء ملموس. راعِ التجديدات القادمة في moneyAndGrowth.
+- **serviceHealth**: note قصيرة تشخّص الفجوة لكل خدمة.
+- **teamHotspots**: اقترح إعادة توزيع أو دعمًا محددًا.
+- **quickWins**: إجراءات قابلة للتنفيذ هذا الأسبوع، كل واحدة مربوطة بأكواد مهام.
+- **executiveSummary**: 3-4 جمل تلخّص حالة الشركة وأبرز ما يحتاج قرارًا.`,
     });
 
     await supabaseAdmin

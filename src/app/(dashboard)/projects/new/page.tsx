@@ -5,6 +5,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { listClients } from "@/lib/data/clients";
 import { listAccountManagers, listEmployees, listServices } from "@/lib/data/employees";
 import { listAllActiveTemplates, listServiceCategories } from "@/lib/data/service-categories";
+import { listPositions } from "@/lib/data/positions";
 import { PageHeader } from "@/components/page-header";
 import { NewProjectForm } from "./new-project-form";
 
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function NewProjectPage() {
   const session = await requirePagePermission("projects.manage");
   const t = await getTranslations("ProjectsNewPage");
-  const [clients, services, ams, categories, employees, allTemplates] =
+  const [clients, services, ams, categories, employees, allTemplates, positions] =
     await Promise.all([
       listClients(session.orgId),
       listServices(session.orgId),
@@ -24,6 +25,7 @@ export default async function NewProjectPage() {
       // entirely client-side. Fetched in parallel with services (no service-id
       // filter) to avoid a sequential round-trip.
       listAllActiveTemplates(session.orgId),
+      listPositions(session.orgId),
     ]);
 
   return (
@@ -67,6 +69,11 @@ export default async function NewProjectPage() {
           service_name: c.service_name,
         }))}
         templates={allTemplates}
+        positions={positions.map((p) => ({
+          slug: p.slug,
+          name: p.name,
+          role: p.role,
+        }))}
       />
 
       <div className="text-xs text-muted-foreground">

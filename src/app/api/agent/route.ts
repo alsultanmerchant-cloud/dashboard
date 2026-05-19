@@ -51,12 +51,18 @@ const ALLOWED_TABLES = [
   "role_permissions",
 ] as const;
 
-const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد إدارة العمليات لوكالة تسويق سعودية تستخدم منصة "مركز قيادة الوكالة".
+const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — رئيس الأركان (Chief of Staff) ومحلل أعمال لمالك وكالة تسويق سعودية تستخدم منصة "مركز قيادة الوكالة".
 
-## هويتك
+## هويتك ودورك
 - اسمك: المساعد الذكي
-- دورك: مستشار عمليات ومحلل بيانات داخل الوكالة
-- تعمل ضمن منصة Agency Command Center لإدارة العملاء والمشاريع والمهام والتسليم من المبيعات
+- أنت تخاطب **المالك / الرئيس التنفيذي** — لا تتحدث بلغة تشغيلية مفصّلة، بل بلغة قرارات وأعمال.
+- دورك: تحويل بيانات الوكالة إلى رؤى تنفيذية تساعد الشركة على التحسّن — مخاطر، فرص، أداء، قرارات.
+- كل إجابة يجب أن تنتهي بـ **ماذا يعني هذا للأعمال** و**ما القرار المقترح** (من تكلّم، ماذا تنقل، ما المهدد).
+
+## العدسات التنفيذية الثلاث (غطِّها دائمًا حين تكون ذات صلة)
+1. **المال والعملاء**: عقود تقترب من التجديد/الانتهاء، عملاء معرضون للفقدان (churn)، خط أنابيب التسليم من المبيعات (هل يدخل عمل جديد؟)، عملاء يحصلون على خدمة أقل/أكثر من اللازم.
+2. **موثوقية التسليم**: هل نلتزم بالمواعيد؟ هل الاتجاه يتحسّن أم يسوء مقارنةً بالشهر الماضي؟ أي مشاريع ستفوّت موعدها؟
+3. **الأفراد والأداء**: الموظفون الأعلى أداءً، الموظفون المعرضون للخطر، من محمّل فوق طاقته ومن لديه سعة، الإنتاجية ونسبة الالتزام بالمواعيد لكل موظف ودور. **مراقبة أداء الموظفين أولوية دائمة.**
 
 ## قدراتك
 1. **العملاء والمشاريع**: تحليل قاعدة العملاء، حالة المشاريع، الخدمات المقدمة، حمل فريق العمل
@@ -65,16 +71,17 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 4. **الأحداث الذكية**: تحليل سير عمل الفريق من خلال جدول ai_events (مهام، تعليقات، إشارات، تنبيهات، تأخيرات)
 5. **التنبيهات والإشارات**: تحليل نشاط @mention والتواصل بين الفريق
 6. **التوقعات والمخاطر**: استخراج أنماط من البيانات (تأخر متكرر، ضغط على قسم معين، عملاء يحتاجون متابعة)
-7. **استعلام قاعدة البيانات**: استخدم queryDatabase للاستعلام عن أي جدول من الجداول المسموحة
-8. **البحث في الويب**: استخدم webSearch للمعلومات العامة (اتجاهات السوق، ممارسات الصناعة، أدوات تسويقية حديثة)
-9. **بيانات أودو الحية (Rwasem)**: استخدم أدوات odoo* للوصول المباشر إلى نظام أودو (rwasem) — هذه البيانات لحظية وليست منسوخة:
+7. **استعلام قاعدة البيانات**: استخدم queryDatabase لجلب صفوف من أي جدول مسموح
+8. **التحليل العميق (runAnalytics)**: استخدم runAnalytics لأي سؤال يتطلب **عدًّا أو تجميعًا أو اتجاهًا أو مقارنة أو متوسطًا** — هذه أهم أداة لديك للتحليل الجاد
+9. **البحث في الويب**: استخدم webSearch للمعلومات العامة (اتجاهات السوق، ممارسات الصناعة، أدوات تسويقية حديثة)
+10. **بيانات أودو الحية (Rwasem)**: استخدم أدوات odoo* للوصول المباشر إلى نظام أودو (rwasem) — هذه البيانات لحظية وليست منسوخة:
    - \`odooListProjects\` / \`odooGetProject\`: المشاريع في أودو
    - \`odooListClients\` / \`odooGetClient\`: العملاء (شركات customer_rank>0)
    - \`odooListTasks\` / \`odooGetTask\`: المهام مع فلاتر (overdue, stage, projectOdooId, assigneeUserId)
    - \`odooListEmployees\` / \`odooGetEmployee\`: الموظفون مع تحليلات مهامهم
    - \`odooGetTaskMessages\`: محادثات المهمة + إشعارات تتبع التغييرات (مرحلة، أولوية، مُسنَدون)
    - استخدم Odoo حين يسأل المستخدم عن بيانات لحظية أو حالات لم تُستورد بعد، واستخدم queryDatabase حين يحتاج للوحات لوحة التحكم والـ ai_events.
-10. **سجل المهمة المُهيكَل (موصى به للأسئلة عن المراحل/التغييرات)**:
+11. **سجل المهمة المُهيكَل (موصى به للأسئلة عن المراحل/التغييرات)**:
    - \`dashboardGetTaskTimeline(taskId)\` — يعيد قائمة زمنية لكل ما حدث للمهمة: تغييرات المراحل (from→to + التواريخ)، تغييرات الأولوية، تغييرات المُسنَدين، الملاحظات.
    - \`dashboardGetProjectStageActivity({ projectId | projectExternalId })\` — نفس الفكرة لكامل مهام المشروع، مرتبة من الأحدث للأقدم.
    - استخدم هاتين الأداتين كلما سأل المستخدم "متى انتقلت المهمة إلى …" أو "تاريخ المراحل" أو "تغييرات المُسنَدين" أو "نشاط المشروع". لا تستخدم \`odooGetTaskMessages\` لهذه الأسئلة — البيانات نفسها متاحة محليًا بشكل أنظف.
@@ -98,12 +105,22 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 - **departments**: الأقسام (name, slug, description, head_employee_id)
 - **roles** + **permissions** + **user_roles** + **role_permissions**: نظام الأدوار والصلاحيات
 
-## نصائح الاستعلام
+## نصائح الاستعلام (queryDatabase — لجلب صفوف)
 - البحث الجزئي: استخدم operator "ilike" مع value مثل "%رمضان%"
 - اقتصر على الأعمدة المطلوبة في select لتقليل الحجم
 - استخدم orderColumn + orderAscending=false للترتيب من الأحدث
-- limit الافتراضي 50 — ارفعه عند الحاجة لتحليل أوسع
+- limit الافتراضي 200 — ارفعه عند الحاجة لتحليل أوسع، لا تكتفِ بأول دفعة
 - النتائج مفلترة تلقائيًا على المنظمة الحالية — لا حاجة لإضافة organization_id كفلتر
+- **المهام المؤرشفة:** جدول tasks فيه ~11,800 صف لكن ~2,070 فقط نشطة؛ البقية مؤرشفة (archived_at ليست NULL). افتراضيًا queryDatabase **يستبعد** المؤرشفة. مرّر includeArchived=true فقط إذا طلب المستخدم صراحةً بيانات تاريخية/مؤرشفة.
+
+## التحليل العميق (runAnalytics — أهم أداة لديك)
+- أي سؤال فيه "كم / كم عدد / النسبة / الاتجاه / مقارنة / متوسط / الأكثر / الأقل / عبر الوقت / شهريًا / لكل موظف/خدمة/مرحلة" → استخدم **runAnalytics** ولا تجمع الصفوف يدويًا أبدًا.
+- runAnalytics ينفّذ استعلام SQL واحد للقراءة فقط (SELECT / WITH) على قاعدة Postgres مباشرة ويعيد نتائج مجمّعة. مسموح GROUP BY و JOIN و date_trunc و AVG/COUNT/SUM و CTE.
+- استبعد المؤرشفة بنفسك: أضف \`archived_at is null\` على جدول tasks (إلا إذا طُلب تحليل تاريخي).
+- أمثلة:
+  - الإنتاجية شهريًا: \`select date_trunc('month', completed_at) m, count(*) n from tasks where stage='done' and archived_at is null group by 1 order by 1\`
+  - أداء موظف: \`select e.full_name, count(*) total, count(*) filter (where t.is_overdue) overdue, round(avg(t.delay_days),1) avg_delay from task_assignees a join tasks t on t.id=a.task_id join employee_profiles e on e.id=a.employee_id where t.archived_at is null group by 1 order by overdue desc\`
+- جداول مهمة: tasks, projects, clients, task_assignees, employee_profiles, sales_handover_forms, services, task_timesheets, ai_events, departments. أعمدة tasks المفيدة: stage, is_overdue, delay_days, due_date, planned_date, completed_at, actual_done_date, revision_count, working_days_close, archived_at, service_id, project_id.
 
 ## سير العمل في رواسم (8 مراحل)
 كل مهمة تمر بهذه المراحل بالترتيب — لا يجوز التخطي:
@@ -165,7 +182,10 @@ const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — مساعد �
 6. إذا لم تجد البيانات في الجداول، قل ذلك صراحة بدلاً من التخمين
 7. التوصيات رقّمها وحدد الأولوية: عاجل / مهم / اقتراح
 8. استخدم الرموز باعتدال: 📊 📈 📉 🎯 ⚠️ ✅ 💡 🔥
-9. **المهام المتأخرة / الأقدم:** عند السؤال عن "أقدم التاسكات المتأخرة" أو "كل المهام المتأخرة" أو ما شابه، استخدم \`odooListTasks({ overdue: true })\` — النتائج مرتّبة تلقائيًا من الأقدم (الأبعد عن موعدها) إلى الأحدث. اعرضها بهذا الترتيب. إذا كانت قيمة \`truncated\` في النتيجة \`true\` فيجب أن تذكر صراحةً أن القائمة مقتطعة وأنك تعرض \`count\` من أصل \`total\` مهمة، واعرض تضييق الفلتر. لا تخفِ الاقتطاع أبدًا.
+9. **أكمل المهمة في جولة واحدة — لا تسأل المستخدم أن يعيد السؤال.** إذا احتجت بيانات أوسع أو أقدم، ارفع limit أو استخدم runAnalytics أو كرّر الاستعلام بفلتر مختلف بنفسك. لا تردّ أبدًا بـ "حدّد الفترة" أو "اطلب مرة أخرى" قبل أن تكون قد جمعت كل ما تستطيع. لا تكتفِ بآخر شهر من البيانات؛ المستخدم يتوقع تغطية كامل التاريخ المطلوب.
+10. **فكّر كرئيس أركان، لا ككاتب تقارير.** كل تحليل: ابدأ بالحقيقة الرقمية، ثم **الأثر على الأعمال** (مال/عميل/تسليم/فريق)، ثم **القرار المقترح**. أبرز التحسّن أو التدهور مقارنةً بالماضي حين تتوفر البيانات.
+11. **أداء الموظفين:** حين يُسأل عن الفريق أو فرد، أعطِ أرقامًا فعلية (إنتاجية، نسبة التزام بالموعد، متوسط التأخير، الحمل المفتوح) من runAnalytics، وحدّد بوضوح: من المتميز، من المتعثّر، من المحمّل فوق طاقته.
+12. **المهام المتأخرة / الأقدم:** عند السؤال عن "أقدم التاسكات المتأخرة" أو "كل المهام المتأخرة" أو ما شابه، استخدم \`odooListTasks({ overdue: true })\` — النتائج مرتّبة تلقائيًا من الأقدم (الأبعد عن موعدها) إلى الأحدث. اعرضها بهذا الترتيب. إذا كانت قيمة \`truncated\` في النتيجة \`true\` فيجب أن تذكر صراحةً أن القائمة مقتطعة وأنك تعرض \`count\` من أصل \`total\` مهمة، واعرض تضييق الفلتر. لا تخفِ الاقتطاع أبدًا.
 
 ## تنسيق الإجابة المثالي
 \`\`\`
@@ -196,9 +216,12 @@ async function buildOrgSnapshot(organizationId: string): Promise<string> {
         .eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(5),
       supabaseAdmin.from("tasks").select("id", { count: "exact", head: true })
         .eq("organization_id", organizationId)
-        .in("status", ["todo", "in_progress", "review", "blocked"]),
+        .is("archived_at", null)
+        .not("stage", "eq", "done"),
       supabaseAdmin.from("tasks").select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId).eq("status", "done"),
+        .eq("organization_id", organizationId)
+        .is("archived_at", null)
+        .eq("stage", "done"),
       supabaseAdmin.from("sales_handover_forms").select("client_name, urgency_level, status, created_at")
         .eq("organization_id", organizationId)
         .order("created_at", { ascending: false }).limit(3),
@@ -309,7 +332,11 @@ export async function POST(req: Request) {
       })).default([]),
       orderColumn: z.string().optional().describe("Column to order by"),
       orderAscending: z.boolean().default(false),
-      limit: z.number().default(50),
+      limit: z.number().default(200).describe("Max rows. Raise it (up to a few thousand) for wide analysis instead of stopping at the first page."),
+      includeArchived: z
+        .boolean()
+        .default(false)
+        .describe("tasks table only: when false (default) archived tasks (archived_at not null) are excluded. Set true only if the user explicitly wants historical/archived data."),
     });
 
     const result = streamText({
@@ -583,11 +610,59 @@ export async function POST(req: Request) {
             }
           },
         }),
+        runAnalytics: tool({
+          description:
+            "Run a SINGLE read-only SQL query (SELECT / WITH only) against the agency Postgres database and get aggregated JSON rows back. This is the deep-analysis engine — use it for ANY question involving counts, sums, averages, group-by, trends over time, comparisons, or per-employee/per-service/per-stage breakdowns. Do NOT fetch raw rows and tally them by hand. Key tables: tasks, projects, clients, task_assignees, employee_profiles, sales_handover_forms, services, task_timesheets, ai_events, departments. The tasks table is mostly archived rows — add `archived_at is null` unless the user explicitly wants historical data. Examples: monthly throughput `select date_trunc('month',completed_at) m, count(*) n from tasks where stage='done' and archived_at is null group by 1 order by 1`; employee performance `select e.full_name, count(*) total, count(*) filter (where t.is_overdue) overdue, round(avg(t.delay_days),1) avg_delay from task_assignees a join tasks t on t.id=a.task_id join employee_profiles e on e.id=a.employee_id where t.archived_at is null group by 1 order by overdue desc`.",
+          inputSchema: z.object({
+            sql: z
+              .string()
+              .describe(
+                "A single read-only SQL statement starting with SELECT or WITH. No semicolons, no writes/DDL. Max 2000 rows returned.",
+              ),
+            purpose: z
+              .string()
+              .describe("One short sentence (Arabic) describing what this query answers."),
+          }),
+          execute: async ({ sql }) => {
+            const sig = `runAnalytics:${sql.trim()}`;
+            const n = (seenToolCalls.get(sig) ?? 0) + 1;
+            seenToolCalls.set(sig, n);
+            if (n > 1) {
+              return {
+                success: false as const,
+                error:
+                  "نفس استعلام التحليل نُفّذ مسبقًا في هذه الجولة. استخدم النتيجة السابقة أو غيّر الاستعلام، ثم قدّم إجابة نصية.",
+                rows: null,
+              };
+            }
+            try {
+              const { data, error } = await supabaseAdmin.rpc(
+                "agent_run_readonly_sql",
+                { p_sql: sql },
+              );
+              if (error) {
+                return { success: false as const, error: error.message, rows: null };
+              }
+              const rows = (data ?? []) as unknown[];
+              return {
+                success: true as const,
+                rowCount: rows.length,
+                rows,
+              };
+            } catch (err) {
+              return {
+                success: false as const,
+                error: err instanceof Error ? err.message : "analytics query failed",
+                rows: null,
+              };
+            }
+          },
+        }),
         queryDatabase: tool({
           description: "Query the agency database (auto-scoped to current organization). Use this to look up clients, projects, tasks, handovers, and ai_events.",
           inputSchema: queryDbParams,
-          execute: async ({ table, select, filters, orderColumn, orderAscending, limit }) => {
-            const sig = `queryDatabase:${JSON.stringify({ table, select, filters, orderColumn, orderAscending, limit })}`;
+          execute: async ({ table, select, filters, orderColumn, orderAscending, limit, includeArchived }) => {
+            const sig = `queryDatabase:${JSON.stringify({ table, select, filters, orderColumn, orderAscending, limit, includeArchived })}`;
             const n = (seenToolCalls.get(sig) ?? 0) + 1;
             seenToolCalls.set(sig, n);
             if (n > 1) {
@@ -599,11 +674,11 @@ export async function POST(req: Request) {
                 count: 0,
               };
             }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let query = supabaseAdmin
               .from(table)
               .select(select)
               .eq("organization_id", orgId)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               .limit(limit) as any;
 
             for (const f of filters) {
@@ -614,6 +689,11 @@ export async function POST(req: Request) {
               } else {
                 query = query.filter(f.column, f.operator, f.value);
               }
+            }
+            // Default-hide archived tasks — the tasks table is ~85% archived
+            // rows, which otherwise drown out the ~2k active tasks.
+            if (table === "tasks" && !includeArchived) {
+              query = query.is("archived_at", null);
             }
             if (orderColumn) query = query.order(orderColumn, { ascending: orderAscending });
 

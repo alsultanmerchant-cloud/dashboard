@@ -11,6 +11,11 @@ import {
   Users,
   Layers,
   Activity,
+  Target,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  UserCheck,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +56,31 @@ const SERVICE_LABELS: Record<string, string> = {
   media_buying: "ميديا باينج",
   other: "أخرى",
 };
+
+const CATEGORY_LABELS: Record<string, string> = {
+  money_clients: "المال والعملاء",
+  delivery: "التسليم",
+  people: "الأفراد",
+  growth: "النمو",
+};
+
+const SEVERITY_CONFIG = {
+  critical: { label: "حرج", cls: "border-cc-red/40 bg-cc-red/[0.04]", dot: "bg-cc-red" },
+  high: { label: "عالٍ", cls: "border-amber/40 bg-amber/[0.04]", dot: "bg-amber" },
+  medium: { label: "متوسط", cls: "border-soft", dot: "bg-cc-blue" },
+} as const;
+
+const TIER_CONFIG = {
+  top: { label: "متميز", cls: "bg-green-dim text-cc-green border-cc-green/20" },
+  solid: { label: "مستقر", cls: "bg-blue-dim text-cc-blue border-cc-blue/20" },
+  at_risk: { label: "متعثّر", cls: "bg-red-dim text-cc-red border-cc-red/20" },
+} as const;
+
+const TREND_CONFIG = {
+  improving: { label: "يتحسّن", icon: TrendingUp, cls: "text-cc-green" },
+  stable: { label: "مستقر", icon: Minus, cls: "text-muted-foreground" },
+  declining: { label: "يتراجع", icon: TrendingDown, cls: "text-cc-red" },
+} as const;
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-lg bg-white/[0.06]", className)} />;
@@ -281,6 +311,90 @@ export function AiAnalysisPanel({
             </CardContent>
           </Card>
 
+          {/* CEO agenda — the executive briefing, highest priority */}
+          {data.topPriorities && data.topPriorities.length > 0 && (
+            <div className="space-y-3">
+              <SectionHeader
+                icon={Target}
+                title="أجندة الرئيس التنفيذي"
+                hint={`${data.topPriorities.length} أولوية`}
+              />
+              <div className="space-y-2">
+                {data.topPriorities.map((p, i) => {
+                  const sev = SEVERITY_CONFIG[p.severity] ?? SEVERITY_CONFIG.medium;
+                  return (
+                    <Card key={i} className={cn("border", sev.cls)}>
+                      <CardContent className="p-4 space-y-2.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn("size-2 rounded-full shrink-0", sev.dot)} />
+                          <p className="text-sm font-semibold flex-1">{p.title}</p>
+                          <Badge variant="secondary" className="text-[10px]">
+                            {CATEGORY_LABELS[p.category] ?? p.category}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-foreground/85 leading-relaxed">
+                          {p.finding}
+                        </p>
+                        <div className="flex items-start gap-1.5">
+                          <AlertTriangle className="size-3 text-amber shrink-0 mt-0.5" />
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {p.businessImpact}
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-1.5">
+                          <Zap className="size-3 text-cc-green shrink-0 mt-0.5" />
+                          <p className="text-xs text-foreground/85 leading-relaxed">
+                            {p.recommendedAction}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* delivery reliability trend */}
+          {data.deliveryTrend && (
+            <div className="space-y-3">
+              <SectionHeader icon={Activity} title="موثوقية التسليم" hint="هذا الشهر مقابل السابق" />
+              {(() => {
+                const t = data.deliveryTrend!;
+                const tr = TREND_CONFIG[t.direction];
+                const TrendIcon = tr.icon;
+                return (
+                  <Card>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <TrendIcon className={cn("size-4", tr.cls)} />
+                          <span className={cn("text-sm font-semibold", tr.cls)}>
+                            {tr.label}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-lg font-bold tabular-nums">
+                            {t.onTimePctThisMonth}%
+                          </span>
+                          <span className="text-[11px] text-muted-foreground tabular-nums">
+                            التزام بالموعد (السابق {t.onTimePctLastMonth}%)
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                          أُنجز {t.completedThisMonth} مهمة (السابق {t.completedLastMonth})
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/85 leading-relaxed">
+                        {t.narrative}
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
+
           {/* clients at risk — most urgent so it comes first */}
           {data.clientsAtRisk.length > 0 && (
             <div className="space-y-3">
@@ -422,6 +536,82 @@ export function AiAnalysisPanel({
             </div>
           )}
 
+          {/* people performance */}
+          {data.peoplePerformance && data.peoplePerformance.length > 0 && (
+            <div className="space-y-3">
+              <SectionHeader
+                icon={UserCheck}
+                title="أداء الفريق"
+                hint={`${data.peoplePerformance.length} موظف`}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                {data.peoplePerformance.map((p, i) => {
+                  const tier = TIER_CONFIG[p.tier] ?? TIER_CONFIG.solid;
+                  const tr = TREND_CONFIG[p.trend];
+                  const TrendIcon = tr.icon;
+                  return (
+                    <Card
+                      key={i}
+                      className={cn(
+                        "border",
+                        p.tier === "at_risk"
+                          ? "border-cc-red/25"
+                          : p.tier === "top"
+                            ? "border-cc-green/25"
+                            : "border-soft",
+                      )}
+                    >
+                      <CardContent className="p-4 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-sm font-semibold">{p.employeeName}</p>
+                          <div className="flex items-center gap-1.5">
+                            {p.role ? (
+                              <Badge variant="secondary" className="text-[10px]">
+                                {ROLE_LABELS[p.role] ?? p.role}
+                              </Badge>
+                            ) : null}
+                            <span
+                              className={cn(
+                                "text-[10px] font-medium px-2 py-0.5 rounded-full border",
+                                tier.cls,
+                              )}
+                            >
+                              {tier.label}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap text-[11px] text-muted-foreground tabular-nums">
+                          <span>أنجز {p.completedLast30} (30 يوم)</span>
+                          {p.onTimePct != null && <span>· التزام {p.onTimePct}%</span>}
+                          {p.avgDelayDays != null && (
+                            <span>· متوسط تأخير {p.avgDelayDays} يوم</span>
+                          )}
+                          <span>· {p.openLoad} مفتوحة</span>
+                          {p.overdueLoad > 0 && (
+                            <span className="text-cc-red">· {p.overdueLoad} متأخرة</span>
+                          )}
+                          <span className={cn("flex items-center gap-0.5", tr.cls)}>
+                            <TrendIcon className="size-3" />
+                            {tr.label}
+                          </span>
+                        </div>
+                        <p className="text-xs text-foreground/85 leading-relaxed">
+                          {p.assessment}
+                        </p>
+                        <div className="flex items-start gap-1.5 pt-0.5">
+                          <Zap className="size-3 text-amber shrink-0 mt-0.5" />
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {p.recommendation}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* quick wins */}
           {data.quickWins.length > 0 && (
             <div className="space-y-3">
@@ -457,7 +647,10 @@ export function AiAnalysisPanel({
           )}
 
           {/* fully-quiet state — schema ran but found nothing actionable */}
-          {data.clientsAtRisk.length === 0 &&
+          {(data.topPriorities?.length ?? 0) === 0 &&
+            !data.deliveryTrend &&
+            (data.peoplePerformance?.length ?? 0) === 0 &&
+            data.clientsAtRisk.length === 0 &&
             data.stageBottlenecks.length === 0 &&
             data.serviceHealth.length === 0 &&
             data.teamHotspots.length === 0 &&

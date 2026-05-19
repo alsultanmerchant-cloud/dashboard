@@ -1,6 +1,10 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAiEvent } from "@/lib/audit";
+import { buildOwnerResolver } from "./resolve-task-owners";
+import type { Database } from "@/lib/supabase/types";
+
+type TaskRoleType = Database["public"]["Enums"]["task_role_type"];
 
 /**
  * Sky Light / Rwasem auto-task generation.
@@ -146,52 +150,52 @@ export async function generateTasksForProjectFromServices(args: {
     return 0;
   }
 
-  // Build role-slot assignments. For each task we resolve every role its
-  // stage_owner_positions references (plus specialist + account_manager so
-  // the prior behaviour never regresses) to a real employee via the org
-  // chart, then write one task_assignees row per resolved role. The
-  // task_current_stage_owner view then resolves each phase → that employee.
-  type ResolvableRole = "account_manager" | "specialist" | "manager";
+  // Build role-slot assignments. Each task's stage_owner_positions references
+  // positions (by slug); we resolve position → role → employee and write one
+  // task_assignees row per resolved role. specialist + account_manager are
+  // always considered so prior behaviour never regresses.
   type SlotRow = {
     organization_id: string;
     task_id: string;
     employee_id: string;
-    role_type: ResolvableRole;
+    role_type: TaskRoleType;
     assigned_by: string | null;
   };
-  // agent / supporting_lead / supporting_agent have no single org-chart
-  // position, so they resolve to null and stay unassigned.
-  const resolveRole = (
-    role: string,
-    serviceId: string | null,
-  ): string | null => {
-    if (role === "account_manager") return args.accountManagerEmployeeId ?? null;
-    if (role === "specialist") {
-      return serviceId ? specialistByServiceId.get(serviceId) ?? null : null;
-    }
-    if (role === "manager") {
-      return serviceId ? deptHeadByServiceId.get(serviceId) ?? null : null;
-    }
-    return null;
-  };
+  const resolver = await buildOwnerResolver({
+    organizationId: args.organizationId,
+    projectId: args.projectId,
+    serviceIds: args.serviceIds,
+    accountManagerEmployeeId: args.accountManagerEmployeeId,
+    specialistByServiceId,
+    deptHeadByServiceId,
+  });
   const slotRows: SlotRow[] = [];
   for (const t of inserted ?? []) {
-    // specialist + account_manager are always considered (legacy behaviour);
-    // any extra roles come from the template item's per-phase mapping.
-    const roles = new Set<string>(["account_manager", "specialist"]);
+    const slugs = new Set<string>(["account_manager", "specialist"]);
     const sop = (t as { stage_owner_positions?: Record<string, string | null> | null })
       .stage_owner_positions;
     if (sop) {
-      for (const v of Object.values(sop)) if (v) roles.add(v);
+      for (const v of Object.values(sop)) if (v) slugs.add(v);
     }
-    for (const role of roles) {
-      const employeeId = resolveRole(role, t.service_id);
-      if (!employeeId) continue;
+    // One slot per structural role — dedupe so two positions sharing a role
+    // don't violate the unique(task_id, role_type) index.
+    const byRole = new Map<string, string>();
+    for (const slug of slugs) {
+      const role = resolver.roleOf(slug);
+      if (!role || byRole.has(role)) continue;
+      const employeeId = resolver.resolve(slug, t.service_id);
+      if (employeeId) byRole.set(role, employeeId);
+    }
+    // Extra people pinned on the service join every one of its tasks.
+    for (const ex of resolver.extrasFor(t.service_id)) {
+      if (!byRole.has(ex.role)) byRole.set(ex.role, ex.employeeId);
+    }
+    for (const [role, employeeId] of byRole) {
       slotRows.push({
         organization_id: args.organizationId,
         task_id: t.id,
         employee_id: employeeId,
-        role_type: role as ResolvableRole,
+        role_type: role as TaskRoleType,
         assigned_by: args.createdByUserId ?? null,
       });
     }

@@ -7,6 +7,7 @@ import { EmployeeInviteSchema } from "@/lib/schemas";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
+import { TASK_OWNER_ROLE_KEYS } from "@/lib/labels";
 
 export type EmployeeInviteState = {
   ok?: true;
@@ -36,7 +37,7 @@ export async function inviteEmployeeAction(
     full_name: formData.get("full_name"),
     email: formData.get("email"),
     phone: formData.get("phone"),
-    job_title: formData.get("job_title"),
+    position_id: formData.get("position_id"),
     department_id: formData.get("department_id"),
     role_id: formData.get("role_id"),
   });
@@ -49,6 +50,18 @@ export async function inviteEmployeeAction(
     return { error: "تحقق من بيانات النموذج", fieldErrors };
   }
   const data = parsed.data;
+
+  // Resolve the picked position so job_title is stored as a display copy.
+  let jobTitle: string | null = null;
+  if (data.position_id) {
+    const { data: pos } = await supabaseAdmin
+      .from("positions")
+      .select("name")
+      .eq("organization_id", session.orgId)
+      .eq("id", data.position_id)
+      .maybeSingle();
+    jobTitle = pos?.name ?? null;
+  }
 
   // 1. Create or reuse auth.users
   const password = generatePassword();
@@ -93,7 +106,8 @@ export async function inviteEmployeeAction(
         full_name: data.full_name,
         email: data.email,
         phone: data.phone,
-        job_title: data.job_title,
+        position_id: data.position_id,
+        job_title: jobTitle,
         employment_status: "active",
       },
       { onConflict: "organization_id,user_id" },
@@ -149,12 +163,11 @@ const UpdateSchema = z.object({
   full_name: z.string().trim().min(2, "الاسم قصير جدًا").max(160),
   email: z.string().trim().email("بريد غير صالح").nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
-  job_title: z.string().trim().max(160).nullable().optional(),
+  position_id: z.string().uuid().nullable().optional(),
   department_id: z.string().uuid().nullable().optional(),
   manager_employee_id: z.string().uuid().nullable().optional(),
   team_leader_employee_id: z.string().uuid().nullable().optional(),
   department_head_employee_id: z.string().uuid().nullable().optional(),
-  position: z.string().trim().max(40).nullable().optional(),
 });
 
 export async function updateEmployeeAction(input: {
@@ -162,12 +175,11 @@ export async function updateEmployeeAction(input: {
   fullName: string;
   email?: string | null;
   phone?: string | null;
-  jobTitle?: string | null;
+  positionId?: string | null;
   departmentId?: string | null;
   managerEmployeeId?: string | null;
   teamLeaderEmployeeId?: string | null;
   departmentHeadEmployeeId?: string | null;
-  position?: string | null;
 }): Promise<ActionResult> {
   let session;
   try {
@@ -181,12 +193,11 @@ export async function updateEmployeeAction(input: {
     full_name: input.fullName,
     email: input.email ?? null,
     phone: input.phone ?? null,
-    job_title: input.jobTitle ?? null,
+    position_id: input.positionId ?? null,
     department_id: input.departmentId ?? null,
     manager_employee_id: input.managerEmployeeId ?? null,
     team_leader_employee_id: input.teamLeaderEmployeeId ?? null,
     department_head_employee_id: input.departmentHeadEmployeeId ?? null,
-    position: input.position ?? null,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
@@ -209,17 +220,30 @@ export async function updateEmployeeAction(input: {
     .maybeSingle();
   if (!existing) return { error: "الموظف غير موجود" };
 
+  // Resolve the picked position so job_title stays in sync as a display copy.
+  let jobTitle: string | null = null;
+  if (parsed.data.position_id) {
+    const { data: pos } = await supabaseAdmin
+      .from("positions")
+      .select("id, name")
+      .eq("organization_id", session.orgId)
+      .eq("id", parsed.data.position_id)
+      .maybeSingle();
+    if (!pos) return { error: "المسمى الوظيفي غير موجود" };
+    jobTitle = pos.name;
+  }
+
   const { error } = await supabaseAdmin
     .from("employee_profiles")
     .update({
       full_name: parsed.data.full_name,
       email: parsed.data.email,
       phone: parsed.data.phone,
-      job_title: parsed.data.job_title,
+      position_id: parsed.data.position_id,
+      job_title: jobTitle,
       department_id: parsed.data.department_id,
       manager_employee_id: parsed.data.manager_employee_id,
       team_leader_employee_id: parsed.data.team_leader_employee_id,
-      position: parsed.data.position,
     })
     .eq("id", parsed.data.id);
   if (error) return { error: error.message };
@@ -416,4 +440,82 @@ export async function hardDeleteEmployeeAction(input: {
 
   revalidatePath("/organization/employees");
   return { ok: true };
+}
+
+// Create a job-title position from the employee form combobox. Each position
+// maps to one structural role; that role drives task auto-assignment. Returns
+// the new (or already-existing, name-matched) position so the caller can
+// select it immediately.
+const CreatePositionSchema = z.object({
+  name: z.string().trim().min(2, "المسمى قصير جدًا").max(80),
+  role: z.enum(TASK_OWNER_ROLE_KEYS),
+});
+
+export type CreatePositionResult =
+  | {
+      ok: true;
+      position: {
+        id: string;
+        slug: string;
+        name: string;
+        role: string;
+        is_system: boolean;
+      };
+    }
+  | { error: string };
+
+export async function createPositionAction(input: {
+  name: string;
+  role: string;
+}): Promise<CreatePositionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = CreatePositionSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  // Reuse an existing same-name position rather than creating a duplicate.
+  const { data: existing } = await supabaseAdmin
+    .from("positions")
+    .select("id, slug, name, role, is_system")
+    .eq("organization_id", session.orgId)
+    .ilike("name", parsed.data.name)
+    .maybeSingle();
+  if (existing) return { ok: true, position: existing };
+
+  const slug = `pos_${randomBytes(6).toString("hex")}`;
+  const { data: created, error } = await supabaseAdmin
+    .from("positions")
+    .insert({
+      organization_id: session.orgId,
+      slug,
+      name: parsed.data.name,
+      role: parsed.data.role,
+      is_system: false,
+      created_by: session.userId,
+    })
+    .select("id, slug, name, role, is_system")
+    .single();
+  if (error || !created) {
+    return { error: error?.message ?? "تعذر إنشاء المسمى" };
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "position.create",
+    entityType: "position",
+    entityId: created.id,
+    metadata: { name: created.name, role: created.role },
+  });
+
+  revalidatePath("/organization/employees");
+  revalidatePath("/task-templates");
+  return { ok: true, position: created };
 }

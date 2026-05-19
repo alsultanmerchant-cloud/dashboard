@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listTaskTemplates, getTaskTemplate } from "@/lib/data/templates";
 import { listDepartments } from "@/lib/data/employees";
+import { listPositions } from "@/lib/data/positions";
 import { AddTemplateItemDialog } from "./[id]/add-item-dialog";
 import { EditTemplateItemDialog } from "./[id]/edit-item-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -10,7 +11,6 @@ import { EmptyState } from "@/components/empty-state";
 import { ConfigShell, type ConfigItem } from "@/components/config-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { ServiceBadge, PriorityBadge } from "@/components/status-badges";
-import { ROLE_LABELS } from "@/lib/labels";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
@@ -35,27 +35,34 @@ export default async function TaskTemplatesPage({
 }) {
   const session = await requirePagePermission("templates.manage");
   const t = await getTranslations("TaskTemplatesPage");
-  const tRoles = await getTranslations("RoleLabels");
   const sp = await searchParams;
   const templates = await listTaskTemplates(session.orgId);
 
   // Default to the first template when none picked — Odoo settings views
   // do the same so the right pane is never blank by default.
   const selectedId = sp.id ?? templates[0]?.id ?? null;
-  const [selected, departments] = await Promise.all([
+  const [selected, departments, positions] = await Promise.all([
     selectedId ? getTaskTemplate(session.orgId, selectedId) : Promise.resolve(null),
     listDepartments(session.orgId),
+    listPositions(session.orgId),
   ]);
+  const positionOptions = positions.map((p) => ({ slug: p.slug, name: p.name }));
+  const positionNameBySlug = new Map(positions.map((p) => [p.slug, p.name]));
 
   const items: ConfigItem[] = templates.map((t) => {
     const service = Array.isArray(t.service) ? t.service[0] : t.service;
     const itemCount = Array.isArray(t.task_template_items)
       ? t.task_template_items[0]?.count ?? 0
       : 0;
+    const serviceHint =
+      service?.name &&
+      service.name.trim().toLocaleLowerCase() !== t.name.trim().toLocaleLowerCase()
+        ? service.name
+        : undefined;
     return {
       id: t.id,
       label: t.name,
-      hint: service?.name ?? undefined,
+      hint: serviceHint,
       stripeColor: service?.slug ? SERVICE_COLOR[service.slug] : undefined,
       inactive: !t.is_active,
       badge: (
@@ -89,6 +96,8 @@ export default async function TaskTemplatesPage({
               <TemplateDetail
                 tpl={selected}
                 departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+                positions={positionOptions}
+                positionNameBySlug={positionNameBySlug}
                 labels={{
                   active: t("active"),
                   inactive: t("inactive"),
@@ -100,7 +109,6 @@ export default async function TaskTemplatesPage({
                   priority: t("table.priority"),
                   edit: t("table.edit"),
                 }}
-                tRoles={tRoles}
               />
             ) : null
           }
@@ -115,11 +123,14 @@ export default async function TaskTemplatesPage({
 function TemplateDetail({
   tpl,
   departments,
+  positions,
+  positionNameBySlug,
   labels,
-  tRoles,
 }: {
   tpl: NonNullable<Awaited<ReturnType<typeof getTaskTemplate>>>;
   departments: { id: string; name: string }[];
+  positions: { slug: string; name: string }[];
+  positionNameBySlug: Map<string, string>;
   labels: {
     active: string;
     inactive: string;
@@ -131,7 +142,6 @@ function TemplateDetail({
     priority: string;
     edit: string;
   };
-  tRoles: Awaited<ReturnType<typeof getTranslations<"RoleLabels">>>;
 }) {
   const service = Array.isArray(tpl.service) ? tpl.service[0] : tpl.service;
   const items = tpl.task_template_items ?? [];
@@ -157,7 +167,11 @@ function TemplateDetail({
             >
               {tpl.is_active ? labels.active : labels.inactive}
             </span>
-            <AddTemplateItemDialog templateId={tpl.id} departments={departments} />
+            <AddTemplateItemDialog
+              templateId={tpl.id}
+              departments={departments}
+              positions={positions}
+            />
           </div>
         </CardContent>
       </Card>
@@ -199,9 +213,8 @@ function TemplateDetail({
                   </DataTableCell>
                   <DataTableCell className="text-xs text-muted-foreground">
                     {it.default_role_key
-                      ? tRoles.has(it.default_role_key)
-                        ? tRoles(it.default_role_key)
-                        : ROLE_LABELS[it.default_role_key] ?? it.default_role_key
+                      ? positionNameBySlug.get(it.default_role_key) ??
+                        it.default_role_key
                       : "—"}
                   </DataTableCell>
                   <DataTableCell className="tabular-nums" dir="ltr">
@@ -228,8 +241,16 @@ function TemplateDetail({
                           it.offset_days_from_project_start,
                         duration_days: it.duration_days,
                         priority: it.priority,
+                        stage_owner_positions:
+                          (it as {
+                            stage_owner_positions?: Record<
+                              string,
+                              string | null
+                            > | null;
+                          }).stage_owner_positions ?? null,
                       }}
                       departments={departments}
+                      positions={positions}
                     />
                   </DataTableCell>
                 </DataTableRow>

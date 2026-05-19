@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { listEmployees, listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions } from "@/lib/data/organization";
+import { listPositions } from "@/lib/data/positions";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { ROLE_LABELS } from "@/lib/labels";
@@ -21,10 +22,11 @@ export default async function EmployeesPage() {
   const tRoles = await getTranslations("RoleLabels");
   const canManage = hasPermission(session, "employees.manage");
 
-  const [employees, departments, roleOptions] = await Promise.all([
+  const [employees, departments, roleOptions, positions] = await Promise.all([
     listEmployees(session.orgId),
     listDepartments(session.orgId),
     listOrgRoleOptions(session.orgId),
+    listPositions(session.orgId),
   ]);
 
   // Build a deptId → name lookup + manager_employee_id → full_name lookup so
@@ -55,6 +57,7 @@ export default async function EmployeesPage() {
       phone: e.phone ?? null,
       job_title: e.job_title ?? null,
       position: (e as { position?: string | null }).position ?? null,
+      position_id: (e as { position_id?: string | null }).position_id ?? null,
       employment_status: e.employment_status ?? "active",
       department_id: e.department_id ?? null,
       department_name: e.department_id ? (deptById.get(e.department_id) ?? null) : null,
@@ -88,6 +91,7 @@ export default async function EmployeesPage() {
         id: r.id,
         label: tRoles.has(r.key) ? tRoles(r.key) : ROLE_LABELS[r.key] ?? r.name,
       }))}
+      positions={positions}
     />
   );
 
@@ -110,6 +114,7 @@ export default async function EmployeesPage() {
         <EmployeesAdmin
           rows={rows}
           departments={deptOptions}
+          positions={positions}
           canManage={canManage}
         />
       )}

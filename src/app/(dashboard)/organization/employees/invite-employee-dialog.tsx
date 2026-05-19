@@ -13,6 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { inviteEmployeeAction, type EmployeeInviteState } from "./_actions";
 import { DEPARTMENT_KIND_LABELS, type DepartmentKind } from "@/lib/labels";
+import {
+  PositionPicker,
+  type PositionOption,
+} from "@/components/forms/position-picker";
 
 type Option = { id: string; label: string };
 type DepartmentOption = Option & {
@@ -21,10 +25,11 @@ type DepartmentOption = Option & {
 };
 
 export function InviteEmployeeDialog({
-  departments, roles,
+  departments, roles, positions: positionsProp,
 }: {
   departments: DepartmentOption[];
   roles: Option[];
+  positions: PositionOption[];
 }) {
   // Group leaf departments under their parent group; back-office "other"
   // and standalone kinds (account_management, quality_control) are bucketed
@@ -49,6 +54,8 @@ export function InviteEmployeeDialog({
   })();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [positions, setPositions] = useState<PositionOption[]>(positionsProp);
+  const [positionId, setPositionId] = useState("");
   const [state, formAction, pending] = useActionState<EmployeeInviteState | undefined, FormData>(
     inviteEmployeeAction,
     undefined,
@@ -101,8 +108,18 @@ export function InviteEmployeeDialog({
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="emp_title">المسمى الوظيفي</Label>
-                <Input id="emp_title" name="job_title" placeholder="مثال: مدير حساب" />
+                <Label>المسمى الوظيفي</Label>
+                <PositionPicker
+                  positions={positions}
+                  value={positionId}
+                  onChange={setPositionId}
+                  onPositionCreated={(p) =>
+                    setPositions((prev) =>
+                      prev.some((x) => x.id === p.id) ? prev : [...prev, p],
+                    )
+                  }
+                  name="position_id"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp_dept">القسم</Label>

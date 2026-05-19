@@ -71,6 +71,7 @@ export function TaskAssigneesPanel({
   canManage,
   currentStage,
   stageOwnerPositions,
+  positionRoleBySlug,
 }: {
   taskId: string;
   assignees: AssigneeRow[];
@@ -78,6 +79,7 @@ export function TaskAssigneesPanel({
   canManage: boolean;
   currentStage?: string | null;
   stageOwnerPositions?: Record<string, string | null> | null;
+  positionRoleBySlug?: Record<string, string>;
 }) {
   const t = useTranslations("TaskDetailPage.assigneesPanel");
   const roleLabels: Record<AssigneeRoleType, string> = {
@@ -89,7 +91,10 @@ export function TaskAssigneesPanel({
 
   const currentOwnerRole = (() => {
     if (!currentStage || !stageOwnerPositions) return null;
-    const role = stageOwnerPositions[currentStage];
+    // stage_owner_positions stores a position slug — map it to its role.
+    const slug = stageOwnerPositions[currentStage];
+    if (!slug) return null;
+    const role = positionRoleBySlug?.[slug] ?? slug;
     return (role as AssigneeRoleType | null) ?? null;
   })();
 

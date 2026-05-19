@@ -895,6 +895,7 @@ export type Database = {
           organization_id: string
           phone: string | null
           position: string | null
+          position_id: string | null
           team_leader_employee_id: string | null
           updated_at: string
           user_id: string | null
@@ -914,6 +915,7 @@ export type Database = {
           organization_id: string
           phone?: string | null
           position?: string | null
+          position_id?: string | null
           team_leader_employee_id?: string | null
           updated_at?: string
           user_id?: string | null
@@ -933,18 +935,12 @@ export type Database = {
           organization_id?: string
           phone?: string | null
           position?: string | null
+          position_id?: string | null
           team_leader_employee_id?: string | null
           updated_at?: string
           user_id?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "employee_profiles_team_leader_employee_id_fkey"
-            columns: ["team_leader_employee_id"]
-            isOneToOne: false
-            referencedRelation: "employee_profiles"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "employee_profiles_department_id_fkey"
             columns: ["department_id"]
@@ -964,6 +960,20 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_profiles_team_leader_employee_id_fkey"
+            columns: ["team_leader_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1939,6 +1949,47 @@ export type Database = {
           },
         ]
       }
+      positions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_system: boolean
+          name: string
+          organization_id: string
+          role: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_system?: boolean
+          name: string
+          organization_id: string
+          role: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_system?: boolean
+          name?: string
+          organization_id?: string
+          role?: string
+          slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "positions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_attachments: {
         Row: {
           created_at: string
@@ -2357,6 +2408,85 @@ export type Database = {
           },
         ]
       }
+      project_service_team: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          employee_id: string
+          id: string
+          is_extra: boolean
+          organization_id: string
+          position_id: string
+          project_id: string
+          service_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          employee_id: string
+          id?: string
+          is_extra?: boolean
+          organization_id: string
+          position_id: string
+          project_id: string
+          service_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          employee_id?: string
+          id?: string
+          is_extra?: boolean
+          organization_id?: string
+          position_id?: string
+          project_id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_service_team_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_service_team_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_service_team_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_service_team_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "project_task_counts"
+            referencedColumns: ["project_id"]
+          },
+          {
+            foreignKeyName: "project_service_team_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_service_team_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_services: {
         Row: {
           category_id: string | null
@@ -2554,6 +2684,7 @@ export type Database = {
           project_manager_employee_id: string | null
           seo_manager_id: string | null
           seo_specialist_id: string | null
+          sequence: number
           site_address: string | null
           site_address_display: string | null
           site_latitude: number | null
@@ -2601,6 +2732,7 @@ export type Database = {
           project_manager_employee_id?: string | null
           seo_manager_id?: string | null
           seo_specialist_id?: string | null
+          sequence?: number
           site_address?: string | null
           site_address_display?: string | null
           site_latitude?: number | null
@@ -2648,6 +2780,7 @@ export type Database = {
           project_manager_employee_id?: string | null
           seo_manager_id?: string | null
           seo_specialist_id?: string | null
+          sequence?: number
           site_address?: string | null
           site_address_display?: string | null
           site_latitude?: number | null
@@ -4588,6 +4721,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          current_stage_duration: string | null
           date_assign: string | null
           date_end: string | null
           delay_days: number | null
@@ -4618,6 +4752,7 @@ export type Database = {
           project_id: string
           revision_count: number
           search_tsv: unknown
+          sequence: number
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
@@ -4647,6 +4782,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          current_stage_duration?: string | null
           date_assign?: string | null
           date_end?: string | null
           delay_days?: number | null
@@ -4677,6 +4813,7 @@ export type Database = {
           project_id: string
           revision_count?: number
           search_tsv?: unknown
+          sequence?: number
           service_id?: string | null
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
@@ -4706,6 +4843,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           created_from_template_item_id?: string | null
+          current_stage_duration?: string | null
           date_assign?: string | null
           date_end?: string | null
           delay_days?: number | null
@@ -4736,6 +4874,7 @@ export type Database = {
           project_id?: string
           revision_count?: number
           search_tsv?: unknown
+          sequence?: number
           service_id?: string | null
           sla_override_minutes?: number | null
           stage?: Database["public"]["Enums"]["task_stage"]
@@ -5545,6 +5684,7 @@ export type Database = {
         }
         Returns: string
       }
+      agent_run_readonly_sql: { Args: { p_sql: string }; Returns: Json }
       approve_task: {
         Args: { p_notes?: string; p_task_id: string }
         Returns: {
@@ -5562,6 +5702,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          current_stage_duration: string | null
           date_assign: string | null
           date_end: string | null
           delay_days: number | null
@@ -5592,6 +5733,7 @@ export type Database = {
           project_id: string
           revision_count: number
           search_tsv: unknown
+          sequence: number
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
@@ -5732,6 +5874,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          current_stage_duration: string | null
           date_assign: string | null
           date_end: string | null
           delay_days: number | null
@@ -5762,6 +5905,7 @@ export type Database = {
           project_id: string
           revision_count: number
           search_tsv: unknown
+          sequence: number
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
@@ -5800,6 +5944,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          current_stage_duration: string | null
           date_assign: string | null
           date_end: string | null
           delay_days: number | null
@@ -5830,6 +5975,7 @@ export type Database = {
           project_id: string
           revision_count: number
           search_tsv: unknown
+          sequence: number
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
@@ -5872,6 +6018,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           created_from_template_item_id: string | null
+          current_stage_duration: string | null
           date_assign: string | null
           date_end: string | null
           delay_days: number | null
@@ -5902,6 +6049,7 @@ export type Database = {
           project_id: string
           revision_count: number
           search_tsv: unknown
+          sequence: number
           service_id: string | null
           sla_override_minutes: number | null
           stage: Database["public"]["Enums"]["task_stage"]
@@ -5924,13 +6072,20 @@ export type Database = {
         }
       }
       search_tasks_typeahead: {
-        Args: { p_limit?: number; p_org_id: string; p_query: string }
+        Args: {
+          p_limit?: number
+          p_org_id: string
+          p_project_id?: string
+          p_query: string
+        }
         Returns: Json
       }
       shift_tasks_for_holidays: {
         Args: { p_dates: string[]; p_org: string }
         Returns: Json
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
       task_current_stage_seconds: {
         Args: { t: Database["public"]["Tables"]["tasks"]["Row"] }
         Returns: number
@@ -6001,6 +6156,7 @@ export type Database = {
         | "account_manager"
         | "supporting_lead"
         | "supporting_agent"
+        | "team_lead"
       task_stage:
         | "new"
         | "in_progress"
@@ -6189,6 +6345,7 @@ export const Constants = {
         "account_manager",
         "supporting_lead",
         "supporting_agent",
+        "team_lead",
       ],
       task_stage: [
         "new",
@@ -6210,3 +6367,4 @@ export const Constants = {
     },
   },
 } as const
+

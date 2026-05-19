@@ -4,7 +4,7 @@
 // Drag tasks between stage columns. Drop calls moveTaskStageAction;
 // the DB trigger writes a task_stage_history row + flips completed_at.
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -523,8 +523,11 @@ function DraggableCard({
   // dnd-kit's `aria-describedby` carries a globally-incrementing counter that
   // differs between server and client renders → hydration mismatch. Skip the
   // attributes during SSR; the drag handlers attach right after mount.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   return (
     <div
@@ -670,7 +673,7 @@ function StageColumn({
               <ChevronLeft className="size-3.5 -rotate-90" />
             </button>
           </div>
-          <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
+          <div className="flex flex-col gap-2 p-2 min-h-24">
             <VisibleTaskList
               tasks={tasks}
               renderTask={(t) => (
@@ -746,7 +749,7 @@ function ProjectColumn({
           {tasks.length}
         </span>
       </div>
-      <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
+      <div className="flex flex-col gap-2 p-2 min-h-24">
         <VisibleTaskList
           tasks={tasks}
           renderTask={(t) => (
@@ -784,7 +787,7 @@ function BucketColumn({
           {tasks.length}
         </span>
       </div>
-      <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[70vh] overflow-y-auto">
+      <div className="flex flex-col gap-2 p-2 min-h-24">
         <VisibleTaskList
           tasks={tasks}
           renderTask={(t) => (
@@ -828,7 +831,7 @@ function NestedColumn({
           {tasks.length}
         </span>
       </div>
-      <div className="flex flex-col gap-2 p-2 min-h-24 max-h-[75vh] overflow-y-auto">
+      <div className="flex flex-col gap-2 p-2 min-h-24">
         {inner.map((sub) => (
           <NestedSubsection key={sub.id} title={sub.name} tasks={sub.tasks} />
         ))}
@@ -1155,6 +1158,9 @@ export function TaskBoard({
   const locale = useLocale();
   const router = useRouter();
   const [taskState, setTasks] = useState(initialTasks);
+  useEffect(() => {
+    setTasks(initialTasks);
+  }, [initialTasks]);
   // Cards are always rendered in Rwasem's kanban order. `taskState` holds the
   // raw set (drag-drop mutates it); `tasks` is the sorted view every column
   // grouping reads from.
@@ -1227,7 +1233,7 @@ export function TaskBoard({
       byId.get(id)!.tasks.push(t);
     }
     return order.map((id) => byId.get(id)!);
-  }, [tasks, groupBy]);
+  }, [tasks, outerKey]);
 
   // Priority grouping: fixed column order urgent → high → medium → low. Any
   // unknown priority value falls into a "بدون أولوية" bucket so we never lose
@@ -1251,7 +1257,7 @@ export function TaskBoard({
     return order
       .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
       .filter((c) => c.tasks.length > 0 || c.id !== "__none__");
-  }, [tasks, groupBy]);
+  }, [tasks, outerKey]);
 
   // Deadline grouping: bucket by planned_date (falls back to due_date) into
   // متأخرة / اليوم / هذا الأسبوع / لاحقاً / غير محدد. "Done" tasks land in
@@ -1295,7 +1301,7 @@ export function TaskBoard({
     return order
       .map((o) => ({ id: o.key, name: o.label, tasks: buckets.get(o.key) ?? [] }))
       .filter((c) => c.tasks.length > 0);
-  }, [tasks, groupBy]);
+  }, [tasks, outerKey]);
 
   // Generic bucket for the four "any field" groupings — assignee / customer /
   // service / last_stage_update. Each returns a list of {id, name, tasks}
@@ -1373,7 +1379,7 @@ export function TaskBoard({
       return b.tasks.length - a.tasks.length;
     });
     return out;
-  }, [tasks, groupBy]);
+  }, [tasks, outerKey]);
 
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
 
@@ -1446,7 +1452,7 @@ export function TaskBoard({
   if (innerKey) {
     const outerCols = bucketTasksBy(tasks, outerKey);
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {outerCols.map((col) => (
           <NestedColumn
             key={col.id}
@@ -1466,7 +1472,7 @@ export function TaskBoard({
 
   if (outerKey === "project") {
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {projectColumns.map((col) => (
           <ProjectColumn
             key={col.id}
@@ -1488,7 +1494,7 @@ export function TaskBoard({
   if (outerKey === "priority" || outerKey === "deadline") {
     const cols = outerKey === "priority" ? priorityColumns : deadlineColumns;
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {cols.map((col) => (
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
@@ -1508,7 +1514,7 @@ export function TaskBoard({
     outerKey === "last_stage_update"
   ) {
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {customColumns.map((col) => (
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
@@ -1530,7 +1536,7 @@ export function TaskBoard({
   ) {
     const cols = bucketTasksBy(tasks, outerKey);
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {cols.map((col) => (
           <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
         ))}
@@ -1556,7 +1562,7 @@ export function TaskBoard({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        <div className="flex items-start gap-3 overflow-x-auto pb-2">
           {TASK_STAGES.map((s) => (
             <StageColumn
               key={s}

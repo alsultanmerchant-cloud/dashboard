@@ -1,141 +1,29 @@
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Briefcase, CalendarOff } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
-import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { ViewSwitcher } from "./view-switcher";
 import { MonthQuickPick } from "./month-quick-pick";
-import { loadTaskBoardForGlobalView, loadTasksForGlobalView } from "./_loaders";
-import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
+import {
+  buildTaskFiltersFromParams,
+  type FilterKey,
+  type TaskQueryParams,
+} from "./_filter_params";
+import {
+  loadTaskBoardPageForGlobalView,
+  loadTasksPageForGlobalView,
+} from "./_loaders";
 import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
-
-const TasksListView = dynamic(
-  () =>
-    import("./tasks-list-view").then((mod) => ({
-      default: mod.TasksListView,
-    })),
-);
-
-const TasksCalendarView = dynamic(
-  () =>
-    import("./tasks-calendar-view").then((mod) => ({
-      default: mod.TasksCalendarView,
-    })),
-);
-
-const TasksPivotView = dynamic(
-  () =>
-    import("./tasks-pivot-view").then((mod) => ({
-      default: mod.TasksPivotView,
-    })),
-);
-
-// Date filter token format: `<field>:<bucket>` where bucket is one of:
-//   • `YYYY`         — whole year
-//   • `YYYYqN`       — quarter N (1-4) of year
-//   • `YYYYmN`       — month N (1-12) of year
-// e.g. `due_date:2026,due_date:2026q3,actual_done_date:2025`.
-function expandDateToken(token: string): { field: DateField; from: string; to: string } | null {
-  const m = token.match(/^([a-z_]+):(\d{4})(?:(q)(\d)|(m)(\d{1,2}))?$/);
-  if (!m) return null;
-  const field = m[1] as DateField;
-  if (!DATE_FIELDS.includes(field)) return null;
-  const year = Number(m[2]);
-  if (m[3] === "q" && m[4]) {
-    const q = Number(m[4]);
-    if (q < 1 || q > 4) return null;
-    const startMonth = (q - 1) * 3 + 1;
-    const endMonth = startMonth + 3;
-    return {
-      field,
-      from: `${year}-${String(startMonth).padStart(2, "0")}-01`,
-      to: endMonth > 12
-        ? `${year + 1}-01-01`
-        : `${year}-${String(endMonth).padStart(2, "0")}-01`,
-    };
-  }
-  if (m[5] === "m" && m[6]) {
-    const month = Number(m[6]);
-    if (month < 1 || month > 12) return null;
-    return {
-      field,
-      from: `${year}-${String(month).padStart(2, "0")}-01`,
-      to: month === 12
-        ? `${year + 1}-01-01`
-        : `${year}-${String(month + 1).padStart(2, "0")}-01`,
-    };
-  }
-  return { field, from: `${year}-01-01`, to: `${year + 1}-01-01` };
-}
-
-function parseDateFilters(raw: string | undefined) {
-  if (!raw) return undefined;
-  const out: Array<{ field: DateField; from: string; to: string }> = [];
-  for (const token of raw.split(",")) {
-    const expanded = expandDateToken(token.trim());
-    if (expanded) out.push(expanded);
-  }
-  return out.length ? out : undefined;
-}
-
-const OPEN_STAGES = [
-  "new",
-  "in_progress",
-  "manager_review",
-  "specialist_review",
-  "ready_to_send",
-  "sent_to_client",
-  "client_changes",
-] as const;
-
-type FilterKey =
-  | "open"
-  | "all"
-  | "overdue"
-  | "done"
-  | "mine"
-  | "due_today"
-  | "behind"
-  | "ahead"
-  | "critical"
-  | "not_started"
-  | "in_progress_pct"
-  | "completed_pct"
-  | "starred"
-  | "followed"
-  | "has_start_date"
-  | "has_end_date"
-  | "no_deadline"
-  | "unassigned"
-  | "over_timesheets"
-  | "near_timesheets"
-  | "archived";
-
-const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
-  "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
-  "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
-  "has_start_date", "has_end_date", "no_deadline",
-  "unassigned", "over_timesheets", "near_timesheets",
-  "archived",
-]);
-
-function parseFilterKeys(raw: string | undefined, legacy: string | undefined): Set<FilterKey> {
-  // Multi-select param `f=open,starred,behind`. Falls back to legacy `filter=open`
-  // for shareable links saved before the multi-select rollout.
-  const source = raw ?? legacy;
-  if (source === undefined) return new Set(["open"]);
-  if (source === "") return new Set();
-  return new Set(
-    source.split(",")
-      .map((s) => s.trim())
-      .filter((s): s is FilterKey => ALL_FILTER_KEYS.has(s as FilterKey)),
-  );
-}
+import { TasksInfiniteView } from "./tasks-infinite-view";
+import {
+  GLOBAL_BOARD_LIMIT,
+  LIST_LIMIT,
+  PROJECT_BOARD_LIMIT,
+} from "@/lib/data/tasks";
 
 export default async function TasksPage({
   searchParams,
@@ -146,6 +34,7 @@ export default async function TasksPage({
     d?: string;
     filter?: FilterKey;
     q?: string;
+    sf?: string;
     projectId?: string;
     odooProjectId?: string;
     groupBy?: string;
@@ -156,21 +45,14 @@ export default async function TasksPage({
   const t = await getTranslations("TasksPage");
   const sp = await searchParams;
   const view = sp.view ?? "kanban";
-  const active = parseFilterKeys(sp.f, sp.filter);
-  const dateFilters = parseDateFilters(sp.d);
-  const search = sp.q?.trim() || undefined;
+
   const VALID_GROUPS = [
     "stage", "project", "priority", "deadline",
     "assignee", "customer", "service", "last_stage_update",
-    // #18 — Odoo parity additions.
     "progress", "status", "start_date",
-    // §5.2 — Rwasem parity additions.
     "tags", "created_at",
   ] as const;
   type GroupKey = (typeof VALID_GROUPS)[number];
-  // Comma-separated group-by stack (Rwasem-style "Stage > Assignee"). Pass the
-  // full ordered list to TaskBoard; it renders a flat board for length 1 and a
-  // nested outer/inner board for length 2+.
   const groupBy: GroupKey[] = (() => {
     const raw = sp.groupBy ?? "";
     const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
@@ -180,21 +62,6 @@ export default async function TasksPage({
     return filtered.length ? filtered : ["stage"];
   })();
 
-  // Stage filter combines "open" / "done" / "all". Both selected (or "all") =
-  // every stage. Kanban view always shows the "done" column even when only
-  // "open" is active — otherwise the column is permanently empty.
-  const stageFilter: string[] | undefined = (() => {
-    if (active.has("all")) return undefined;
-    const stages: string[] = [];
-    if (active.has("open")) stages.push(...OPEN_STAGES);
-    if (active.has("done")) stages.push("done");
-    if (stages.length === 0) return undefined;
-    if (view === "kanban" && active.has("open") && !active.has("done")) return undefined;
-    return stages;
-  })();
-
-  // Resolve odooProjectId → Supabase project UUID when coming from the
-  // project card (which only knows the Odoo integer ID).
   let resolvedProjectId = sp.projectId;
   if (!resolvedProjectId && sp.odooProjectId) {
     const { data } = await supabaseAdmin
@@ -206,6 +73,32 @@ export default async function TasksPage({
       .maybeSingle();
     resolvedProjectId = data?.id;
   }
+
+  const built = buildTaskFiltersFromParams(sp as TaskQueryParams, {
+    userId: session.userId,
+    employeeId: session.employeeId,
+    projectId: resolvedProjectId,
+  });
+  const active = built.activeKeys;
+  const taskFilters = { ...built.filters };
+
+  let customFilterTaskIds: string[] | null = null;
+  const customTree = decodeFilterFromUrl(sp.cf);
+  if (customTree) {
+    const compiled = compileFilterTree(customTree, (name) =>
+      getTaskField(name, (k) => k),
+    );
+    if (compiled) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id")
+        .eq("organization_id", session.orgId)
+        .limit(5000)
+        .or(compiled.clause);
+      customFilterTaskIds = error ? [] : (data ?? []).map((r) => r.id as string);
+    }
+  }
+  taskFilters.customFilterTaskIds = customFilterTaskIds;
 
   const canViewProjectInfo =
     session.isOwner || session.permissions.has("projects.view");
@@ -221,68 +114,26 @@ export default async function TasksPage({
     projectInfo = data;
   }
 
-  const progressBuckets: Array<"not_started" | "in_progress" | "completed"> = [];
-  if (active.has("not_started")) progressBuckets.push("not_started");
-  if (active.has("in_progress_pct")) progressBuckets.push("in_progress");
-  if (active.has("completed_pct")) progressBuckets.push("completed");
-
-  // Odoo-style "Add Custom Filter" rule tree (?cf=). Compile it to a PostgREST
-  // clause, resolve the matching task IDs up front, and hand the allow-list to
-  // the bundle loader (post-fetch intersection — same pattern as noDeadline).
-  let customFilterTaskIds: string[] | null = null;
-  const customTree = decodeFilterFromUrl(sp.cf);
-  if (customTree) {
-    const compiled = compileFilterTree(customTree, (name) =>
-      getTaskField(name, (k) => k),
-    );
-    if (compiled) {
-      const { data, error } = await supabaseAdmin
-        .from("tasks")
-        .select("id")
-        .eq("organization_id", session.orgId)
-        .limit(5000)
-        .or(compiled.clause);
-      // A malformed/unsupported rule yields "no matches" rather than a crash —
-      // the pill still renders so the user can edit or remove it.
-      customFilterTaskIds = error ? [] : (data ?? []).map((r) => r.id as string);
-    }
-  }
-
-  const taskFilters = {
-    stage: stageFilter,
-    overdue: active.has("overdue"),
-    dueToday: active.has("due_today"),
-    behindSchedule: active.has("behind"),
-    aheadSchedule: active.has("ahead"),
-    criticalDelay: active.has("critical"),
-    progressBuckets: progressBuckets.length ? progressBuckets : undefined,
-    starred: active.has("starred"),
-    hasStartDate: active.has("has_start_date"),
-    hasEndDate: active.has("has_end_date"),
-    noDeadline: active.has("no_deadline"),
-    unassigned: active.has("unassigned"),
-    overTimesheets: active.has("over_timesheets"),
-    nearTimesheets: active.has("near_timesheets"),
-    archived: active.has("archived"),
-    followedByUserId: active.has("followed") ? session.userId : undefined,
-    assignedToEmployeeId: active.has("mine") ? session.employeeId : undefined,
-    projectId: resolvedProjectId,
-    search,
-    dateFilters,
-    customFilterTaskIds,
-  };
-
-  const boardTasks: BoardTask[] =
+  const pageSize = view === "kanban"
+    ? (resolvedProjectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT)
+    : LIST_LIMIT;
+  const boardBundle =
     view === "kanban"
-      ? await loadTaskBoardForGlobalView(session.orgId, taskFilters)
-      : [];
-  const tasks =
+      ? await loadTaskBoardPageForGlobalView(session.orgId, taskFilters, {
+        limit: pageSize,
+        offset: 0,
+      })
+      : { rows: [], totalCount: 0 };
+  const listBundle =
     view === "kanban"
-      ? []
-      : await loadTasksForGlobalView(session.orgId, taskFilters);
+      ? { rows: [], totalCount: 0 }
+      : await loadTasksPageForGlobalView(session.orgId, taskFilters, {
+        limit: pageSize,
+        offset: 0,
+      });
+  const filteredTotalCount =
+    view === "kanban" ? boardBundle.totalCount : listBundle.totalCount;
 
-  // Project-scoped task count for the banner — only computed when projectId
-  // is set. Cheap (count head) and clearly communicates "view is filtered".
   let scopedTaskCount: number | null = null;
   if (projectInfo) {
     const { count } = await supabaseAdmin
@@ -293,10 +144,6 @@ export default async function TasksPage({
     scopedTaskCount = count ?? 0;
   }
 
-  // #1/#2: the count chip reports "<shown> of <total>" so the active filter
-  // is unambiguous — matching Rwasem's search_default_my_open_tasks header.
-  // #13: the "no deadline" KPI tile surfaces open tasks missing a date.
-  const shownCount = view === "kanban" ? boardTasks.length : tasks.length;
   const baseTaskQuery = () =>
     supabaseAdmin
       .from("tasks")
@@ -320,22 +167,29 @@ export default async function TasksPage({
     return t("toolbar.customFilter");
   })();
   const noDeadlineActive = active.size === 1 && active.has("no_deadline");
+  const allTasksActive = active.size === 0 || active.has("all");
+
+  const queryString = new URLSearchParams(
+    Object.entries(sp).flatMap(([key, value]) =>
+      value == null ? [] : [[key, String(value)]],
+    ),
+  ).toString();
+  const toggleAllParams = new URLSearchParams(queryString);
+  toggleAllParams.set("f", allTasksActive ? "open" : "all");
+  toggleAllParams.delete("filter");
+  const toggleAllHref = `/tasks${toggleAllParams.toString() ? `?${toggleAllParams.toString()}` : ""}`;
 
   return (
     <div>
-      {/* Sky Light §2.5: when /tasks is project-scoped via ?projectId=, render
-          a prominent banner so the user knows the view is filtered (the prior
-          tiny "Project Info" link was easy to miss; users reported the kanban
-          looking like the global list). */}
       {projectInfo && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan/30 bg-cyan-dim/30 px-4 py-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Briefcase className="size-4 text-cyan shrink-0" />
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Briefcase className="size-4 shrink-0 text-cyan" />
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-wide text-cyan/80">
                 {t("projectScope")}
               </p>
-              <p className="text-sm font-semibold truncate">
+              <p className="truncate text-sm font-semibold">
                 {projectInfo.name}
                 {scopedTaskCount !== null && (
                   <span className="ms-2 text-xs font-normal text-muted-foreground">
@@ -363,24 +217,36 @@ export default async function TasksPage({
         </div>
       )}
 
-      {/* Top toolbar — view switcher + KPI chips. The Rwasem-style smart
-          search bar (Filters / Group By / Favorites) lives in the navbar. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         <ViewSwitcher current={view} />
         <MonthQuickPick />
-        {/* #1/#2: filter + count chip — makes the active domain unambiguous,
-            mirroring Rwasem's "Open Tasks · N of M" header. */}
         <span
           className="inline-flex items-center gap-1.5 rounded-full border border-soft bg-soft-1/50 px-2.5 py-1 text-[11px] font-medium"
-          aria-label={t("toolbar.countAria", { shown: shownCount, total: totalCount })}
+          aria-label={t("toolbar.countAria", {
+            shown: filteredTotalCount,
+            total: filteredTotalCount,
+          })}
         >
           <span className="text-foreground">{filterLabel}</span>
           <span className="text-muted-foreground">·</span>
           <span className="tabular-nums text-foreground/70">
-            {t("toolbar.countLabel", { shown: shownCount, total: totalCount })}
+            {t("toolbar.countLabel", {
+              shown: filteredTotalCount,
+              total: filteredTotalCount,
+            })}
           </span>
         </span>
-        {/* #13: "tasks without deadline" KPI tile — toggles the no_deadline filter. */}
+        <Link
+          href={toggleAllHref}
+          className={cn(
+            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+            allTasksActive
+              ? "border-cyan/40 bg-cyan-dim text-cyan"
+              : "border-soft bg-card text-foreground/70 hover:text-foreground",
+          )}
+        >
+          {allTasksActive ? "عرض المفتوحة فقط" : "عرض كل المهام"}
+        </Link>
         <Link
           href={noDeadlineActive ? "/tasks" : "/tasks?f=no_deadline"}
           title={
@@ -403,14 +269,22 @@ export default async function TasksPage({
             </span>
           )}
         </Link>
+        {filteredTotalCount !== totalCount && (
+          <span className="text-[11px] text-muted-foreground">
+            من أصل {totalCount}
+          </span>
+        )}
       </div>
 
-      {view === "list" && <TasksListView tasks={tasks} />}
-      {view === "kanban" && (
-        <TaskBoard tasks={boardTasks} groupBy={groupBy} />
-      )}
-      {view === "calendar" && <TasksCalendarView tasks={tasks} />}
-      {view === "pivot" && <TasksPivotView tasks={tasks} />}
+      <TasksInfiniteView
+        view={view}
+        groupBy={groupBy}
+        queryString={queryString}
+        initialBoardTasks={boardBundle.rows}
+        initialListTasks={listBundle.rows}
+        totalCount={filteredTotalCount}
+        pageSize={pageSize}
+      />
     </div>
   );
 }

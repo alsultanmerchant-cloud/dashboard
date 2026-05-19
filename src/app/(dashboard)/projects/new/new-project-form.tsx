@@ -20,6 +20,12 @@ import { cn } from "@/lib/utils";
 import { expandTemplates, type GeneratedTask, type TemplateInput } from "@/lib/projects/offsets";
 import { createProjectAction, createClientQuickAction, type ProjectFormState } from "../_actions";
 import type { TemplateWithItems } from "@/lib/data/service-categories";
+import {
+  ServiceTeamPanel,
+  type ServiceTeamEntry,
+} from "./service-team-panel";
+
+type PositionOpt = { slug: string; name: string; role: string };
 
 type WizardStep = 1 | 2 | 3;
 
@@ -78,7 +84,7 @@ function addDaysIso(iso: string, days: number): string {
 }
 
 export function NewProjectForm({
-  clients: initialClients, services, accountManagers, employees, categories, templates,
+  clients: initialClients, services, accountManagers, employees, categories, templates, positions,
 }: {
   clients: ClientOpt[];
   services: ServiceOpt[];
@@ -86,6 +92,7 @@ export function NewProjectForm({
   employees: EmployeeOpt[];
   categories: CategoryOpt[];
   templates: TemplateWithItems[];
+  positions: PositionOpt[];
 }) {
   const router = useRouter();
   const t = useTranslations("ProjectsNewForm");
@@ -127,6 +134,8 @@ export function NewProjectForm({
   const [seoManagerId, setSeoManagerId] = useState<string>("");
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [constantAssigneeId, setConstantAssigneeId] = useState<string>("");
+  // Per-service position → employee assignment (the ServiceTeamPanel payload).
+  const [serviceTeam, setServiceTeam] = useState<ServiceTeamEntry[]>([]);
   const [showQuickClient, setShowQuickClient] = useState(false);
   const [quickClient, setQuickClient] = useState({ name: "", phone: "", email: "" });
   const [creatingClient, setCreatingClient] = useState(false);
@@ -405,6 +414,13 @@ export function NewProjectForm({
       <input type="hidden" name="media_manager_id" value={mediaManagerId} />
       <input type="hidden" name="seo_manager_id" value={seoManagerId} />
       <input type="hidden" name="constant_assignee_employee_id" value={constantAssigneeId} />
+      <input
+        type="hidden"
+        name="service_team"
+        value={JSON.stringify(
+          serviceTeam.filter((e) => selectedServices.has(e.serviceId)),
+        )}
+      />
       {followerIds.map((id) => (
         <input key={id} type="hidden" name="follower_employee_ids" value={id} />
       ))}
@@ -1072,6 +1088,22 @@ export function NewProjectForm({
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>فريق المشروع حسب المسمى الوظيفي</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  لكل خدمة، عيّن الموظف المسؤول عن كل مسمى وظيفي تستخدمه قوالبها.
+                  أي شخص تضيفه يُسنَد لكل مهام تلك الخدمة.
+                </p>
+                <ServiceTeamPanel
+                  selectedServiceIds={Array.from(selectedServices)}
+                  services={services}
+                  templates={templates}
+                  positions={positions}
+                  employeeOptions={employeeOptionsAll}
+                  onChange={setServiceTeam}
+                />
               </div>
 
               <div className="space-y-1.5">

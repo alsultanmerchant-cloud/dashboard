@@ -32,12 +32,9 @@ import {
   Search,
   X,
   Check,
-  Briefcase,
-  Store,
   Save,
   Trash2,
   Loader2,
-  ListChecks,
   Sliders,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -48,7 +45,7 @@ import {
   updateTaskFilterAction,
 } from "./_filter_actions";
 import { CustomFilterDialog } from "@/components/custom-filter/dialog";
-import { buildTaskFields, getTaskField } from "@/lib/custom-filter/tasks-fields";
+import { buildTaskFields } from "@/lib/custom-filter/tasks-fields";
 import {
   URL_PARAM as CF_URL_PARAM,
   encodeFilterToUrl,
@@ -93,23 +90,25 @@ type GroupBy =
   | "start_date"
   | "tags"
   | "created_at";
-type SearchSuggestion = {
-  id: string;
-  projectName: string;
-  storeName: string | null;
-  clientName: string | null;
-};
-// Sky Light feedback #5 — task-name autocomplete entries. Clicking one jumps
-// straight to /tasks/[id] instead of running a query.
-type TaskSuggestion = {
-  id: string;
-  title: string;
-  taskCode: string | null;
-  stage: string;
-  projectId: string | null;
-  projectName: string | null;
-  clientName: string | null;
-};
+// ── Rwasem faceted search ────────────────────────────────────────────────
+// Typed text becomes a field-scoped facet. Picking a menu row ("Search Tasks
+// for X", "Search Assignees for X", …) appends one Facet. Facets persist in
+// the `?sf=` param as a JSON array. Combination rules mirror Odoo: facets on
+// different fields AND together, facets on the same field OR together — both
+// enforced in the list_tasks_bundle RPC (migration 0127).
+type FacetField = "title" | "tags" | "assignee" | "stage" | "project";
+type Facet = { field: FacetField; value: string };
+
+const FACET_FIELD_DEFS: { field: FacetField }[] = [
+  { field: "title" },
+  { field: "tags" },
+  { field: "assignee" },
+  { field: "stage" },
+  { field: "project" },
+];
+const FACET_FIELD_SET = new Set<FacetField>(
+  FACET_FIELD_DEFS.map((d) => d.field),
+);
 
 type DateField = "due_date" | "actual_done_date" | "stage_entered_at" | "created_at";
 
@@ -279,6 +278,12 @@ export function SmartSearchBar({
       ),
     [groupRows],
   );
+  // Short field label for a facet ("Tasks", "Assignees", …) — used both for
+  // the dropdown menu rows and the two-segment facet chips.
+  const facetFieldLabel = useCallback(
+    (field: FacetField) => t(`facets.fields.${field}`),
+    [t],
+  );
   const monthFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
     [locale],
@@ -318,11 +323,26 @@ export function SmartSearchBar({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(currentQuery);
   const [pending, start] = useTransition();
-  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
-  const [taskSuggestions, setTaskSuggestions] = useState<TaskSuggestion[]>([]);
-  const [taskInProjectSuggestions, setTaskInProjectSuggestions] = useState<TaskSuggestion[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [suggestionError, setSuggestionError] = useState(false);
+  // Active search facets, decoded from the `?sf=` JSON array. Invalid entries
+  // (unknown field, blank value) are dropped so a hand-edited URL is safe.
+  const currentFacets = useMemo<Facet[]>(() => {
+    const raw = params.get("sf");
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((entry): Facet[] => {
+        if (!entry || typeof entry !== "object") return [];
+        const field = (entry as { field?: unknown }).field;
+        const value = (entry as { value?: unknown }).value;
+        if (typeof field !== "string" || !FACET_FIELD_SET.has(field as FacetField)) return [];
+        if (typeof value !== "string" || !value.trim()) return [];
+        return [{ field: field as FacetField, value: value.trim() }];
+      });
+    } catch {
+      return [];
+    }
+  }, [params]);
   // Saved filters: prop wins (server-rendered), otherwise lazy-fetch on first
   // open. Refetch every time the dropdown reopens so newly-added entries
   // surface without a router.refresh().
@@ -448,62 +468,6 @@ export function SmartSearchBar({
     setQuery(currentQuery);
   }, [currentQuery]);
 
-  // Debounced autocomplete. Fires from 1 character — the trigram fallback in
-  // `search_tasks_typeahead` (migration 0117) matches short / partial Arabic
-  // input that the FTS tsvector alone would miss.
-  useEffect(() => {
-    if (!open) return;
-    const trimmed = query.trim();
-    if (trimmed.length < 1) {
-      setSuggestions([]);
-      setTaskSuggestions([]);
-      setTaskInProjectSuggestions([]);
-      setLoadingSuggestions(false);
-      setSuggestionError(false);
-      return;
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      setLoadingSuggestions(true);
-      setSuggestionError(false);
-      try {
-        // When the view is project-scoped, pass projectId so the API can
-        // split hits into "In this project" vs "Other projects".
-        const scopedProjectId = params.get("projectId");
-        const url =
-          `/api/tasks/search-suggestions?q=${encodeURIComponent(trimmed)}` +
-          (scopedProjectId ? `&projectId=${encodeURIComponent(scopedProjectId)}` : "");
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as {
-          tasks?: TaskSuggestion[];
-          tasksInProject?: TaskSuggestion[];
-          items?: SearchSuggestion[];
-        };
-        if (!cancelled) {
-          setTaskSuggestions(data.tasks ?? []);
-          setTaskInProjectSuggestions(data.tasksInProject ?? []);
-          setSuggestions(data.items ?? []);
-        }
-      } catch {
-        if (!cancelled) {
-          setTaskSuggestions([]);
-          setTaskInProjectSuggestions([]);
-          setSuggestions([]);
-          setSuggestionError(true);
-        }
-      } finally {
-        if (!cancelled) setLoadingSuggestions(false);
-      }
-    }, 180);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [open, query, params]);
-
   // Close on click outside.
   useEffect(() => {
     if (!open) return;
@@ -523,6 +487,7 @@ export function SmartSearchBar({
     dates: string[];
     groupBy: GroupBy | GroupBy[];
     q: string | null;
+    facets: Facet[];
     view: string;
     projectId: string | null;
     customFilter: string | null;
@@ -530,6 +495,10 @@ export function SmartSearchBar({
     const sp = new URLSearchParams(params);
     if (next.customFilter === null) sp.delete(CF_URL_PARAM);
     else if (next.customFilter !== undefined) sp.set(CF_URL_PARAM, next.customFilter);
+    if (next.facets !== undefined) {
+      if (next.facets.length === 0) sp.delete("sf");
+      else sp.set("sf", JSON.stringify(next.facets));
+    }
     if (next.filters !== undefined) {
       sp.delete("filter"); // drop legacy single-key param if present
       if (next.filters.size === 0) sp.set("f", "");
@@ -582,33 +551,39 @@ export function SmartSearchBar({
     navigate(buildHref({ customFilter: null }));
   };
 
-  const submitQuery = () => {
-    const trimmed = query.trim();
-    navigate(buildHref({ q: trimmed || null, projectId: null }));
+  // Append one facet for the typed text. Same field + same value is a no-op
+  // (Odoo de-dups identical facets); a stale free-text `q` is dropped so the
+  // two search models don't both apply at once.
+  const addFacet = (field: FacetField) => {
+    const value = query.trim();
+    if (!value) return;
+    const exists = currentFacets.some(
+      (f) => f.field === field && f.value === value,
+    );
+    const nextFacets = exists
+      ? currentFacets
+      : [...currentFacets, { field, value }];
+    setQuery("");
+    navigate(buildHref({ facets: nextFacets, q: null }));
     setOpen(false);
+  };
+
+  const removeFacet = (index: number) => {
+    navigate(
+      buildHref({ facets: currentFacets.filter((_, i) => i !== index) }),
+    );
+  };
+
+  // Enter applies the default field (Search Tasks → title), matching Odoo's
+  // highlighted first row.
+  const submitQuery = () => {
+    if (query.trim()) addFacet("title");
+    else setOpen(false);
   };
 
   const clearQuery = () => {
     setQuery("");
     navigate(buildHref({ q: null, projectId: null }));
-  };
-
-  const chooseSuggestion = (item: SearchSuggestion) => {
-    setQuery(item.storeName || item.projectName);
-    navigate(
-      buildHref({
-        q: item.storeName || item.projectName,
-        projectId: item.id,
-      }),
-    );
-    setOpen(false);
-  };
-
-  // Task autocomplete row — jump straight to the task detail page.
-  const chooseTask = (task: TaskSuggestion) => {
-    setQuery(task.title);
-    navigate(`/tasks/${task.id}`);
-    setOpen(false);
   };
 
   const toggleGroup = (key: GroupBy) => {
@@ -678,6 +653,31 @@ export function SmartSearchBar({
             >
               <X className="size-3" />
             </button>
+          </span>
+        ))}
+        {/* Search facet chips — two-segment: bold field name + typed value,
+            mirroring Rwasem's "Assignees احمد ✕" pill. */}
+        {currentFacets.map((facet, i) => (
+          <span
+            key={`${facet.field}-${facet.value}-${i}`}
+            className="inline-flex items-center overflow-hidden rounded-full border border-primary/25 text-[11px] font-medium text-primary rtl:flex-row-reverse"
+          >
+            <span className="bg-primary/15 px-2 py-1">
+              {facetFieldLabel(facet.field)}
+            </span>
+            <span className="flex items-center gap-1 bg-primary/8 px-2 py-1 rtl:flex-row-reverse">
+              <span className="max-w-[10rem] truncate">{facet.value}</span>
+              <button
+                type="button"
+                onClick={() => removeFacet(i)}
+                aria-label={t("aria.removeChip", {
+                  label: `${facetFieldLabel(facet.field)}: ${facet.value}`,
+                })}
+                className="opacity-70 hover:opacity-100"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
           </span>
         ))}
         {currentDates.map((token) => (
@@ -813,104 +813,39 @@ export function SmartSearchBar({
             dropdownClassName,
           )}
         >
+          {/* Rwasem faceted search — typed text becomes a list of
+              field-scoped options. The first row (Search Tasks → title) is
+              highlighted and is what Enter applies. */}
           {query.trim().length >= 1 && (
-            <div className="border-b border-soft/70 p-3">
-              {/* Loading skeleton */}
-              {loadingSuggestions && (
-                <div className="flex flex-col gap-1.5" aria-hidden>
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className="h-9 animate-pulse rounded-lg bg-soft-1"
-                    />
-                  ))}
-                  <span className="sr-only">{t("suggestions.loading")}</span>
-                </div>
-              )}
-
-              {/* Error state */}
-              {!loadingSuggestions && suggestionError && (
-                <div className="px-2 py-2 text-[11px] text-cc-red">
-                  {t("suggestions.error")}
-                </div>
-              )}
-
-              {/* Empty state */}
-              {!loadingSuggestions &&
-                !suggestionError &&
-                taskSuggestions.length === 0 &&
-                taskInProjectSuggestions.length === 0 &&
-                suggestions.length === 0 && (
-                  <div className="px-2 py-2 text-[11px] text-muted-foreground">
-                    {t("suggestions.empty")}
-                  </div>
-                )}
-
-              {/* "In this project" — only when the view is project-scoped and
-                  the project has matching tasks (Rwasem parity). */}
-              {!loadingSuggestions &&
-                !suggestionError &&
-                taskInProjectSuggestions.length > 0 && (
-                  <TaskSuggestionSection
-                    label={t("suggestions.inThisProject")}
-                    tasks={taskInProjectSuggestions}
-                    onChoose={chooseTask}
-                  />
-                )}
-
-              {/* Task results — "Other projects" when scoped, else "Tasks". */}
-              {!loadingSuggestions &&
-                !suggestionError &&
-                taskSuggestions.length > 0 && (
-                  <TaskSuggestionSection
-                    label={
-                      taskInProjectSuggestions.length > 0
-                        ? t("suggestions.otherProjects")
-                        : t("suggestions.tasksTitle")
-                    }
-                    tasks={taskSuggestions}
-                    onChoose={chooseTask}
-                  />
-                )}
-
-              {/* Project / store results — secondary section. */}
-              {!loadingSuggestions &&
-                !suggestionError &&
-                suggestions.length > 0 && (
-                  <div>
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                      <Search className="size-3.5" />
-                      {t("suggestions.title")}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {suggestions.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => chooseSuggestion(item)}
-                          className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
-                              <Briefcase className="size-3.5 shrink-0 text-cyan" />
-                              <span className="truncate">{item.projectName}</span>
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
-                              <Store className="size-3 shrink-0" />
-                              <span className="truncate">
-                                {item.storeName || t("suggestions.noStoreName")}
-                              </span>
-                              {item.clientName ? (
-                                <span className="truncate">· {item.clientName}</span>
-                              ) : null}
-                            </span>
-                          </span>
-                          <Check className="size-3.5 shrink-0 text-cyan/70" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+            <div className="border-b border-soft/70 p-2">
+              <div className="mb-1 flex items-center gap-1.5 px-2 pb-1 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+                <Search className="size-3.5" />
+                {t("facets.heading")}
+              </div>
+              <div className="flex flex-col">
+                {FACET_FIELD_DEFS.map((def, i) => (
+                  <button
+                    key={def.field}
+                    type="button"
+                    onClick={() => addFacet(def.field)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse",
+                      i === 0 && "bg-soft-1",
+                    )}
+                  >
+                    <Search className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 shrink-0 text-muted-foreground">
+                      {t("facets.searchFor", {
+                        field: facetFieldLabel(def.field),
+                      })}
+                      {":"}
+                    </span>
+                    <span className="min-w-0 truncate font-semibold text-primary">
+                      {query.trim()}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="grid grid-cols-1 divide-y divide-soft/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0 rtl:sm:divide-x-reverse">
@@ -1039,53 +974,6 @@ export function SmartSearchBar({
         }}
         onApply={applyCustomFilter}
       />
-    </div>
-  );
-}
-
-// One labelled block of task autocomplete rows. Used twice when the /tasks
-// view is project-scoped: "In this project" then "Other projects".
-function TaskSuggestionSection({
-  label,
-  tasks,
-  onChoose,
-}: {
-  label: string;
-  tasks: TaskSuggestion[];
-  onChoose: (task: TaskSuggestion) => void;
-}) {
-  return (
-    <div className="mb-2">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-        <ListChecks className="size-3.5" />
-        {label}
-      </div>
-      <div className="flex flex-col gap-1">
-        {tasks.map((task) => (
-          <button
-            key={task.id}
-            type="button"
-            onClick={() => onChoose(task)}
-            className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
-                <ListChecks className="size-3.5 shrink-0 text-cyan" />
-                <span className="truncate">{task.title}</span>
-              </span>
-              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
-                {task.taskCode ? (
-                  <span className="shrink-0 tabular-nums">{task.taskCode}</span>
-                ) : null}
-                {task.projectName ? (
-                  <span className="truncate">· {task.projectName}</span>
-                ) : null}
-              </span>
-            </span>
-            <Check className="size-3.5 shrink-0 text-cyan/70" />
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
