@@ -50,7 +50,11 @@ export type EmployeeRow = {
   external_source: string | null;
 };
 
-export type DeptOption = { id: string; name: string };
+export type DeptOption = {
+  id: string;
+  name: string;
+  head_employee_id: string | null;
+};
 
 export function EmployeesAdmin({
   rows,
@@ -351,6 +355,14 @@ function EditEmployeeDialog({
   const [teamLeaderId, setTeamLeaderId] = useState(
     employee.team_leader_employee_id ?? "",
   );
+  // Department head is stored on departments.head_employee_id — the dropdown
+  // is seeded from the employee's current department and re-seeded whenever
+  // the department changes. Saving it updates the head for that whole dept.
+  const headForDept = (deptId: string) =>
+    departments.find((d) => d.id === deptId)?.head_employee_id ?? "";
+  const [departmentHeadId, setDepartmentHeadId] = useState(
+    headForDept(employee.department_id ?? ""),
+  );
   const [pending, start] = useTransition();
 
   const employeeOptions: SearchableOption[] = allEmployees
@@ -372,6 +384,7 @@ function EditEmployeeDialog({
         departmentId: departmentId || null,
         managerEmployeeId: managerId || null,
         teamLeaderEmployeeId: teamLeaderId || null,
+        departmentHeadEmployeeId: departmentId ? departmentHeadId || null : null,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -422,7 +435,11 @@ function EditEmployeeDialog({
           <Field label="القسم">
             <select
               value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDepartmentId(next);
+                setDepartmentHeadId(headForDept(next));
+              }}
               disabled={pending}
               className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
             >
@@ -464,6 +481,35 @@ function EditEmployeeDialog({
             emptyMessage="لا توجد نتائج"
             ariaLabel="قائد الفريق"
           />
+        </Field>
+        <Field label="رئيس القسم">
+          <SearchableSelect
+            value={departmentHeadId}
+            onValueChange={setDepartmentHeadId}
+            options={[
+              { value: "", label: "— بدون —" },
+              ...allEmployees
+                .filter((e) => e.employment_status === "active")
+                .map((e) => ({
+                  value: e.id,
+                  label: e.full_name,
+                  hint:
+                    [e.job_title, e.department_name]
+                      .filter(Boolean)
+                      .join(" • ") || null,
+                })),
+            ]}
+            disabled={pending || !departmentId}
+            placeholder={departmentId ? "— بدون —" : "اختر قسمًا أولًا"}
+            searchPlaceholder="ابحث عن موظف..."
+            emptyMessage="لا توجد نتائج"
+            ariaLabel="رئيس القسم"
+          />
+          {departmentId && (
+            <p className="text-[10px] text-muted-foreground">
+              يُحدِّث رئيس القسم لكل موظفي هذا القسم.
+            </p>
+          )}
         </Field>
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">

@@ -46,6 +46,10 @@ export type TaskFilters = {
   followedByUserId?: string;
   assignedToEmployeeId?: string;
   search?: string;
+  // Resolved task-id allow-list from the Odoo-style "Add Custom Filter" rule
+  // tree (?cf= param). undefined/null → no custom filter is active. An empty
+  // array → the rule matched nothing. Applied post-fetch (like noDeadline).
+  customFilterTaskIds?: string[] | null;
   // Hierarchical date filters (Rwasem parity). Each entry is one bucket on one
   // field; multiple entries on the SAME field OR together; entries on
   // DIFFERENT fields AND together. Dates are inclusive on `from`, exclusive
@@ -205,6 +209,10 @@ async function fetchTaskBundle(
         (r as { due_date?: string | null }).due_date == null,
     );
   }
+  if (filters.customFilterTaskIds != null) {
+    const allow = new Set(filters.customFilterTaskIds);
+    rows = rows.filter((r) => allow.has(r.id));
+  }
   return rows;
 }
 
@@ -356,13 +364,22 @@ export type TaskSearchSuggestion = {
   title: string;
   taskCode: string | null;
   stage: string;
+  projectId: string | null;
   projectName: string | null;
   clientName: string | null;
 };
 
+/**
+ * Forgiving task-name autocomplete (search_tasks_typeahead RPC).
+ * When `projectId` is passed the results are filtered to that single
+ * project — used to populate the "In this project" search section when the
+ * /tasks view is scoped via ?projectId=.
+ */
 export async function listTaskTitleSuggestions(
   orgId: string,
   query: string,
+  projectId?: string,
+  limit = 8,
 ): Promise<TaskSearchSuggestion[]> {
   const search = query.trim();
   if (!search) return [];
@@ -374,7 +391,8 @@ export async function listTaskTitleSuggestions(
   const { data, error } = await supabaseAdmin.rpc("search_tasks_typeahead", {
     p_org_id: orgId,
     p_query: sanitized,
-    p_limit: 8,
+    p_limit: limit,
+    p_project_id: projectId ?? null,
   });
   if (error) throw error;
 
@@ -383,6 +401,7 @@ export async function listTaskTitleSuggestions(
     title: string;
     taskCode: string | null;
     stage: string;
+    projectId: string | null;
     projectName: string | null;
     clientName: string | null;
   }>;
@@ -391,6 +410,7 @@ export async function listTaskTitleSuggestions(
     title: row.title,
     taskCode: row.taskCode ?? null,
     stage: row.stage,
+    projectId: row.projectId ?? null,
     projectName: row.projectName ?? null,
     clientName: row.clientName ?? null,
   }));

@@ -73,6 +73,7 @@ export default async function EmployeesPage() {
   const deptOptions: DeptOption[] = departments.map((d) => ({
     id: d.id,
     name: d.name,
+    head_employee_id: d.head_employee_id ?? null,
   }));
 
   const inviteButton = (

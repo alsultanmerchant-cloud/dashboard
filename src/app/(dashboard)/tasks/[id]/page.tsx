@@ -31,6 +31,7 @@ import { listEmployees } from "@/lib/data/employees";
 import { loadOrgChart } from "@/lib/data/org-chart";
 import { CommentComposer } from "../comment-composer";
 import { TaskSmartButtons } from "./task-smart-buttons";
+import { TaskStageOwnerEditor } from "./task-stage-owner-editor";
 
 const CommentsFeed = dynamic(
   () => import("./comments-feed").then((mod) => ({ default: mod.CommentsFeed })),
@@ -482,6 +483,19 @@ export default async function TaskDetailPage({
       <SectionTitle
         title={t("sections.assignees.title")}
         description={t("sections.assignees.description")}
+        actions={
+          task.created_by === session.userId ||
+          hasPermission(session, "tasks.manage") ||
+          hasPermission(session, "task.view_all") ? (
+            <TaskStageOwnerEditor
+              taskId={task.id}
+              initial={
+                (task as { stage_owner_positions?: Record<string, string | null> | null })
+                  .stage_owner_positions ?? null
+              }
+            />
+          ) : undefined
+        }
       />
       <Card className="mb-6">
         <CardContent className="p-4">

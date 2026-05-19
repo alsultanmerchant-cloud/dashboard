@@ -153,6 +153,7 @@ const UpdateSchema = z.object({
   department_id: z.string().uuid().nullable().optional(),
   manager_employee_id: z.string().uuid().nullable().optional(),
   team_leader_employee_id: z.string().uuid().nullable().optional(),
+  department_head_employee_id: z.string().uuid().nullable().optional(),
   position: z.string().trim().max(40).nullable().optional(),
 });
 
@@ -165,6 +166,7 @@ export async function updateEmployeeAction(input: {
   departmentId?: string | null;
   managerEmployeeId?: string | null;
   teamLeaderEmployeeId?: string | null;
+  departmentHeadEmployeeId?: string | null;
   position?: string | null;
 }): Promise<ActionResult> {
   let session;
@@ -183,6 +185,7 @@ export async function updateEmployeeAction(input: {
     department_id: input.departmentId ?? null,
     manager_employee_id: input.managerEmployeeId ?? null,
     team_leader_employee_id: input.teamLeaderEmployeeId ?? null,
+    department_head_employee_id: input.departmentHeadEmployeeId ?? null,
     position: input.position ?? null,
   });
   if (!parsed.success) {
@@ -221,6 +224,32 @@ export async function updateEmployeeAction(input: {
     .eq("id", parsed.data.id);
   if (error) return { error: error.message };
 
+  // Department head lives on departments.head_employee_id — update it for the
+  // employee's department when supplied. This re-points the head for the
+  // whole department, not just this employee.
+  let deptHeadChanged = false;
+  if (parsed.data.department_id) {
+    const { data: dept } = await supabaseAdmin
+      .from("departments")
+      .select("id, head_employee_id")
+      .eq("organization_id", session.orgId)
+      .eq("id", parsed.data.department_id)
+      .maybeSingle();
+    if (
+      dept &&
+      (dept.head_employee_id ?? null) !==
+        (parsed.data.department_head_employee_id ?? null)
+    ) {
+      const { error: headErr } = await supabaseAdmin
+        .from("departments")
+        .update({ head_employee_id: parsed.data.department_head_employee_id })
+        .eq("organization_id", session.orgId)
+        .eq("id", parsed.data.department_id);
+      if (headErr) return { error: headErr.message };
+      deptHeadChanged = true;
+    }
+  }
+
   await logAudit({
     organizationId: session.orgId,
     actorUserId: session.userId,
@@ -230,10 +259,22 @@ export async function updateEmployeeAction(input: {
     metadata: {
       from: { full_name: existing.full_name, email: existing.email },
       to: { full_name: parsed.data.full_name, email: parsed.data.email },
+      ...(deptHeadChanged
+        ? {
+            department_head_set: {
+              department_id: parsed.data.department_id,
+              head_employee_id: parsed.data.department_head_employee_id,
+            },
+          }
+        : {}),
     },
   });
 
   revalidatePath("/organization/employees");
+  if (deptHeadChanged) {
+    revalidatePath("/organization/departments");
+    revalidatePath("/organization/chart");
+  }
   return { ok: true };
 }
 

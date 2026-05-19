@@ -33,64 +33,21 @@ const ROLE_KEYS = [
   "supporting_agent",
 ] as const;
 
-const StageOwnerSchema = z.object({
-  itemId: z.string().uuid(),
-  // Map: stage → role-key (or null for "no owner"). Unknown stages are
-  // ignored; unknown roles are rejected.
-  mapping: z.record(z.string(), z.union([z.enum(ROLE_KEYS), z.null()])),
-});
+// Schema fragment + cleaner for the per-stage owner map, embedded inline in
+// create/update so the "تعديل مهمة القالب" modal sets per-phase owners in
+// one save. Map: stage → role-key (or null). Unknown roles are rejected;
+// unknown stages are dropped by cleanStageOwnerMap.
+const StageOwnerMapSchema = z
+  .record(z.string(), z.union([z.enum(ROLE_KEYS), z.null()]))
+  .optional();
 
-export type StageOwnerResult = { ok: true } | { ok: false; error: string };
-
-export async function updateStageOwnerPositionsAction(
-  input: { itemId: string; mapping: Record<string, string | null> },
-): Promise<StageOwnerResult> {
-  let session;
-  try {
-    session = await requirePermission("templates.manage");
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
-
-  const parsed = StageOwnerSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
-  }
-
-  // Filter the incoming mapping to known stage keys only — keeps the JSON
-  // tidy and protects against typos in the client payload.
-  const cleaned: Record<string, string | null> = {};
-  for (const stage of STAGE_KEYS) {
-    cleaned[stage] = (parsed.data.mapping[stage] ?? null) as string | null;
-  }
-
-  // Verify the item belongs to the caller's org BEFORE writing.
-  const { data: existing } = await supabaseAdmin
-    .from("task_template_items")
-    .select("id, organization_id, task_template_id")
-    .eq("id", parsed.data.itemId)
-    .maybeSingle();
-  if (!existing || existing.organization_id !== session.orgId) {
-    return { ok: false, error: "البند غير موجود" };
-  }
-
-  const { error } = await supabaseAdmin
-    .from("task_template_items")
-    .update({ stage_owner_positions: cleaned })
-    .eq("id", parsed.data.itemId)
-    .eq("organization_id", session.orgId);
-  if (error) return { ok: false, error: error.message };
-
-  await logAudit({
-    organizationId: session.orgId,
-    actorUserId: session.userId,
-    action: "task_template_item.update_stage_owners",
-    entityType: "task_template_item",
-    entityId: parsed.data.itemId,
-    metadata: { mapping: cleaned, template_id: existing.task_template_id },
-  });
-  revalidatePath(`/task-templates/${existing.task_template_id}`);
-  return { ok: true };
+function cleanStageOwnerMap(
+  raw: Record<string, string | null> | undefined | null,
+): Record<string, string | null> | undefined {
+  if (!raw) return undefined;
+  const out: Record<string, string | null> = {};
+  for (const stage of STAGE_KEYS) out[stage] = raw[stage] ?? null;
+  return out;
 }
 
 const PRIORITY_KEYS = ["low", "medium", "high", "urgent"] as const;
@@ -118,6 +75,7 @@ const CreateItemSchema = z.object({
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
   duration_days: z.coerce.number().int().min(1).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
+  stage_owner_positions: StageOwnerMapSchema,
 });
 
 export type CreateItemResult =
@@ -133,6 +91,7 @@ export async function createTaskTemplateItemAction(input: {
   offset_days_from_project_start: number;
   duration_days: number;
   priority?: (typeof PRIORITY_KEYS)[number];
+  stage_owner_positions?: Record<string, string | null> | null;
 }): Promise<CreateItemResult> {
   let session;
   try {
@@ -150,6 +109,7 @@ export async function createTaskTemplateItemAction(input: {
     offset_days_from_project_start: input.offset_days_from_project_start,
     duration_days: input.duration_days,
     priority: input.priority ?? "medium",
+    stage_owner_positions: input.stage_owner_positions ?? undefined,
   });
   if (!parsed.success) {
     return {
@@ -178,6 +138,10 @@ export async function createTaskTemplateItemAction(input: {
     .maybeSingle();
   const nextOrder = (maxRow?.order_index ?? -1) + 1;
 
+  // Omit stage_owner_positions when not supplied so the column default
+  // (the Sky Light convention from migration 0077) applies.
+  const stageOwners = cleanStageOwnerMap(parsed.data.stage_owner_positions);
+
   const { data: inserted, error } = await supabaseAdmin
     .from("task_template_items")
     .insert({
@@ -191,6 +155,7 @@ export async function createTaskTemplateItemAction(input: {
       duration_days: parsed.data.duration_days,
       priority: parsed.data.priority,
       order_index: nextOrder,
+      ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
     })
     .select("id")
     .single();
@@ -242,6 +207,7 @@ const UpdateItemSchema = z.object({
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
   duration_days: z.coerce.number().int().min(1).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
+  stage_owner_positions: StageOwnerMapSchema,
 });
 
 export async function updateTaskTemplateItemAction(input: {
@@ -253,6 +219,7 @@ export async function updateTaskTemplateItemAction(input: {
   offset_days_from_project_start: number;
   duration_days: number;
   priority?: (typeof PRIORITY_KEYS)[number];
+  stage_owner_positions?: Record<string, string | null> | null;
 }): Promise<CreateItemResult> {
   let session;
   try {
@@ -270,6 +237,7 @@ export async function updateTaskTemplateItemAction(input: {
     offset_days_from_project_start: input.offset_days_from_project_start,
     duration_days: input.duration_days,
     priority: input.priority ?? "medium",
+    stage_owner_positions: input.stage_owner_positions ?? undefined,
   });
   if (!parsed.success) {
     return {
@@ -288,6 +256,10 @@ export async function updateTaskTemplateItemAction(input: {
     return { ok: false, error: "البند غير موجود" };
   }
 
+  // Only overwrite stage_owner_positions when the caller supplied a map —
+  // a bare metadata edit must not wipe an existing per-phase owner config.
+  const stageOwners = cleanStageOwnerMap(parsed.data.stage_owner_positions);
+
   const { error } = await supabaseAdmin
     .from("task_template_items")
     .update({
@@ -298,6 +270,7 @@ export async function updateTaskTemplateItemAction(input: {
       offset_days_from_project_start: parsed.data.offset_days_from_project_start,
       duration_days: parsed.data.duration_days,
       priority: parsed.data.priority,
+      ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
     })
     .eq("id", parsed.data.itemId)
     .eq("organization_id", session.orgId);

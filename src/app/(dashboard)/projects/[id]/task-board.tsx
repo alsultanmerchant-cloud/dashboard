@@ -20,7 +20,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Loader2, Clock, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { Loader2, Clock, ChevronLeft, ChevronRight, Star, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { avatarUrlFor } from "@/lib/utils-format";
 import {
@@ -307,6 +307,25 @@ function TaskCard({
         className="pointer-events-none absolute inset-y-0 start-0 w-1"
         style={{ backgroundColor: svcColor ?? "#9c9c9c" }}
       />
+
+      {/* ── Project header — shown on the cross-project /tasks board so each
+          card carries its project (and client) like Odoo's kanban. ── */}
+      {task.project && (
+        <Link
+          href={`/projects/${task.project.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary"
+          title={task.project.name}
+        >
+          <Briefcase className="size-3 shrink-0" />
+          <span className="truncate">{task.project.name}</span>
+          {task.project.client_name && (
+            <span className="truncate text-muted-foreground/70">
+              · {task.project.client_name}
+            </span>
+          )}
+        </Link>
+      )}
 
       {/* ── Title ── */}
       <Link

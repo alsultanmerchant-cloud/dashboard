@@ -82,8 +82,11 @@ export async function generateTasksFromCategories(args: {
     .eq("organization_id", args.organizationId)
     .in("id", serviceIds);
   const specialistByServiceId = new Map<string, string>();
+  // manager → head of the service's department (org-chart resolution).
+  const deptHeadByServiceId = new Map<string, string>();
   for (const s of services ?? []) {
     const dept = Array.isArray(s.default_department) ? s.default_department[0] : s.default_department;
+    if (dept?.head_employee_id) deptHeadByServiceId.set(s.id, dept.head_employee_id);
     const slug = ((s as { slug?: string | null }).slug ?? "").toLowerCase();
     let projectOverride: string | null = null;
     if (
@@ -125,42 +128,52 @@ export async function generateTasksFromCategories(args: {
   const { data: inserted, error } = await supabaseAdmin
     .from("tasks")
     .insert(insertPayload)
-    .select("id, service_id");
+    .select("id, service_id, stage_owner_positions");
   if (error) {
     console.error("[generateTasksFromCategories_failed]", error.message);
     return { count: 0, error: error.message };
   }
 
-  // Role-slot assignments (best-effort).
+  // Role-slot assignments (best-effort). Each role referenced by a task's
+  // stage_owner_positions is resolved to a real employee from the org chart
+  // (plus specialist + account_manager so legacy behaviour never regresses).
+  type ResolvableRole = "account_manager" | "specialist" | "manager";
   type SlotRow = {
     organization_id: string;
     task_id: string;
     employee_id: string;
-    role_type: "account_manager" | "specialist";
+    role_type: ResolvableRole;
     assigned_by: string | null;
+  };
+  // agent / supporting_* have no single org-chart position → left unassigned.
+  const resolveRole = (role: string, serviceId: string | null): string | null => {
+    if (role === "account_manager") return args.accountManagerEmployeeId ?? null;
+    if (role === "specialist") {
+      return serviceId ? specialistByServiceId.get(serviceId) ?? null : null;
+    }
+    if (role === "manager") {
+      return serviceId ? deptHeadByServiceId.get(serviceId) ?? null : null;
+    }
+    return null;
   };
   const slotRows: SlotRow[] = [];
   for (const t of inserted ?? []) {
-    if (args.accountManagerEmployeeId) {
+    const roles = new Set<string>(["account_manager", "specialist"]);
+    const sop = (t as { stage_owner_positions?: Record<string, string | null> | null })
+      .stage_owner_positions;
+    if (sop) {
+      for (const v of Object.values(sop)) if (v) roles.add(v);
+    }
+    for (const role of roles) {
+      const employeeId = resolveRole(role, t.service_id);
+      if (!employeeId) continue;
       slotRows.push({
         organization_id: args.organizationId,
         task_id: t.id,
-        employee_id: args.accountManagerEmployeeId,
-        role_type: "account_manager",
+        employee_id: employeeId,
+        role_type: role as ResolvableRole,
         assigned_by: args.createdByUserId ?? null,
       });
-    }
-    if (t.service_id) {
-      const specialistId = specialistByServiceId.get(t.service_id);
-      if (specialistId) {
-        slotRows.push({
-          organization_id: args.organizationId,
-          task_id: t.id,
-          employee_id: specialistId,
-          role_type: "specialist",
-          assigned_by: args.createdByUserId ?? null,
-        });
-      }
     }
   }
   if (slotRows.length > 0) {

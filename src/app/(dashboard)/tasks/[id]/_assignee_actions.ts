@@ -460,3 +460,86 @@ export async function setAssigneeHeadOfDeptAction(input: {
   }
   return { ok: true, appliedGlobally: parsed.data.apply_globally };
 }
+
+// =========================================================================
+// Per-stage owner positions on a single task (migration 0077).
+//
+// task_template_items carry a stage_owner_positions map that generate-tasks
+// copies onto each task. Templates expose an editor; tasks were read-only.
+// This lets a manager override the role responsible for each of the 8
+// stages on one specific task without touching the template.
+// =========================================================================
+
+const STAGE_KEYS = [
+  "new",
+  "in_progress",
+  "manager_review",
+  "specialist_review",
+  "ready_to_send",
+  "sent_to_client",
+  "client_changes",
+  "done",
+] as const;
+
+const STAGE_OWNER_ROLE_KEYS = [
+  "specialist",
+  "manager",
+  "agent",
+  "account_manager",
+  "supporting_lead",
+  "supporting_agent",
+] as const;
+
+const TaskStageOwnerSchema = z.object({
+  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  mapping: z.record(
+    z.string(),
+    z.union([z.enum(STAGE_OWNER_ROLE_KEYS), z.null()]),
+  ),
+});
+
+export async function updateTaskStageOwnerPositionsAction(input: {
+  taskId: string;
+  mapping: Record<string, string | null>;
+}): Promise<{ ok: true } | { error: string }> {
+  const parsed = TaskStageOwnerSchema.safeParse({
+    task_id: input.taskId,
+    mapping: input.mapping,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  let auth;
+  try {
+    auth = await authorizeTaskManage(parsed.data.task_id);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const { session, task } = auth;
+
+  // Keep only known stage keys so the JSON stays tidy.
+  const cleaned: Record<string, string | null> = {};
+  for (const stage of STAGE_KEYS) {
+    cleaned[stage] = parsed.data.mapping[stage] ?? null;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("tasks")
+    .update({ stage_owner_positions: cleaned })
+    .eq("id", parsed.data.task_id)
+    .eq("organization_id", session.orgId);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.update_stage_owners",
+    entityType: "task",
+    entityId: task.id,
+    metadata: { mapping: cleaned },
+  });
+
+  revalidatePath(`/tasks/${task.id}`);
+  return { ok: true };
+}

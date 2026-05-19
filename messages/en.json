@@ -1873,7 +1873,9 @@
       "empty": "No matches",
       "tasksTitle": "Tasks",
       "title": "Projects",
-      "noStoreName": "No store name"
+      "noStoreName": "No store name",
+      "inThisProject": "In this project",
+      "otherProjects": "Other projects"
     },
     "saved": {
       "saveCurrentSearch": "Save current search",
@@ -1910,7 +1912,12 @@
       "archived": "Archived",
       "inProgressPct": "In Progress (1–99%)",
       "completedPct": "Completed (100%)",
-      "notStarted": "Not started (0%)"
+      "notStarted": "Not started (0%)",
+      "behind": "Behind Schedule",
+      "ahead": "Ahead of Schedule",
+      "critical": "Critical Delay",
+      "dueToday": "Due Today",
+      "overdue": "Overdue"
     },
     "groups": {
       "assignee": "Assignees",
@@ -1922,6 +1929,52 @@
       "lastStageUpdate": "Last Stage Update",
       "deadline": "Deadline",
       "progress": "Progress Range"
+    },
+    "cf": {
+      "addCustomFilter": "Add Custom Filter",
+      "fields": {
+        "project": "Project",
+        "service": "Service",
+        "title": "Title",
+        "taskCode": "Task Code",
+        "description": "Description",
+        "stage": "Stage",
+        "priority": "Priority",
+        "progress": "Progress %",
+        "delayDays": "Delay Days",
+        "dueDate": "Deadline",
+        "plannedDate": "Planned Date",
+        "actualDoneDate": "Closed On",
+        "startDate": "Start Date",
+        "createdOn": "Created On",
+        "stageEnteredAt": "Last Stage Update",
+        "isOverdue": "Overdue",
+        "isImportant": "Important",
+        "approvalRequired": "Needs Approval",
+        "externalSource": "Origin"
+      },
+      "options": {
+        "stage": {
+          "new": "New",
+          "inProgress": "In Progress",
+          "managerReview": "Manager Review",
+          "specialistReview": "Specialist Review",
+          "readyToSend": "Ready to Send",
+          "sentToClient": "Sent to Client",
+          "clientChanges": "Client Changes",
+          "done": "Done"
+        },
+        "priority": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High",
+          "urgent": "Urgent"
+        },
+        "externalSource": {
+          "odoo": "Odoo",
+          "dashboard": "Dashboard"
+        }
+      }
     }
   }
 }

@@ -1873,7 +1873,9 @@
       "empty": "لا نتائج",
       "tasksTitle": "المهام",
       "title": "المشاريع",
-      "noStoreName": "بدون اسم متجر"
+      "noStoreName": "بدون اسم متجر",
+      "inThisProject": "في هذا المشروع",
+      "otherProjects": "مشاريع أخرى"
     },
     "saved": {
       "saveCurrentSearch": "حفظ البحث الحالي",
@@ -1910,7 +1912,12 @@
       "archived": "مؤرشفة",
       "inProgressPct": "قيد التنفيذ (1–99٪)",
       "completedPct": "مكتملة (100٪)",
-      "notStarted": "لم تبدأ (0٪)"
+      "notStarted": "لم تبدأ (0٪)",
+      "behind": "متأخرة عن الجدول",
+      "ahead": "متقدّمة عن الجدول",
+      "critical": "تأخير حرج",
+      "dueToday": "مستحقة اليوم",
+      "overdue": "فات موعدها"
     },
     "groups": {
       "assignee": "المسؤولون",
@@ -1922,6 +1929,52 @@
       "lastStageUpdate": "آخر تحديث للمرحلة",
       "deadline": "الموعد النهائي",
       "progress": "نطاق التقدّم"
+    },
+    "cf": {
+      "addCustomFilter": "إضافة فلتر مخصّص",
+      "fields": {
+        "project": "المشروع",
+        "service": "الخدمة",
+        "title": "العنوان",
+        "taskCode": "رمز المهمة",
+        "description": "الوصف",
+        "stage": "المرحلة",
+        "priority": "الأولوية",
+        "progress": "نسبة التقدّم",
+        "delayDays": "أيام التأخير",
+        "dueDate": "الموعد النهائي",
+        "plannedDate": "التاريخ المخطّط",
+        "actualDoneDate": "تاريخ الإغلاق",
+        "startDate": "تاريخ البدء",
+        "createdOn": "تاريخ الإنشاء",
+        "stageEnteredAt": "آخر تحديث للمرحلة",
+        "isOverdue": "متأخرة",
+        "isImportant": "مهمّة",
+        "approvalRequired": "تحتاج موافقة",
+        "externalSource": "المصدر"
+      },
+      "options": {
+        "stage": {
+          "new": "جديدة",
+          "inProgress": "قيد التنفيذ",
+          "managerReview": "مراجعة المدير",
+          "specialistReview": "مراجعة الأخصائي",
+          "readyToSend": "جاهزة للإرسال",
+          "sentToClient": "أُرسلت للعميل",
+          "clientChanges": "تعديلات العميل",
+          "done": "منجزة"
+        },
+        "priority": {
+          "low": "منخفضة",
+          "medium": "متوسطة",
+          "high": "عالية",
+          "urgent": "عاجلة"
+        },
+        "externalSource": {
+          "odoo": "أودو",
+          "dashboard": "لوحة التحكم"
+        }
+      }
     }
   }
 }

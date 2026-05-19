@@ -15,6 +15,7 @@
 // intentionally omitted — every rendered row maps to a real filter.
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -37,6 +38,7 @@ import {
   Trash2,
   Loader2,
   ListChecks,
+  Sliders,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -45,6 +47,15 @@ import {
   deleteTaskFilterAction,
   updateTaskFilterAction,
 } from "./_filter_actions";
+import { CustomFilterDialog } from "@/components/custom-filter/dialog";
+import { buildTaskFields, getTaskField } from "@/lib/custom-filter/tasks-fields";
+import {
+  URL_PARAM as CF_URL_PARAM,
+  encodeFilterToUrl,
+  decodeFilterFromUrl,
+} from "@/lib/custom-filter/url-state";
+import { formatFilterTree } from "@/lib/custom-filter/format-pill";
+import type { FilterTree } from "@/lib/custom-filter/types";
 
 type FilterKey =
   | "open"
@@ -95,6 +106,7 @@ type TaskSuggestion = {
   title: string;
   taskCode: string | null;
   stage: string;
+  projectId: string | null;
   projectName: string | null;
   clientName: string | null;
 };
@@ -140,6 +152,15 @@ const ODOO_FILTER_ROWS: FilterRow[] = [
   { kind: "sep" },
   { kind: "filter", key: "in_progress_pct", labelKey: "filters.inProgressPct" },
   { kind: "filter", key: "completed_pct", labelKey: "filters.completedPct" },
+  { kind: "filter", key: "not_started", labelKey: "filters.notStarted" },
+  { kind: "sep" },
+  { kind: "filter", key: "behind", labelKey: "filters.behind" },
+  { kind: "filter", key: "ahead", labelKey: "filters.ahead" },
+  { kind: "filter", key: "critical", labelKey: "filters.critical" },
+  { kind: "sep" },
+  { kind: "filter", key: "due_today", labelKey: "filters.dueToday" },
+  { kind: "sep" },
+  { kind: "filter", key: "overdue", labelKey: "filters.overdue" },
 ];
 const FILTER_KEYS = new Set<FilterKey>(
   ODOO_FILTER_ROWS.flatMap((r) => (r.kind === "filter" ? [r.key] : [])),
@@ -299,6 +320,7 @@ export function SmartSearchBar({
   const [pending, start] = useTransition();
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [taskSuggestions, setTaskSuggestions] = useState<TaskSuggestion[]>([]);
+  const [taskInProjectSuggestions, setTaskInProjectSuggestions] = useState<TaskSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState(false);
   // Saved filters: prop wins (server-rendered), otherwise lazy-fetch on first
@@ -320,6 +342,108 @@ export function SmartSearchBar({
   }, [open]);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  // ── Custom Filter (Odoo-style rule builder) ────────────────────────────
+  // The whole rule tree lives in `?cf=<base64-json>` so reloads + share
+  // links preserve it — identical wiring to the /projects search bar.
+  const customFilterT = useTranslations("CustomFilter");
+  const taskFields = useMemo(() => buildTaskFields(t), [t]);
+  const taskFieldMap = useMemo(
+    () => Object.fromEntries(taskFields.map((f) => [f.name, f])),
+    [taskFields],
+  );
+  const getField = useCallback(
+    (name: string) => taskFieldMap[name],
+    [taskFieldMap],
+  );
+  const customTreeRaw = params.get(CF_URL_PARAM);
+  const customTree: FilterTree | null = useMemo(
+    () => decodeFilterFromUrl(customTreeRaw),
+    [customTreeRaw],
+  );
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [relationLabels, setRelationLabels] = useState<Record<string, string>>({});
+  // Resolve relational UUIDs → display names so the pill reads
+  // "Project is in ( متجر رينا )" instead of a raw uuid.
+  useEffect(() => {
+    if (!customTree) return;
+    const pairs: { model: string; id: string }[] = [];
+    const walk = (nodes: FilterTree["children"]) => {
+      for (const n of nodes) {
+        if (n.type === "group") walk(n.children);
+        else {
+          const f = getField(n.field);
+          if (!f || f.kind !== "relational" || !f.relation) continue;
+          const ids = Array.isArray(n.value)
+            ? (n.value as string[])
+            : n.value
+              ? [n.value as string]
+              : [];
+          for (const id of ids) pairs.push({ model: f.relation.model, id });
+        }
+      }
+    };
+    walk(customTree.children);
+    const missing = pairs.filter((p) => !relationLabels[p.id]);
+    if (missing.length === 0) return;
+    const byModel = new Map<string, string[]>();
+    for (const { model, id } of missing) {
+      const arr = byModel.get(model) ?? [];
+      arr.push(id);
+      byModel.set(model, arr);
+    }
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const [model, ids] of byModel) {
+        const res = await fetch(
+          `/api/custom-filter/options?model=${encodeURIComponent(model)}&ids=${ids.join(",")}`,
+          { credentials: "include" },
+        );
+        if (!res.ok) continue;
+        const json = (await res.json()) as { items: { id: string; label: string }[] };
+        for (const item of json.items) next[item.id] = item.label;
+      }
+      if (!cancelled && Object.keys(next).length > 0) {
+        setRelationLabels((prev) => ({ ...prev, ...next }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customTree, getField, relationLabels]);
+  const customFilterLabel = useMemo(() => {
+    if (!customTree) return "";
+    return formatFilterTree(
+      customTree,
+      getField,
+      (_model, id) => relationLabels[id],
+      {
+        operatorLabel: (op) =>
+          customFilterT(
+            `operators.${{
+              "=": "eq",
+              "!=": "neq",
+              ">": "gt",
+              ">=": "gte",
+              "<": "lt",
+              "<=": "lte",
+              "ilike": "contains",
+              "not ilike": "notContains",
+              "in": "isIn",
+              "not in": "isNotIn",
+              "between": "between",
+              "set": "isSet",
+              "not_set": "isNotSet",
+            }[op]}`,
+          ),
+        booleanTrue: customFilterT("boolean.true"),
+        booleanFalse: customFilterT("boolean.false"),
+        and: customFilterT("connectors.and"),
+        or: customFilterT("connectors.or"),
+      },
+    );
+  }, [customFilterT, customTree, getField, relationLabels]);
+
   useEffect(() => {
     setQuery(currentQuery);
   }, [currentQuery]);
@@ -333,6 +457,7 @@ export function SmartSearchBar({
     if (trimmed.length < 1) {
       setSuggestions([]);
       setTaskSuggestions([]);
+      setTaskInProjectSuggestions([]);
       setLoadingSuggestions(false);
       setSuggestionError(false);
       return;
@@ -343,21 +468,28 @@ export function SmartSearchBar({
       setLoadingSuggestions(true);
       setSuggestionError(false);
       try {
-        const res = await fetch(
-          `/api/tasks/search-suggestions?q=${encodeURIComponent(trimmed)}`,
-        );
+        // When the view is project-scoped, pass projectId so the API can
+        // split hits into "In this project" vs "Other projects".
+        const scopedProjectId = params.get("projectId");
+        const url =
+          `/api/tasks/search-suggestions?q=${encodeURIComponent(trimmed)}` +
+          (scopedProjectId ? `&projectId=${encodeURIComponent(scopedProjectId)}` : "");
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as {
           tasks?: TaskSuggestion[];
+          tasksInProject?: TaskSuggestion[];
           items?: SearchSuggestion[];
         };
         if (!cancelled) {
           setTaskSuggestions(data.tasks ?? []);
+          setTaskInProjectSuggestions(data.tasksInProject ?? []);
           setSuggestions(data.items ?? []);
         }
       } catch {
         if (!cancelled) {
           setTaskSuggestions([]);
+          setTaskInProjectSuggestions([]);
           setSuggestions([]);
           setSuggestionError(true);
         }
@@ -370,7 +502,7 @@ export function SmartSearchBar({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, query]);
+  }, [open, query, params]);
 
   // Close on click outside.
   useEffect(() => {
@@ -393,8 +525,11 @@ export function SmartSearchBar({
     q: string | null;
     view: string;
     projectId: string | null;
+    customFilter: string | null;
   }>) {
     const sp = new URLSearchParams(params);
+    if (next.customFilter === null) sp.delete(CF_URL_PARAM);
+    else if (next.customFilter !== undefined) sp.set(CF_URL_PARAM, next.customFilter);
     if (next.filters !== undefined) {
       sp.delete("filter"); // drop legacy single-key param if present
       if (next.filters.size === 0) sp.set("f", "");
@@ -433,6 +568,18 @@ export function SmartSearchBar({
 
   const navigate = (href: string) => {
     start(() => router.push(href));
+  };
+
+  const applyCustomFilter = (tree: FilterTree | null) => {
+    if (tree && tree.children.length > 0) {
+      navigate(buildHref({ customFilter: encodeFilterToUrl(tree) }));
+    } else {
+      navigate(buildHref({ customFilter: null }));
+    }
+  };
+
+  const clearCustomFilter = () => {
+    navigate(buildHref({ customFilter: null }));
   };
 
   const submitQuery = () => {
@@ -573,6 +720,35 @@ export function SmartSearchBar({
             </button>
           </span>
         )}
+        {/* Custom-filter pill — clicking the body re-opens the rule dialog. */}
+        {customTree && customFilterLabel && (
+          <span className="inline-flex max-w-[16rem] items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary rtl:flex-row-reverse">
+            <Sliders className="size-2.5 shrink-0" />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCustomDialogOpen(true);
+                setOpen(false);
+              }}
+              className="truncate hover:underline"
+              title={customFilterLabel}
+            >
+              {customFilterLabel}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                clearCustomFilter();
+              }}
+              aria-label={t("aria.removeChip", { label: customFilterLabel })}
+              className="shrink-0 opacity-70 hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
         {activeChips.length + currentDates.length > 1 && (
           <button
             type="button"
@@ -663,52 +839,38 @@ export function SmartSearchBar({
               {!loadingSuggestions &&
                 !suggestionError &&
                 taskSuggestions.length === 0 &&
+                taskInProjectSuggestions.length === 0 &&
                 suggestions.length === 0 && (
                   <div className="px-2 py-2 text-[11px] text-muted-foreground">
                     {t("suggestions.empty")}
                   </div>
                 )}
 
-              {/* Task results — primary section (feedback #5). */}
+              {/* "In this project" — only when the view is project-scoped and
+                  the project has matching tasks (Rwasem parity). */}
+              {!loadingSuggestions &&
+                !suggestionError &&
+                taskInProjectSuggestions.length > 0 && (
+                  <TaskSuggestionSection
+                    label={t("suggestions.inThisProject")}
+                    tasks={taskInProjectSuggestions}
+                    onChoose={chooseTask}
+                  />
+                )}
+
+              {/* Task results — "Other projects" when scoped, else "Tasks". */}
               {!loadingSuggestions &&
                 !suggestionError &&
                 taskSuggestions.length > 0 && (
-                  <div className="mb-2">
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
-                      <ListChecks className="size-3.5" />
-                      {t("suggestions.tasksTitle")}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {taskSuggestions.map((task) => (
-                        <button
-                          key={task.id}
-                          type="button"
-                          onClick={() => chooseTask(task)}
-                          className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
-                              <ListChecks className="size-3.5 shrink-0 text-cyan" />
-                              <span className="truncate">{task.title}</span>
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
-                              {task.taskCode ? (
-                                <span className="shrink-0 tabular-nums">
-                                  {task.taskCode}
-                                </span>
-                              ) : null}
-                              {task.projectName ? (
-                                <span className="truncate">
-                                  · {task.projectName}
-                                </span>
-                              ) : null}
-                            </span>
-                          </span>
-                          <Check className="size-3.5 shrink-0 text-cyan/70" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <TaskSuggestionSection
+                    label={
+                      taskInProjectSuggestions.length > 0
+                        ? t("suggestions.otherProjects")
+                        : t("suggestions.tasksTitle")
+                    }
+                    tasks={taskSuggestions}
+                    onChoose={chooseTask}
+                  />
                 )}
 
               {/* Project / store results — secondary section. */}
@@ -783,6 +945,24 @@ export function SmartSearchBar({
                     />
                   );
                 })}
+                {/* Odoo "Add Custom Filter" — opens the rule-builder dialog. */}
+                <div className="my-1 border-t border-soft/60" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomDialogOpen(true);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors rtl:flex-row-reverse",
+                    customTree
+                      ? "bg-primary/10 text-primary"
+                      : "text-cyan hover:bg-soft-1",
+                  )}
+                >
+                  <Sliders className="size-3" />
+                  {t("cf.addCustomFilter")}
+                </button>
               </div>
             </section>
 
@@ -842,6 +1022,70 @@ export function SmartSearchBar({
         </div>
       )}
       <input type="hidden" value={currentView} readOnly />
+
+      {/* Custom-filter dialog — mounted at the search-bar level so its DOM
+          isn't inside the popover (dismissed on outside-click). */}
+      <CustomFilterDialog
+        open={customDialogOpen}
+        onOpenChange={setCustomDialogOpen}
+        fields={taskFields}
+        initialTree={customTree}
+        includeArchived={currentActive.has("archived")}
+        onIncludeArchivedChange={(next) => {
+          const f = new Set(currentActive);
+          if (next) f.add("archived");
+          else f.delete("archived");
+          navigate(buildHref({ filters: f }));
+        }}
+        onApply={applyCustomFilter}
+      />
+    </div>
+  );
+}
+
+// One labelled block of task autocomplete rows. Used twice when the /tasks
+// view is project-scoped: "In this project" then "Other projects".
+function TaskSuggestionSection({
+  label,
+  tasks,
+  onChoose,
+}: {
+  label: string;
+  tasks: TaskSuggestion[];
+  onChoose: (task: TaskSuggestion) => void;
+}) {
+  return (
+    <div className="mb-2">
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground rtl:flex-row-reverse">
+        <ListChecks className="size-3.5" />
+        {label}
+      </div>
+      <div className="flex flex-col gap-1">
+        {tasks.map((task) => (
+          <button
+            key={task.id}
+            type="button"
+            onClick={() => onChoose(task)}
+            className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-right text-xs transition-colors hover:bg-soft-1 rtl:flex-row-reverse"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 font-medium text-foreground rtl:flex-row-reverse">
+                <ListChecks className="size-3.5 shrink-0 text-cyan" />
+                <span className="truncate">{task.title}</span>
+              </span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground rtl:flex-row-reverse">
+                {task.taskCode ? (
+                  <span className="shrink-0 tabular-nums">{task.taskCode}</span>
+                ) : null}
+                {task.projectName ? (
+                  <span className="truncate">· {task.projectName}</span>
+                ) : null}
+              </span>
+            </span>
+            <Check className="size-3.5 shrink-0 text-cyan/70" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

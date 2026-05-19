@@ -8,9 +8,11 @@ import { cn } from "@/lib/utils";
 import { TaskBoard, type BoardTask } from "../projects/[id]/task-board";
 import { ViewSwitcher } from "./view-switcher";
 import { MonthQuickPick } from "./month-quick-pick";
-import { SmartSearchBar } from "./smart-search-bar";
 import { loadTaskBoardForGlobalView, loadTasksForGlobalView } from "./_loaders";
 import { DATE_FIELDS, type DateField } from "@/lib/data/tasks";
+import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
+import { compileFilterTree } from "@/lib/custom-filter/postgrest";
+import { getTaskField } from "@/lib/custom-filter/tasks-fields";
 
 const TasksListView = dynamic(
   () =>
@@ -147,6 +149,7 @@ export default async function TasksPage({
     projectId?: string;
     odooProjectId?: string;
     groupBy?: string;
+    cf?: string;
   }>;
 }) {
   const session = await requirePagePermission("tasks.view");
@@ -223,6 +226,28 @@ export default async function TasksPage({
   if (active.has("in_progress_pct")) progressBuckets.push("in_progress");
   if (active.has("completed_pct")) progressBuckets.push("completed");
 
+  // Odoo-style "Add Custom Filter" rule tree (?cf=). Compile it to a PostgREST
+  // clause, resolve the matching task IDs up front, and hand the allow-list to
+  // the bundle loader (post-fetch intersection — same pattern as noDeadline).
+  let customFilterTaskIds: string[] | null = null;
+  const customTree = decodeFilterFromUrl(sp.cf);
+  if (customTree) {
+    const compiled = compileFilterTree(customTree, (name) =>
+      getTaskField(name, (k) => k),
+    );
+    if (compiled) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id")
+        .eq("organization_id", session.orgId)
+        .limit(5000)
+        .or(compiled.clause);
+      // A malformed/unsupported rule yields "no matches" rather than a crash —
+      // the pill still renders so the user can edit or remove it.
+      customFilterTaskIds = error ? [] : (data ?? []).map((r) => r.id as string);
+    }
+  }
+
   const taskFilters = {
     stage: stageFilter,
     overdue: active.has("overdue"),
@@ -244,6 +269,7 @@ export default async function TasksPage({
     projectId: resolvedProjectId,
     search,
     dateFilters,
+    customFilterTaskIds,
   };
 
   const boardTasks: BoardTask[] =
@@ -337,11 +363,9 @@ export default async function TasksPage({
         </div>
       )}
 
-      {/* Top toolbar — Rwasem-style: the smart search bar (Filters / Group By /
-          Favorites in a single dropdown) is the prominent inline element, with
-          the view switcher and KPI chips beside it. */}
+      {/* Top toolbar — view switcher + KPI chips. The Rwasem-style smart
+          search bar (Filters / Group By / Favorites) lives in the navbar. */}
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
-        <SmartSearchBar variant="page" view={view} totalCount={totalCount} />
         <ViewSwitcher current={view} />
         <MonthQuickPick />
         {/* #1/#2: filter + count chip — makes the active domain unambiguous,

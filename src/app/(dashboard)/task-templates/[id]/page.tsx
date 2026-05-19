@@ -9,7 +9,6 @@ import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
-import { StageOwnerEditor } from "./stage-owner-editor";
 import { AddTemplateItemDialog } from "./add-item-dialog";
 import { EditTemplateItemDialog } from "./edit-item-dialog";
 import { listDepartments } from "@/lib/data/employees";
@@ -108,22 +107,11 @@ export default async function TaskTemplateDetailPage({
                   </DataTableCell>
                   <DataTableCell className="tabular-nums text-xs text-muted-foreground" dir="ltr">{it.duration_days}</DataTableCell>
                   <DataTableCell><PriorityBadge priority={it.priority} /></DataTableCell>
-                  <DataTableCell>
-                    <div className="flex flex-col gap-1">
-                      <StageOwnerEditor
-                        itemId={it.id}
-                        initial={
-                          (it as { stage_owner_positions?: Record<string, string | null> | null })
-                            .stage_owner_positions ?? null
-                        }
-                      />
-                      <span className="text-[10px] text-muted-foreground">
-                        {stageOwnerPreview(
-                          (it as { stage_owner_positions?: Record<string, string | null> | null })
-                            .stage_owner_positions ?? null,
-                        )}
-                      </span>
-                    </div>
+                  <DataTableCell className="text-xs text-muted-foreground">
+                    {stageOwnerPreview(
+                      (it as { stage_owner_positions?: Record<string, string | null> | null })
+                        .stage_owner_positions ?? null,
+                    )}
                   </DataTableCell>
                   <DataTableCell>
                     <EditTemplateItemDialog
@@ -137,6 +125,9 @@ export default async function TaskTemplateDetailPage({
                           it.offset_days_from_project_start,
                         duration_days: it.duration_days,
                         priority: it.priority,
+                        stage_owner_positions:
+                          (it as { stage_owner_positions?: Record<string, string | null> | null })
+                            .stage_owner_positions ?? null,
                       }}
                       departments={departments.map((d) => ({
                         id: d.id,

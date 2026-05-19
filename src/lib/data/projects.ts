@@ -60,7 +60,7 @@ async function resolveCustomFilterIds(
   organizationId: string,
   tree: FilterTree,
 ): Promise<string[] | null> {
-  const compiled = compileFilterTree(tree, getProjectField);
+  const compiled = compileFilterTree(tree, (name) => getProjectField(name, (k) => k));
   if (!compiled) return null;
 
   const query = supabaseAdmin

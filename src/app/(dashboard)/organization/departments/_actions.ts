@@ -12,6 +12,11 @@ export type DepartmentFormState = {
   fieldErrors?: Record<string, string>;
 };
 
+export type DepartmentDeleteState = {
+  ok?: true;
+  error?: string;
+};
+
 export async function createDepartmentAction(
   _prev: DepartmentFormState | undefined,
   formData: FormData,
@@ -118,5 +123,70 @@ export async function updateDepartmentAction(
   revalidatePath("/organization/departments");
   revalidatePath(`/organization/departments/${departmentId}`);
   revalidatePath("/organization/employees");
+  return { ok: true };
+}
+
+export async function deleteDepartmentAction(
+  departmentId: string,
+): Promise<DepartmentDeleteState> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  if (!departmentId) {
+    return { error: "معرّف القسم مفقود" };
+  }
+
+  const { data: department, error: departmentError } = await supabaseAdmin
+    .from("departments")
+    .select("id, name, organization_id, parent_department_id")
+    .eq("id", departmentId)
+    .eq("organization_id", session.orgId)
+    .maybeSingle();
+  if (departmentError) return { error: departmentError.message };
+  if (!department) return { error: "القسم غير موجود" };
+
+  const { count: employeeCount, error: employeeCountError } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", session.orgId)
+    .eq("department_id", departmentId);
+  if (employeeCountError) return { error: employeeCountError.message };
+  if ((employeeCount ?? 0) > 0) {
+    return {
+      error: "لا يمكن حذف القسم لأنه ما زال مرتبطًا بموظفين. انقل الموظفين أولًا.",
+    };
+  }
+
+  const { error: reparentError } = await supabaseAdmin
+    .from("departments")
+    .update({ parent_department_id: department.parent_department_id ?? null })
+    .eq("organization_id", session.orgId)
+    .eq("parent_department_id", departmentId);
+  if (reparentError) return { error: reparentError.message };
+
+  const { error: deleteError } = await supabaseAdmin
+    .from("departments")
+    .delete()
+    .eq("id", departmentId)
+    .eq("organization_id", session.orgId);
+  if (deleteError) return { error: deleteError.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "department.delete",
+    entityType: "department",
+    entityId: departmentId,
+    metadata: { name: department.name },
+  });
+
+  revalidatePath("/organization/departments");
+  revalidatePath(`/organization/departments/${departmentId}`);
+  revalidatePath("/organization/employees");
+  revalidatePath("/organization/chart");
   return { ok: true };
 }
