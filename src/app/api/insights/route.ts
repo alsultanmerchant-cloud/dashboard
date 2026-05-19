@@ -101,11 +101,13 @@ async function buildSignalPack(orgId: string): Promise<{
         "id, task_code, title, stage, priority, due_date, planned_date, is_overdue, delay_days, stage_entered_at, service_id, project_id",
       )
       .eq("organization_id", orgId)
+      .is("archived_at", null)
       .not("stage", "eq", "done"),
     supabaseAdmin
       .from("tasks")
       .select("id, service_id")
       .eq("organization_id", orgId)
+      .is("archived_at", null)
       .eq("stage", "done")
       .gte("completed_at", weekAgo),
     supabaseAdmin

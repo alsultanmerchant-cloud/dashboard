@@ -1,36 +1,22 @@
 "use client";
 
-// PDF-style editable org chart using @xyflow/react + dagre for auto-layout.
-// Renders the Sky Light department tree as a top-down flowchart that
-// matches the look of the owner's "Sky light organization.pdf".
-//
-// Features:
-//   - Auto-layout via dagre (top-down, like the PDF)
-//   - Drag nodes to reposition (positions persist in component state)
-//   - Double-click a node to rename (calls onRenameDepartment)
-//   - Pan + zoom + minimap + controls
-//   - Color-coded by department kind (matches the PDF palette)
-//
-// Server actions for rename/add/delete are wired through props so the
-// component stays purely presentational and the page owns persistence.
-
 import { useEffect, useMemo, useState } from "react";
 import {
-  ReactFlow,
-  ReactFlowProvider,
   Background,
   Controls,
-  MiniMap,
   Handle,
+  MiniMap,
   Position,
-  useNodesState,
+  ReactFlow,
+  ReactFlowProvider,
   useEdgesState,
-  type Node,
+  useNodesState,
   type Edge,
+  type Node,
   type NodeProps,
 } from "@xyflow/react";
 import dagre from "dagre";
-import { Crown, Loader2, Pencil, Plus, Shield, Trash2, Users } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 
 import type { OrgDepartment } from "@/lib/data/org-chart";
@@ -72,165 +58,188 @@ type DeptKind =
   | "quality_control"
   | "other";
 
-// Tones matching the PDF palette: black (CEO), purple (technical), dark-blue (sales),
-// teal (admin), light-blue (sub-departments), green (support).
-const KIND_TONES: Record<DeptKind, { bg: string; border: string; text: string; chip: string }> = {
-  group: {
-    bg: "bg-violet-500/[0.18] dark:bg-violet-500/[0.18]",
-    border: "border-violet-500/35 dark:border-violet-400/40",
-    text: "text-violet-950 dark:text-violet-50",
-    chip: "bg-violet-500/18 text-violet-900 dark:bg-violet-400/20 dark:text-violet-100",
-  },
-  account_management: {
-    bg: "bg-cyan/15 dark:bg-cyan/15",
-    border: "border-cyan/45 dark:border-cyan/40",
-    text: "text-sky-950 dark:text-cyan-50",
-    chip: "bg-cyan/18 text-sky-900 dark:bg-cyan/20 dark:text-cyan-100",
-  },
-  main_section: {
-    bg: "bg-blue-500/[0.18] dark:bg-blue-500/[0.18]",
-    border: "border-blue-500/35 dark:border-blue-400/40",
-    text: "text-blue-950 dark:text-blue-50",
-    chip: "bg-blue-500/18 text-blue-900 dark:bg-blue-400/20 dark:text-blue-100",
-  },
-  supporting_section: {
-    bg: "bg-emerald-500/[0.16] dark:bg-emerald-500/[0.16]",
-    border: "border-emerald-500/35 dark:border-emerald-400/35",
-    text: "text-emerald-950 dark:text-emerald-50",
-    chip: "bg-emerald-500/18 text-emerald-900 dark:bg-emerald-400/20 dark:text-emerald-100",
-  },
-  quality_control: {
-    bg: "bg-amber-500/[0.16] dark:bg-amber-500/[0.16]",
-    border: "border-amber-500/35 dark:border-amber-400/40",
-    text: "text-amber-950 dark:text-amber-50",
-    chip: "bg-amber-500/18 text-amber-900 dark:bg-amber-400/20 dark:text-amber-100",
-  },
-  other: {
-    bg: "bg-soft-2",
-    border: "border-soft-2",
-    text: "text-foreground",
-    chip: "bg-soft-3 text-muted-foreground",
-  },
-};
-
-const KIND_LABEL: Record<DeptKind, string> = {
-  group: "مجموعة",
-  account_management: "إدارة الحسابات",
-  main_section: "قسم أساسي",
-  supporting_section: "قسم مساند",
-  quality_control: "الجودة",
-  other: "إداري",
-};
-
-type NodeData = {
-  name: string;
-  kind: DeptKind;
-  description: string | null;
-  headEmployeeId: string | null;
-  memberEmployeeIds: string[];
-  head: PersonSummary | null;
-  teamLeads: PersonSummary[];
-  members: PersonSummary[];
-  childCount: number;
-  totalPeople: number;
-  width: number;
-  height: number;
-  employees: EmployeeOption[];
-  onRename?: (id: string, newName: string) => void;
-  onUpdate?: (update: DepartmentUpdate) => void;
-  onAddChild?: (parentId: string) => void;
-  onDelete?: (id: string) => void;
-  isCEO?: boolean;
-};
-
-const KIND_OPTIONS: { value: DeptKind; label: string }[] = (
-  ["group", "account_management", "main_section", "supporting_section", "quality_control", "other"] as DeptKind[]
-).map((k) => ({ value: k, label: KIND_LABEL[k] }));
-
 type PersonSummary = {
   id: string;
   name: string;
   title: string | null;
+  managerId?: string | null;
+  visual?: "member" | "lead" | "manager" | "highlight";
 };
 
-const NODE_WIDTH = 300;
-const GROUP_NODE_WIDTH = 320;
-const NODE_MIN_HEIGHT = 120;
+type DeptNodeData = {
+  nodeType: "dept";
+  id: string;
+  name: string;
+  kind: DeptKind;
+  slug: string;
+  description: string | null;
+  subtitle: string | null;
+  width: number;
+  height: number;
+  headEmployeeId: string | null;
+  memberEmployeeIds: string[];
+  employees: EmployeeOption[];
+  onUpdate?: (update: DepartmentUpdate) => void;
+  onAddChild?: (parentId: string) => void;
+  onDelete?: (id: string) => void;
+  isProtected?: boolean;
+};
 
-function estimateNodeSize(dept: OrgDepartment) {
-  const width = dept.kind === "group" ? GROUP_NODE_WIDTH : NODE_WIDTH;
-  const peopleRows =
-    (dept.head ? 1 : 0) +
-    Math.ceil((dept.teamLeads.length || 0) / 2) +
-    Math.ceil((dept.members.length || 0) / 2);
-  const metaRows =
-    2 +
-    (dept.head ? 1 : 0) +
-    (dept.teamLeads.length > 0 ? 1 : 0) +
-    (dept.members.length > 0 ? 1 : 0) +
-    (dept.children.length > 0 ? 1 : 0);
-  const height = Math.max(
-    NODE_MIN_HEIGHT,
-    78 + metaRows * 24 + peopleRows * 34 + (dept.description ? 24 : 0),
-  );
-  return { width, height };
+type PersonNodeData = {
+  nodeType: "person";
+  name: string;
+  title: string | null;
+  visual: "member" | "lead" | "manager" | "highlight";
+  width: number;
+  height: number;
+};
+
+type FlowNodeData = DeptNodeData | PersonNodeData;
+
+const KIND_OPTIONS: { value: DeptKind; label: string }[] = [
+  { value: "group", label: "مجموعة" },
+  { value: "account_management", label: "إدارة الحسابات" },
+  { value: "main_section", label: "قسم أساسي" },
+  { value: "supporting_section", label: "قسم مساند" },
+  { value: "quality_control", label: "الجودة" },
+  { value: "other", label: "إداري" },
+];
+
+const DEPT_STYLES: Record<string, string> = {
+  "sl-ceo": "bg-black text-white border-black",
+  "technical-head": "bg-gradient-to-r from-violet-600 to-violet-500 text-white border-violet-500",
+  "sales-group": "bg-gradient-to-r from-violet-600 to-violet-500 text-white border-violet-500",
+  "technical-section": "bg-violet-700 text-white border-violet-700",
+  administration: "bg-violet-700 text-white border-violet-700",
+  assistance: "bg-violet-700 text-white border-violet-700",
+  "technical-main": "bg-[#3f73a4] text-white border-[#3f73a4]",
+  "technical-supporting": "bg-[#3f73a4] text-white border-[#3f73a4]",
+  "sales-team": "bg-[#3f73a4] text-white border-[#3f73a4]",
+  telesales: "bg-[#3f73a4] text-white border-[#3f73a4]",
+  "hr-department": "bg-[#3f73a4] text-white border-[#3f73a4]",
+  accountant: "bg-[#3f73a4] text-white border-[#3f73a4]",
+  "management-floor": "bg-[#3f73a4] text-white border-[#3f73a4]",
+};
+
+const DEFAULT_DEPT_STYLE = "bg-blue-700 text-white border-blue-700";
+
+const DEPT_SIZES: Record<string, { width: number; height: number }> = {
+  "sl-ceo": { width: 520, height: 118 },
+  "technical-head": { width: 560, height: 72 },
+  "sales-group": { width: 560, height: 72 },
+  "technical-section": { width: 420, height: 50 },
+  administration: { width: 360, height: 42 },
+  assistance: { width: 145, height: 58 },
+  "technical-main": { width: 260, height: 56 },
+  "technical-supporting": { width: 260, height: 56 },
+  "sales-team": { width: 350, height: 52 },
+  telesales: { width: 270, height: 52 },
+  "hr-department": { width: 165, height: 58 },
+  accountant: { width: 165, height: 58 },
+  "management-floor": { width: 145, height: 72 },
+  "quality-control": { width: 115, height: 64 },
+};
+
+const PERSON_SIZES = {
+  member: { width: 88, height: 34 },
+  lead: { width: 92, height: 48 },
+  manager: { width: 118, height: 54 },
+  highlight: { width: 72, height: 44 },
+};
+
+function slugDisplayName(slug: string, fallback: string) {
+  switch (slug) {
+    case "technical-main":
+      return "Main section";
+    case "technical-supporting":
+      return "Supporting section";
+    case "technical-section":
+      return "Technical section";
+    case "sales-group":
+      return "SALES";
+    case "sales-team":
+      return "SALES";
+    case "telesales":
+      return "TELESALES";
+    case "quality-control":
+      return "Quality control";
+    case "account-management":
+      return "Account manager";
+    case "public-relationships":
+      return "Public Relationships";
+    case "social-media":
+      return "Social media";
+    case "media-buying":
+      return "Media buying";
+    case "social-content":
+      return "Social content";
+    case "seo-content":
+      return "SEO content";
+    case "art-direction-designs":
+      return "Art Direction Designs";
+    case "programming":
+      return "Programming";
+    case "art-video-editing":
+      return "Video Editing";
+    case "art-ai-videos":
+      return "AI videos";
+    case "management-floor":
+      return "management floor";
+    case "hr-department":
+      return "HR Department";
+    case "accountant":
+      return "Accountant";
+    default:
+      return fallback;
+  }
 }
 
-function PersonPill({
-  person,
-  icon,
-}: {
-  person: PersonSummary;
-  icon?: "head" | "lead";
-}) {
-  return (
-    <div className="rounded-xl bg-black/10 px-2.5 py-1.5 text-[11px] leading-tight dark:bg-white/10">
-      <div className="flex items-center gap-1.5 font-semibold">
-        {icon === "head" && <Crown className="size-3 opacity-70" />}
-        {icon === "lead" && <Shield className="size-3 opacity-70" />}
-        <span>{person.name}</span>
-      </div>
-      {person.title && (
-        <div className="mt-0.5 text-[10px] opacity-75">
-          {person.title}
-        </div>
-      )}
-    </div>
-  );
+function buildDeptSubtitle(dept: OrgDepartment) {
+  if (dept.slug === "sl-ceo") {
+    return [dept.head?.full_name, dept.members[0]?.full_name].filter(Boolean).join("\n");
+  }
+  if (dept.slug === "technical-section" && dept.head) {
+    return `Head of technical: ${dept.head.full_name}`;
+  }
+  if (dept.slug === "sales-group" && dept.head) {
+    return `CSO: ${dept.head.full_name}`;
+  }
+  if (dept.slug === "quality-control" && dept.head) {
+    return `Head: ${dept.head.full_name}`;
+  }
+  if (dept.head) {
+    return `HEAD: ${dept.head.full_name}`;
+  }
+  return null;
 }
 
-function PeopleSection({
-  label,
-  people,
-  icon,
-}: {
-  label: string;
-  people: PersonSummary[];
-  icon?: "head" | "lead";
-}) {
-  if (people.length === 0) return null;
-  return (
-    <section className="space-y-1.5">
-      <div className="text-[10px] font-semibold tracking-wide opacity-70">
-        {label}
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        {people.map((person) => (
-          <PersonPill key={person.id} person={person} icon={icon} />
-        ))}
-      </div>
-    </section>
-  );
+function classifyPerson(person: PersonSummary) {
+  const t = (person.title || "").toLowerCase();
+  if (t.includes("head") || t.includes("supervisor") || t.includes("cso")) {
+    return "manager" as const;
+  }
+  if (t.includes("team leader")) {
+    return "lead" as const;
+  }
+  if (person.name === "Alaa" || person.name === "Alaa Arafat" || person.name === "Esraa Awad") {
+    return "highlight" as const;
+  }
+  return "member" as const;
+}
+
+function personNodeLabel(data: PersonNodeData) {
+  if (!data.title) return [data.name];
+  if (data.visual === "lead") return [data.title.replace("Telesales ", "").replace("Sales ", ""), data.name];
+  if (data.visual === "manager") return [data.title, data.name];
+  return [data.name];
 }
 
 function EditDeptModal({
-  id,
   data,
   open,
   onOpenChange,
 }: {
-  id: string;
-  data: NodeData;
+  data: DeptNodeData;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -241,37 +250,16 @@ function EditDeptModal({
   const [memberIds, setMemberIds] = useState<string[]>(data.memberEmployeeIds);
   const [saving, setSaving] = useState(false);
 
-  // Re-sync the form whenever the modal (re)opens for this node.
-  useEffect(() => {
-    if (open) {
-      setName(data.name);
-      setKind(data.kind);
-      setDescription(data.description ?? "");
-      setHeadEmployeeId(data.headEmployeeId ?? "");
-      setMemberIds(data.memberEmployeeIds);
-      setSaving(false);
-    }
-  }, [open, data.name, data.kind, data.description, data.headEmployeeId, data.memberEmployeeIds]);
-
   const headOptions = useMemo(
     () => [
       { value: "", label: "بدون رئيس" },
-      ...data.employees.map((e) => ({
-        value: e.id,
-        label: e.name,
-        hint: e.title,
-      })),
+      ...data.employees.map((e) => ({ value: e.id, label: e.name, hint: e.title })),
     ],
     [data.employees],
   );
 
   const memberOptions = useMemo(
-    () =>
-      data.employees.map((e) => ({
-        value: e.id,
-        label: e.name,
-        hint: e.title,
-      })),
+    () => data.employees.map((e) => ({ value: e.id, label: e.name, hint: e.title })),
     [data.employees],
   );
 
@@ -279,7 +267,7 @@ function EditDeptModal({
     if (!name.trim() || !data.onUpdate) return;
     setSaving(true);
     data.onUpdate({
-      id,
+      id: data.id,
       name: name.trim(),
       kind,
       description: description.trim() ? description.trim() : null,
@@ -299,12 +287,7 @@ function EditDeptModal({
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="oc_dep_name">اسم القسم *</Label>
-            <Input
-              id="oc_dep_name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="مثال: الإعلام الرقمي"
-            />
+            <Input id="oc_dep_name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-1.5">
             <Label>نوع القسم</Label>
@@ -340,9 +323,6 @@ function EditDeptModal({
               emptyMessage="لا يوجد موظفون"
               ariaLabel="أعضاء القسم"
             />
-            <p className="text-[11px] text-muted-foreground">
-              سيتم نقل أي موظف مُختار إلى هذا القسم، وإلغاء ربط الموظفين المُزالين.
-            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="oc_dep_desc">الوصف</Label>
@@ -351,7 +331,6 @@ function EditDeptModal({
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="وصف اختياري للقسم…"
             />
           </div>
         </div>
@@ -369,69 +348,34 @@ function EditDeptModal({
   );
 }
 
-function DeptNode({ id, data }: NodeProps<Node<NodeData>>) {
-  const tone = KIND_TONES[data.kind] ?? KIND_TONES.other;
+function DeptNode({ data }: NodeProps<Node<DeptNodeData>>) {
   const [modalOpen, setModalOpen] = useState(false);
-
+  const style = DEPT_STYLES[data.slug] ?? DEFAULT_DEPT_STYLE;
+  const isTop = data.slug === "sl-ceo" || data.slug === "technical-head" || data.slug === "sales-group";
   return (
-    <div
-      onDoubleClick={() => {
-        if (data.onUpdate) setModalOpen(true);
-      }}
-      className={cn(
-        "group relative rounded-2xl border px-4 py-3 backdrop-blur-md transition-shadow shadow-md hover:shadow-xl",
-        tone.bg,
-        tone.border,
-        tone.text,
-      )}
-      style={{ width: data.width, minHeight: data.height }}
-    >
-      <Handle type="target" position={Position.Top} className="!bg-white/30 !w-2 !h-2 !border-0" />
-
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-extrabold leading-tight">
-            {data.name}
-          </h3>
-
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium tracking-wider",
-              tone.chip,
-            )}
-          >
-            {KIND_LABEL[data.kind] ?? data.kind}
-          </span>
+    <div className="group relative">
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-0 !bg-transparent" />
+      <div
+        onDoubleClick={() => {
+          if (data.onUpdate) setModalOpen(true);
+        }}
+        className={cn(
+          "rounded-[4px] border px-3 py-2 text-center shadow-sm transition-shadow hover:shadow-md",
+          style,
+        )}
+        style={{ width: data.width, minHeight: data.height }}
+      >
+        <div className={cn("whitespace-pre-line font-semibold", isTop ? "text-2xl leading-tight" : "text-[15px] leading-tight")}>
+          {data.name}
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-[10px] opacity-70">
-          <span className="inline-flex items-center gap-1">
-            <Users className="size-3" />
-            {data.totalPeople} عضو
-          </span>
-          {data.childCount > 0 && (
-            <span>{data.childCount} قسم فرعي</span>
-          )}
-        </div>
-
-        <PeopleSection
-          label="الإدارة"
-          people={data.head ? [data.head] : []}
-          icon="head"
-        />
-        <PeopleSection
-          label="قادة الفرق"
-          people={data.teamLeads}
-          icon="lead"
-        />
-        <PeopleSection
-          label="الأعضاء"
-          people={data.members}
-        />
+        {data.subtitle && (
+          <div className={cn("mt-1 whitespace-pre-line", data.slug === "sl-ceo" ? "text-[18px] leading-tight" : "text-[12px] leading-snug")}>
+            {data.subtitle}
+          </div>
+        )}
       </div>
 
-      {/* Hover toolbar */}
-      <div className="absolute -top-3 left-2 hidden gap-1 group-hover:flex">
+      <div className="absolute -top-3 left-1 hidden gap-1 group-hover:flex">
         {data.onUpdate && (
           <button
             type="button"
@@ -440,7 +384,7 @@ function DeptNode({ id, data }: NodeProps<Node<NodeData>>) {
               setModalOpen(true);
             }}
             title="تعديل القسم"
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-card/95 ring-1 ring-white/15 hover:bg-cyan/20 hover:text-cyan"
+            className="flex h-6 w-6 items-center justify-center rounded-md bg-card ring-1 ring-border hover:text-cyan"
           >
             <Pencil className="size-3" />
           </button>
@@ -450,67 +394,101 @@ function DeptNode({ id, data }: NodeProps<Node<NodeData>>) {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              data.onAddChild?.(id);
+              data.onAddChild?.(data.id);
             }}
             title="إضافة قسم فرعي"
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-card/95 ring-1 ring-white/15 hover:bg-emerald-400/20 hover:text-emerald-300"
+            className="flex h-6 w-6 items-center justify-center rounded-md bg-card ring-1 ring-border hover:text-emerald-500"
           >
             <Plus className="size-3" />
           </button>
         )}
-        {data.onDelete && !data.isCEO && (
+        {data.onDelete && !data.isProtected && (
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`حذف "${data.name}"؟`)) data.onDelete?.(id);
+              if (confirm(`حذف "${data.name}"؟`)) data.onDelete?.(data.id);
             }}
             title="حذف"
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-card/95 ring-1 ring-white/15 hover:bg-cc-red/20 hover:text-cc-red"
+            className="flex h-6 w-6 items-center justify-center rounded-md bg-card ring-1 ring-border hover:text-cc-red"
           >
             <Trash2 className="size-3" />
           </button>
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!bg-white/30 !w-2 !h-2 !border-0" />
-
-      {data.onUpdate && (
-        <EditDeptModal id={id} data={data} open={modalOpen} onOpenChange={setModalOpen} />
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-0 !bg-transparent" />
+      {data.onUpdate && modalOpen && (
+        <EditDeptModal
+          key={`${data.id}:${data.name}:${data.headEmployeeId ?? ""}`}
+          data={data}
+          open={modalOpen}
+          onOpenChange={setModalOpen}
+        />
       )}
     </div>
   );
 }
 
-const NODE_TYPES = { dept: DeptNode };
+function PersonNode({ data }: NodeProps<Node<PersonNodeData>>) {
+  const lines = personNodeLabel(data);
+  const classes =
+    data.visual === "manager"
+      ? "bg-blue-700 text-white border-blue-700"
+      : data.visual === "lead"
+        ? "bg-white text-blue-700 border-blue-600"
+        : data.visual === "highlight"
+          ? "bg-[#e8fff0] text-[#18a04e] border-[#18a04e]"
+          : "bg-white text-slate-900 border-sky-400 border-dashed";
 
-function layoutWithDagre(nodes: Node[], edges: Edge[]): Node[] {
+  return (
+    <div className="relative">
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-0 !bg-transparent" />
+      <div
+        className={cn(
+          "rounded-[4px] border px-2 py-1 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.4)]",
+          classes,
+        )}
+        style={{ width: data.width, minHeight: data.height }}
+      >
+        {lines.map((line, idx) => (
+          <div
+            key={`${line}-${idx}`}
+            className={cn(
+              idx === 0 && data.visual !== "member" && data.visual !== "highlight"
+                ? "text-[9px] leading-tight"
+                : "text-[9px] leading-tight",
+              idx === lines.length - 1 ? "font-medium" : "",
+            )}
+          >
+            {line}
+          </div>
+        ))}
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-0 !bg-transparent" />
+    </div>
+  );
+}
+
+const NODE_TYPES = {
+  dept: DeptNode,
+  person: PersonNode,
+};
+
+function layoutWithDagre(nodes: Node<FlowNodeData>[], edges: Edge[]) {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", ranksep: 60, nodesep: 24 });
+  g.setGraph({ rankdir: "TB", ranksep: 36, nodesep: 22, edgesep: 8, marginx: 40, marginy: 30 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes) {
-    const width =
-      typeof n.style?.width === "number" ? n.style.width : NODE_WIDTH;
-    const height =
-      n.data && typeof n.data === "object" && "height" in n.data
-        ? (n.data.height as number)
-        : NODE_MIN_HEIGHT;
-    g.setNode(n.id, { width, height });
+    g.setNode(n.id, { width: n.data.width, height: n.data.height });
   }
   for (const e of edges) g.setEdge(e.source, e.target);
   dagre.layout(g);
   return nodes.map((n) => {
     const pos = g.node(n.id);
-    const width =
-      typeof n.style?.width === "number" ? n.style.width : NODE_WIDTH;
-    const height =
-      n.data && typeof n.data === "object" && "height" in n.data
-        ? (n.data.height as number)
-        : NODE_MIN_HEIGHT;
     return {
       ...n,
-      position: { x: pos.x - width / 2, y: pos.y - height / 2 },
-      // Required by react-flow when sourcePosition/targetPosition are present
+      position: { x: pos.x - n.data.width / 2, y: pos.y - n.data.height / 2 },
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top,
     };
@@ -526,96 +504,172 @@ export type OrgChartFlowProps = {
   onDeleteDepartment?: (id: string) => Promise<void> | void;
 };
 
+function buildFlowGraph(
+  departments: OrgDepartment[],
+  employees: EmployeeOption[],
+  onUpdateDepartment?: (update: DepartmentUpdate) => Promise<void> | void,
+  onAddChildDepartment?: (parentId: string) => Promise<void> | void,
+  onDeleteDepartment?: (id: string) => Promise<void> | void,
+) {
+  const nodes: Node<FlowNodeData>[] = [];
+  const edges: Edge[] = [];
+  const personNodes = new Set<string>();
+
+  const pushPersonNode = (
+    id: string,
+    person: PersonSummary,
+    parentId: string,
+    visualOverride?: PersonNodeData["visual"],
+  ) => {
+    if (personNodes.has(id)) return;
+    const visual = visualOverride ?? classifyPerson(person);
+    const size = PERSON_SIZES[visual];
+    nodes.push({
+      id,
+      type: "person",
+      position: { x: 0, y: 0 },
+      data: {
+        nodeType: "person",
+        name: person.name,
+        title: person.title,
+        visual,
+        width: size.width,
+        height: size.height,
+      },
+    });
+    personNodes.add(id);
+    edges.push({
+      id: `e-${parentId}-${id}`,
+      source: parentId,
+      target: id,
+      type: "smoothstep",
+      style: { stroke: "#8f9197", strokeWidth: 1.15 },
+    });
+  };
+
+  const lookup = new Map<string, PersonSummary>();
+
+  for (const dept of departments) {
+    const deptId = dept.id;
+    const displayName = slugDisplayName(dept.slug, dept.name);
+    const subtitle = buildDeptSubtitle(dept);
+    const slug = dept.slug === "technical-section" && subtitle ? "technical-head" : dept.slug;
+    const size = DEPT_SIZES[slug] ?? DEPT_SIZES[dept.slug] ?? { width: 130, height: subtitle ? 54 : 36 };
+    nodes.push({
+      id: deptId,
+      type: "dept",
+      position: { x: 0, y: 0 },
+      data: {
+        nodeType: "dept",
+        id: deptId,
+        name: displayName,
+        kind: (dept.kind as DeptKind) ?? "other",
+        slug,
+        description: dept.description ?? null,
+        subtitle,
+        width: size.width,
+        height: size.height,
+        headEmployeeId: dept.head?.id ?? null,
+        memberEmployeeIds: [
+          ...(dept.head ? [dept.head.id] : []),
+          ...dept.teamLeads.map((p) => p.id),
+          ...dept.members.map((p) => p.id),
+        ],
+        employees,
+        onUpdate: onUpdateDepartment,
+        onAddChild: onAddChildDepartment,
+        onDelete: onDeleteDepartment,
+        isProtected: dept.slug === "sl-ceo" || dept.slug === "sales-group" || dept.slug === "technical-section",
+      },
+    });
+    if (dept.parent_department_id) {
+      edges.push({
+        id: `e-${dept.parent_department_id}-${dept.id}`,
+        source: dept.parent_department_id,
+        target: dept.id,
+        type: "smoothstep",
+        style: { stroke: "#8f9197", strokeWidth: 1.2 },
+      });
+    }
+
+    for (const lead of dept.teamLeads) {
+      lookup.set(lead.id, {
+        id: lead.id,
+        name: lead.full_name,
+        title: lead.job_title,
+        managerId: lead.manager_employee_id,
+      });
+    }
+    for (const member of dept.members) {
+      lookup.set(member.id, {
+        id: member.id,
+        name: member.full_name,
+        title: member.job_title,
+        managerId: member.manager_employee_id,
+      });
+    }
+  }
+
+  for (const dept of departments) {
+    const deptNodeId = dept.id;
+    const teamLeadIds = new Set(dept.teamLeads.map((lead) => lead.id));
+
+    for (const lead of dept.teamLeads) {
+      pushPersonNode(
+        `person:${dept.id}:${lead.id}`,
+        {
+          id: lead.id,
+          name: lead.full_name,
+          title: lead.job_title,
+          managerId: lead.manager_employee_id,
+        },
+        deptNodeId,
+        "lead",
+      );
+    }
+
+    for (const member of dept.members) {
+      const person: PersonSummary = {
+        id: member.id,
+        name: member.full_name,
+        title: member.job_title,
+        managerId: member.manager_employee_id,
+      };
+      const nodeId = `person:${dept.id}:${member.id}`;
+      const managerId =
+        person.managerId && teamLeadIds.has(person.managerId)
+          ? `person:${dept.id}:${person.managerId}`
+          : deptNodeId;
+      pushPersonNode(nodeId, person, managerId);
+    }
+  }
+
+  return { nodes, edges };
+}
+
 function OrgChartFlowInner({
   departments,
   employees,
-  onRenameDepartment,
   onUpdateDepartment,
   onAddChildDepartment,
   onDeleteDepartment,
 }: OrgChartFlowProps) {
   const employeeList = useMemo(() => employees ?? [], [employees]);
-  const initialNodes = useMemo<Node[]>(() => {
-    return departments.map((d) => {
-      const { width, height } = estimateNodeSize(d);
-      return {
-        id: d.id,
-        type: "dept",
-        position: { x: 0, y: 0 },
-        style: { width },
-        data: {
-          name: d.name,
-          kind: (d.kind as DeptKind) ?? "other",
-          description: d.description ?? null,
-          headEmployeeId: d.head?.id ?? null,
-          memberEmployeeIds: [
-            ...(d.head ? [d.head.id] : []),
-            ...d.teamLeads.map((p) => p.id),
-            ...d.members.map((p) => p.id),
-          ],
-          head: d.head
-            ? {
-                id: d.head.id,
-                name: d.head.full_name,
-                title: d.head.job_title ?? null,
-              }
-            : null,
-          teamLeads: d.teamLeads.map((person) => ({
-            id: person.id,
-            name: person.full_name,
-            title: person.job_title ?? null,
-          })),
-          members: d.members.map((person) => ({
-            id: person.id,
-            name: person.full_name,
-            title: person.job_title ?? null,
-          })),
-          childCount: d.children.length,
-          totalPeople:
-            (d.head ? 1 : 0) + d.teamLeads.length + d.members.length,
-          width,
-          height,
-          employees: employeeList,
-          onRename: onRenameDepartment,
-          onUpdate: onUpdateDepartment,
-          onAddChild: onAddChildDepartment,
-          onDelete: onDeleteDepartment,
-          isCEO: d.slug === "sl-ceo",
-        } satisfies NodeData,
-      };
-    });
-  }, [departments, employeeList, onRenameDepartment, onUpdateDepartment, onAddChildDepartment, onDeleteDepartment]);
-
-  const initialEdges = useMemo<Edge[]>(() => {
-    return departments
-      .filter((d) => d.parent_department_id)
-      .map((d) => ({
-        id: `e-${d.parent_department_id}-${d.id}`,
-        source: d.parent_department_id!,
-        target: d.id,
-        type: "smoothstep",
-        style: {
-          stroke: "color-mix(in srgb, var(--foreground) 22%, transparent)",
-          strokeWidth: 1.5,
-        },
-      }));
-  }, [departments]);
-
-  const laidOut = useMemo(
-    () => layoutWithDagre(initialNodes, initialEdges),
-    [initialNodes, initialEdges],
+  const { nodes: rawNodes, edges: rawEdges } = useMemo(
+    () => buildFlowGraph(departments, employeeList, onUpdateDepartment, onAddChildDepartment, onDeleteDepartment),
+    [departments, employeeList, onUpdateDepartment, onAddChildDepartment, onDeleteDepartment],
   );
 
+  const laidOut = useMemo(() => layoutWithDagre(rawNodes, rawEdges), [rawNodes, rawEdges]);
   const [nodes, setNodes, onNodesChange] = useNodesState(laidOut);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, , onEdgesChange] = useEdgesState(rawEdges);
 
-  // Re-layout when departments change shape (added/deleted).
   useEffect(() => {
     setNodes(laidOut);
   }, [laidOut, setNodes]);
 
   return (
-    <div className="h-[78vh] w-full overflow-hidden rounded-2xl border border-soft bg-card/30">
+    <div className="h-[82vh] w-full overflow-hidden rounded-2xl border border-soft bg-white">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -623,22 +677,22 @@ function OrgChartFlowInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        fitViewOptions={{ padding: 0.08, minZoom: 0.35 }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable
         nodesConnectable={false}
         elementsSelectable
-        minZoom={0.3}
-        maxZoom={1.6}
+        minZoom={0.24}
+        maxZoom={1.4}
       >
-        <Background gap={24} size={1} className="opacity-60" />
-        <Controls position="bottom-left" showInteractive={false} className="!bg-card/80 !border !border-soft-2" />
+        <Background color="#f3f4f6" gap={24} size={1} />
+        <Controls position="bottom-left" showInteractive={false} className="!bg-white !border !border-slate-200" />
         <MiniMap
           position="bottom-right"
           pannable
           zoomable
-          className="!bg-card/80 !border !border-soft-2"
-          maskColor="rgba(0,0,0,0.6)"
+          className="!bg-white !border !border-slate-200"
+          maskColor="rgba(15,23,42,0.08)"
         />
       </ReactFlow>
     </div>
@@ -653,8 +707,6 @@ export function OrgChartFlow(props: OrgChartFlowProps) {
   );
 }
 
-// Helper: flatten the tree (returned by loadOrgChart as nested) into the
-// flat list our component expects. Server pages call this before passing.
 export function flattenOrgChart(roots: OrgDepartment[]): OrgDepartment[] {
   const out: OrgDepartment[] = [];
   const walk = (d: OrgDepartment) => {
