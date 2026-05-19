@@ -8,6 +8,7 @@ import { ViewSwitcher } from "./view-switcher";
 import { MonthQuickPick } from "./month-quick-pick";
 import {
   buildTaskFiltersFromParams,
+  resolveTasksView,
   type FilterKey,
   type TaskQueryParams,
 } from "./_filter_params";
@@ -19,6 +20,7 @@ import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
 import { TasksInfiniteView } from "./tasks-infinite-view";
+import { TasksCountProvider, TaskCountBadge } from "./tasks-count-badge";
 import {
   GLOBAL_BOARD_LIMIT,
   LIST_LIMIT,
@@ -44,7 +46,7 @@ export default async function TasksPage({
   const session = await requirePagePermission("tasks.view");
   const t = await getTranslations("TasksPage");
   const sp = await searchParams;
-  const view = sp.view ?? "kanban";
+  const view = resolveTasksView(sp);
 
   const VALID_GROUPS = [
     "stage", "project", "priority", "deadline",
@@ -133,6 +135,8 @@ export default async function TasksPage({
       });
   const filteredTotalCount =
     view === "kanban" ? boardBundle.totalCount : listBundle.totalCount;
+  const initialLoadedCount =
+    view === "kanban" ? boardBundle.rows.length : listBundle.rows.length;
 
   let scopedTaskCount: number | null = null;
   if (projectInfo) {
@@ -217,25 +221,11 @@ export default async function TasksPage({
         </div>
       )}
 
+      <TasksCountProvider key={queryString} initialLoaded={initialLoadedCount}>
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         <ViewSwitcher current={view} />
         <MonthQuickPick />
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-soft bg-soft-1/50 px-2.5 py-1 text-[11px] font-medium"
-          aria-label={t("toolbar.countAria", {
-            shown: filteredTotalCount,
-            total: filteredTotalCount,
-          })}
-        >
-          <span className="text-foreground">{filterLabel}</span>
-          <span className="text-muted-foreground">·</span>
-          <span className="tabular-nums text-foreground/70">
-            {t("toolbar.countLabel", {
-              shown: filteredTotalCount,
-              total: filteredTotalCount,
-            })}
-          </span>
-        </span>
+        <TaskCountBadge filterLabel={filterLabel} total={filteredTotalCount} />
         <Link
           href={toggleAllHref}
           className={cn(
@@ -285,6 +275,7 @@ export default async function TasksPage({
         totalCount={filteredTotalCount}
         pageSize={pageSize}
       />
+      </TasksCountProvider>
     </div>
   );
 }

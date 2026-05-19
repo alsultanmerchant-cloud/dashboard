@@ -119,7 +119,14 @@ export type TaskQueryParams = {
   q?: string;
   sf?: string;
   groupBy?: string;
+  projectId?: string;
+  odooProjectId?: string;
 };
+
+export function resolveTasksView(sp: Pick<TaskQueryParams, "view" | "projectId" | "odooProjectId">) {
+  if (sp.view) return sp.view;
+  return sp.projectId || sp.odooProjectId ? "kanban" : "list";
+}
 
 const FACET_FIELD_SET: ReadonlySet<string> = new Set(SEARCH_FACET_FIELDS);
 
@@ -165,7 +172,7 @@ export function buildTaskFiltersFromParams(
     projectId?: string;
   },
 ): { filters: TaskFilters; activeKeys: Set<FilterKey>; view: string } {
-  const view = sp.view ?? "kanban";
+  const view = resolveTasksView(sp);
   const active = parseFilterKeys(sp.f, sp.filter);
   const dateFilters = parseDateFilters(sp.d);
   const search = sp.q?.trim() || undefined;

@@ -84,7 +84,7 @@ export default async function MessagesPage() {
     .sort((a, b) => (a.latestCreatedAt < b.latestCreatedAt ? 1 : -1));
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100dvh-11.5rem)] flex-col gap-4">
       <PageHeader title={t("title")} description={t("description")} />
       {conversations.length === 0 ? (
         <EmptyState

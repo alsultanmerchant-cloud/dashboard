@@ -9,11 +9,12 @@ import { LayoutDashboard, List } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { OrgChart, OrgDepartment } from "@/lib/data/org-chart";
-import { OrgChartFlow, flattenOrgChart } from "./org-chart-flow";
+import { OrgChartFlow, flattenOrgChart, type DepartmentUpdate } from "./org-chart-flow";
 import {
   renameDepartment,
   addChildDepartment,
   deleteDepartment,
+  updateDepartmentDetails,
 } from "../_actions";
 
 const TABS = [
@@ -38,6 +39,13 @@ export function ChartViews({ chart }: { chart: OrgChart }) {
       const res = await addChildDepartment({ parentId, name: "قسم جديد", kind: "other" });
       if (res.error) toast.error(res.error);
       else toast.success("تمت إضافة القسم");
+    });
+  };
+  const handleUpdate = (update: DepartmentUpdate) => {
+    start(async () => {
+      const res = await updateDepartmentDetails(update);
+      if (res.error) toast.error(res.error);
+      else toast.success("تم تحديث القسم");
     });
   };
   const handleDelete = (id: string) => {
@@ -77,7 +85,13 @@ export function ChartViews({ chart }: { chart: OrgChart }) {
       {view === "diagram" ? (
         <OrgChartFlow
           departments={flat}
+          employees={chart.employees.map((e) => ({
+            id: e.id,
+            name: e.full_name,
+            title: e.job_title,
+          }))}
           onRenameDepartment={handleRename}
+          onUpdateDepartment={handleUpdate}
           onAddChildDepartment={handleAddChild}
           onDeleteDepartment={handleDelete}
         />

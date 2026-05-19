@@ -951,6 +951,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     "sequence",
     "project_id",
     "stage_id",
+    "state",
     "user_ids",
     "date_deadline",
     "create_date",
@@ -1030,7 +1031,11 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     if (!projectUuid) continue;
 
     const stageName = t.stage_id ? ctx.stageNameById.get(t.stage_id[0]) : "New";
-    const stage = mapStageName(stageName);
+    // Odoo's `state` field is the source of truth for done-ness — it's
+    // independent of the kanban `stage_id`, so a task can be marked done
+    // (`state = '1_done'`) while parked in any column. Trust state first;
+    // fall back to the stage-name mapping for everything else.
+    const stage = t.state === "1_done" ? "done" : mapStageName(stageName);
     const serviceUuid =
       t.category_id ? ctx.serviceIdMap.get(t.category_id[0]) ?? null : null;
 

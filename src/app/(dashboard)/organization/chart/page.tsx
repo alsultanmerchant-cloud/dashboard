@@ -6,9 +6,12 @@ import { isFlagOn } from "@/lib/feature-flags";
 import {
   loadOrgChart,
   filterSalesSubtree,
-  type OrgChart,
   type OrgDepartment,
 } from "@/lib/data/org-chart";
+import {
+  buildLocalSkyLightOrgChart,
+  shouldUseLocalSkyLightOrgChart,
+} from "@/lib/data/sky-light-org-local";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,13 +22,11 @@ export const dynamic = "force-dynamic";
 
 function PersonChip({
   name,
-  position,
   jobTitle,
   positionLabel,
   variant = "member",
 }: {
   name: string;
-  position: string | null;
   jobTitle: string | null;
   positionLabel: string | null;
   variant?: "head" | "lead" | "member";
@@ -117,7 +118,6 @@ function DepartmentNode({
                 {dept.head ? (
                   <PersonChip
                     name={dept.head.full_name}
-                    position={dept.head.position}
                     jobTitle={dept.head.job_title}
                     positionLabel={dept.head.position ? labels.positionLabel(dept.head.position) : null}
                     variant="head"
@@ -139,7 +139,6 @@ function DepartmentNode({
                       <PersonChip
                         key={l.id}
                         name={l.full_name}
-                        position={l.position}
                         jobTitle={l.job_title}
                         positionLabel={l.position ? labels.positionLabel(l.position) : null}
                         variant="lead"
@@ -159,7 +158,6 @@ function DepartmentNode({
                       <PersonChip
                         key={m.id}
                         name={m.full_name}
-                        position={m.position}
                         jobTitle={m.job_title}
                         positionLabel={m.position ? labels.positionLabel(m.position) : null}
                       />
@@ -194,6 +192,9 @@ export default async function OrgChartPage() {
     getTranslations("Organization"),
   ]);
   let chart = await loadOrgChart(session.orgId);
+  if (shouldUseLocalSkyLightOrgChart(chart)) {
+    chart = buildLocalSkyLightOrgChart();
+  }
 
   // Hide Sales / Telesales subtree behind the feature flag.
   const userCtx = await getServerSession();
@@ -201,31 +202,6 @@ export default async function OrgChartPage() {
   if (!showSales) chart = filterSalesSubtree(chart);
 
   const totalDepts = chart.byId.size;
-
-  const kindLabelMap: Record<string, string> = {
-    account_management: t("deptKindLabels.account_management"),
-    group: t("deptKindLabels.group"),
-    main_section: t("deptKindLabels.main_section"),
-    supporting_section: t("deptKindLabels.supporting_section"),
-    quality_control: t("deptKindLabels.quality_control"),
-    other: t("deptKindLabels.other"),
-  };
-  const posLabelMap: Record<string, string> = {
-    head: t("positions.head"),
-    team_lead: t("positions.team_lead"),
-    specialist: t("positions.specialist"),
-    agent: t("positions.agent"),
-    admin: t("positions.admin"),
-    none: t("positions.none"),
-  };
-  const labels = {
-    head: t("head"),
-    noHead: t("noHead"),
-    teamLeads: t("teamLeads"),
-    members: t("members"),
-    deptKindLabel: (kind: string) => kindLabelMap[kind] ?? kind,
-    positionLabel: (pos: string) => posLabelMap[pos] ?? pos,
-  };
 
   return (
     <div className="space-y-4">

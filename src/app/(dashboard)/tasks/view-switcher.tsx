@@ -20,11 +20,15 @@ export function ViewSwitcher({ current }: { current: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const defaultView =
+    params.get("projectId") || params.get("odooProjectId") ? "kanban" : "list";
 
   function setView(view: string) {
     const next = new URLSearchParams(params);
-    next.set("view", view);
-    router.push(`${pathname}?${next.toString()}`);
+    if (view === defaultView) next.delete("view");
+    else next.set("view", view);
+    const query = next.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
   }
 
   return (

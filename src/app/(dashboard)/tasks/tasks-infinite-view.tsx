@@ -7,6 +7,7 @@ import { TasksListView } from "./tasks-list-view";
 import { TasksCalendarView } from "./tasks-calendar-view";
 import { TasksPivotView } from "./tasks-pivot-view";
 import type { ListTaskRow } from "./_loaders";
+import { useTasksLoadedCount } from "./tasks-count-badge";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -54,6 +55,12 @@ export function TasksInfiniteView({
   const loadedCount = view === "kanban" ? boardTasks.length : listTasks.length;
   const hasMore = loadedCount < totalCount;
   const mode = view === "kanban" ? "board" : "list";
+
+  // Mirror the on-screen row count into the toolbar badge.
+  const { setLoaded } = useTasksLoadedCount();
+  useEffect(() => {
+    setLoaded(loadedCount);
+  }, [loadedCount, setLoaded]);
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;

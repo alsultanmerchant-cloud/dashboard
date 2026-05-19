@@ -320,6 +320,142 @@ export async function renameDepartment(input: {
   return { ok: true };
 }
 
+/**
+ * Update all editable details of a department in one shot — used by the
+ * org-chart card edit modal. Covers name, kind, description and head.
+ */
+const UpdateDetailsSchema = z.object({
+  id: z.string().uuid("معرّف القسم غير صالح"),
+  name: z.string().min(1, "الاسم لا يمكن أن يكون فارغاً").max(120),
+  kind: z.enum([
+    "group",
+    "account_management",
+    "main_section",
+    "supporting_section",
+    "quality_control",
+    "other",
+  ]),
+  description: z.string().max(2000).nullable(),
+  headEmployeeId: z.string().uuid("معرّف الموظف غير صالح").nullable(),
+  memberEmployeeIds: z.array(z.string().uuid()).nullable().optional(),
+});
+
+export async function updateDepartmentDetails(input: {
+  id: string;
+  name: string;
+  kind: "group" | "account_management" | "main_section" | "supporting_section" | "quality_control" | "other";
+  description: string | null;
+  headEmployeeId: string | null;
+  memberEmployeeIds?: string[] | null;
+}): Promise<OrgActionState> {
+  let session;
+  try {
+    session = await requirePermission("org.manage_structure");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = UpdateDetailsSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: "تحقق من البيانات", fieldErrors: flattenZodIssues(parsed.error) };
+  }
+
+  const { data: dept } = await supabaseAdmin
+    .from("departments")
+    .select("id, name, organization_id")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+  if (!dept || dept.organization_id !== session.orgId) {
+    return { error: "القسم غير موجود في وكالتك" };
+  }
+
+  // Org-scope the head employee if one was chosen.
+  if (parsed.data.headEmployeeId) {
+    const { data: emp } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id, organization_id")
+      .eq("id", parsed.data.headEmployeeId)
+      .maybeSingle();
+    if (!emp || emp.organization_id !== session.orgId) {
+      return { error: "الموظف غير موجود في وكالتك" };
+    }
+  }
+
+  const { error } = await supabaseAdmin
+    .from("departments")
+    .update({
+      name: parsed.data.name,
+      kind: parsed.data.kind,
+      description: parsed.data.description,
+      head_employee_id: parsed.data.headEmployeeId,
+    })
+    .eq("id", parsed.data.id);
+  if (error) return { error: error.message };
+
+  // Reconcile members: any employee in the new list gets department_id set
+  // to this dept; anyone currently in this dept but not in the new list is
+  // unassigned (department_id = null).
+  if (parsed.data.memberEmployeeIds != null) {
+    const targetIds = parsed.data.memberEmployeeIds;
+    const { data: current, error: curErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("department_id", parsed.data.id);
+    if (curErr) return { error: curErr.message };
+
+    const currentIds = new Set((current ?? []).map((r) => r.id));
+    const targetSet = new Set(targetIds);
+    const toRemove = [...currentIds].filter((cid) => !targetSet.has(cid));
+    const toAdd = targetIds.filter((tid) => !currentIds.has(tid));
+
+    if (toRemove.length > 0) {
+      const { error: rmErr } = await supabaseAdmin
+        .from("employee_profiles")
+        .update({ department_id: null })
+        .in("id", toRemove)
+        .eq("organization_id", session.orgId);
+      if (rmErr) return { error: rmErr.message };
+    }
+    if (toAdd.length > 0) {
+      const { error: addErr } = await supabaseAdmin
+        .from("employee_profiles")
+        .update({ department_id: parsed.data.id })
+        .in("id", toAdd)
+        .eq("organization_id", session.orgId);
+      if (addErr) return { error: addErr.message };
+    }
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "department.update",
+    entityType: "department",
+    entityId: parsed.data.id,
+    metadata: {
+      from: dept.name,
+      to: parsed.data.name,
+      kind: parsed.data.kind,
+      head_employee_id: parsed.data.headEmployeeId,
+    },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "ORG_DEPARTMENT_UPDATED",
+    entityType: "department",
+    entityId: parsed.data.id,
+    payload: { department_name: parsed.data.name, kind: parsed.data.kind },
+    importance: "low",
+  });
+
+  revalidatePath("/organization/chart");
+  revalidatePath(`/organization/departments/${parsed.data.id}`);
+  revalidatePath("/organization/departments");
+  return { ok: true };
+}
+
 /** Create a new child department under the given parent. */
 const AddChildSchema = z.object({
   parentId: z.string().uuid("معرّف القسم الأب غير صالح").nullable(),

@@ -111,6 +111,9 @@ export interface OdooTask {
   sequence?: number;
   project_id: OdooMany2one;
   stage_id: OdooMany2one;
+  // project.task.state — '01_in_progress' | '1_done' (independent of the
+  // kanban stage_id; a task can be marked done while parked in any column).
+  state?: string | false;
   user_ids: OdooMany2many;
   date_deadline: OdooDate; // Deadline / Planned Date in the manual
   create_date: OdooDatetime;
