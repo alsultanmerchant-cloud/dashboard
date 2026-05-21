@@ -570,6 +570,11 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       // Sky Light fills these in on every project; date_start/date are mostly blank.
       "ks_project_start",
       "ks_project_end",
+      // Odoo's computed task counters. We store these on the project row so
+      // the dashboard card mirrors Rwasem exactly (B5: count parity).
+      "task_count",
+      "open_task_count",
+      "closed_task_count",
       // Rwasem operator list hides non-employee-visibility projects
       // (the default "Internal" portal project, mostly). Read it so we
       // can mirror the same archive behaviour locally — see B5 in
@@ -647,16 +652,12 @@ async function importProjects(ctx: ImportContext): Promise<number> {
           ? p.ks_project_end.slice(0, 10)
           : null) ?? nullable(p.date),
       description: nullable(p.description),
-      // Mirror Odoo's archive flag AND its operator-list visibility rule:
-      // projects whose privacy_visibility is anything other than 'employees'
-      // (typically the demo "Internal" project at id=1, set to 'portal')
-      // never appear in Rwasem's operator project list. Treat them as
-      // archived locally so our counts match Odoo (RWASEM_PARITY_NOTES §B5).
-      status:
-        p.active === false ||
-        (p.privacy_visibility && p.privacy_visibility !== "employees")
-          ? "archived"
-          : "active",
+      // Mirror Odoo's archive flag. The earlier rule also archived any
+      // project with privacy_visibility != 'employees' (assumed to be just
+      // the demo "Internal" project), but the live Skylight tenant has
+      // ALL projects set to 'portal', so that rule hid everything from the
+      // operator list. Only Odoo's `active` flag drives archive status now.
+      status: p.active === false ? "archived" : "active",
       priority: "medium",
       store_name: nullable(p.store_name),
       target,
@@ -676,6 +677,9 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       // Sky Light's Odoo prints project_code as "PRJ-" + lpad(odoo_id, 5, '0').
       // We mirror the same format so screenshots line up between systems.
       project_code: `PRJ-${String(p.id).padStart(5, "0")}`,
+      odoo_task_count: typeof p.task_count === "number" ? p.task_count : null,
+      odoo_open_task_count: typeof p.open_task_count === "number" ? p.open_task_count : null,
+      odoo_closed_task_count: typeof p.closed_task_count === "number" ? p.closed_task_count : null,
     };
     const { data, error } = await supabaseAdmin
       .from("projects")

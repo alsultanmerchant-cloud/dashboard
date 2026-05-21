@@ -82,6 +82,13 @@ export interface OdooProject {
   // (already declared above as total_progress)
   // rwasem_document_management_project
   document_count?: number;
+  // Odoo's computed task counts on project.project. We mirror these into
+  // `projects.odoo_*_count` so the operator card matches Rwasem's number
+  // exactly even when our local count rule diverges (stage.fold rules,
+  // renewal cycles, etc.).
+  task_count?: number;
+  open_task_count?: number;
+  closed_task_count?: number;
   // Odoo's project visibility setting. Portal/followers projects (e.g. the
   // built-in id=1 "Internal" placeholder) are hidden from the operator
   // project list in Rwasem — we mirror that by treating them as archived.
