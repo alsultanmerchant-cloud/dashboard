@@ -7,6 +7,7 @@
 // recognises the affordance before the underlying behaviours land.
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
   Bookmark,
@@ -62,15 +63,14 @@ export function RightRail() {
         >
           <Bookmark className="size-4" />
         </button>
-        <button
-          type="button"
+        <Link
+          href="/projects?onlyFavorites=1"
           aria-label={t("favorite")}
           title={t("favorite")}
           className={iconCls}
-          disabled
         >
           <Star className="size-4" />
-        </button>
+        </Link>
         <button
           type="button"
           aria-label={t("search")}

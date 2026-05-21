@@ -1045,6 +1045,7 @@
   },
   "ModuleTabs": {
     "projects": "Projects",
+    "newProject": "New Project",
     "tasks": "Tasks",
     "myTasks": "My Tasks",
     "allTasks": "All Tasks",
@@ -1072,7 +1073,9 @@
     "kanbanView": "Kanban view",
     "listView": "List view",
     "calendar": "Calendar",
-    "calendarView": "Calendar view"
+    "calendarView": "Calendar view",
+    "pivot": "Pivot",
+    "pivotView": "Pivot view"
   },
   "TasksPage": {
     "projectScope": "Project tasks",
@@ -2119,6 +2122,121 @@
           "dashboard": "Dashboard"
         }
       }
+    }
+  },
+  "Executive": {
+    "hero": {
+      "onTimeLabel": "On-Time Delivery",
+      "onTimeRange": "Last 30 days",
+      "onTimeSample": "{sample} delivered tasks",
+      "onTimeNoSample": "No deliveries in last 30 days",
+      "benchmark": "Target 85%",
+      "overdueLabel": "Overdue tasks",
+      "stuckLabel": "Stuck in review",
+      "stuckHint": "Past 2 business days",
+      "revisionsLabel": "Client revisions",
+      "revisionsHint": "Stage entries · 30d",
+      "wow": "WoW:"
+    },
+    "pulse": {
+      "completed": "Completed",
+      "tasksAdded": "Tasks added",
+      "clientChanges": "Client changes",
+      "approvals": "Approvals decided",
+      "caption": "Last 7 days vs the prior 7"
+    },
+    "clientHealth": {
+      "title": "Client delivery health",
+      "description": "Worst 5 and best 5 by overdue load and 30-day on-time rate",
+      "viewAll": "All clients →",
+      "worstTitle": "Needs attention",
+      "worstEmpty": "No clients are behind 🎉",
+      "bestTitle": "Top performers",
+      "bestEmpty": "Not enough sample",
+      "bestEmptyDescription": "Needs ≥ 3 deliveries in 30 days"
+    },
+    "services": {
+      "title": "Service-line health",
+      "description": "On-time rate, overdue load and revision pressure per service",
+      "openTasks": "open",
+      "delivered": "delivered",
+      "onTime": "on-time",
+      "empty": "No service data"
+    },
+    "flow": {
+      "title": "Delivery flow",
+      "description": "Task distribution across the 8 stages and average dwell time per stage",
+      "worstStageLabel": "Highest pressure",
+      "avgDwell": "avg dwell",
+      "openStage": "Open this stage",
+      "bottlenecksTitle": "Review bottlenecks",
+      "bottlenecksEmpty": "No tasks stuck in review"
+    },
+    "stuckProjects": {
+      "title": "Stuck projects",
+      "description": "Top 5 projects by overdue load and worst slip",
+      "viewAll": "All projects →",
+      "overdue": "overdue",
+      "worstSlip": "worst slip",
+      "idleDays": "Idle {days}d",
+      "emptyTitle": "No stuck projects",
+      "emptyDescription": "No overdue tasks across active projects"
+    },
+    "deadlines": {
+      "title": "Upcoming deadlines",
+      "description": "{total} tasks due in the next 7 days",
+      "viewAll": "All tasks →",
+      "today": "Today"
+    },
+    "team": {
+      "title": "Team & capacity",
+      "description": "Specialist load and on-time performance",
+      "loadTitle": "Most loaded specialists",
+      "loadEmpty": "No open tasks",
+      "topTitle": "Top performers",
+      "bottomTitle": "Needs support",
+      "emptyLeaderboard": "Not enough sample (≥ 3 deliveries / 30d)"
+    },
+    "commercial": {
+      "title": "Commercial mix · this month",
+      "open": "Open contracts →",
+      "types": {
+        "New": "New",
+        "Renew": "Renew",
+        "UPSELL": "Upsell",
+        "WinBack": "Win-back",
+        "Hold": "Hold"
+      }
+    },
+    "activity": {
+      "title": "Recent activity",
+      "description": "Latest meaningful events across the system",
+      "viewAll": "View all",
+      "emptyTitle": "No recent events",
+      "emptyDescription": "Governance, contracts and task events will appear here"
+    },
+    "aging": {
+      "title": "WIP aging pyramid",
+      "description": "{total} open tasks · {stalePct}% are older than 30 days",
+      "overdue": "overdue",
+      "noOverdue": "no overdue"
+    },
+    "stageFlow": {
+      "title": "Stage transition flow",
+      "description": "Where work flows and where it bounces back — {backwardPct}% of moves are backward",
+      "fromHeader": "From",
+      "forward": "Forward",
+      "backward": "Backward",
+      "topBackwardTitle": "Top backward moves",
+      "topBackwardEmpty": "No backward transitions 🎉",
+      "caption": "Last 90 days of stage transition history"
+    },
+    "topRevised": {
+      "title": "Most-revised tasks",
+      "description": "Top 5 tasks bounced back to \"client changes\" in the last 90 days",
+      "revisions": "revs",
+      "emptyTitle": "No recent revisions",
+      "emptyDescription": "Tasks that get revised repeatedly will appear here"
     }
   }
 }

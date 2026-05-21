@@ -1,12 +1,9 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Briefcase, CalendarOff } from "lucide-react";
+import { Briefcase } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { cn } from "@/lib/utils";
-import { ViewSwitcher } from "./view-switcher";
-import { MonthQuickPick } from "./month-quick-pick";
 import {
   buildTaskFiltersFromParams,
   resolveTasksView,
@@ -21,7 +18,8 @@ import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
 import { TasksInfiniteView } from "./tasks-infinite-view";
-import { TasksCountProvider, TaskCountBadge } from "./tasks-count-badge";
+import { TasksCountProvider } from "./tasks-count-badge";
+import { TasksModuleTabsMeta } from "./tasks-module-tabs-meta";
 import {
   GLOBAL_BOARD_LIMIT,
   LIST_LIMIT,
@@ -87,24 +85,6 @@ export default async function TasksPage({
   const active = built.activeKeys;
   const taskFilters = { ...built.filters };
 
-  let customFilterTaskIds: string[] | null = null;
-  const customTree = decodeFilterFromUrl(sp.cf);
-  if (customTree) {
-    const compiled = compileFilterTree(customTree, (name) =>
-      getTaskField(name, (k) => k),
-    );
-    if (compiled) {
-      const { data, error } = await supabaseAdmin
-        .from("tasks")
-        .select("id")
-        .eq("organization_id", session.orgId)
-        .limit(5000)
-        .or(compiled.clause);
-      customFilterTaskIds = error ? [] : (data ?? []).map((r) => r.id as string);
-    }
-  }
-  taskFilters.customFilterTaskIds = customFilterTaskIds;
-
   const canViewProjectInfo =
     session.isOwner || session.permissions.has("projects.view");
 
@@ -112,41 +92,7 @@ export default async function TasksPage({
     ? (resolvedProjectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT)
     : LIST_LIMIT;
 
-  const boardBundlePromise =
-    view === "kanban"
-      ? loadTaskBoardPageForGlobalView(session.orgId, taskFilters, {
-          limit: pageSize,
-          offset: 0,
-        })
-      : Promise.resolve({ rows: [], totalCount: 0 });
-  const listBundlePromise =
-    view === "kanban"
-      ? Promise.resolve({ rows: [], totalCount: 0 })
-      : loadTasksPageForGlobalView(session.orgId, taskFilters, {
-          limit: pageSize,
-          offset: 0,
-        });
-
-  const [
-    boardBundle,
-    listBundle,
-  ] = await Promise.all([
-    boardBundlePromise,
-    listBundlePromise,
-  ]);
-
-  const filteredTotalCount =
-    view === "kanban" ? boardBundle.totalCount : listBundle.totalCount;
-  const initialLoadedCount =
-    view === "kanban" ? boardBundle.rows.length : listBundle.rows.length;
-
-  const filterLabel = (() => {
-    if (active.size === 1 && active.has("open")) return t("toolbar.openTasksFilter");
-    if (active.size === 0 || active.has("all")) return t("toolbar.allTasksFilter");
-    return t("toolbar.customFilter");
-  })();
   const noDeadlineActive = active.size === 1 && active.has("no_deadline");
-  const allTasksActive = active.size === 0 || active.has("all");
 
   const queryParams = new URLSearchParams(
     Object.entries(sp).flatMap(([key, value]) =>
@@ -160,10 +106,6 @@ export default async function TasksPage({
   }
   const queryString = queryParams.toString();
   const apiQueryString = apiQueryParams.toString();
-  const toggleAllParams = new URLSearchParams(queryString);
-  toggleAllParams.set("f", allTasksActive ? "open" : "all");
-  toggleAllParams.delete("filter");
-  const toggleAllHref = `/tasks${toggleAllParams.toString() ? `?${toggleAllParams.toString()}` : ""}`;
 
   return (
     <div>
@@ -179,26 +121,122 @@ export default async function TasksPage({
         </Suspense>
       ) : null}
 
-      <TasksCountProvider key={queryString} initialLoaded={initialLoadedCount}>
+      <Suspense
+        key={queryString}
+        fallback={
+          <TasksBoardSkeleton />
+        }
+      >
+        <TasksBoardSection
+          orgId={session.orgId}
+          view={view}
+          groupBy={groupBy}
+          taskFilters={taskFilters}
+          customFilterTaskIdsTree={sp.cf ?? null}
+          pageSize={pageSize}
+          apiQueryString={apiQueryString}
+          queryString={queryString}
+          resolvedProjectId={resolvedProjectId ?? null}
+          noDeadlineActive={noDeadlineActive}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+// Lightweight fallback so the page chrome (toolbar shell) is visible while
+// TasksBoardSection's heavy fetch streams.
+function TasksBoardSkeleton({
+}: Record<string, never>) {
+  return (
+    <div>
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
-        <ViewSwitcher current={view} />
-        <MonthQuickPick />
-        <TaskCountBadge filterLabel={filterLabel} total={filteredTotalCount} />
-        <Link
-          href={toggleAllHref}
-          className={cn(
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-            allTasksActive
-              ? "border-cyan/40 bg-cyan-dim text-cyan"
-              : "border-soft bg-card text-foreground/70 hover:text-foreground",
-          )}
-        >
-          {allTasksActive ? "عرض المفتوحة فقط" : "عرض كل المهام"}
-        </Link>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-28 animate-pulse rounded-lg border border-soft bg-card/70" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Streamed inside Suspense so the toolbar/banner render immediately while the
+// board/list (which need a heavy parallel fetch + an optional custom-filter
+// resolve) load in the background.
+async function TasksBoardSection({
+  orgId,
+  view,
+  groupBy,
+  taskFilters,
+  customFilterTaskIdsTree,
+  pageSize,
+  apiQueryString,
+  queryString,
+  resolvedProjectId,
+  noDeadlineActive,
+}: {
+  orgId: string;
+  view: "kanban" | "list" | "calendar" | "pivot";
+  groupBy: string[];
+  taskFilters: ReturnType<typeof buildTaskFiltersFromParams>["filters"];
+  customFilterTaskIdsTree: string | null;
+  pageSize: number;
+  apiQueryString: string;
+  queryString: string;
+  resolvedProjectId: string | null;
+  noDeadlineActive: boolean;
+}) {
+  const t = await getTranslations("TasksPage");
+
+  // Custom-filter compile + lookup runs in parallel with the main bundle
+  // fetch via Promise.all below.
+  const customFilterPromise: Promise<string[] | null> = (async () => {
+    const customTree = decodeFilterFromUrl(customFilterTaskIdsTree);
+    if (!customTree) return null;
+    const compiled = compileFilterTree(customTree, (name) =>
+      getTaskField(name, (k) => k),
+    );
+    if (!compiled) return null;
+    const { data, error } = await supabaseAdmin
+      .from("tasks")
+      .select("id")
+      .eq("organization_id", orgId)
+      .limit(5000)
+      .or(compiled.clause);
+    return error ? [] : (data ?? []).map((r) => r.id as string);
+  })();
+
+  const customFilterTaskIds = await customFilterPromise;
+  const effectiveFilters = { ...taskFilters, customFilterTaskIds };
+
+  const [boardBundle, listBundle] = await Promise.all([
+    view === "kanban"
+      ? loadTaskBoardPageForGlobalView(orgId, effectiveFilters, {
+          limit: pageSize,
+          offset: 0,
+        })
+      : Promise.resolve({ rows: [], totalCount: 0 }),
+    view === "kanban"
+      ? Promise.resolve({ rows: [], totalCount: 0 })
+      : loadTasksPageForGlobalView(orgId, effectiveFilters, {
+          limit: pageSize,
+          offset: 0,
+        }),
+  ]);
+
+  const filteredTotalCount =
+    view === "kanban" ? boardBundle.totalCount : listBundle.totalCount;
+  const initialLoadedCount =
+    view === "kanban" ? boardBundle.rows.length : listBundle.rows.length;
+
+  return (
+    <TasksCountProvider key={queryString} initialLoaded={initialLoadedCount}>
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
         <Suspense fallback={null}>
           <TasksToolbarMeta
-            orgId={session.orgId}
-            projectId={resolvedProjectId ?? null}
+            orgId={orgId}
+            projectId={resolvedProjectId}
             filteredTotalCount={filteredTotalCount}
             noDeadlineActive={noDeadlineActive}
             noDeadlineHref={noDeadlineActive ? "/tasks" : "/tasks?f=no_deadline"}
@@ -211,18 +249,19 @@ export default async function TasksPage({
 
       <TasksInfiniteView
         view={view}
-        groupBy={groupBy}
+        groupBy={groupBy as Parameters<typeof TasksInfiniteView>[0]["groupBy"]}
         queryString={apiQueryString}
         initialBoardTasks={boardBundle.rows}
         initialListTasks={listBundle.rows}
         totalCount={filteredTotalCount}
         pageSize={pageSize}
       />
-      </TasksCountProvider>
-    </div>
+    </TasksCountProvider>
   );
 }
 
+// Lightweight fallback so the page chrome (banner + toolbar shell) is visible
+// while TasksBoardSection streams.
 async function ProjectScopeBanner({
   orgId,
   projectId,
@@ -331,32 +370,23 @@ async function TasksToolbarMeta({
 
   const totalCount = totalRes.count ?? 0;
   const noDeadlineCount = noDeadlineRes.error ? null : noDeadlineRes.count ?? 0;
+  const trailingText =
+    filteredTotalCount !== totalCount ? `من أصل ${totalCount}` : null;
 
   return (
     <>
-      <Link
-        href={noDeadlineHref}
-        title={noDeadlineCount === null ? kpiErrorLabel : kpiNoDeadlineHintLabel}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-          noDeadlineActive
-            ? "border-cyan/40 bg-cyan-dim text-cyan"
-            : "border-soft bg-card text-foreground/70 hover:text-foreground",
-        )}
-      >
-        <CalendarOff className="size-3.5" />
-        {kpiNoDeadlineLabel}
-        {noDeadlineCount !== null && (
-          <span className="tabular-nums rounded-full bg-soft-2/60 px-1.5 text-[10px]">
-            {noDeadlineCount}
-          </span>
-        )}
-      </Link>
-      {filteredTotalCount !== totalCount && (
-        <span className="text-[11px] text-muted-foreground">
-          من أصل {totalCount}
-        </span>
-      )}
+      <TasksModuleTabsMeta
+        trailingText={trailingText}
+        pills={[
+          {
+            label: kpiNoDeadlineLabel,
+            href: noDeadlineHref,
+            active: noDeadlineActive,
+            count: noDeadlineCount,
+            title: noDeadlineCount === null ? kpiErrorLabel : kpiNoDeadlineHintLabel,
+          },
+        ]}
+      />
     </>
   );
 }

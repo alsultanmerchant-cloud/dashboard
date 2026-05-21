@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { LiveProject } from "@/lib/odoo/live";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
@@ -69,6 +70,20 @@ export type ProjectSearchFacetField =
 export type ProjectSearchFacet = {
   field: ProjectSearchFacetField;
   value: string;
+};
+
+export type ProjectSmartBadgeData = {
+  topAccountManagers: Array<{
+    id: string;
+    name: string;
+    openTasks: number;
+    projects: number;
+  }>;
+  topTags: Array<{
+    id: string;
+    name: string;
+    projects: number;
+  }>;
 };
 
 /** Pre-filter project IDs via PostgREST using the custom-filter tree.
@@ -340,6 +355,110 @@ const aggregateProjectTotals = cache(async (organizationId: string) => {
 });
 
 export const getProjectTotals = aggregateProjectTotals;
+
+export const getProjectSmartBadgeData = unstable_cache(
+  async (organizationId: string): Promise<ProjectSmartBadgeData> => {
+    const [{ data: projects }, { data: openTasks }, { data: tagAssignments }] = await Promise.all([
+      supabaseAdmin
+        .from("projects")
+        .select(
+          "id, account_manager_employee_id, account_manager:employee_profiles!projects_account_manager_employee_id_fkey(id, full_name)",
+        )
+        .eq("organization_id", organizationId)
+        .neq("status", "archived"),
+      supabaseAdmin
+        .from("tasks")
+        .select("project_id")
+        .eq("organization_id", organizationId)
+        .is("archived_at", null)
+        .neq("stage", "done"),
+      supabaseAdmin
+        .from("project_tag_assignments")
+        .select("project_id, tag:project_tags(id, name)")
+        .eq("organization_id", organizationId),
+    ]);
+
+    const activeProjectIds = new Set<string>();
+    const projectToManager = new Map<string, { id: string; name: string }>();
+
+    for (const row of (projects ?? []) as Array<{
+      id: string;
+      account_manager_employee_id: string | null;
+      account_manager:
+        | { id: string; full_name: string | null }
+        | { id: string; full_name: string | null }[]
+        | null;
+    }>) {
+      activeProjectIds.add(row.id);
+      const manager = Array.isArray(row.account_manager) ? row.account_manager[0] : row.account_manager;
+      if (row.account_manager_employee_id && manager?.full_name) {
+        projectToManager.set(row.id, {
+          id: row.account_manager_employee_id,
+          name: manager.full_name,
+        });
+      }
+    }
+
+    const managerAgg = new Map<string, { id: string; name: string; openTasks: number; projectIds: Set<string> }>();
+    for (const row of (openTasks ?? []) as Array<{ project_id: string | null }>) {
+      if (!row.project_id || !activeProjectIds.has(row.project_id)) continue;
+      const manager = projectToManager.get(row.project_id);
+      if (!manager) continue;
+      const slot = managerAgg.get(manager.id) ?? {
+        id: manager.id,
+        name: manager.name,
+        openTasks: 0,
+        projectIds: new Set<string>(),
+      };
+      slot.openTasks += 1;
+      slot.projectIds.add(row.project_id);
+      managerAgg.set(manager.id, slot);
+    }
+
+    const tagAgg = new Map<string, { id: string; name: string; projectIds: Set<string> }>();
+    for (const row of (tagAssignments ?? []) as Array<{
+      project_id: string | null;
+      tag:
+        | { id: string; name: string | null }
+        | { id: string; name: string | null }[]
+        | null;
+    }>) {
+      if (!row.project_id || !activeProjectIds.has(row.project_id)) continue;
+      const tag = Array.isArray(row.tag) ? row.tag[0] : row.tag;
+      if (!tag?.id || !tag.name) continue;
+      const slot = tagAgg.get(tag.id) ?? {
+        id: tag.id,
+        name: tag.name,
+        projectIds: new Set<string>(),
+      };
+      slot.projectIds.add(row.project_id);
+      tagAgg.set(tag.id, slot);
+    }
+
+    return {
+      topAccountManagers: [...managerAgg.values()]
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          openTasks: entry.openTasks,
+          projects: entry.projectIds.size,
+        }))
+        .sort((a, b) => b.openTasks - a.openTasks || b.projects - a.projects || a.name.localeCompare(b.name))
+        .slice(0, 2),
+      topTags: [...tagAgg.values()]
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          projects: entry.projectIds.size,
+        }))
+        .filter((entry) => entry.projects >= 2)
+        .sort((a, b) => b.projects - a.projects || a.name.localeCompare(b.name))
+        .slice(0, 3),
+    };
+  },
+  ["project-smart-badges"],
+  { revalidate: 300 },
+);
 
 export async function listProjects(orgId: string) {
   const { data, error } = await supabaseAdmin

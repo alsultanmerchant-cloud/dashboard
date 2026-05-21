@@ -17,6 +17,13 @@ interface TopbarPageMeta {
 interface ModuleTabsMeta {
   trailingText?: string;
   isBusy?: boolean;
+  pills?: {
+    label: string;
+    href?: string;
+    active?: boolean;
+    count?: number | null;
+    title?: string;
+  }[];
 }
 
 export type TimeFilter = "اليوم" | "الأسبوع" | "الشهر" | "الكل";

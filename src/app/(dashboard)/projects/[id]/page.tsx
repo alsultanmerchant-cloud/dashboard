@@ -3,7 +3,7 @@ import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
-  Briefcase, Calendar, ListTodo, Star, Users,
+  Briefcase, Calendar, ListTodo, Users,
 } from "lucide-react";
 import { ProjectInfoChrome } from "./project-info-chrome";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
@@ -33,6 +33,7 @@ import { listServiceCategories } from "@/lib/data/service-categories";
 import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate, type EmployeePickOption } from "./services-panel";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
 import { HoldDialog } from "./hold-dialog";
+import { RecomputeTeamButton } from "./recompute-team-button";
 import { ProjectHolidaysPanel, type ProjectHolidayRow } from "./project-holidays-panel";
 import { ProjectNotesPanel, type ProjectNoteRow } from "./project-notes-panel";
 import { listProjectWhatsAppGroups, suggestGroupName } from "@/lib/data/whatsapp";
@@ -42,6 +43,7 @@ import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
 import { buildTaskFiltersFromParams } from "../../tasks/_filter_params";
 import { SmartSearchBar } from "../../tasks/smart-search-bar";
 import { cn } from "@/lib/utils";
+import { ProjectFavoriteButton } from "@/components/projects/project-favorite-button";
 
 const TaskBoard = dynamic(() => import("./task-board").then((mod) => mod.TaskBoard));
 const ProjectChatterPanel = dynamic(
@@ -211,8 +213,6 @@ export default async function ProjectDetailPage({
     getTranslations("Nav"),
     requirePagePermission("projects.view"),
   ]);
-  const project = await getProject(session.orgId, id);
-  if (!project) notFound();
   // Same filter surface as the global /tasks page, but scoped to this
   // project. The chip menu (SmartSearchBar) reads + writes URL params; we
   // parse those into TaskFilters here and pass them to the loader.
@@ -222,21 +222,26 @@ export default async function ProjectDetailPage({
     projectId: id,
   });
 
-  const [summary, holdActor, projectTags, followersRes] = await Promise.all([
-    getProjectTaskSummary(session.orgId, project.id),
-    // Key off held_at, not status — Odoo-imported holds can sit on
-    // status='archived' or other text values; the ribbon below already
-    // keys off held_at for the same reason.
-    project.held_at
-      ? getProjectHoldActor(session.orgId, project.id)
-      : Promise.resolve(null),
-    getProjectAttachedTags(session.orgId, project.id),
+  // Parallelize the critical-path fetches: project, summary, tags, follower
+  // count all key off (orgId, projectId) and have no inter-dependency, so we
+  // batch them into one round-trip instead of awaiting project first.
+  const [project, summary, projectTags, followersRes] = await Promise.all([
+    getProject(session.orgId, id),
+    getProjectTaskSummary(session.orgId, id),
+    getProjectAttachedTags(session.orgId, id),
     supabaseAdmin
       .from("project_followers")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", session.orgId)
       .eq("project_id", id),
   ]);
+  if (!project) notFound();
+  // Key off held_at, not status — Odoo-imported holds can sit on
+  // status='archived' or other text values; the ribbon below already
+  // keys off held_at for the same reason.
+  const holdActor = project.held_at
+    ? await getProjectHoldActor(session.orgId, project.id)
+    : null;
   const attachedTags = projectTags;
   const followerCount = followersRes.count ?? 0;
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
@@ -367,6 +372,9 @@ export default async function ProjectDetailPage({
                     <BulkReassignSection orgId={session.orgId} projectId={project.id} />
                   </Suspense>
                 )}
+                {hasPermission(session, "projects.manage") && (
+                  <RecomputeTeamButton projectId={project.id} />
+                )}
               </div>
               {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
                 <span className="inline-flex items-center rounded-full border border-amber/40 bg-amber-dim px-2 py-1 text-[10px] font-semibold text-amber">
@@ -381,7 +389,10 @@ export default async function ProjectDetailPage({
               </p>
               <div className="mt-2 flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <Star className="size-5 text-muted-foreground" />
+                  <ProjectFavoriteButton
+                    projectId={project.id}
+                    initialFavorite={Boolean((project as { is_favorite?: boolean | null }).is_favorite)}
+                  />
                   <h1 className="truncate text-[1.65rem] font-semibold tracking-tight text-foreground">
                     {project.name}
                   </h1>
@@ -542,11 +553,15 @@ export default async function ProjectDetailPage({
       <SectionTitle title={t("sections.services.title")} />
       <Card className="mb-8">
         <CardContent className="p-4">
-          <ProjectServicesSection
-            project={project}
-            orgId={session.orgId}
-            canManage={session.permissions.has("projects.manage") || session.isOwner}
-          />
+          <Suspense
+            fallback={<div className="text-sm text-muted-foreground">{t("loading.tags")}</div>}
+          >
+            <ProjectServicesSection
+              project={project}
+              orgId={session.orgId}
+              canManage={session.permissions.has("projects.manage") || session.isOwner}
+            />
+          </Suspense>
         </CardContent>
       </Card>
 

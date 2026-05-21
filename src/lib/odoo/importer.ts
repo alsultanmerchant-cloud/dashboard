@@ -413,7 +413,10 @@ async function importServices(ctx: ImportContext): Promise<number> {
     // Odoo's 14 service categories include "🟢Media Buying" which would
     // map to the same slug). The id suffix guarantees uniqueness without
     // depending on a deduping pass.
-    const stripped = c.name
+    // Odoo returns `false` for empty strings, so coerce defensively before
+    // calling string methods.
+    const nameStr = typeof c.name === "string" ? c.name : "";
+    const stripped = nameStr
       .replace(/[\p{Emoji}\p{Extended_Pictographic}]/gu, "")
       .trim()
       .toLowerCase()
@@ -425,7 +428,7 @@ async function importServices(ctx: ImportContext): Promise<number> {
       organization_id: ctx.organizationId,
       external_source: SOURCE,
       external_id: c.id,
-      name: c.name,
+      name: nameStr || `Category ${c.id}`,
       slug,
       is_active: true,
     };

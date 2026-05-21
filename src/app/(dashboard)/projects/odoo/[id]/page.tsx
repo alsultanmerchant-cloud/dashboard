@@ -4,7 +4,7 @@ import { getTranslations } from "next-intl/server";
 import {
   ListTodo, CheckCircle2, AlertTriangle, Activity,
   Calendar, User, Building2, ChevronLeft, ArrowRight,
-  Star, Hash, MapPin, DollarSign, Briefcase,
+  Hash, MapPin, DollarSign, Briefcase,
   MessageSquare, FileText, BarChart3, Users,
 } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
@@ -23,6 +23,7 @@ import { DetailTabs } from "./detail-tabs";
 import { StatusBanner } from "./status-banner";
 import { UpdatesFeed } from "./updates-feed";
 import type { StatusValue } from "./_status-actions";
+import { ProjectFavoriteButton } from "@/components/projects/project-favorite-button";
 
 // Mirror the Rwasem card stripe palette so the detail header matches
 // the project's Odoo color exactly.
@@ -135,11 +136,10 @@ export default async function OdooProjectDetailPage({
         <div className="relative p-5 ps-6 space-y-4">
           {/* Title row */}
           <div className="flex items-start gap-3">
-            <Star
-              className={cn(
-                "size-5 shrink-0",
-                project.isFavorite ? "fill-amber-400 text-amber-500" : "text-muted-foreground",
-              )}
+            <ProjectFavoriteButton
+              projectOdooId={project.odooId}
+              initialFavorite={project.isFavorite}
+              className="shrink-0"
             />
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-xl font-bold text-foreground">{project.name}</h1>

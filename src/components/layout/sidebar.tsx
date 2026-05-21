@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { X, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react";
+import { X, LogOut } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -14,9 +15,11 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher";
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
+  onDesktopExpandedChange?: (expanded: boolean) => void;
 }
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, onDesktopExpandedChange }: SidebarProps) {
+  const logoSrc = "https://skylightad.com/wp-content/uploads/elementor/thumbs/logo-1080-qz82xj5nel49tz0etciq6bxtjqy8yu6tnelutr5wx4.png";
   const pathname = usePathname();
   const { user, signOut, orgs, hasPermission } = useAuth();
   const tApp = useTranslations("App");
@@ -25,16 +28,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const tGroups = useTranslations("NavGroups");
   const expanded = !!open;
   const [desktopHovered, setDesktopHovered] = useState(false);
-  const [desktopPinned, setDesktopPinned] = useState(false);
-  const desktopExpanded = expanded || desktopPinned || desktopHovered;
+  const desktopExpanded = expanded || desktopHovered;
+  const desktopCollapsed = !expanded && !desktopExpanded;
 
   const collapseSidebar = () => {
     onClose?.();
   };
 
-  const toggleDesktopPinned = () => {
-    setDesktopPinned((value) => !value);
-  };
+  useEffect(() => {
+    onDesktopExpandedChange?.(desktopExpanded);
+  }, [desktopExpanded, onDesktopExpandedChange]);
 
   const isItemVisible = (item: NavItem) => {
     if (!user) return !item.perm;
@@ -64,9 +67,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         onMouseEnter={() => setDesktopHovered(true)}
         onMouseLeave={() => setDesktopHovered(false)}
         data-expanded={expanded}
-        data-desktop-pinned={desktopPinned}
         className={cn(
-          "fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform,padding,background-color,border-color,box-shadow] duration-300 ease-in-out",
+          "group/sidebar fixed top-3 bottom-3 z-50 overflow-hidden rounded-[28px] flex flex-col transition-[width,transform,padding,background-color,border-color,box-shadow] duration-300 ease-in-out",
           "bg-sidebar text-sidebar-foreground border border-sidebar-border shadow-[var(--surface-elev)]",
           "w-[252px]",
           // RTL pins to the right edge; LTR to the left.
@@ -74,39 +76,36 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           open
             ? "translate-x-0"
             : "rtl:translate-x-[268px] ltr:-translate-x-[268px] lg:rtl:translate-x-0 lg:ltr:translate-x-0",
-          desktopExpanded ? "lg:w-[252px]" : "lg:w-[72px]",
-          !expanded &&
-            (desktopHovered
-              ? "lg:top-3 lg:bottom-3 lg:h-auto lg:rounded-[28px] lg:border-sidebar-border lg:bg-sidebar lg:shadow-[var(--surface-elev)]"
-              : "lg:top-3 lg:bottom-auto lg:h-[60px] lg:rounded-[24px] lg:border-transparent lg:bg-transparent lg:shadow-none"),
+          desktopExpanded ? "lg:w-[252px]" : "lg:w-[58px]",
           expanded && "lg:!w-[252px]",
         )}
       >
-        <button
-          type="button"
-          onClick={toggleDesktopPinned}
-          aria-label={desktopExpanded ? "Collapse sidebar" : "Expand sidebar"}
-          title={desktopExpanded ? "Collapse sidebar" : "Expand sidebar"}
-          className={cn(
-            "hidden lg:flex absolute top-4 z-10 h-9 w-9 items-center justify-center rounded-xl border border-sidebar-border bg-sidebar-accent text-sidebar-foreground/80 shadow-[var(--surface-elev)] transition-all duration-200 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-            "rtl:left-3 ltr:right-3",
-            desktopExpanded
-              ? "opacity-100"
-              : "opacity-100 ring-1 ring-white/12",
-          )}
-        >
-          {desktopExpanded ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-        </button>
-
         {/* Logo + org */}
         <div
           className={cn(
             "px-2.5 lg:px-3 pt-4 pb-3 border-b border-sidebar-border",
-            !expanded && "lg:px-2",
-            !desktopExpanded && "lg:border-transparent",
+            !expanded && "lg:px-1.5",
+            desktopCollapsed && "lg:px-1.5 lg:pt-3 lg:pb-1.5",
           )}
         >
-          <div className={cn("flex items-start gap-3", !expanded && "lg:justify-center lg:gap-0")}>
+          <div className={cn("flex items-start gap-3", desktopCollapsed && "lg:justify-center lg:items-center lg:gap-0")}>
+            <div
+              className={cn(
+                "hidden lg:flex size-10 items-center justify-center rounded-[18px] border border-sidebar-border bg-sidebar-accent overflow-hidden shrink-0 transition-all duration-200",
+                desktopCollapsed && "lg:size-9 lg:rounded-2xl",
+                desktopExpanded && "lg:hidden",
+              )}
+            >
+              <Image
+                src={logoSrc}
+                alt="Sky Light"
+                width={28}
+                height={28}
+                className={cn("size-7 object-contain", desktopCollapsed && "lg:size-6")}
+                loading="eager"
+                unoptimized
+              />
+            </div>
             <div
               className={cn(
                 "flex-1 min-w-0 transition-opacity duration-200",
@@ -126,18 +125,21 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </div>
           <div
             className={cn(
-              "mt-3 flex items-center gap-2.5 rounded-xl bg-sidebar-accent border border-sidebar-border px-3 py-2 transition-opacity duration-200",
+              "mt-3 flex items-center gap-2.5 rounded-xl bg-sidebar-accent border border-sidebar-border px-3 py-2 transition-all duration-200",
+              desktopCollapsed && "lg:mt-0 lg:h-0 lg:overflow-hidden lg:border-transparent lg:px-0 lg:py-0 lg:opacity-0",
               desktopExpanded
                 ? "lg:opacity-100 lg:pointer-events-auto"
                 : "lg:opacity-0 lg:pointer-events-none",
             )}
           >
-            <img
-              src="https://skylightad.com/wp-content/uploads/elementor/thumbs/logo-1080-qz82xj5nel49tz0etciq6bxtjqy8yu6tnelutr5wx4.png"
+            <Image
+              src={logoSrc}
               alt="Sky Light"
+              width={32}
+              height={32}
               className="size-8 object-contain rounded-lg p-1"
               loading="eager"
-              decoding="async"
+              unoptimized
             />
             <div className="flex-1 text-start min-w-0">
               <p className="text-xs font-semibold text-sidebar-foreground truncate">
@@ -155,10 +157,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <nav
           className={cn(
             "flex-1 overflow-y-auto overflow-x-hidden px-2 lg:px-2 pt-3 pb-2 space-y-3 scrollbar-hide",
-            "transition-opacity duration-200",
-            desktopExpanded
-              ? "lg:opacity-100 lg:pointer-events-auto"
-              : "lg:opacity-0 lg:pointer-events-none",
+            desktopCollapsed && "lg:px-1.5 lg:pt-1",
           )}
         >
           {NAV_GROUPS.map((group) => {
@@ -169,8 +168,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <div key={group.labelKey}>
                 <div
                   className={cn(
-                    "px-3 pb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/55 transition-opacity duration-200",
-                    desktopExpanded ? "lg:opacity-100" : "lg:opacity-0",
+                    "px-3 pb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/55 transition-all duration-200",
+                    desktopExpanded ? "lg:opacity-100 lg:h-auto" : "lg:h-0 lg:overflow-hidden lg:pb-0 lg:opacity-0",
                   )}
                 >
                   {groupLabel}
@@ -181,25 +180,30 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     const active = isActive(item.href);
                     const itemLabel = tNav(item.labelKey);
                     return (
-                      <li key={item.href}>
+                      <li key={item.href} className={cn(desktopCollapsed && "lg:flex lg:justify-center")}>
                         <Link
                           href={item.href}
                           onClick={collapseSidebar}
                           title={itemLabel}
                           className={cn(
                             "group relative flex items-center gap-3 overflow-hidden rounded-xl px-2 py-2 text-[13px] font-semibold transition-all duration-200",
-                            active
+                            desktopCollapsed && "lg:h-10 lg:w-10 lg:justify-center lg:rounded-xl lg:px-0",
+                            active && desktopCollapsed
+                              ? "lg:bg-transparent lg:text-sidebar-foreground lg:shadow-none"
+                              : active
                               ? "bg-sidebar-primary text-sidebar-primary-foreground font-bold shadow-[0_4px_14px_rgba(0,0,0,0.18)]"
                               : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                           )}
                         >
-                          {active && (
+                          {active && !desktopCollapsed && (
                             <span className="absolute inset-y-1.5 rtl:right-0 ltr:left-0 w-[3px] rounded-full bg-sidebar-primary-foreground/80" />
                           )}
                           <span
                             className={cn(
                               "flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 shrink-0",
-                              active
+                              active && desktopCollapsed
+                                ? "bg-white text-sidebar-primary-foreground shadow-[0_4px_12px_rgba(14,9,60,0.16)]"
+                                : active
                                 ? "bg-sidebar-primary-foreground/15 text-sidebar-primary-foreground"
                                 : "bg-sidebar-accent text-sidebar-foreground/85 group-hover:text-sidebar-foreground",
                             )}
@@ -209,7 +213,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           <span
                             className={cn(
                               "flex-1 truncate transition-opacity duration-200 whitespace-nowrap",
-                              desktopExpanded ? "lg:opacity-100" : "lg:opacity-0",
+                              desktopExpanded
+                                ? "lg:opacity-100 lg:w-auto"
+                                : "lg:w-0 lg:overflow-hidden lg:opacity-0",
                             )}
                           >
                             {itemLabel}
@@ -217,8 +223,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           {item.comingSoon && (
                             <span
                               className={cn(
-                                "rounded-full bg-amber-dim px-1.5 py-0.5 text-[9px] font-medium text-amber tracking-tight transition-opacity duration-200",
-                                desktopExpanded ? "lg:opacity-100" : "lg:opacity-0",
+                                "rounded-full bg-amber-dim px-1.5 py-0.5 text-[9px] font-medium text-amber tracking-tight transition-all duration-200",
+                                desktopExpanded
+                                  ? "lg:opacity-100 lg:w-auto"
+                                  : "lg:w-0 lg:overflow-hidden lg:px-0 lg:py-0 lg:opacity-0",
                               )}
                             >
                               {tCommon("comingSoon")}
@@ -238,16 +246,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <div
           className={cn(
             "m-2 lg:m-2 mt-0 rounded-2xl border border-sidebar-border bg-sidebar-accent p-2.5 transition-all duration-200",
-            !expanded && "lg:border-transparent lg:bg-transparent lg:p-0",
-            desktopExpanded
-              ? "lg:opacity-100 lg:pointer-events-auto"
-              : "lg:opacity-0 lg:pointer-events-none",
+            desktopCollapsed && "lg:flex lg:justify-center lg:border-transparent lg:bg-transparent lg:p-0 lg:mx-1.5",
           )}
         >
           <div
             className={cn(
               "mb-2.5 flex items-center justify-between gap-2 text-[10px] transition-opacity duration-200",
-              desktopExpanded ? "lg:opacity-100" : "lg:opacity-0",
+              desktopExpanded
+                ? "lg:opacity-100 lg:h-auto"
+                : "lg:h-0 lg:overflow-hidden lg:mb-0 lg:opacity-0",
             )}
           >
             <span className="text-sidebar-foreground/65">{tApp("operationalStatus")}</span>
@@ -256,12 +263,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <span className="rounded-full bg-green-dim px-2 py-0.5 text-cc-green">{tApp("live")}</span>
             </div>
           </div>
-          <div className={cn("flex items-center gap-2", !expanded && "lg:justify-center lg:gap-0")}>
+          <div className={cn("flex items-center gap-2", desktopCollapsed && "lg:justify-center lg:gap-0")}>
             <div
               className={cn(
                 "flex items-center justify-center overflow-hidden shrink-0 transition-all duration-200",
-                !expanded
-                  ? "lg:h-11 lg:w-11 lg:rounded-2xl lg:bg-sidebar-primary/15 lg:ring-1 lg:ring-sidebar-border"
+                desktopCollapsed
+                  ? "lg:h-10 lg:w-10 lg:rounded-xl lg:bg-sidebar-primary/15 lg:ring-1 lg:ring-sidebar-border"
                   : "h-9 w-9 rounded-xl bg-sidebar-primary/20 text-sidebar-primary ring-1 ring-sidebar-border",
               )}
             >
@@ -276,7 +283,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 <AvatarFallback
                   className={cn(
                     "bg-transparent font-bold",
-                    expanded ? "text-xs text-sidebar-primary" : "lg:text-sm lg:tracking-[0.2em] lg:text-sidebar-primary",
+                    desktopCollapsed ? "lg:text-sm lg:tracking-[0.2em] lg:text-sidebar-primary" : "text-xs text-sidebar-primary",
                   )}
                 >
                   {user?.name?.[0] || "م"}

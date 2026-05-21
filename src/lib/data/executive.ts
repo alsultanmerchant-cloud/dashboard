@@ -1,0 +1,1069 @@
+import "server-only";
+import { cache } from "react";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  getDashboardOdooMetrics,
+  type DashboardOdooMetrics,
+} from "@/lib/odoo/live";
+import type { TaskStage } from "@/lib/labels";
+
+// =========================================================================
+// Executive (/dashboard) data layer.
+// One module per page; each fetcher wrapped in React `cache()` so that
+// multiple Suspense boundaries reusing the same data hit the source once.
+// Live counts come from Odoo (always-fresh via the live helpers); deltas
+// and per-client rollups come from Supabase.
+// =========================================================================
+
+// ---- Hero KPIs (on-time, overdue, stuck-in-review, revisions) ------------
+
+export interface HeroKpis {
+  onTime: { pct: number | null; sample: number };
+  overdue: { current: number; weekAgo: number };
+  stuckInReview: { current: number };
+  revisionVolume: { totalComments30d: number };
+}
+
+async function _getHeroKpis(orgId: string): Promise<HeroKpis> {
+  const [odooNow, weekAgoOverdue, totalRevision30d] = await Promise.all([
+    getDashboardOdooMetrics().catch(() => null),
+    countOverdueAt(orgId, daysAgoIso(7)),
+    countRevisionCommentsSince(orgId, daysAgoIso(30)),
+  ]);
+
+  return {
+    onTime: {
+      pct: odooNow?.onTimePct ?? null,
+      sample: odooNow?.onTimeSample ?? 0,
+    },
+    overdue: {
+      current: odooNow?.overdueCount ?? 0,
+      weekAgo: weekAgoOverdue,
+    },
+    stuckInReview: {
+      current: odooNow?.reviewBacklog ?? 0,
+    },
+    revisionVolume: {
+      totalComments30d: totalRevision30d,
+    },
+  };
+}
+
+export const getHeroKpis = cache(_getHeroKpis);
+
+// ---- Client delivery health (top/bottom 5) -------------------------------
+
+export interface ClientHealthRow {
+  clientId: string;
+  clientName: string;
+  activeProjectCount: number;
+  openTaskCount: number;
+  overdueTaskCount: number;
+  onTimePct30d: number | null;
+  deliveredCount30d: number;
+  avgRevisionCount: number;
+  totalRevisionComments: number;
+  lastActivityAt: string | null;
+}
+
+async function _getClientHealth(orgId: string): Promise<{
+  worst: ClientHealthRow[];
+  best: ClientHealthRow[];
+}> {
+  const { data, error } = await supabaseAdmin
+    .from("v_client_delivery_health")
+    .select(
+      "client_id, client_name, active_project_count, open_task_count, overdue_task_count, on_time_pct_30d, delivered_count_30d, avg_revision_count, total_revision_comments, last_activity_at",
+    )
+    .eq("organization_id", orgId)
+    .gt("open_task_count", 0);
+  if (error) throw error;
+
+  const rows: ClientHealthRow[] = (data ?? []).map((r) => ({
+    clientId: r.client_id as string,
+    clientName: r.client_name as string,
+    activeProjectCount: r.active_project_count as number,
+    openTaskCount: r.open_task_count as number,
+    overdueTaskCount: r.overdue_task_count as number,
+    onTimePct30d: r.on_time_pct_30d === null ? null : Number(r.on_time_pct_30d),
+    deliveredCount30d: r.delivered_count_30d as number,
+    avgRevisionCount: Number(r.avg_revision_count ?? 0),
+    totalRevisionComments: r.total_revision_comments as number,
+    lastActivityAt: (r.last_activity_at as string | null) ?? null,
+  }));
+
+  // Worst-5 ranking: overdue desc, on-time asc (nulls last), revision volume desc.
+  // Best-5: on-time desc among clients with >= 3 deliveries in 30d.
+  const worst = [...rows]
+    .sort((a, b) => {
+      if (b.overdueTaskCount !== a.overdueTaskCount) return b.overdueTaskCount - a.overdueTaskCount;
+      const aPct = a.onTimePct30d ?? -1;
+      const bPct = b.onTimePct30d ?? -1;
+      if (aPct !== bPct) return aPct - bPct;
+      return b.totalRevisionComments - a.totalRevisionComments;
+    })
+    .slice(0, 5);
+
+  const best = [...rows]
+    .filter((r) => r.deliveredCount30d >= 3 && r.onTimePct30d !== null)
+    .sort((a, b) => (b.onTimePct30d ?? 0) - (a.onTimePct30d ?? 0))
+    .slice(0, 5);
+
+  return { worst, best };
+}
+
+export const getClientHealth = cache(_getClientHealth);
+
+// ---- Stage funnel (count + dwell per stage) ------------------------------
+
+export const FUNNEL_STAGE_ORDER: TaskStage[] = [
+  "new",
+  "in_progress",
+  "manager_review",
+  "specialist_review",
+  "ready_to_send",
+  "sent_to_client",
+  "client_changes",
+  "done",
+];
+
+export interface FunnelStageRow {
+  stage: TaskStage;
+  openCount: number;
+  avgDwellHours: number;
+}
+
+async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
+  const [stagesRes, dwellRes] = await Promise.all([
+    supabaseAdmin
+      .from("tasks")
+      .select("stage")
+      .eq("organization_id", orgId)
+      .is("archived_at", null),
+    supabaseAdmin
+      .from("task_stage_history")
+      .select("to_stage, duration_seconds")
+      .eq("organization_id", orgId)
+      .not("exited_at", "is", null),
+  ]);
+  if (stagesRes.error) throw stagesRes.error;
+  if (dwellRes.error) throw dwellRes.error;
+
+  const counts = new Map<TaskStage, number>();
+  for (const r of stagesRes.data ?? []) {
+    const s = (r as { stage: TaskStage }).stage;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+
+  const dwellSums = new Map<TaskStage, { total: number; n: number }>();
+  for (const r of dwellRes.data ?? []) {
+    const s = (r as { to_stage: TaskStage }).to_stage;
+    const d = (r as { duration_seconds: number | null }).duration_seconds ?? 0;
+    if (d <= 0) continue;
+    const cur = dwellSums.get(s) ?? { total: 0, n: 0 };
+    cur.total += d;
+    cur.n += 1;
+    dwellSums.set(s, cur);
+  }
+
+  return FUNNEL_STAGE_ORDER.map((stage) => {
+    const d = dwellSums.get(stage);
+    return {
+      stage,
+      openCount: counts.get(stage) ?? 0,
+      avgDwellHours: d ? d.total / d.n / 3600 : 0,
+    };
+  });
+}
+
+export const getStageFunnel = cache(_getStageFunnel);
+
+// ---- Approval bottlenecks (oldest tasks in each review stage) ------------
+
+export interface BottleneckRow {
+  taskId: string;
+  title: string;
+  projectName: string | null;
+  stage: TaskStage;
+  enteredAt: string;
+  businessHoursInStage: number;
+}
+
+async function _getApprovalBottlenecks(orgId: string): Promise<BottleneckRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("v_review_backlog")
+    .select(
+      "task_id, stage, stage_entered_at, business_minutes_in_stage, task:tasks!inner(id, title, project:projects!inner(id, name))",
+    )
+    .eq("organization_id", orgId)
+    .order("business_minutes_in_stage", { ascending: false })
+    .limit(6);
+  if (error) throw error;
+
+  type Row = {
+    task_id: string;
+    stage: string;
+    stage_entered_at: string;
+    business_minutes_in_stage: number;
+    task: {
+      title: string;
+      project: { name: string } | { name: string }[] | null;
+    } | null;
+  };
+
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const project = Array.isArray(r.task?.project) ? r.task?.project[0] : r.task?.project;
+    return {
+      taskId: r.task_id,
+      title: r.task?.title ?? "—",
+      projectName: project?.name ?? null,
+      stage: r.stage as TaskStage,
+      enteredAt: r.stage_entered_at,
+      businessHoursInStage: Math.round(r.business_minutes_in_stage / 60),
+    };
+  });
+}
+
+export const getApprovalBottlenecks = cache(_getApprovalBottlenecks);
+
+// ---- Specialist load (top 8) ---------------------------------------------
+
+export interface SpecialistLoadRow {
+  employeeId: string;
+  fullName: string;
+  openCount: number;
+  allocatedHours: number;
+}
+
+async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("task_assignees")
+    .select(
+      "employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name)",
+    )
+    .eq("organization_id", orgId)
+    .eq("role_type", "agent");
+  if (error) throw error;
+
+  type Row = {
+    employee_id: string;
+    task:
+      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
+      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
+      | null;
+    employee:
+      | { id: string; full_name: string }
+      | { id: string; full_name: string }[]
+      | null;
+  };
+
+  const agg = new Map<string, { name: string; count: number; minutes: number }>();
+  for (const raw of ((data ?? []) as unknown as Row[])) {
+    const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
+    const e = Array.isArray(raw.employee) ? raw.employee[0] : raw.employee;
+    if (!t || !e) continue;
+    if (t.archived_at) continue;
+    if (t.stage === "done") continue;
+    const cur = agg.get(e.id) ?? { name: e.full_name, count: 0, minutes: 0 };
+    cur.count += 1;
+    cur.minutes += t.allocated_time_minutes ?? 0;
+    agg.set(e.id, cur);
+  }
+
+  return Array.from(agg.entries())
+    .map(([employeeId, v]) => ({
+      employeeId,
+      fullName: v.name,
+      openCount: v.count,
+      allocatedHours: Math.round((v.minutes / 60) * 10) / 10,
+    }))
+    .sort((a, b) => b.openCount - a.openCount)
+    .slice(0, 8);
+}
+
+export const getSpecialistLoadTop = cache(_getSpecialistLoadTop);
+
+// ---- Performer leaderboard (top/bottom 3 by on-time %) -------------------
+
+export interface PerformerRow {
+  employeeId: string;
+  fullName: string;
+  delivered30d: number;
+  onTimePct: number;
+}
+
+async function _getPerformerLeaderboard(orgId: string): Promise<{
+  top: PerformerRow[];
+  bottom: PerformerRow[];
+}> {
+  const since = daysAgoIso(30).slice(0, 10);
+  // Single round-trip: join task_assignees -> tasks!inner filtered to
+  // done tasks completed in the window. PostgREST filters parents when
+  // the embedded relation is !inner with .eq()/.gte() on it, so we get
+  // back exactly the rows we need with no IN-list blow-up.
+  const { data, error } = await supabaseAdmin
+    .from("task_assignees")
+    .select(
+      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name), task:tasks!inner(id, due_date, planned_date, completed_at, stage)",
+    )
+    .eq("organization_id", orgId)
+    .eq("role_type", "agent")
+    .eq("task.stage", "done")
+    .gte("task.completed_at", `${since}T00:00:00Z`);
+  if (error) throw error;
+
+  type ARow = {
+    task_id: string;
+    employee:
+      | { id: string; full_name: string }
+      | { id: string; full_name: string }[]
+      | null;
+    task:
+      | { id: string; due_date: string | null; planned_date: string | null; completed_at: string | null }
+      | { id: string; due_date: string | null; planned_date: string | null; completed_at: string | null }[]
+      | null;
+  };
+
+  const agg = new Map<string, { name: string; delivered: number; onTime: number }>();
+  const seen = new Set<string>();
+  for (const r of ((data ?? []) as unknown as ARow[])) {
+    const e = Array.isArray(r.employee) ? r.employee[0] : r.employee;
+    const t = Array.isArray(r.task) ? r.task[0] : r.task;
+    if (!e || !t) continue;
+    const key = `${e.id}:${r.task_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const deadline = t.due_date ?? t.planned_date;
+    if (!deadline || !t.completed_at) continue;
+    const onTime = t.completed_at.slice(0, 10) <= deadline;
+    const cur = agg.get(e.id) ?? { name: e.full_name, delivered: 0, onTime: 0 };
+    cur.delivered += 1;
+    if (onTime) cur.onTime += 1;
+    agg.set(e.id, cur);
+  }
+
+  const rows: PerformerRow[] = Array.from(agg.entries())
+    .filter(([, v]) => v.delivered >= 3)
+    .map(([employeeId, v]) => ({
+      employeeId,
+      fullName: v.name,
+      delivered30d: v.delivered,
+      onTimePct: Math.round((v.onTime / v.delivered) * 100),
+    }));
+
+  const top = [...rows].sort((a, b) => b.onTimePct - a.onTimePct).slice(0, 3);
+  const bottom = [...rows].sort((a, b) => a.onTimePct - b.onTimePct).slice(0, 3);
+
+  return { top, bottom };
+}
+
+export const getPerformerLeaderboard = cache(_getPerformerLeaderboard);
+
+// ---- On-time trend (30-day daily sparkline) ------------------------------
+
+export interface OnTimeTrendPoint {
+  date: string; // YYYY-MM-DD
+  pct: number | null;
+  sample: number;
+}
+
+async function _getOnTimeTrend30d(orgId: string): Promise<OnTimeTrendPoint[]> {
+  // Pull a wider window (last 37 days) so the rolling 7-day window has
+  // valid samples even at the left edge of the chart.
+  const since = daysAgoIso(37).slice(0, 10);
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select("completed_at, due_date, planned_date")
+    .eq("organization_id", orgId)
+    .eq("stage", "done")
+    .gte("completed_at", `${since}T00:00:00Z`)
+    .is("archived_at", null);
+  if (error) throw error;
+
+  // Daily counts for the wide window.
+  const daily = new Map<string, { total: number; onTime: number }>();
+  for (let i = 36; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+    daily.set(d, { total: 0, onTime: 0 });
+  }
+  for (const r of (data ?? []) as Array<{
+    completed_at: string | null;
+    due_date: string | null;
+    planned_date: string | null;
+  }>) {
+    if (!r.completed_at) continue;
+    const deadline = r.due_date ?? r.planned_date;
+    if (!deadline) continue;
+    const day = r.completed_at.slice(0, 10);
+    const b = daily.get(day);
+    if (!b) continue;
+    b.total += 1;
+    if (r.completed_at.slice(0, 10) <= deadline) b.onTime += 1;
+  }
+
+  // Rolling 7-day on-time pct ending on each of the last 30 days.
+  const ordered = Array.from(daily.entries());
+  const out: OnTimeTrendPoint[] = [];
+  for (let i = ordered.length - 30; i < ordered.length; i++) {
+    let total = 0;
+    let onTime = 0;
+    for (let j = Math.max(0, i - 6); j <= i; j++) {
+      total += ordered[j][1].total;
+      onTime += ordered[j][1].onTime;
+    }
+    out.push({
+      date: ordered[i][0],
+      sample: total,
+      pct: total === 0 ? null : Math.round((onTime / total) * 100),
+    });
+  }
+  return out;
+}
+
+export const getOnTimeTrend30d = cache(_getOnTimeTrend30d);
+
+// ---- Pulse strip (this week vs last week) --------------------------------
+
+export interface PulseDelta {
+  current: number;
+  previous: number;
+}
+
+export interface PulseStats {
+  completed: PulseDelta;
+  newClientChanges: PulseDelta;
+  tasksAdded: PulseDelta;
+  approvalsResolved: PulseDelta;
+}
+
+async function _getPulseStats(orgId: string): Promise<PulseStats> {
+  const now = new Date();
+  const thisStart = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+  const lastStart = new Date(now.getTime() - 14 * 86_400_000).toISOString();
+  const lastEnd = thisStart;
+
+  const [doneThis, doneLast, ccThis, ccLast, addThis, addLast, apprThis, apprLast] =
+    await Promise.all([
+      countTaskStageEntered(orgId, "done", thisStart, undefined),
+      countTaskStageEntered(orgId, "done", lastStart, lastEnd),
+      countTaskStageEntered(orgId, "client_changes", thisStart, undefined),
+      countTaskStageEntered(orgId, "client_changes", lastStart, lastEnd),
+      countTasksCreated(orgId, thisStart, undefined),
+      countTasksCreated(orgId, lastStart, lastEnd),
+      countApprovalsResolved(orgId, thisStart, undefined),
+      countApprovalsResolved(orgId, lastStart, lastEnd),
+    ]);
+
+  return {
+    completed: { current: doneThis, previous: doneLast },
+    newClientChanges: { current: ccThis, previous: ccLast },
+    tasksAdded: { current: addThis, previous: addLast },
+    approvalsResolved: { current: apprThis, previous: apprLast },
+  };
+}
+
+export const getPulseStats = cache(_getPulseStats);
+
+async function countTaskStageEntered(
+  orgId: string,
+  stage: string,
+  sinceIso: string,
+  untilIso: string | undefined,
+): Promise<number> {
+  let q = supabaseAdmin
+    .from("task_stage_history")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("to_stage", stage)
+    .gte("entered_at", sinceIso);
+  if (untilIso) q = q.lt("entered_at", untilIso);
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
+async function countTasksCreated(
+  orgId: string,
+  sinceIso: string,
+  untilIso: string | undefined,
+): Promise<number> {
+  let q = supabaseAdmin
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .gte("created_at", sinceIso);
+  if (untilIso) q = q.lt("created_at", untilIso);
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
+async function countApprovalsResolved(
+  orgId: string,
+  sinceIso: string,
+  untilIso: string | undefined,
+): Promise<number> {
+  let q = supabaseAdmin
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .not("approval_decided_at", "is", null)
+    .gte("approval_decided_at", sinceIso);
+  if (untilIso) q = q.lt("approval_decided_at", untilIso);
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
+// ---- Service-line health (per service: open, overdue, on-time pct) -------
+
+export interface ServiceHealthRow {
+  serviceId: string;
+  name: string;
+  slug: string;
+  openCount: number;
+  overdueCount: number;
+  delivered30d: number;
+  onTimePct30d: number | null;
+  avgRevisions: number;
+  // 30-point rolling 7-day on-time pct, ending today (for sparkline).
+  trend: Array<number | null>;
+}
+
+async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]> {
+  // Wide window for rolling trend (37d so first sparkline point has 7d behind it).
+  const sinceTrend = daysAgoIso(37).slice(0, 10);
+  const sinceTs30 = `${daysAgoIso(30).slice(0, 10)}T00:00:00Z`;
+
+  const [servicesRes, tasksRes] = await Promise.all([
+    supabaseAdmin
+      .from("services")
+      .select("id, name, slug")
+      .eq("organization_id", orgId)
+      .eq("is_active", true),
+    supabaseAdmin
+      .from("tasks")
+      .select("service_id, stage, is_overdue, completed_at, due_date, planned_date, revision_count, archived_at")
+      .eq("organization_id", orgId)
+      .is("archived_at", null)
+      .not("service_id", "is", null),
+  ]);
+  if (servicesRes.error) throw servicesRes.error;
+  if (tasksRes.error) throw tasksRes.error;
+
+  type T = {
+    service_id: string;
+    stage: string;
+    is_overdue: boolean;
+    completed_at: string | null;
+    due_date: string | null;
+    planned_date: string | null;
+    revision_count: number;
+    archived_at: string | null;
+  };
+
+  // Per-service totals (current snapshot) + per-day buckets for the trend.
+  const agg = new Map<
+    string,
+    {
+      open: number;
+      overdue: number;
+      delivered: number;
+      onTime: number;
+      revisions: number;
+      revisionsN: number;
+      // Map<YYYY-MM-DD, { total, onTime }> over the 37-day window.
+      daily: Map<string, { total: number; onTime: number }>;
+    }
+  >();
+
+  const ensure = (id: string) => {
+    let cur = agg.get(id);
+    if (!cur) {
+      cur = {
+        open: 0, overdue: 0, delivered: 0, onTime: 0, revisions: 0, revisionsN: 0,
+        daily: new Map(),
+      };
+      agg.set(id, cur);
+    }
+    return cur;
+  };
+
+  for (const t of (tasksRes.data ?? []) as T[]) {
+    if (!t.service_id) continue;
+    const cur = ensure(t.service_id);
+    const isOpen = t.stage !== "done";
+    if (isOpen) {
+      cur.open += 1;
+      if (t.is_overdue) cur.overdue += 1;
+      cur.revisions += t.revision_count ?? 0;
+      cur.revisionsN += 1;
+    }
+    if (t.stage === "done" && t.completed_at) {
+      const deadline = t.due_date ?? t.planned_date;
+      if (deadline) {
+        const day = t.completed_at.slice(0, 10);
+        // Headline: last 30d.
+        if (t.completed_at >= sinceTs30) {
+          cur.delivered += 1;
+          if (day <= deadline) cur.onTime += 1;
+        }
+        // Trend: last 37d (so rolling 7d can start cleanly at -30).
+        if (day >= sinceTrend) {
+          const slot = cur.daily.get(day) ?? { total: 0, onTime: 0 };
+          slot.total += 1;
+          if (day <= deadline) slot.onTime += 1;
+          cur.daily.set(day, slot);
+        }
+      }
+    }
+  }
+
+  // Build rolling 7-day series ending each of the last 30 days.
+  const days37: string[] = [];
+  for (let i = 36; i >= 0; i--) {
+    days37.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
+  }
+
+  const rows: ServiceHealthRow[] = (servicesRes.data ?? []).map((s) => {
+    const v = agg.get(s.id as string);
+    const trend: Array<number | null> = [];
+    if (v) {
+      for (let i = 7; i < days37.length; i++) {
+        let total = 0;
+        let onTime = 0;
+        for (let j = i - 6; j <= i; j++) {
+          const d = v.daily.get(days37[j]);
+          if (d) {
+            total += d.total;
+            onTime += d.onTime;
+          }
+        }
+        trend.push(total === 0 ? null : Math.round((onTime / total) * 100));
+      }
+    } else {
+      for (let i = 7; i < days37.length; i++) trend.push(null);
+    }
+
+    return {
+      serviceId: s.id as string,
+      name: s.name as string,
+      slug: s.slug as string,
+      openCount: v?.open ?? 0,
+      overdueCount: v?.overdue ?? 0,
+      delivered30d: v?.delivered ?? 0,
+      onTimePct30d: v && v.delivered > 0 ? Math.round((v.onTime / v.delivered) * 100) : null,
+      avgRevisions: v && v.revisionsN > 0 ? Math.round((v.revisions / v.revisionsN) * 10) / 10 : 0,
+      trend,
+    };
+  });
+
+  return rows.filter((r) => r.openCount > 0 || r.delivered30d > 0).sort((a, b) => b.openCount - a.openCount);
+}
+
+export const getServiceLineHealth = cache(_getServiceLineHealth);
+
+// ---- Top stuck projects (by overdue load) --------------------------------
+
+export interface StuckProjectRow {
+  projectId: string;
+  projectCode: string | null;
+  projectName: string;
+  clientName: string | null;
+  openTasks: number;
+  overdueTasks: number;
+  worstSlipPercent: number;
+  daysSinceActivity: number | null;
+}
+
+async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      "id, stage, is_overdue, progress_slip_percent, updated_at, archived_at, project:projects!inner(id, name, project_code, client:clients!inner(name))",
+    )
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .neq("stage", "done");
+  if (error) throw error;
+
+  type Row = {
+    is_overdue: boolean;
+    progress_slip_percent: number | string | null;
+    updated_at: string;
+    project:
+      | { id: string; name: string; project_code: string | null; client: { name: string } | { name: string }[] | null }
+      | { id: string; name: string; project_code: string | null; client: { name: string } | { name: string }[] | null }[]
+      | null;
+  };
+
+  const agg = new Map<
+    string,
+    {
+      name: string;
+      code: string | null;
+      client: string | null;
+      open: number;
+      overdue: number;
+      worstSlip: number;
+      lastActivity: string;
+    }
+  >();
+  for (const r of (data ?? []) as unknown as Row[]) {
+    const p = Array.isArray(r.project) ? r.project[0] : r.project;
+    if (!p) continue;
+    const client = Array.isArray(p.client) ? p.client[0] : p.client;
+    const slip = Number(r.progress_slip_percent ?? 0);
+    const cur =
+      agg.get(p.id) ?? {
+        name: p.name,
+        code: p.project_code,
+        client: client?.name ?? null,
+        open: 0,
+        overdue: 0,
+        worstSlip: 0,
+        lastActivity: r.updated_at,
+      };
+    cur.open += 1;
+    if (r.is_overdue) cur.overdue += 1;
+    if (slip > cur.worstSlip) cur.worstSlip = slip;
+    if (r.updated_at > cur.lastActivity) cur.lastActivity = r.updated_at;
+    agg.set(p.id, cur);
+  }
+
+  const now = Date.now();
+  return Array.from(agg.entries())
+    .map(([projectId, v]) => ({
+      projectId,
+      projectCode: v.code,
+      projectName: v.name,
+      clientName: v.client,
+      openTasks: v.open,
+      overdueTasks: v.overdue,
+      worstSlipPercent: Math.round(v.worstSlip),
+      daysSinceActivity: Math.floor((now - new Date(v.lastActivity).getTime()) / 86_400_000),
+    }))
+    .filter((r) => r.overdueTasks > 0)
+    .sort((a, b) => b.overdueTasks - a.overdueTasks || b.worstSlipPercent - a.worstSlipPercent)
+    .slice(0, 5);
+}
+
+export const getTopStuckProjects = cache(_getTopStuckProjects);
+
+// ---- Upcoming deadlines (next 7 days, grouped by day) --------------------
+
+export interface UpcomingDeadlineDay {
+  date: string;
+  weekday: string; // 0..6 (Sunday=0)
+  count: number;
+  highlights: Array<{ taskId: string; title: string; projectName: string | null; priority: string }>;
+}
+
+async function _getUpcomingDeadlines(orgId: string): Promise<UpcomingDeadlineDay[]> {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const todayIso = today.toISOString().slice(0, 10);
+  const end = new Date(today.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
+
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      "id, title, due_date, priority, archived_at, stage, project:projects!inner(id, name)",
+    )
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .neq("stage", "done")
+    .gte("due_date", todayIso)
+    .lt("due_date", end)
+    .order("due_date", { ascending: true })
+    .order("priority", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    title: string;
+    due_date: string;
+    priority: string;
+    project: { name: string } | { name: string }[] | null;
+  };
+
+  const buckets = new Map<string, UpcomingDeadlineDay>();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today.getTime() + i * 86_400_000);
+    const iso = d.toISOString().slice(0, 10);
+    buckets.set(iso, {
+      date: iso,
+      weekday: String(d.getUTCDay()),
+      count: 0,
+      highlights: [],
+    });
+  }
+  for (const r of (data ?? []) as unknown as Row[]) {
+    const b = buckets.get(r.due_date);
+    if (!b) continue;
+    b.count += 1;
+    if (b.highlights.length < 2) {
+      const proj = Array.isArray(r.project) ? r.project[0] : r.project;
+      b.highlights.push({
+        taskId: r.id,
+        title: r.title,
+        projectName: proj?.name ?? null,
+        priority: r.priority,
+      });
+    }
+  }
+  return Array.from(buckets.values());
+}
+
+export const getUpcomingDeadlines = cache(_getUpcomingDeadlines);
+
+// ---- WIP aging pyramid ---------------------------------------------------
+
+export type WipAgeBucket = "0-7" | "8-14" | "15-30" | "31-90" | "90+";
+
+export interface WipAgingRow {
+  bucket: WipAgeBucket;
+  label: string;
+  count: number;
+  overdueCount: number;
+}
+
+const AGE_LABELS: Record<WipAgeBucket, string> = {
+  "0-7": "0-7d",
+  "8-14": "8-14d",
+  "15-30": "15-30d",
+  "31-90": "31-90d",
+  "90+": "90d+",
+};
+
+async function _getWipAging(orgId: string): Promise<WipAgingRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select("id, created_at, is_overdue, stage, archived_at")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .neq("stage", "done");
+  if (error) throw error;
+
+  const buckets: Record<WipAgeBucket, { count: number; overdueCount: number }> = {
+    "0-7": { count: 0, overdueCount: 0 },
+    "8-14": { count: 0, overdueCount: 0 },
+    "15-30": { count: 0, overdueCount: 0 },
+    "31-90": { count: 0, overdueCount: 0 },
+    "90+": { count: 0, overdueCount: 0 },
+  };
+  const now = Date.now();
+  for (const r of (data ?? []) as Array<{ created_at: string; is_overdue: boolean }>) {
+    const ageDays = Math.floor((now - new Date(r.created_at).getTime()) / 86_400_000);
+    const key: WipAgeBucket =
+      ageDays <= 7 ? "0-7"
+      : ageDays <= 14 ? "8-14"
+      : ageDays <= 30 ? "15-30"
+      : ageDays <= 90 ? "31-90"
+      : "90+";
+    buckets[key].count += 1;
+    if (r.is_overdue) buckets[key].overdueCount += 1;
+  }
+  return (Object.keys(buckets) as WipAgeBucket[]).map((b) => ({
+    bucket: b,
+    label: AGE_LABELS[b],
+    count: buckets[b].count,
+    overdueCount: buckets[b].overdueCount,
+  }));
+}
+
+export const getWipAging = cache(_getWipAging);
+
+// ---- Stage bounce-back matrix --------------------------------------------
+
+export interface StageFlowCell {
+  from: TaskStage;
+  to: TaskStage;
+  count: number;
+  isBackward: boolean;
+}
+
+async function _getStageFlowMatrix(orgId: string): Promise<{
+  cells: StageFlowCell[];
+  topBackward: Array<{ from: TaskStage; to: TaskStage; count: number }>;
+  totalForward: number;
+  totalBackward: number;
+}> {
+  // Look at the last 90 days of stage transitions so the matrix isn't
+  // dominated by ancient data.
+  const since = daysAgoIso(90);
+  const { data, error } = await supabaseAdmin
+    .from("task_stage_history")
+    .select("from_stage, to_stage")
+    .eq("organization_id", orgId)
+    .gte("entered_at", since)
+    .not("from_stage", "is", null);
+  if (error) throw error;
+
+  const orderIdx: Record<string, number> = {};
+  FUNNEL_STAGE_ORDER.forEach((s, i) => (orderIdx[s] = i));
+
+  const counts = new Map<string, number>();
+  let totalForward = 0;
+  let totalBackward = 0;
+  for (const r of (data ?? []) as Array<{ from_stage: TaskStage; to_stage: TaskStage }>) {
+    if (!r.from_stage || !r.to_stage) continue;
+    const key = `${r.from_stage}>${r.to_stage}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const fi = orderIdx[r.from_stage] ?? 0;
+    const ti = orderIdx[r.to_stage] ?? 0;
+    if (ti < fi) totalBackward += 1;
+    else totalForward += 1;
+  }
+
+  const cells: StageFlowCell[] = [];
+  for (const from of FUNNEL_STAGE_ORDER) {
+    for (const to of FUNNEL_STAGE_ORDER) {
+      if (from === to) continue;
+      const c = counts.get(`${from}>${to}`) ?? 0;
+      cells.push({
+        from,
+        to,
+        count: c,
+        isBackward: (orderIdx[to] ?? 0) < (orderIdx[from] ?? 0),
+      });
+    }
+  }
+
+  const topBackward = cells
+    .filter((c) => c.isBackward && c.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+    .map(({ from, to, count }) => ({ from, to, count }));
+
+  return { cells, topBackward, totalForward, totalBackward };
+}
+
+export const getStageFlowMatrix = cache(_getStageFlowMatrix);
+
+// ---- Top revised tasks ---------------------------------------------------
+
+export interface RevisedTaskRow {
+  taskId: string;
+  title: string;
+  revisionCount: number;
+  stage: TaskStage;
+  projectName: string | null;
+  clientName: string | null;
+  updatedAt: string;
+}
+
+async function _getTopRevisedTasks(orgId: string): Promise<RevisedTaskRow[]> {
+  // `tasks.revision_count` isn't populated by the Odoo sync. Use the live
+  // truth: count task_stage_history rows where to_stage='client_changes' per
+  // task over the last 90 days. Each such row = the client kicked the work
+  // back for another revision.
+  const since = daysAgoIso(90);
+  const { data, error } = await supabaseAdmin
+    .from("task_stage_history")
+    .select("task_id, entered_at")
+    .eq("organization_id", orgId)
+    .eq("to_stage", "client_changes")
+    .gte("entered_at", since);
+  if (error) throw error;
+
+  const counts = new Map<string, { count: number; lastEnteredAt: string }>();
+  for (const r of (data ?? []) as Array<{ task_id: string; entered_at: string }>) {
+    const cur = counts.get(r.task_id) ?? { count: 0, lastEnteredAt: r.entered_at };
+    cur.count += 1;
+    if (r.entered_at > cur.lastEnteredAt) cur.lastEnteredAt = r.entered_at;
+    counts.set(r.task_id, cur);
+  }
+
+  const top = Array.from(counts.entries())
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 5);
+  if (top.length === 0) return [];
+
+  const taskIds = top.map(([id]) => id);
+  const { data: tasksData, error: tErr } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      "id, title, stage, updated_at, archived_at, project:projects!inner(name, client:clients!inner(name))",
+    )
+    .eq("organization_id", orgId)
+    .in("id", taskIds);
+  if (tErr) throw tErr;
+
+  type TRow = {
+    id: string;
+    title: string;
+    stage: TaskStage;
+    updated_at: string;
+    project:
+      | { name: string; client: { name: string } | { name: string }[] | null }
+      | { name: string; client: { name: string } | { name: string }[] | null }[]
+      | null;
+  };
+
+  const byId = new Map<string, TRow>();
+  for (const r of (tasksData ?? []) as unknown as TRow[]) byId.set(r.id, r);
+
+  return top
+    .map(([id, agg]) => {
+      const r = byId.get(id);
+      if (!r) return null;
+      const proj = Array.isArray(r.project) ? r.project[0] : r.project;
+      const client = proj && (Array.isArray(proj.client) ? proj.client[0] : proj.client);
+      return {
+        taskId: r.id,
+        title: r.title,
+        revisionCount: agg.count,
+        stage: r.stage,
+        projectName: proj?.name ?? null,
+        clientName: client?.name ?? null,
+        updatedAt: agg.lastEnteredAt,
+      };
+    })
+    .filter((x): x is RevisedTaskRow => x !== null);
+}
+
+export const getTopRevisedTasks = cache(_getTopRevisedTasks);
+
+// =========================================================================
+// Helpers
+// =========================================================================
+
+function daysAgoIso(n: number): string {
+  return new Date(Date.now() - n * 86_400_000).toISOString();
+}
+
+// "How many tasks were overdue as of N days ago" — reads from the daily
+// snapshot table populated by the snapshot_dashboard_daily() cron. We
+// can't reconstruct this from `tasks` directly because is_overdue is
+// mirrored from Odoo with no history and due_date is sparsely set.
+// Falls back to 0 when no snapshot exists for that date.
+async function countOverdueAt(orgId: string, isoTs: string): Promise<number> {
+  const date = isoTs.slice(0, 10);
+  const { data, error } = await supabaseAdmin
+    .from("dashboard_daily_snapshots")
+    .select("overdue_count")
+    .eq("organization_id", orgId)
+    .eq("snapshot_date", date)
+    .maybeSingle();
+  if (error || !data) return 0;
+  return (data as { overdue_count: number }).overdue_count ?? 0;
+}
+
+async function countRevisionCommentsSince(orgId: string, isoTs: string): Promise<number> {
+  // Tasks that had ANY activity in client_changes since isoTs — approximated
+  // via task_stage_history rows where to_stage='client_changes' and
+  // entered_at >= isoTs.
+  const { count, error } = await supabaseAdmin
+    .from("task_stage_history")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("to_stage", "client_changes")
+    .gte("entered_at", isoTs);
+  if (error) return 0;
+  return count ?? 0;
+}
+
+// Re-export the Odoo metrics shape for the page composition layer.
+export type { DashboardOdooMetrics };

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { OriginBadge } from "@/components/origin-badge";
+import { ProjectFavoriteButton } from "@/components/projects/project-favorite-button";
 
 // Rwasem prints datetimes as `MM/DD/YYYY HH:MM:SS`. Source values are
 // either a date (`YYYY-MM-DD`) or a full ISO timestamp; both are normalised
@@ -106,20 +107,18 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
       <div className="ps-4 pe-3 pt-3 pb-2.5">
         {/* Title row: star · name · kebab */}
         <div className="flex items-start gap-2">
-          <button
-            type="button"
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "relative shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-amber-500",
-              p.isFavorite && "text-amber-500",
-            )}
-            aria-label={p.isFavorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}
-            title={p.isFavorite ? "مفضّل" : "إضافة للمفضلة"}
-          >
-            <Star
-              className={cn("size-4", p.isFavorite && "fill-amber-400")}
+          {p.id ? (
+            <ProjectFavoriteButton
+              projectId={p.id}
+              initialFavorite={p.isFavorite}
+              size="sm"
+              className="relative shrink-0"
             />
-          </button>
+          ) : (
+            <span className="relative shrink-0 rounded p-0.5 text-muted-foreground">
+              <Star className={cn("size-4", p.isFavorite && "fill-amber-400 text-amber-500")} />
+            </span>
+          )}
 
           {/* Title is a real <Link> so cmd/ctrl/middle-click opens the project
               info page in a new tab — parity with the tasks list. stopPropagation

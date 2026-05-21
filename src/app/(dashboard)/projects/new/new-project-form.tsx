@@ -132,6 +132,10 @@ export function NewProjectForm({
   const [socialManagerId, setSocialManagerId] = useState<string>("");
   const [mediaManagerId, setMediaManagerId] = useState<string>("");
   const [seoManagerId, setSeoManagerId] = useState<string>("");
+  // Step 3 — advanced per-service team picker is collapsed by default to
+  // keep the wizard scannable. Only operators who want to pin extra people
+  // per service or override the department defaults need to expand it.
+  const [showAdvancedTeam, setShowAdvancedTeam] = useState<boolean>(false);
   const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [constantAssigneeId, setConstantAssigneeId] = useState<string>("");
   // Per-service position → employee assignment (the ServiceTeamPanel payload).
@@ -266,6 +270,51 @@ export function NewProjectForm({
   }, [selectedServices, splits]);
 
   const selectedClient = clients.find((c) => c.id === clientId);
+
+  // Department panels in step 3 are department-scoped, so only render the
+  // ones whose service is actually selected. Match by slug substring — the
+  // seeded services use 'social-media-*', 'media-buying', 'seo'; future
+  // categories can be added here without touching the panel layout.
+  const needsSocialPanel = useMemo(
+    () =>
+      Array.from(selectedServices).some((sid) => {
+        const slug = (services.find((s) => s.id === sid)?.slug ?? "").toLowerCase();
+        return slug.includes("social");
+      }),
+    [selectedServices, services],
+  );
+  const needsMediaPanel = useMemo(
+    () =>
+      Array.from(selectedServices).some((sid) => {
+        const slug = (services.find((s) => s.id === sid)?.slug ?? "").toLowerCase();
+        return slug.includes("media") && !slug.includes("social");
+      }),
+    [selectedServices, services],
+  );
+  const needsSeoPanel = useMemo(
+    () =>
+      Array.from(selectedServices).some((sid) => {
+        const slug = (services.find((s) => s.id === sid)?.slug ?? "").toLowerCase();
+        return slug.includes("seo");
+      }),
+    [selectedServices, services],
+  );
+  // Services that don't fit the three structural buckets — the operator can
+  // still assign people via the advanced per-service team panel.
+  const hasOtherServices = useMemo(() => {
+    const total = selectedServices.size;
+    return (
+      total > 0 &&
+      Array.from(selectedServices).some((sid) => {
+        const slug = (services.find((s) => s.id === sid)?.slug ?? "").toLowerCase();
+        return (
+          !slug.includes("social") &&
+          !slug.includes("media") &&
+          !slug.includes("seo")
+        );
+      })
+    );
+  }, [selectedServices, services]);
 
   // Available services filtered by search query, excluding already-selected
   // ones. Empty query returns everything not yet attached.
@@ -1000,8 +1049,19 @@ export function NewProjectForm({
               </div>
 
               {/* Per-role team: each row pairs the specialist (المتخصص) with
-                  the section head (مدير القسم) accountable for that specialty. */}
+                  the section head (مدير القسم) accountable for that specialty.
+                  Department panels are only rendered for selected services so
+                  the operator isn't asked to pick a media-buying specialist
+                  for a SEO-only project. */}
+              <div className="space-y-2">
+                <Label>فِرَق الأقسام المختارة</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  لكل قسم اختير له خدمة، حدّد المتخصّص ومدير القسم. الأقسام التي لا
+                  تخصها الخدمات المختارة لا تظهر هنا.
+                </p>
+              </div>
               <div className="space-y-3">
+                {needsSocialPanel && (
                 <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
                   <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
                     <span className="grid size-5 place-items-center rounded-full bg-blue-400/20 text-blue-300">🔵</span>
@@ -1030,7 +1090,9 @@ export function NewProjectForm({
                     </div>
                   </div>
                 </div>
+                )}
 
+                {needsMediaPanel && (
                 <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
                   <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
                     <span className="grid size-5 place-items-center rounded-full bg-emerald-400/20 text-emerald-300">🟢</span>
@@ -1059,7 +1121,9 @@ export function NewProjectForm({
                     </div>
                   </div>
                 </div>
+                )}
 
+                {needsSeoPanel && (
                 <div className="rounded-xl border border-soft bg-soft-1/40 p-3">
                   <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-foreground">
                     <span className="grid size-5 place-items-center rounded-full bg-orange-400/20 text-orange-300">🟠</span>
@@ -1088,22 +1152,48 @@ export function NewProjectForm({
                     </div>
                   </div>
                 </div>
+                )}
+                {!needsSocialPanel && !needsMediaPanel && !needsSeoPanel && hasOtherServices && (
+                  <p className="rounded-lg border border-dashed border-soft bg-soft-1/40 px-3 py-3 text-center text-[11px] text-muted-foreground">
+                    الخدمات المختارة لا تنتمي للأقسام الثلاث (سوشال / ميديا / سيو).
+                    يمكنك تعيين الفريق من خلال «إعدادات متقدمة» بالأسفل.
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-1.5">
-                <Label>فريق المشروع حسب المسمى الوظيفي</Label>
-                <p className="text-[11px] text-muted-foreground">
-                  لكل خدمة، عيّن الموظف المسؤول عن كل مسمى وظيفي تستخدمه قوالبها.
-                  أي شخص تضيفه يُسنَد لكل مهام تلك الخدمة.
-                </p>
-                <ServiceTeamPanel
-                  selectedServiceIds={Array.from(selectedServices)}
-                  services={services}
-                  templates={templates}
-                  positions={positions}
-                  employeeOptions={employeeOptionsAll}
-                  onChange={setServiceTeam}
-                />
+              {/* Advanced — per-service position picker + extras. Collapsed
+                  by default; the structural roles above usually cover what
+                  operators need. Expand to pin custom employees on a service
+                  or override the dept defaults for an unusual project. */}
+              <div className="rounded-xl border border-soft bg-card">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedTeam((v) => !v)}
+                  className="flex w-full items-center justify-between px-3 py-2 text-start text-[12px] font-medium text-foreground hover:bg-muted/40"
+                  aria-expanded={showAdvancedTeam}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-muted-foreground">{showAdvancedTeam ? "▾" : "▸"}</span>
+                    إعدادات متقدمة — فريق مخصّص لكل خدمة
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">اختياري</span>
+                </button>
+                {showAdvancedTeam && (
+                  <div className="border-t border-soft px-3 py-3">
+                    <p className="mb-2 text-[11px] text-muted-foreground">
+                      لكل خدمة، عيّن موظفًا لكل مسمى وظيفي تستخدمه قوالبها. أي شخص
+                      تضيفه يُسنَد لكل مهام تلك الخدمة (يستبدل الافتراضيات أعلاه).
+                    </p>
+                    <ServiceTeamPanel
+                      selectedServiceIds={Array.from(selectedServices)}
+                      services={services}
+                      templates={templates}
+                      positions={positions}
+                      employeeOptions={employeeOptionsAll}
+                      onChange={setServiceTeam}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">

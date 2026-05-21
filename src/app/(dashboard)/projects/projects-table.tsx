@@ -12,6 +12,7 @@ import { ArrowRight, Star } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { ProjectFavoriteButton } from "@/components/projects/project-favorite-button";
 
 // Status → small dot color. Keeps the list scannable without a full badge.
 const STATUS_DOT: Record<string, string> = {
@@ -95,12 +96,23 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
             return (
               <tr key={p.id ?? `odoo-${p.odooId}`} className="group hover:bg-muted/40">
                 <td className="px-2 py-2 align-middle">
-                  <Star
-                    className={cn(
-                      "size-3.5",
-                      p.isFavorite ? "fill-amber-400 text-amber-500" : "text-muted-foreground/60",
-                    )}
-                  />
+                  {p.id ? (
+                    <ProjectFavoriteButton
+                      projectId={p.id}
+                      initialFavorite={p.isFavorite}
+                      size="sm"
+                      className="align-middle"
+                      iconClassName="size-3.5"
+                      inactiveClassName="text-muted-foreground/60 hover:text-amber-500"
+                    />
+                  ) : (
+                    <Star
+                      className={cn(
+                        "size-3.5",
+                        p.isFavorite ? "fill-amber-400 text-amber-500" : "text-muted-foreground/60",
+                      )}
+                    />
+                  )}
                 </td>
                 <td className="px-2 py-2 align-middle tabular-nums text-muted-foreground">
                   {p.ref}

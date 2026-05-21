@@ -86,7 +86,7 @@ export function Topbar({
 
   return (
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
-      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between gap-3 rounded-[20px] px-3 py-3 shadow-[var(--surface-elev)] sm:rounded-[26px] sm:px-5 dark:shadow-none rtl:flex-row-reverse lg:rtl:px-24 lg:ltr:pl-24">
+      <div className="rwasem-topbar dark:glass-surface flex items-center justify-between gap-3 rounded-[20px] px-3 py-3 shadow-[var(--surface-elev)] sm:rounded-[26px] sm:px-5 dark:shadow-none rtl:flex-row-reverse">
         <div className="flex min-w-0 flex-1 items-center gap-3 rtl:flex-row-reverse">
           <Button
             variant="ghost"

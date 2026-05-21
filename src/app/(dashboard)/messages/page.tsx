@@ -1,7 +1,6 @@
 import { requirePagePermission } from "@/lib/auth-server";
 import { getLocale, getTranslations } from "next-intl/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MessagesInbox } from "./inbox";
 import { MessageCircle } from "lucide-react";
@@ -84,14 +83,15 @@ export default async function MessagesPage() {
     .sort((a, b) => (a.latestCreatedAt < b.latestCreatedAt ? 1 : -1));
 
   return (
-    <div className="flex min-h-[calc(100dvh-11.5rem)] flex-col gap-4">
-      <PageHeader title={t("title")} description={t("description")} />
+    <div className="min-h-[calc(100dvh-8.5rem)]">
       {conversations.length === 0 ? (
-        <EmptyState
-          icon={<MessageCircle className="size-6" />}
-          title={t("emptyTitle")}
-          description={t("emptyDescription")}
-        />
+        <div className="flex min-h-[calc(100dvh-8.5rem)] items-center justify-center rounded-[28px] border border-soft bg-card/72 p-6">
+          <EmptyState
+            icon={<MessageCircle className="size-6" />}
+            title={t("emptyTitle")}
+            description={t("emptyDescription")}
+          />
+        </div>
       ) : (
         <MessagesInbox conversations={conversations} locale={locale} />
       )}

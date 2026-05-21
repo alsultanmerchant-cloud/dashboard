@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
     // (helpers in src/lib/data/*.ts) and re-enable strict checks.
     ignoreBuildErrors: true,
   },
+  experimental: {
+    // Keep client-side router cache warm so back/forward and quick re-visits
+    // (projects ↔ tasks ↔ task-detail) reuse the previous render instead of
+    // refetching. Dynamic pages cache for 30s, static for 3 min.
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+  },
 };
 
 export default withNextIntl(nextConfig);

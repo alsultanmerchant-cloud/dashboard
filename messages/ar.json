@@ -1045,6 +1045,7 @@
   },
   "ModuleTabs": {
     "projects": "المشاريع",
+    "newProject": "مشروع جديد",
     "tasks": "المهام",
     "myTasks": "مهامي",
     "allTasks": "كل المهام",
@@ -1072,7 +1073,9 @@
     "kanbanView": "عرض كانبان",
     "listView": "عرض قائمة",
     "calendar": "تقويم",
-    "calendarView": "عرض التقويم"
+    "calendarView": "عرض التقويم",
+    "pivot": "محوري",
+    "pivotView": "عرض محوري"
   },
   "TasksPage": {
     "projectScope": "مهام مشروع",
@@ -2119,6 +2122,121 @@
           "dashboard": "لوحة التحكم"
         }
       }
+    }
+  },
+  "Executive": {
+    "hero": {
+      "onTimeLabel": "نسبة التسليم في الموعد",
+      "onTimeRange": "آخر ٣٠ يوماً",
+      "onTimeSample": "{sample} مهمة مسلَّمة",
+      "onTimeNoSample": "لا توجد تسليمات في آخر ٣٠ يوماً",
+      "benchmark": "الهدف ٨٥٪",
+      "overdueLabel": "مهام متأخرة",
+      "stuckLabel": "عالق في المراجعة",
+      "stuckHint": "بعد يومَي عمل",
+      "revisionsLabel": "تعديلات العميل",
+      "revisionsHint": "تعليقات / ٣٠ يوماً",
+      "wow": "أسبوع/أسبوع:"
+    },
+    "pulse": {
+      "completed": "مكتملة",
+      "tasksAdded": "مهام جديدة",
+      "clientChanges": "تعديلات عميل",
+      "approvals": "موافقات مُحسومة",
+      "caption": "آخر ٧ أيام مقارنةً بالأسبوع السابق"
+    },
+    "clientHealth": {
+      "title": "صحة العملاء",
+      "description": "أسوأ ٥ وأفضل ٥ بناءً على التأخر ونسبة الالتزام في آخر ٣٠ يوماً",
+      "viewAll": "كل العملاء →",
+      "worstTitle": "بحاجة لانتباه",
+      "worstEmpty": "لا يوجد عملاء متأخرون 🎉",
+      "bestTitle": "أداء متميز",
+      "bestEmpty": "لا توجد عينة كافية",
+      "bestEmptyDescription": "يحتاج العميل ٣ تسليمات على الأقل خلال ٣٠ يوماً"
+    },
+    "services": {
+      "title": "صحة خطوط الخدمة",
+      "description": "نسبة الالتزام والتأخر ومعدّل المراجعات لكل خط خدمة",
+      "openTasks": "مفتوحة",
+      "delivered": "مسلَّمة",
+      "onTime": "في الموعد",
+      "empty": "لا توجد بيانات خدمات"
+    },
+    "flow": {
+      "title": "مسار التسليم",
+      "description": "توزيع المهام عبر المراحل الثمانية ومتوسط زمن البقاء في كل مرحلة",
+      "worstStageLabel": "أعلى ضغط",
+      "avgDwell": "متوسط بقاء",
+      "openStage": "فتح هذه المرحلة",
+      "bottlenecksTitle": "عوائق المراجعة",
+      "bottlenecksEmpty": "لا توجد مهام عالقة في المراجعة"
+    },
+    "stuckProjects": {
+      "title": "مشاريع متعثرة",
+      "description": "أكثر ٥ مشاريع تأخراً وانزلاقاً عن الجدول",
+      "viewAll": "كل المشاريع →",
+      "overdue": "متأخرة",
+      "worstSlip": "أكبر انزلاق",
+      "idleDays": "بدون نشاط {days} يوم",
+      "emptyTitle": "لا توجد مشاريع متعثرة",
+      "emptyDescription": "لا توجد مهام متأخرة عبر المشاريع النشطة"
+    },
+    "deadlines": {
+      "title": "المواعيد القادمة",
+      "description": "{total} مهمة مستحقة خلال الأيام السبعة القادمة",
+      "viewAll": "كل المهام →",
+      "today": "اليوم"
+    },
+    "team": {
+      "title": "الفريق والطاقة",
+      "description": "حِمل الأخصائيين والأداء حسب نسبة الالتزام",
+      "loadTitle": "أعلى الأخصائيين حملاً",
+      "loadEmpty": "لا توجد مهام مفتوحة",
+      "topTitle": "الأعلى التزاماً",
+      "bottomTitle": "بحاجة لدعم",
+      "emptyLeaderboard": "لا توجد عينة كافية (≥ ٣ تسليمات/٣٠ يوماً)"
+    },
+    "commercial": {
+      "title": "النشاط التجاري للشهر",
+      "open": "فتح العقود →",
+      "types": {
+        "New": "جديد",
+        "Renew": "تجديد",
+        "UPSELL": "ترقية",
+        "WinBack": "استرجاع",
+        "Hold": "تعليق"
+      }
+    },
+    "activity": {
+      "title": "آخر النشاط",
+      "description": "أحدث الأحداث المهمة عبر المنظومة",
+      "viewAll": "عرض الكل",
+      "emptyTitle": "لا توجد أحداث حديثة",
+      "emptyDescription": "ستظهر هنا أحداث الحوكمة والعقود والمهام عند حدوثها"
+    },
+    "aging": {
+      "title": "هرم تقادم المهام",
+      "description": "{total} مهمة مفتوحة · {stalePct}٪ منها أقدم من شهر",
+      "overdue": "متأخرة",
+      "noOverdue": "لا تأخر"
+    },
+    "stageFlow": {
+      "title": "حركة المهام بين المراحل",
+      "description": "أين تتدفّق المهام وأين ترتدّ — {backwardPct}٪ من التحرّكات للخلف",
+      "fromHeader": "من",
+      "forward": "للأمام",
+      "backward": "ارتداد",
+      "topBackwardTitle": "أبرز الارتدادات",
+      "topBackwardEmpty": "لا توجد ارتدادات حالياً 🎉",
+      "caption": "آخر ٩٠ يوماً من تاريخ تحرّكات المهام"
+    },
+    "topRevised": {
+      "title": "أكثر المهام تعديلاً",
+      "description": "أكثر ٥ مهام تم إعادتها لمرحلة \"تعديلات العميل\" في آخر ٩٠ يوماً",
+      "revisions": "مراجعة",
+      "emptyTitle": "لا توجد مراجعات حديثة",
+      "emptyDescription": "ستظهر هنا المهام التي تكرر تعديلها"
     }
   }
 }

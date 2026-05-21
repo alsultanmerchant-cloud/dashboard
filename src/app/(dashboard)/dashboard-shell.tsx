@@ -158,6 +158,7 @@ export function DashboardShell({
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
 
@@ -185,9 +186,19 @@ export function DashboardShell({
           <NotificationsLoader onLoad={addNotifications} />
           <DmUnreadLoader onChange={setDmUnreadCount} />
           <div className="min-h-screen bg-background panel-grid">
-            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <Sidebar
+              open={sidebarOpen}
+              onClose={() => setSidebarOpen(false)}
+              onDesktopExpandedChange={setDesktopSidebarExpanded}
+            />
 
-            <div className="min-h-screen">
+            <div
+              className={`min-h-screen transition-[padding] duration-300 ease-in-out ${
+                desktopSidebarExpanded
+                  ? "lg:rtl:pr-[276px] lg:ltr:pl-[276px]"
+                  : "lg:rtl:pr-[82px] lg:ltr:pl-[82px]"
+              }`}
+            >
               <Topbar
                 unreadCount={unreadCount}
                 dmUnreadCount={dmUnreadCount}

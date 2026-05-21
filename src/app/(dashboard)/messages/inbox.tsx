@@ -67,13 +67,15 @@ function MessageBubble({ message, locale }: { message: ConversationMessage; loca
     <div className={cn("flex", message.is_mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[88%] rounded-[22px] px-4 py-3 text-sm shadow-sm sm:max-w-[78%]",
+          "max-w-[88%] rounded-[24px] border px-4 py-3 text-sm shadow-[0_14px_40px_-28px_rgba(15,23,42,0.9)] sm:max-w-[78%]",
           message.is_mine
-            ? "rounded-br-md bg-cyan-dim text-foreground"
-            : "rounded-bl-md border border-soft bg-card text-foreground",
+            ? "rounded-br-md border-cyan/25 bg-cyan-dim/70 text-foreground"
+            : "rounded-bl-md border-soft bg-card/88 text-foreground",
         )}
       >
-        {message.body && <p className="whitespace-pre-wrap break-words leading-6">{message.body}</p>}
+        {message.body ? (
+          <p className="whitespace-pre-wrap break-words leading-6">{message.body}</p>
+        ) : null}
         {message.attachments.length > 0 && (
           <ul className="mt-2 space-y-1.5">
             {message.attachments.map((attachment) => (
@@ -94,7 +96,9 @@ function MessageBubble({ message, locale }: { message: ConversationMessage; loca
         )}
         <p className="mt-2 text-[10px] tabular-nums text-muted-foreground/80" dir="ltr">
           {time}
-          {message.is_mine && message.read_at && <span className="ms-1 text-cyan">مقروء</span>}
+          {message.is_mine && message.read_at ? (
+            <span className="ms-1 text-cyan">مقروء</span>
+          ) : null}
         </p>
       </div>
     </div>
@@ -301,30 +305,32 @@ export function MessagesInbox({
   const showThreadOnMobile = Boolean(selectedConversation);
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden rounded-[28px] border border-soft bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,251,252,0.92))] shadow-[0_24px_80px_-40px_rgba(15,23,42,0.45)]">
-      <div className="grid h-full min-h-[640px] flex-1 md:grid-cols-[340px_minmax(0,1fr)]">
+    <div className="flex min-h-0 flex-1 overflow-hidden rounded-[28px] border border-soft bg-card shadow-[var(--surface-elev-strong)]">
+      <div className="grid h-full min-h-[640px] flex-1 md:grid-cols-[320px_minmax(0,1fr)]">
         <aside
           className={cn(
-            "min-h-0 border-e border-soft bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.08),transparent_38%),linear-gradient(180deg,rgba(244,250,251,0.98),rgba(255,255,255,0.94))]",
+            "min-h-0 border-e border-soft bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,248,252,0.96))]",
             showRailOnMobile ? "block" : "hidden md:block",
           )}
         >
           <div className="border-b border-soft px-4 py-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.22em] text-cyan/80">
+                <p className="text-xs font-medium uppercase tracking-[0.22em] text-cyan/75">
                   {t("railLabel")}
                 </p>
-                <h2 className="mt-1 text-xl font-semibold tracking-tight">{t("title")}</h2>
+                <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">
+                  {t("title")}
+                </h2>
               </div>
-              <div className="rounded-2xl border border-cyan/20 bg-cyan-dim px-3 py-1.5 text-end">
+              <div className="rounded-2xl border border-cyan/20 bg-cyan-dim/15 px-3 py-1.5 text-end">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-cyan/80">
                   {t("unread")}
                 </p>
                 <p className="text-sm font-semibold text-cyan">{unreadCount}</p>
               </div>
             </div>
-            <div className="mt-4 rounded-2xl border border-soft bg-background/80 px-3 py-2 shadow-sm">
+            <div className="mt-4 rounded-2xl border border-soft bg-background px-3 py-2 shadow-[var(--surface-elev)]">
               <label className="flex items-center gap-2">
                 <Search className="size-4 text-muted-foreground" />
                 <input
@@ -342,7 +348,7 @@ export function MessagesInbox({
             {search.trim() ? <span>{t("filtered")}</span> : null}
           </div>
 
-          <div className="h-[calc(100%-168px)] min-h-0 space-y-1 overflow-y-auto px-2 pb-3 md:h-[calc(100%-128px)]">
+          <div className="h-[calc(100%-168px)] min-h-0 space-y-2 overflow-y-auto px-2 pb-3 md:h-[calc(100%-128px)]">
             {filteredConversations.map((conversation) => {
               const active = selectedConversation?.otherEmployeeId === conversation.otherEmployeeId;
               return (
@@ -351,36 +357,39 @@ export function MessagesInbox({
                   type="button"
                   onClick={() => setSelectedId(conversation.otherEmployeeId)}
                   className={cn(
-                    "flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-start transition-colors",
+                    "flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-start transition-all",
                     active
-                      ? "bg-foreground text-background shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-                      : "hover:bg-card/80",
+                      ? "border-cyan/30 bg-cyan-dim/14 shadow-[var(--surface-elev)]"
+                      : "border-transparent bg-transparent hover:border-soft hover:bg-soft-1",
                   )}
                 >
                   <Avatar size="lg" className="size-12 shrink-0">
-                    <AvatarImage src={conversation.otherAvatarUrl ?? undefined} alt={conversation.otherFullName} />
-                    <AvatarFallback className={cn(active ? "bg-white/12 text-white" : "bg-cyan/15 text-cyan")}>
+                    <AvatarImage
+                      src={conversation.otherAvatarUrl ?? undefined}
+                      alt={conversation.otherFullName}
+                    />
+                    <AvatarFallback className="bg-cyan/12 text-cyan">
                       {firstLetter(conversation.otherFullName)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className={cn("truncate text-sm font-semibold", active ? "text-white" : "text-foreground")}>
+                        <p className="truncate text-sm font-semibold text-foreground">
                           {conversation.otherFullName}
                         </p>
                         {conversation.otherJobTitle ? (
-                          <p className={cn("truncate text-[11px]", active ? "text-white/60" : "text-muted-foreground")}>
+                          <p className="truncate text-[11px] text-muted-foreground">
                             {conversation.otherJobTitle}
                           </p>
                         ) : null}
                       </div>
-                      <span className={cn("shrink-0 text-[11px] tabular-nums", active ? "text-white/60" : "text-muted-foreground")}>
+                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                         {relativeTime(conversation.latestCreatedAt)}
                       </span>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
-                      <p className={cn("min-w-0 flex-1 truncate text-xs", active ? "text-white/72" : "text-muted-foreground")}>
+                      <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                         {conversation.latestBody ?? t("attachmentFallback")}
                       </p>
                       {conversation.unread > 0 ? (
@@ -400,27 +409,37 @@ export function MessagesInbox({
                   <Search className="size-5" />
                 </div>
                 <p className="mt-4 text-sm font-medium">{t("noMatchesTitle")}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{t("noMatchesDescription")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("noMatchesDescription")}
+                </p>
               </div>
             ) : null}
           </div>
         </aside>
 
-        <section className={cn("min-h-0 min-w-0 bg-[linear-gradient(180deg,rgba(247,250,252,0.82),rgba(255,255,255,0.98))]", showThreadOnMobile ? "block" : "hidden md:block")}>
+        <section
+          className={cn(
+            "min-h-0 min-w-0 bg-[linear-gradient(180deg,#fcfcfe_0%,#f4f2fb_100%)]",
+            showThreadOnMobile ? "block" : "hidden md:block",
+          )}
+        >
           {selectedConversation ? (
             <div className="flex h-full min-h-0 flex-col">
-              <header className="border-b border-soft bg-background/75 px-4 py-4 backdrop-blur">
+              <header className="border-b border-soft bg-card px-5 py-4">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setSelectedId(null)}
-                    className="grid size-10 place-items-center rounded-full border border-soft bg-card text-muted-foreground transition-colors hover:text-foreground md:hidden"
+                    className="grid size-10 place-items-center rounded-full border border-soft bg-background/70 text-muted-foreground transition-colors hover:text-foreground md:hidden"
                     aria-label={t("backToInbox")}
                   >
                     <ArrowLeft className="size-4" />
                   </button>
                   <Avatar size="lg" className="size-11">
-                    <AvatarImage src={selectedConversation.otherAvatarUrl ?? undefined} alt={selectedConversation.otherFullName} />
+                    <AvatarImage
+                      src={selectedConversation.otherAvatarUrl ?? undefined}
+                      alt={selectedConversation.otherFullName}
+                    />
                     <AvatarFallback className="bg-cyan/15 text-cyan">
                       {firstLetter(selectedConversation.otherFullName)}
                     </AvatarFallback>
@@ -430,7 +449,7 @@ export function MessagesInbox({
                       <h3 className="truncate text-lg font-semibold tracking-tight">
                         {selectedConversation.otherFullName}
                       </h3>
-                      <span className="rounded-full border border-cyan/20 bg-cyan/10 px-2 py-0.5 text-[11px] font-medium text-cyan">
+                      <span className="rounded-full border border-cyan/20 bg-cyan-dim/15 px-2 py-0.5 text-[11px] font-medium text-cyan">
                         {t("directMessage")}
                       </span>
                     </div>
@@ -439,77 +458,90 @@ export function MessagesInbox({
                     </p>
                   </div>
                 </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-soft bg-soft-1 px-3 py-1.5 text-muted-foreground">
+                      {t("latestReply", { time: relativeTime(selectedConversation.latestCreatedAt) })}
+                    </span>
+                  <span className="rounded-full border border-soft bg-soft-1 px-3 py-1.5 text-muted-foreground">
+                    {t("messageCount", { count: messages.length })}
+                  </span>
+                </div>
               </header>
 
-              <div className="border-b border-soft bg-background/70 px-4 py-3 text-xs text-muted-foreground">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span>{t("latestReply", { time: relativeTime(selectedConversation.latestCreatedAt) })}</span>
-                  <span>{t("messageCount", { count: messages.length })}</span>
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(82,65,195,0.05),transparent_26%),linear-gradient(180deg,#faf9fd_0%,#f3f1f9_100%)] px-4 py-5">
+                <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-3">
+                  {loadingThread ? (
+                    <div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
+                      <Loader2 className="size-5 animate-spin" />
+                    </div>
+                  ) : error ? (
+                    <div className="grid h-full min-h-[320px] place-items-center">
+                      <Card className="w-full max-w-md border-amber/30 bg-amber/10">
+                        <CardContent className="p-5 text-center">
+                          <p className="text-sm font-medium text-amber">
+                            {t("threadLoadErrorTitle")}
+                          </p>
+                          <p className="mt-1 text-xs text-amber/80">{error}</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  ) : messages.length === 0 ? (
+                    <div className="grid h-full min-h-[320px] place-items-center">
+                      <div className="max-w-sm rounded-[28px] border border-soft bg-card p-8 text-center shadow-[var(--surface-elev)]">
+                        <div className="mx-auto grid size-16 place-items-center rounded-full bg-cyan/10 text-cyan">
+                          <MessageCircle className="size-6" />
+                        </div>
+                        <p className="mt-4 text-base font-semibold">{t("emptyThreadTitle")}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {t("emptyThreadDescription")}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {hasMore ? (
+                        <div className="flex justify-center pb-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void loadConversation(
+                                selectedConversation.otherEmployeeId,
+                                messages[0]?.created_at,
+                              )}
+                            disabled={loadingOlder}
+                            className="inline-flex items-center gap-2 rounded-full border border-soft bg-card px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground disabled:opacity-50"
+                          >
+                            {loadingOlder ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : null}
+                            {t("loadOlder")}
+                          </button>
+                        </div>
+                      ) : null}
+                      {messages.map((message) => (
+                        <MessageBubble key={message.id} message={message} locale={locale} />
+                      ))}
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div
-                ref={scrollRef}
-                className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.06),transparent_30%),linear-gradient(180deg,rgba(247,250,252,0.5),rgba(255,255,255,0.95))] px-4 py-5"
-              >
-                {loadingThread ? (
-                  <div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
-                    <Loader2 className="size-5 animate-spin" />
-                  </div>
-                ) : error ? (
-                  <div className="grid h-full min-h-[320px] place-items-center">
-                    <Card className="w-full max-w-md border-amber/30 bg-amber/10">
-                      <CardContent className="p-5 text-center">
-                        <p className="text-sm font-medium text-amber">{t("threadLoadErrorTitle")}</p>
-                        <p className="mt-1 text-xs text-amber/80">{error}</p>
-                      </CardContent>
-                    </Card>
-                  </div>
-                ) : messages.length === 0 ? (
-                  <div className="grid h-full min-h-[320px] place-items-center">
-                    <div className="max-w-sm text-center">
-                      <div className="mx-auto grid size-16 place-items-center rounded-full bg-cyan/10 text-cyan">
-                        <MessageCircle className="size-6" />
-                      </div>
-                      <p className="mt-4 text-base font-semibold">{t("emptyThreadTitle")}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{t("emptyThreadDescription")}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {hasMore ? (
-                      <div className="flex justify-center pb-1">
-                        <button
-                          type="button"
-                          onClick={() => void loadConversation(selectedConversation.otherEmployeeId, messages[0]?.created_at)}
-                          disabled={loadingOlder}
-                          className="inline-flex items-center gap-2 rounded-full border border-soft bg-background/90 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-card hover:text-foreground disabled:opacity-50"
-                        >
-                          {loadingOlder ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                          {t("loadOlder")}
-                        </button>
-                      </div>
-                    ) : null}
-                    {messages.map((message) => (
-                      <MessageBubble key={message.id} message={message} locale={locale} />
-                    ))}
-                  </>
-                )}
-              </div>
-
-              <div className="border-t border-soft bg-background/88 p-4 backdrop-blur">
+              <div className="border-t border-soft bg-card p-4">
                 {staged.length > 0 ? (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {staged.map((attachment, index) => (
                       <span
                         key={attachment.storage_path}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-cyan/20 bg-cyan/10 px-3 py-1 text-xs text-cyan"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-cyan/20 bg-cyan-dim/14 px-3 py-1 text-xs text-cyan"
                       >
                         <FileText className="size-3.5" />
                         <span className="max-w-[180px] truncate">{attachment.filename}</span>
                         <button
                           type="button"
-                          onClick={() => setStaged((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                          onClick={() =>
+                            setStaged((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )}
                           aria-label={`${t("removeAttachment")} ${attachment.filename}`}
                           className="opacity-70 transition-opacity hover:opacity-100"
                         >
@@ -520,60 +552,68 @@ export function MessagesInbox({
                   </div>
                 ) : null}
 
-                <div className="flex items-end gap-3 rounded-[26px] border border-soft bg-card/90 p-3 shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={uploadingFile || staged.length >= 8}
-                    className="grid size-11 shrink-0 place-items-center rounded-full border border-soft bg-background text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                    aria-label={t("attachFile")}
-                  >
-                    {uploadingFile ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-                  </button>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    multiple
-                    hidden
-                    onChange={(event) => void onPickFiles(event.target.files)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <textarea
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                          event.preventDefault();
-                          submit();
-                        }
-                      }}
-                      rows={2}
-                      placeholder={t("composerPlaceholder")}
-                      className="min-h-12 w-full resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground"
+                <div className="rounded-[28px] border border-soft bg-background p-3 shadow-[var(--surface-elev)]">
+                  <div className="flex items-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={uploadingFile || staged.length >= 8}
+                      className="grid size-11 shrink-0 place-items-center rounded-full border border-soft bg-card text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground disabled:opacity-50"
+                      aria-label={t("attachFile")}
+                    >
+                      {uploadingFile ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Paperclip className="size-4" />
+                      )}
+                    </button>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(event) => void onPickFiles(event.target.files)}
                     />
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {t("composerHint")}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <textarea
+                        value={body}
+                        onChange={(event) => setBody(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                            event.preventDefault();
+                            submit();
+                          }
+                        }}
+                        rows={2}
+                        placeholder={t("composerPlaceholder")}
+                        className="min-h-12 w-full resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground"
+                      />
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {t("composerHint")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={submit}
+                      disabled={pending || (!body.trim() && staged.length === 0)}
+                      className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-cyan px-4 text-sm font-medium text-background transition-opacity disabled:opacity-50"
+                    >
+                      {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                      <span className="hidden sm:inline">{t("send")}</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={submit}
-                    disabled={pending || (!body.trim() && staged.length === 0)}
-                    className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-foreground px-4 text-sm font-medium text-background transition-opacity disabled:opacity-50"
-                  >
-                    {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                    <span className="hidden sm:inline">{t("send")}</span>
-                  </button>
                 </div>
               </div>
             </div>
           ) : (
             <div className="grid h-full min-h-0 place-items-center px-6">
-              <div className="max-w-md text-center">
+              <div className="max-w-md rounded-[32px] border border-soft bg-card p-10 text-center shadow-[var(--surface-elev)]">
                 <div className="mx-auto grid size-20 place-items-center rounded-full bg-cyan/10 text-cyan">
                   <MessageCircle className="size-8" />
                 </div>
-                <h3 className="mt-5 text-2xl font-semibold tracking-tight">{t("selectConversationTitle")}</h3>
+                <h3 className="mt-5 text-2xl font-semibold tracking-tight">
+                  {t("selectConversationTitle")}
+                </h3>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   {t("selectConversationDescription")}
                 </p>
