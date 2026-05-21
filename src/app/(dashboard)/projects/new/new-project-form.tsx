@@ -1315,8 +1315,8 @@ export function NewProjectForm({
       </div>
 
       {/* Right: preview pane */}
-      <Card>
-        <CardContent className="p-4 space-y-3">
+      <Card className="lg:h-full">
+        <CardContent className="flex h-full min-h-0 flex-col p-4">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Eye className="size-4 text-cyan" />
             معاينة المهام التي ستُولَّد
@@ -1326,11 +1326,11 @@ export function NewProjectForm({
           </div>
 
           {selectedServices.size === 0 ? (
-            <div className="rounded-lg border border-dashed border-soft-2 p-6 text-center text-xs text-muted-foreground">
+            <div className="mt-3 flex flex-1 items-center justify-center rounded-lg border border-dashed border-soft-2 p-6 text-center text-xs text-muted-foreground">
               اختر خدمة واحدة على الأقل لعرض المهام المتوقعة.
             </div>
           ) : preview.length === 0 ? (
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-400 flex items-start gap-2">
+            <div className="mt-3 flex flex-1 items-center rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-400">
               <AlertCircle className="size-4 mt-0.5 shrink-0" />
               <div>
                 لا توجد قوالب مطابقة. تحقق من تصنيفات الخدمات في
@@ -1339,7 +1339,7 @@ export function NewProjectForm({
               </div>
             </div>
           ) : (
-            <ul className="space-y-2 max-h-[60vh] overflow-y-auto px-1">
+            <ul className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto px-1">
               {preview.map((t, i) => (
                 <li
                   key={`${t.templateItemId ?? "x"}-${i}`}

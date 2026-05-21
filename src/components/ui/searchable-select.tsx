@@ -55,6 +55,7 @@ type Props = SingleProps | MultiProps;
 export function SearchableSelect(props: Props) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -91,6 +92,11 @@ export function SearchableSelect(props: Props) {
       );
     }
   };
+
+  React.useEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [open]);
 
   return (
     <div className={cn("relative", props.className)}>
@@ -137,7 +143,7 @@ export function SearchableSelect(props: Props) {
           <div className="flex items-center gap-2 border-b border-soft px-2 py-1.5">
             <Search className="size-4 shrink-0 text-muted-foreground" />
             <input
-              autoFocus
+              ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
