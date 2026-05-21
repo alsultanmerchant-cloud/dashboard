@@ -10,8 +10,15 @@ import {
   listTasksPage,
   type TaskFilters,
 } from "@/lib/data/tasks";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { BoardTask } from "../projects/[id]/task-board";
 import type { TaskStage, TaskRoleType } from "@/lib/labels";
+
+export type NextActivitySummary = {
+  activity_type: string;
+  summary: string | null;
+  due_date: string;
+};
 
 export type ListTaskRow = BoardTask & {
   status: string;
@@ -20,6 +27,13 @@ export type ListTaskRow = BoardTask & {
   client_name: string | null;
   project_name: string;
   project_id: string;
+  /** §TASK-LIST-1 — Odoo "Hours Spent" sum over task_timesheets. */
+  hours_spent: number;
+  /** §TASK-LIST-1 — Odoo "Next Activity" (earliest unresolved task_activity). */
+  next_activity: NextActivitySummary | null;
+  /** §TASK-LIST-1 — Odoo "Approval Status" pill. */
+  approval_status: string | null;
+  approval_required: boolean;
 };
 
 type RawTask = Awaited<ReturnType<typeof listTasks>>[number];
@@ -95,7 +109,93 @@ function toListRow(t: RawTask): ListTaskRow | null {
     client_name: client?.name ?? null,
     project_name: project.name,
     project_id: project.id,
+    // §TASK-LIST-1 — placeholders filled by enrichListRows() after the
+    // bundle returns. Keeping them on the row keeps the renderer simple.
+    hours_spent: 0,
+    next_activity: null,
+    approval_status: null,
+    approval_required: false,
   };
+}
+
+// §TASK-LIST-1 — fetch the three Odoo list-only signals in bulk (one query
+// each, all grouped by task_id) and merge into the row map. Cheaper than
+// adding to the bundle RPC right away; can be folded back into the RPC in
+// a future migration once the column set stabilises.
+async function enrichListRows(
+  orgId: string,
+  rows: ListTaskRow[],
+): Promise<ListTaskRow[]> {
+  if (rows.length === 0) return rows;
+  const ids = rows.map((r) => r.id);
+
+  const [timesheetsRes, activitiesRes, approvalsRes] = await Promise.all([
+    supabaseAdmin
+      .from("task_timesheets")
+      .select("task_id, hours")
+      .eq("organization_id", orgId)
+      .in("task_id", ids),
+    supabaseAdmin
+      .from("task_activities")
+      .select("task_id, activity_type, summary, due_date")
+      .eq("organization_id", orgId)
+      .in("task_id", ids)
+      .is("completed_at", null)
+      .order("due_date", { ascending: true }),
+    supabaseAdmin
+      .from("tasks")
+      .select("id, approval_status, approval_required")
+      .eq("organization_id", orgId)
+      .in("id", ids),
+  ]);
+
+  const hoursByTask = new Map<string, number>();
+  for (const row of (timesheetsRes.data ?? []) as Array<{
+    task_id: string;
+    hours: number | string | null;
+  }>) {
+    const h = typeof row.hours === "string" ? Number(row.hours) : row.hours;
+    if (h == null || !Number.isFinite(h)) continue;
+    hoursByTask.set(row.task_id, (hoursByTask.get(row.task_id) ?? 0) + h);
+  }
+
+  // First (= earliest due) open activity per task — query is already
+  // ordered ascending so the first hit wins.
+  const nextActivityByTask = new Map<string, NextActivitySummary>();
+  for (const row of (activitiesRes.data ?? []) as Array<{
+    task_id: string;
+    activity_type: string;
+    summary: string | null;
+    due_date: string;
+  }>) {
+    if (!nextActivityByTask.has(row.task_id)) {
+      nextActivityByTask.set(row.task_id, {
+        activity_type: row.activity_type,
+        summary: row.summary,
+        due_date: row.due_date,
+      });
+    }
+  }
+
+  const approvalByTask = new Map<string, { status: string | null; required: boolean }>();
+  for (const row of (approvalsRes.data ?? []) as Array<{
+    id: string;
+    approval_status: string | null;
+    approval_required: boolean | null;
+  }>) {
+    approvalByTask.set(row.id, {
+      status: row.approval_status,
+      required: Boolean(row.approval_required),
+    });
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    hours_spent: hoursByTask.get(r.id) ?? 0,
+    next_activity: nextActivityByTask.get(r.id) ?? null,
+    approval_status: approvalByTask.get(r.id)?.status ?? null,
+    approval_required: approvalByTask.get(r.id)?.required ?? false,
+  }));
 }
 
 export async function loadTasksForGlobalView(
@@ -103,9 +203,10 @@ export async function loadTasksForGlobalView(
   filters: TaskFilters,
 ): Promise<ListTaskRow[]> {
   const raw = await listTasks(orgId, filters);
-  return raw
+  const rows = raw
     .map(toListRow)
     .filter((x): x is ListTaskRow => x !== null);
+  return enrichListRows(orgId, rows);
 }
 
 export async function loadTasksPageForGlobalView(
@@ -114,10 +215,11 @@ export async function loadTasksPageForGlobalView(
   opts: { limit?: number; offset?: number } = {},
 ): Promise<{ rows: ListTaskRow[]; totalCount: number }> {
   const bundle = await listTasksPage(orgId, filters, opts);
+  const rows = bundle.rows
+    .map(toListRow)
+    .filter((x): x is ListTaskRow => x !== null);
   return {
-    rows: bundle.rows
-      .map(toListRow)
-      .filter((x): x is ListTaskRow => x !== null),
+    rows: await enrichListRows(orgId, rows),
     totalCount: bundle.totalCount,
   };
 }

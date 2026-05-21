@@ -4,6 +4,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { listProjectsPaged } from "@/lib/data/projects";
 import type { LiveProject } from "@/lib/odoo/live";
 import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
+import type { ProjectSearchFacet } from "@/lib/data/projects";
 
 export type ProjectFilters = {
   onlyWithCategories?: boolean;
@@ -20,6 +21,8 @@ export type ProjectFilters = {
   endDateTo?: string;
   /** Base64-encoded custom filter tree (matches the URL `?cf=` param). */
   customFilterEncoded?: string;
+  /** Rwasem-style faceted search; mirrors the URL `?sf=` JSON array. */
+  searchFacets?: ProjectSearchFacet[];
 };
 
 export type LoadMoreResult = {
@@ -55,6 +58,7 @@ export async function loadMoreProjectsAction(
     endDateTo: filters.endDateTo,
     currentEmployeeId: session.employeeId,
     customFilter,
+    searchFacets: filters.searchFacets,
   });
   return {
     rows,

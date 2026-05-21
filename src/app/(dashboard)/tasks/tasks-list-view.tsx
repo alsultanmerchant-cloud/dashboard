@@ -203,6 +203,12 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
               <DataTableHeaderCell className="text-center" title="عدد المهام الفرعية المنجزة (تعديلات/مراجعات)">تعديلات</DataTableHeaderCell>
               <DataTableHeaderCell>المدة في المرحلة</DataTableHeaderCell>
               <DataTableHeaderCell>التقدم</DataTableHeaderCell>
+              {/* §TASK-LIST-1 — five Odoo columns the team scans daily. */}
+              <DataTableHeaderCell className="text-end" title="Expected %">المتوقّع %</DataTableHeaderCell>
+              <DataTableHeaderCell className="text-end" title="Progress Slip %">انحراف %</DataTableHeaderCell>
+              <DataTableHeaderCell className="text-end" title="Hours Spent">الساعات</DataTableHeaderCell>
+              <DataTableHeaderCell title="Next Activity">النشاط التالي</DataTableHeaderCell>
+              <DataTableHeaderCell title="Approval Status">حالة الموافقة</DataTableHeaderCell>
               <DataTableHeaderCell aria-label="فتح" />
             </tr>
           </DataTableHead>
@@ -379,6 +385,73 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
                         </span>
                       )}
                     </div>
+                  </DataTableCell>
+                  {/* §TASK-LIST-1 — Expected % */}
+                  <DataTableCell className="text-end tabular-nums text-xs text-muted-foreground">
+                    {t.expected_progress_percent != null
+                      ? `${Math.round(Number(t.expected_progress_percent))}%`
+                      : "—"}
+                  </DataTableCell>
+                  {/* §TASK-LIST-1 — Progress Slip % */}
+                  <DataTableCell className="text-end tabular-nums text-xs">
+                    {t.progress_slip_percent != null ? (
+                      <span
+                        className={cn(
+                          Number(t.progress_slip_percent) > 10 && "text-cc-red font-medium",
+                          Number(t.progress_slip_percent) > 0 && Number(t.progress_slip_percent) <= 10 && "text-amber-400",
+                          Number(t.progress_slip_percent) <= 0 && "text-emerald-400",
+                        )}
+                      >
+                        {Math.round(Number(t.progress_slip_percent))}%
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </DataTableCell>
+                  {/* §TASK-LIST-1 — Hours Spent (sum of task_timesheets.hours) */}
+                  <DataTableCell className="text-end tabular-nums text-xs text-muted-foreground">
+                    {t.hours_spent > 0 ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="size-3" />
+                        {t.hours_spent % 1 === 0 ? t.hours_spent : t.hours_spent.toFixed(1)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </DataTableCell>
+                  {/* §TASK-LIST-1 — Next Activity (earliest unresolved task_activity) */}
+                  <DataTableCell className="text-xs">
+                    {t.next_activity ? (
+                      <div
+                        className="inline-flex items-center gap-1.5 max-w-[180px]"
+                        title={t.next_activity.summary ?? t.next_activity.activity_type}
+                      >
+                        <span className="size-1.5 shrink-0 rounded-full bg-amber-400" />
+                        <span className="truncate text-foreground/80" dir="ltr">
+                          {t.next_activity.due_date}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </DataTableCell>
+                  {/* §TASK-LIST-1 — Approval Status (only render when gate is required) */}
+                  <DataTableCell className="text-xs">
+                    {t.approval_required && t.approval_status ? (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          t.approval_status === "approved" && "bg-emerald-500/15 text-emerald-400",
+                          t.approval_status === "requested" && "bg-amber-500/15 text-amber-400",
+                          t.approval_status === "rejected" && "bg-rose-500/15 text-rose-400",
+                          t.approval_status === "draft" && "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {t.approval_status}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
                   </DataTableCell>
                   <DataTableCell>
                     <Link

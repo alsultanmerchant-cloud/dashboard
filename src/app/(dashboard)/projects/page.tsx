@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
 import { ProjectsList } from "./projects-list";
+import { decodeProjectFacets } from "./_facets";
 import {
   URL_PARAM as CF_URL_PARAM,
   encodeFilterToUrl,
@@ -71,6 +72,9 @@ export default async function ProjectsPage({
   const customFilter = decodeFilterFromUrl(
     typeof sp[CF_URL_PARAM] === "string" ? (sp[CF_URL_PARAM] as string) : null,
   );
+  const searchFacets = decodeProjectFacets(
+    typeof sp.sf === "string" ? sp.sf : null,
+  );
   const { rows: projects, total } = await listProjectsPaged({
     organizationId: session.orgId,
     page: 1,
@@ -91,6 +95,7 @@ export default async function ProjectsPage({
     endDateTo: toStr(sp.endDateTo),
     currentEmployeeId: session.employeeId,
     customFilter,
+    searchFacets,
   });
 
   return (
@@ -131,6 +136,7 @@ export default async function ProjectsPage({
             endDateTo: toStr(sp.endDateTo),
             groupBy: toStr(sp.groupBy),
             cf: typeof sp[CF_URL_PARAM] === "string" ? (sp[CF_URL_PARAM] as string) : "",
+            sf: typeof sp.sf === "string" ? sp.sf : "",
           })}
           initial={projects}
           initialTotal={total}

@@ -82,6 +82,10 @@ export interface OdooProject {
   // (already declared above as total_progress)
   // rwasem_document_management_project
   document_count?: number;
+  // Odoo's project visibility setting. Portal/followers projects (e.g. the
+  // built-in id=1 "Internal" placeholder) are hidden from the operator
+  // project list in Rwasem — we mirror that by treating them as archived.
+  privacy_visibility?: "employees" | "followers" | "portal" | false;
 }
 
 export interface OdooProjectTag {

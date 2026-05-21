@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { Bell, RefreshCw, Menu, MessageCircle, CalendarDays } from "lucide-react";
+import { Bell, RefreshCw, Menu, MessageCircle } from "lucide-react";
+import { AppSwitcher } from "./app-switcher";
 import { TopbarCalendarPopover } from "./topbar-calendar-popover";
 import { Button } from "@/components/ui/button";
 import { useTopbarControls } from "@/components/layout/topbar-context";
@@ -42,42 +42,6 @@ interface TopbarProps {
   onMenuClick?: () => void;
   notificationPanel?: React.ReactNode;
 }
-
-const TopbarClock = memo(function TopbarClock({
-  locale,
-  className,
-}: {
-  locale: string;
-  className: string;
-}) {
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const schedule = () => {
-      const current = new Date();
-      const delay = (60 - current.getSeconds()) * 1000 - current.getMilliseconds();
-      return window.setTimeout(() => {
-        setNow(new Date());
-        timeoutId = schedule();
-      }, Math.max(delay, 250));
-    };
-
-    let timeoutId = schedule();
-    return () => window.clearTimeout(timeoutId);
-  }, []);
-
-  const clockStr = new Intl.DateTimeFormat(intlLocale(locale), {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(now);
-
-  return (
-    <span className={className} dir="ltr">
-      {clockStr}
-    </span>
-  );
-});
 
 // Slim, single-row top bar. The legacy day/week/month + month-name pills
 // were removed per owner feedback — the main page should breathe more.
@@ -133,6 +97,10 @@ export function Topbar({
             <Menu className="w-5 h-5 text-white/90 dark:text-muted-foreground" />
           </Button>
 
+          {/* Odoo-style 9-dot app switcher (RWASEM_PARITY_NOTES §NAV-6).
+              Hidden on the mobile breakpoint where the hamburger covers it. */}
+          <AppSwitcher className="hidden lg:inline-flex" />
+
           <div className="min-w-0 rtl:text-right">
             <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">{title}</h2>
             <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">{subtitle}</p>
@@ -176,15 +144,6 @@ export function Topbar({
           </div>
           <div className="md:hidden">
             <QuickCreateTrigger className={primaryCreateClass} />
-          </div>
-
-          {/* Clock is desktop-only (tight on phones); calendar always shows
-              so the user can reach scheduled-activities from any viewport. */}
-          <div className="hidden lg:flex items-center gap-2">
-            <TopbarClock
-              locale={locale}
-              className={`${utilityChip} px-3 py-1.5 text-xs font-mono`}
-            />
           </div>
 
           {/* Calendar icon opens an inline mini-calendar popover with

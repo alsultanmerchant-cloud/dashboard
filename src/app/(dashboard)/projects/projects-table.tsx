@@ -1,15 +1,28 @@
 "use client";
 
-// Rwasem-style list view: dense table with the same columns Odoo shows
-// in the project list — name, ref, store name, client, dates, account
-// manager, project manager, task count.
+// Rwasem/Odoo-style list view. Column order mirrors Rwasem's list view per
+// the §1 pixel-perfect mandate:
+//   ★ · Project ID · Name · Customer · Project Manager · status dot · View Tasks
+// followed by our dashboard extras (Store Name, Start, End, Account Manager).
+// See RWASEM_PARITY_NOTES §PROJ-LIST-5.
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Star } from "lucide-react";
+import { ArrowRight, Star } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+
+// Status → small dot color. Keeps the list scannable without a full badge.
+const STATUS_DOT: Record<string, string> = {
+  active: "bg-emerald-500",
+  on_track: "bg-emerald-500",
+  at_risk: "bg-amber-500",
+  off_track: "bg-rose-500",
+  on_hold: "bg-slate-400",
+  archived: "bg-slate-400",
+  done: "bg-cyan-500",
+};
 
 const ODOO_COLORS = [
   "#9c9c9c", "#d44d4d", "#dfb700", "#3597d3", "#5b8a72",
@@ -58,21 +71,27 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
         <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
           <tr>
             <th className="w-8 px-2 py-2"></th>
-            <th className="px-2 py-2 text-start font-semibold">{t("client")}</th>
-            <th className="px-2 py-2 text-start font-semibold">{t("ref")}</th>
+            {/* Odoo columns, exact label + order (§PROJ-LIST-5). */}
+            <th className="px-2 py-2 text-start font-semibold">{t("projectId")}</th>
+            <th className="px-2 py-2 text-start font-semibold">{t("name")}</th>
+            <th className="px-2 py-2 text-start font-semibold">{t("customer")}</th>
+            <th className="px-2 py-2 text-start font-semibold">{t("projectManager")}</th>
+            <th className="w-12 px-2 py-2 text-center font-semibold">{t("statusDot")}</th>
+            <th className="w-24 px-2 py-2 text-center font-semibold">{t("viewTasks")}</th>
+            {/* Dashboard extras — kept after the Odoo columns. */}
             <th className="px-2 py-2 text-start font-semibold">{t("storeName")}</th>
-            <th className="px-2 py-2 text-start font-semibold">{t("client")}</th>
             <th className="px-2 py-2 text-start font-semibold">{t("startDate")}</th>
             <th className="px-2 py-2 text-start font-semibold">{t("endDate")}</th>
-            <th className="px-2 py-2 text-start font-semibold">{t("projectManager")}</th>
             <th className="px-2 py-2 text-start font-semibold">{t("accountManager")}</th>
-            <th className="px-2 py-2 text-end font-semibold">{t("tasks")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
           {items.map((p) => {
             const stripe = odooColor(p.color || 11);
-            const href = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
+            const tasksHref = p.id ? `/tasks?projectId=${p.id}` : `/tasks?odooProjectId=${p.odooId}`;
+            const projectHref = p.id ? `/projects/${p.id}` : tasksHref;
+            const statusKey = (p as { status?: string | null }).status ?? "active";
+            const dotCls = STATUS_DOT[statusKey] ?? "bg-slate-400";
             return (
               <tr key={p.id ?? `odoo-${p.odooId}`} className="group hover:bg-muted/40">
                 <td className="px-2 py-2 align-middle">
@@ -83,9 +102,12 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                     )}
                   />
                 </td>
+                <td className="px-2 py-2 align-middle tabular-nums text-muted-foreground">
+                  {p.ref}
+                </td>
                 <td className="px-2 py-2 align-middle">
                   <Link
-                    href={href}
+                    href={projectHref}
                     className="flex items-center gap-2 text-foreground hover:text-primary"
                   >
                     <span
@@ -96,24 +118,10 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                     <span className="truncate font-medium">{p.name}</span>
                   </Link>
                 </td>
-                <td className="px-2 py-2 align-middle tabular-nums text-muted-foreground">
-                  {p.ref}
-                </td>
-                <td className="px-2 py-2 align-middle">
-                  <span className="block max-w-[18ch] truncate text-foreground/80">
-                    {p.storeName ?? p.clientName ?? "—"}
-                  </span>
-                </td>
                 <td className="px-2 py-2 align-middle">
                   <span className="block max-w-[18ch] truncate text-foreground/80">
                     {p.clientName ?? "—"}
                   </span>
-                </td>
-                <td className="px-2 py-2 align-middle tabular-nums text-foreground/80" dir="ltr">
-                  {formatOdooDate(p.startDate)}
-                </td>
-                <td className="px-2 py-2 align-middle tabular-nums text-foreground/80" dir="ltr">
-                  {formatOdooDate(p.endDate)}
                 </td>
                 <td className="px-2 py-2 align-middle">
                   {p.managerName ? (
@@ -129,6 +137,33 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                     <span className="text-muted-foreground">—</span>
                   )}
                 </td>
+                <td className="px-2 py-2 align-middle text-center">
+                  <span
+                    aria-label={statusKey}
+                    title={statusKey}
+                    className={cn("inline-block size-2.5 rounded-full", dotCls)}
+                  />
+                </td>
+                <td className="px-2 py-2 align-middle text-center">
+                  <Link
+                    href={tasksHref}
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-muted"
+                  >
+                    <span>{p.openTaskCount}</span>
+                    <ArrowRight className="size-3 rtl:rotate-180" />
+                  </Link>
+                </td>
+                <td className="px-2 py-2 align-middle">
+                  <span className="block max-w-[18ch] truncate text-foreground/80">
+                    {p.storeName ?? "—"}
+                  </span>
+                </td>
+                <td className="px-2 py-2 align-middle tabular-nums text-foreground/80" dir="ltr">
+                  {formatOdooDate(p.startDate)}
+                </td>
+                <td className="px-2 py-2 align-middle tabular-nums text-foreground/80" dir="ltr">
+                  {formatOdooDate(p.endDate)}
+                </td>
                 <td className="px-2 py-2 align-middle">
                   {p.accountManagerName ? (
                     <div className="flex items-center gap-1.5">
@@ -142,9 +177,6 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
-                </td>
-                <td className="px-2 py-2 text-end align-middle tabular-nums font-semibold text-primary">
-                  {p.openTaskCount}
                 </td>
               </tr>
             );

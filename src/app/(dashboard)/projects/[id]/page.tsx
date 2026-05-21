@@ -1,15 +1,21 @@
 import { Suspense } from "react";
+import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import {
-  Briefcase, Calendar, User, ListTodo, PauseCircle,
+  Briefcase, Calendar, ListTodo, Star, Users,
 } from "lucide-react";
+import { ProjectInfoChrome } from "./project-info-chrome";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { getProject, getProjectHoldActor, getProjectTaskSummary, getProjectTagsForProject } from "@/lib/data/projects";
+import {
+  getProject,
+  getProjectHoldActor,
+  getProjectTaskSummary,
+  getProjectAttachedTags,
+  listProjectTags,
+} from "@/lib/data/projects";
 import { ProjectTagsPanel } from "./project-tags-panel";
-import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
-import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   ProjectStatusBadge, PriorityBadge,
@@ -19,11 +25,10 @@ import { intlLocale } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { GanttChart } from "lucide-react";
-import { TaskBoard } from "./task-board";
+import type { BoardTask } from "./task-board";
 import { BulkReassignDialog } from "./bulk-reassign-dialog";
 import { listEmployees } from "@/lib/data/employees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { MessageButton } from "@/components/dm/message-button";
 import { listServiceCategories } from "@/lib/data/service-categories";
 import { ProjectServicesPanel, type ServiceLink, type ServiceCandidate, type EmployeePickOption } from "./services-panel";
 import { WhatsAppPanel, type WhatsAppGroupRow } from "./whatsapp-panel";
@@ -36,18 +41,152 @@ import { RenewalsPanel } from "./renewals/renewals-panel";
 import { loadTaskBoardForGlobalView } from "../../tasks/_loaders";
 import { buildTaskFiltersFromParams } from "../../tasks/_filter_params";
 import { SmartSearchBar } from "../../tasks/smart-search-bar";
-import { ProjectDocumentsPanel } from "./project-documents-panel";
+import { cn } from "@/lib/utils";
 
-function formatShortDate(
+const TaskBoard = dynamic(() => import("./task-board").then((mod) => mod.TaskBoard));
+const ProjectChatterPanel = dynamic(
+  () => import("./project-chatter-panel").then((mod) => mod.ProjectChatterPanel),
+);
+
+function formatLongDate(
   value: string | Date | null | undefined,
   locale: string,
 ): string {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   return new Intl.DateTimeFormat(intlLocale(locale.startsWith("ar") ? "ar-SA" : "en-US"), {
-    month: "short",
-    day: "numeric",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   }).format(d);
+}
+
+type PersonLite = {
+  id?: string;
+  full_name: string;
+  job_title: string | null;
+  avatar_url?: string | null;
+} | null;
+
+function personInitial(value: string | undefined): string {
+  return value?.trim().slice(0, 1).toUpperCase() || "—";
+}
+
+function SummaryPill({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-soft bg-card px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-soft-2 text-primary">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            {label}
+          </p>
+          <p className="mt-1 text-lg font-semibold tracking-tight text-foreground">{value}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoField({
+  label,
+  value,
+  icon,
+  className,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("rounded-2xl border border-soft bg-soft-1/60 px-4 py-3", className)}>
+      <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      <div className="flex items-start gap-2 text-sm text-foreground">
+        {icon ? <span className="mt-0.5 text-muted-foreground">{icon}</span> : null}
+        <div className="min-w-0 flex-1">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function UnderlineField({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3", className)}>
+      <p className="pt-1 text-[12px] font-medium text-foreground/90">{label}</p>
+      <div className="min-w-0 border-b border-primary/80 pb-1.5 text-[12px] text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FormChip({
+  label,
+  dotClassName = "bg-primary",
+}: {
+  label: string;
+  dotClassName?: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-foreground/80">
+      <span className={cn("size-2 rounded-full", dotClassName)} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function PersonCard({
+  label,
+  person,
+  compact = false,
+}: {
+  label: string;
+  person: PersonLite;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn(
+      "flex items-center gap-3 rounded-2xl border border-soft bg-card px-3 py-3",
+      compact && "px-2.5 py-2.5",
+    )}
+    >
+      <Avatar size="sm">
+        <AvatarFallback>{personInitial(person?.full_name)}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {label}
+        </p>
+        <p className="truncate text-sm font-semibold text-foreground">
+          {person?.full_name ?? "—"}
+        </p>
+        <p className="truncate text-[11px] text-muted-foreground">
+          {person?.job_title ?? "—"}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default async function ProjectDetailPage({
@@ -64,12 +203,14 @@ export default async function ProjectDetailPage({
     groupBy?: string;
   }>;
 }) {
-  const { id } = await params;
-  const sp = (await searchParams) ?? {};
-  const locale = await getLocale();
-  const t = await getTranslations("ProjectDetailPage");
-  const tNav = await getTranslations("Nav");
-  const session = await requirePagePermission("projects.view");
+  const [{ id }, sp, locale, t, tNav, session] = await Promise.all([
+    params,
+    searchParams ? searchParams.then((value) => value ?? {}) : Promise.resolve({}),
+    getLocale(),
+    getTranslations("ProjectDetailPage"),
+    getTranslations("Nav"),
+    requirePagePermission("projects.view"),
+  ]);
   const project = await getProject(session.orgId, id);
   if (!project) notFound();
   // Same filter surface as the global /tasks page, but scoped to this
@@ -81,7 +222,7 @@ export default async function ProjectDetailPage({
     projectId: id,
   });
 
-  const [summary, holdActor] = await Promise.all([
+  const [summary, holdActor, projectTags, followersRes] = await Promise.all([
     getProjectTaskSummary(session.orgId, project.id),
     // Key off held_at, not status — Odoo-imported holds can sit on
     // status='archived' or other text values; the ribbon below already
@@ -89,12 +230,23 @@ export default async function ProjectDetailPage({
     project.held_at
       ? getProjectHoldActor(session.orgId, project.id)
       : Promise.resolve(null),
+    getProjectAttachedTags(session.orgId, project.id),
+    supabaseAdmin
+      .from("project_followers")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", session.orgId)
+      .eq("project_id", id),
   ]);
+  const attachedTags = projectTags;
+  const followerCount = followersRes.count ?? 0;
   const renewalDays = daysUntilRenewal((project as { next_renewal_date?: string | null }).next_renewal_date ?? null);
   const canManageRenewal =
     session.isOwner || session.permissions.has("renewal.manage");
 
   const client = Array.isArray(project.client) ? project.client[0] : project.client;
+  const projectManager = Array.isArray((project as { project_manager?: unknown }).project_manager)
+    ? ((project as { project_manager?: { id: string; full_name: string; job_title: string | null; avatar_url: string | null }[] }).project_manager?.[0] ?? null)
+    : ((project as { project_manager?: { id: string; full_name: string; job_title: string | null; avatar_url: string | null } | null }).project_manager ?? null);
   const am = Array.isArray(project.account_manager) ? project.account_manager[0] : project.account_manager;
   const socialSp = Array.isArray((project as { social_specialist?: unknown }).social_specialist)
     ? ((project as { social_specialist?: { id: string; full_name: string; job_title: string | null }[] }).social_specialist?.[0] ?? null)
@@ -110,219 +262,283 @@ export default async function ProjectDetailPage({
     { label: t("specialists.media"), emp: mediaSp },
     { label: t("specialists.seo"), emp: seoSp },
   ];
+  const serviceLinks = ((project.project_services ?? []) as Array<{
+    id: string;
+    service:
+      | { id: string; name: string; slug: string }
+      | { id: string; name: string; slug: string }[]
+      | null;
+  }>)
+    .map((link) => (Array.isArray(link.service) ? link.service[0] : link.service))
+    .filter((service): service is { id: string; name: string; slug: string } => Boolean(service));
+  const projectMembers = (project.project_members ?? []) as Array<{
+    id: string;
+    role_label: string | null;
+    employee:
+      | { id: string; full_name: string; job_title: string | null; avatar_url: string | null }
+      | { id: string; full_name: string; job_title: string | null; avatar_url: string | null }[]
+      | null;
+  }>;
+  const memberCount = projectMembers.length;
+  const specialistCount = specialists.filter((specialist) => specialist.emp).length;
+  const description = project.description?.trim() || t("overview.emptyDescription");
+  const totalProgress = summary.total > 0
+    ? `${Math.round(((summary.done ?? 0) / summary.total) * 100)}%`
+    : "0%";
+  // Smart-button stat pills mirror Odoo's project header (Tasks, Status,
+  // Collaborators, Documents). Documents opens a StackedSheet now — the
+  // page no longer renders a separate documents section.
+  const documentCount =
+    (project as { document_count?: number | null }).document_count ?? 0;
 
   return (
     <div>
-      <PageHeader
-        title={
-          ((project as { project_code?: string | null }).project_code
-            ? `${(project as { project_code?: string | null }).project_code} · `
-            : "") + project.name
-        }
-        description={project.description ?? undefined}
-        breadcrumbs={[{ label: tNav("projects"), href: "/projects" }, { label: project.name }]}
-        actions={
-          <div className="flex items-center gap-2">
-            <HoldDialog
-              projectId={project.id}
-              status={project.status}
-              heldAt={project.held_at}
-              holdReason={project.hold_reason}
-              heldBy={holdActor?.name ?? null}
-            />
-            {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
-              <span
-                className="inline-flex items-center rounded-full border border-amber/40 bg-amber-dim px-2 py-0.5 text-[10px] font-semibold text-amber"
-                title={t("renewalSoonTitle")}
-              >
-                {t("renewalSoon", { days: renewalDays })}
-              </span>
-            )}
-            <PriorityBadge priority={project.priority} />
-            <ProjectStatusBadge status={project.status} />
-            <Link
-              href={`/projects/${project.id}/gantt`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted/50 transition-colors"
-            >
-              <GanttChart className="size-3.5" />
-              {t("actions.gantt")}
-            </Link>
-            {session.permissions.has("tasks.manage") && (
-              <Suspense fallback={null}>
-                <BulkReassignSection orgId={session.orgId} projectId={project.id} />
-              </Suspense>
-            )}
-          </div>
+      <ProjectInfoChrome
+        projectId={project.id}
+        projectName={project.name}
+        projectCode={(project as { project_code?: string | null }).project_code ?? null}
+        recordKind="projects"
+        moduleLabel={tNav("projects")}
+        moduleHref="/projects"
+        newHref="/projects/new"
+        totalTasks={summary.total}
+        followerCount={followerCount}
+        documentCount={documentCount}
+        labels={{
+          totalTasks: t("metrics.totalTasks"),
+          collaborators: t("sections.followers.title"),
+          documents: t("sections.attachments.title"),
+          activities: t("smartPills.activities"),
+          documentsSheetTitle: t("sections.attachments.title"),
+          documentsSheetDescription: t("sections.attachments.description"),
+          followersSheetTitle: t("sections.followers.title"),
+          followersSheetDescription: t("sections.followers.description"),
+          activitiesSheetTitle: t("activitiesSheet.title"),
+        }}
+        rightActions={
+          <Link
+            href={`/projects/${project.id}/gantt`}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] font-medium hover:bg-muted/50 transition-colors"
+          >
+            <GanttChart className="size-3.5" />
+            {t("actions.gantt")}
+          </Link>
         }
       />
 
-      {/*
-        HOLD ribbon. Per dispatch T3: key off held_at IS NOT NULL (the
-        canonical signal, since project_status is text on this DB and
-        adding a 'hold' enum is not required). holdProjectAction also
-        flips status to 'on_hold' for legacy reads, but the visual cue
-        here is grounded on the timestamp so a partially-applied state
-        (status without held_at, or vice versa) still surfaces a ribbon.
-      */}
-      {project.held_at && (
-        <Card className="mb-6 border-amber/30 bg-amber-dim/30">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <PauseCircle className="size-5 text-amber shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-amber">{t("hold.ribbonTitle")}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("hold.since", { date: formatShortDate(project.held_at, locale) })}
-                    {holdActor?.name && (
-                      <>
-                        {" "}· {t("hold.by")}{" "}
-                        <span className="text-foreground/80">{holdActor.name}</span>
-                      </>
-                    )}
-                  </p>
-                </div>
-                {project.hold_reason && (
-                  <p className="mt-1 text-xs text-foreground/80 leading-relaxed">
-                    {project.hold_reason}
-                  </p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
-      <div className="mb-6 grid grid-cols-2 gap-2.5 md:grid-cols-4">
-        <MetricCard
+      <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <SummaryPill
+          icon={<ListTodo className="size-4" />}
           label={t("metrics.totalTasks")}
           value={summary.total}
-          icon={<ListTodo className="size-5" />}
-          className="p-3"
         />
-        <MetricCard
+        <SummaryPill
+          icon={<Briefcase className="size-4" />}
           label={t("metrics.inProgress")}
           value={summary.in_progress}
-          tone="info"
-          icon={<Briefcase className="size-5" />}
-          className="p-3"
         />
-        <MetricCard
-          label={t("metrics.inReview")}
-          value={summary.manager_review + summary.specialist_review}
-          tone="warning"
-          icon={<ListTodo className="size-5" />}
-          className="p-3"
+        <SummaryPill
+          icon={<Users className="size-4" />}
+          label={t("sections.team.title")}
+          value={memberCount}
         />
-        <MetricCard
-          label={t("metrics.withClient")}
-          value={summary.ready_to_send + summary.sent_to_client + summary.client_changes}
-          tone="info"
-          icon={<ListTodo className="size-5" />}
-          className="p-3"
+        <SummaryPill
+          icon={<Calendar className="size-4" />}
+          label={t("sections.services.title")}
+          value={serviceLinks.length}
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3 mb-8">
-        <Card>
-          <CardContent className="p-4 space-y-2.5">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <User className="size-4 text-cyan" /> {t("cards.client")}
-            </h3>
-            <div>
-              <p className="text-base font-medium">{client?.name ?? "—"}</p>
-              {client?.contact_name && (
-                <p className="text-xs text-muted-foreground mt-0.5">{client.contact_name}</p>
+      <Card className="mb-8 overflow-visible rounded-[1.75rem] border-border bg-[#fcfcfd] shadow-[0_12px_30px_rgba(31,35,51,0.06)]">
+        <CardContent className="p-0">
+          <div className="px-5 py-5 sm:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-1 pb-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <HoldDialog
+                  projectId={project.id}
+                  status={project.status}
+                  heldAt={project.held_at}
+                  holdReason={project.hold_reason}
+                  heldBy={holdActor?.name ?? null}
+                />
+                {session.permissions.has("tasks.manage") && (
+                  <Suspense fallback={null}>
+                    <BulkReassignSection orgId={session.orgId} projectId={project.id} />
+                  </Suspense>
+                )}
+              </div>
+              {renewalDays !== null && renewalDays >= 0 && renewalDays <= 14 && (
+                <span className="inline-flex items-center rounded-full border border-amber/40 bg-amber-dim px-2 py-1 text-[10px] font-semibold text-amber">
+                  {t("renewalSoon", { days: renewalDays })}
+                </span>
               )}
-              {client?.phone && <p className="text-xs text-muted-foreground" dir="ltr">{client.phone}</p>}
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 space-y-2.5">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <Calendar className="size-4 text-cyan" /> {t("cards.timeline")}
-            </h3>
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("cards.start")}</span>
-                <span>{formatShortDate(project.start_date, locale)}</span>
+
+            <div className="pt-7">
+              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                {(project as { project_code?: string | null }).project_code ?? `PRJ-${project.id.slice(0, 8)}`}
+              </p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Star className="size-5 text-muted-foreground" />
+                  <h1 className="truncate text-[1.65rem] font-semibold tracking-tight text-foreground">
+                    {project.name}
+                  </h1>
+                </div>
+                <button type="button" className="text-[12px] font-medium text-primary underline-offset-2 hover:underline">
+                  EN
+                </button>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("cards.end")}</span>
-                <span>{formatShortDate(project.end_date, locale)}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 space-y-2.5">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <User className="size-4 text-cyan" /> {t("cards.accountManager")}
-            </h3>
-            {am ? (
-              <div className="flex items-center gap-2.5">
-                <Avatar size="sm">
-                  <AvatarFallback>{am.full_name[0]}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{am.full_name}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">{am.job_title ?? ""}</p>
+
+              <div className="mt-4 grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.95fr)]">
+                <div className="space-y-5">
+                  <UnderlineField
+                    label={t("pixelFields.workingCalendar")}
+                    value={<span>{t("pixelFields.standardCalendar")}</span>}
+                  />
+                  <UnderlineField
+                    label={t("cards.client")}
+                    value={<span>{client?.name ?? "—"}</span>}
+                  />
+                  <UnderlineField
+                    label={t("pixelFields.siteAddress")}
+                    value={<span className="text-muted-foreground">{client?.address ?? t("pixelFields.sitePlaceholder")}</span>}
+                  />
+                </div>
+
+                <div className="space-y-5">
+                  <UnderlineField
+                    label={t("overview.labels.projectManager")}
+                    value={
+                      <div className="flex items-center gap-2">
+                        <span className="grid size-5 place-items-center rounded bg-[#be275c] text-[10px] font-semibold text-white">
+                          {personInitial(projectManager?.full_name)}
+                        </span>
+                        <span>{projectManager?.full_name ?? am?.full_name ?? "—"}</span>
+                      </div>
+                    }
+                  />
+                  <UnderlineField
+                    label={t("pixelFields.startDate")}
+                    value={<span>{formatLongDate(project.start_date, locale)}</span>}
+                  />
+                  <UnderlineField
+                    label={t("pixelFields.totalProgress")}
+                    value={<span>{totalProgress}</span>}
+                  />
+                  <UnderlineField
+                    label={t("pixelFields.plannedDate")}
+                    value={
+                      <div className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2">
+                        <span>{formatLongDate(project.start_date, locale)}</span>
+                        <span className="text-center text-muted-foreground">→</span>
+                        <span>{formatLongDate(project.end_date, locale)}</span>
+                      </div>
+                    }
+                  />
+                  <UnderlineField
+                    label={t("pixelFields.allocatedHours")}
+                    value={<span>{t("pixelFields.defaultHours")}</span>}
+                  />
                 </div>
               </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t("cards.noAccountManager")}</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-3">
-        {specialists.map((s) => (
-          <Card key={s.label}>
-            <CardContent className="p-4 space-y-2">
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <User className="size-4 text-cyan" /> {t("specialists.owner", { label: s.label })}
-              </h3>
-              {s.emp ? (
-                <div className="flex items-center gap-2.5">
-                  <Avatar size="sm">
-                    <AvatarFallback>{s.emp.full_name[0]}</AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{s.emp.full_name}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">{s.emp.job_title ?? ""}</p>
-                  </div>
+          </div>
+
+          <div className="grid gap-0 border-t border-border lg:grid-cols-[minmax(0,1.15fr)_minmax(21rem,0.85fr)]">
+            <div className="border-b border-soft px-5 py-5 sm:px-6 lg:border-b-0 lg:border-e">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-foreground">{t("overview.sections.teamAndTags")}</h2>
+                  <p className="text-xs text-muted-foreground">{t("overview.sections.teamAndTagsHint")}</p>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("specialists.unassigned")}</p>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </div>
 
-      <SectionTitle
-        title={t("sections.tags.title")}
-        description={t("sections.tags.description")}
-      />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          <Suspense fallback={<p className="text-xs text-muted-foreground">{t("loading.tags")}</p>}>
-            <ProjectTagsSection
-              orgId={session.orgId}
-              projectId={project.id}
-              canManage={session.permissions.has("projects.manage") || session.isOwner}
-            />
-          </Suspense>
+              <div className="space-y-5">
+                <div>
+                  <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {t("sections.team.title")}
+                  </p>
+                  {projectMembers.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-soft-2 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
+                      {t("empty.team")}
+                    </div>
+                  ) : (
+                    <ul className="grid gap-2 sm:grid-cols-2">
+                      {projectMembers.map((m) => {
+                        const e = Array.isArray(m.employee) ? m.employee[0] : m.employee;
+                        if (!e) return null;
+                        return (
+                          <li key={m.id} className="flex items-center gap-3 rounded-2xl border border-soft bg-card px-3 py-2.5">
+                            <Avatar size="sm">
+                              <AvatarFallback>{personInitial(e.full_name)}</AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{e.full_name}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {m.role_label ?? e.job_title ?? "—"}
+                              </p>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {t("sections.tags.title")}
+                  </p>
+                  <Suspense fallback={<p className="text-xs text-muted-foreground">{t("loading.tags")}</p>}>
+                    <ProjectTagsSection
+                      orgId={session.orgId}
+                      projectId={project.id}
+                      attached={attachedTags}
+                      canManage={session.permissions.has("projects.manage") || session.isOwner}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-5 sm:px-6">
+              <div className="mb-4">
+                <h2 className="text-base font-semibold text-foreground">{t("overview.sections.quickFacts")}</h2>
+                <p className="text-xs text-muted-foreground">{t("overview.sections.quickFactsHint")}</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <InfoField
+                  label={t("metrics.inReview")}
+                  value={summary.manager_review + summary.specialist_review}
+                />
+                <InfoField
+                  label={t("metrics.withClient")}
+                  value={summary.ready_to_send + summary.sent_to_client + summary.client_changes}
+                />
+                <InfoField
+                  label={t("overview.labels.priority")}
+                  value={<span className="inline-flex"><PriorityBadge priority={project.priority} /></span>}
+                />
+                <InfoField
+                  label={t("overview.labels.status")}
+                  value={<span className="inline-flex"><ProjectStatusBadge status={project.status} /></span>}
+                />
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Sky Light feedback #12: editable multi-package list. The chip
-          row mirrors the wizard's behavior post-creation; uses the same
-          services catalog seeded by the Odoo importer (project.category_ids
-          → services). canManage gates the add/remove affordances behind
-          the projects.manage permission. */}
+      {/* ──────────────────────────────────────────────────────────────
+          Odoo body continuation — Categories (= Services), Documents
+          (Odoo's "All Documents" smart-button target), Collaborators
+          (Odoo's "Collaborators" smart-button target). Pixel-perfect
+          ordering per RWASEM_PARITY_NOTES §1 mandate; extensions live
+          below in their own labelled section.
+          ────────────────────────────────────────────────────────────── */}
       <SectionTitle title={t("sections.services.title")} />
       <Card className="mb-8">
         <CardContent className="p-4">
@@ -333,6 +549,108 @@ export default async function ProjectDetailPage({
           />
         </CardContent>
       </Card>
+
+      <SectionTitle
+        title={t("activityLog.title")}
+        description={t("activityLog.description")}
+      />
+      <Card className="mb-8">
+        <CardContent className="p-4">
+          <ProjectChatterPanel
+            projectId={project.id}
+            canCompose={hasPermission(session, "projects.manage")}
+          />
+        </CardContent>
+      </Card>
+
+      {/* §PROJ-INFO-3 — Customer Info fields surfaced as labelled cards.
+          Schema already carries store_name / target / account_manager /
+          (social|media|seo)_specialist (mig 0049); this is the operator
+          surface that previously only existed scattered through the form. */}
+      <SectionTitle title={t("sections.customerInfo.title")} />
+      <Card className="mb-8">
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoField
+            label={t("customerInfo.storeName")}
+            value={
+              <span className={cn(!project.store_name && "text-muted-foreground")}>
+                {project.store_name ?? t("overview.none")}
+              </span>
+            }
+          />
+          <InfoField
+            label={t("customerInfo.target")}
+            value={
+              (project as { target?: string | null }).target ? (
+                <span className="inline-flex rounded-md bg-soft-1 px-2 py-0.5 text-[11px] font-medium text-foreground/80">
+                  {t(`customerInfo.targets.${(project as { target: string }).target}`)}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">{t("overview.none")}</span>
+              )
+            }
+          />
+          <InfoField
+            label={t("customerInfo.accountManager")}
+            value={
+              am ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
+                    {personInitial(am.full_name)}
+                  </span>
+                  <span>{am.full_name}</span>
+                </span>
+              ) : (
+                <span className="text-muted-foreground">{t("overview.none")}</span>
+              )
+            }
+          />
+          <InfoField
+            label={t("specialists.social")}
+            value={
+              socialSp ? (
+                <span>{socialSp.full_name}</span>
+              ) : (
+                <span className="text-muted-foreground">{t("overview.none")}</span>
+              )
+            }
+          />
+          <InfoField
+            label={t("specialists.media")}
+            value={
+              mediaSp ? (
+                <span>{mediaSp.full_name}</span>
+              ) : (
+                <span className="text-muted-foreground">{t("overview.none")}</span>
+              )
+            }
+          />
+          <InfoField
+            label={t("specialists.seo")}
+            value={
+              seoSp ? (
+                <span>{seoSp.full_name}</span>
+              ) : (
+                <span className="text-muted-foreground">{t("overview.none")}</span>
+              )
+            }
+          />
+        </CardContent>
+      </Card>
+
+      {/* ──────────────────────────────────────────────────────────────
+          الأقسام الإضافية / Dashboard extras (RWASEM_PARITY_NOTES §8).
+          Anything below this banner is a paid-for differentiator and
+          MUST stay positioned after the Odoo body so a Rwasem-trained
+          operator scrolling top-to-bottom sees Rwasem's layout first.
+          ────────────────────────────────────────────────────────────── */}
+      <div className="my-6 flex items-center gap-3" aria-hidden>
+        <span className="h-px flex-1 bg-border" />
+        <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {t("sections.extrasBanner")}
+        </span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
 
       <SectionTitle
         title={t("sections.whatsapp.title")}
@@ -371,82 +689,6 @@ export default async function ProjectDetailPage({
               canManage={
                 session.permissions.has("projects.manage") || session.isOwner
               }
-            />
-          </Suspense>
-        </CardContent>
-      </Card>
-
-      {/* Sky Light feedback #14: aggregated "All Documents" section. Mirrors
-          Odoo `rwasem_document_management_project`'s smart-button — pulls
-          attachments from the project itself AND every task under it, then
-          lists them with task code so the operator can see what belongs where. */}
-      <SectionTitle
-        title={t("sections.notes.title")}
-        description={t("sections.notes.description")}
-      />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          <Suspense
-            fallback={<div className="text-sm text-muted-foreground">{t("loading.notes")}</div>}
-          >
-            <ProjectNotesSection
-              orgId={session.orgId}
-              projectId={project.id}
-              currentUserId={session.userId}
-              canCreate={hasPermission(session, "projects.view")}
-              canManage={hasPermission(session, "projects.manage")}
-            />
-          </Suspense>
-        </CardContent>
-      </Card>
-
-      <SectionTitle
-        title={t("sections.attachments.title")}
-        description={t("sections.attachments.description")}
-      />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          <ProjectDocumentsPanel projectId={project.id} />
-        </CardContent>
-      </Card>
-
-      <SectionTitle title={t("sections.team.title")} />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          {(project.project_members ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("empty.team")}</p>
-          ) : (
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(project.project_members ?? []).map((m) => {
-                const e = Array.isArray(m.employee) ? m.employee[0] : m.employee;
-                if (!e) return null;
-                return (
-                  <li key={m.id} className="flex items-center gap-3 rounded-xl border border-soft bg-soft-1 p-2.5">
-                    <Avatar size="sm">
-                      <AvatarFallback>{e.full_name[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{e.full_name}</p>
-                      <p className="text-[11px] text-muted-foreground truncate">{m.role_label ?? e.job_title ?? ""}</p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      <SectionTitle
-        title={t("sections.followers.title")}
-        description={t("sections.followers.description")}
-      />
-      <Card className="mb-8">
-        <CardContent className="p-4">
-          <Suspense fallback={<div className="text-sm text-muted-foreground">{t("loading.followers")}</div>}>
-            <ProjectFollowersSection
-              orgId={session.orgId}
-              projectId={project.id}
             />
           </Suspense>
         </CardContent>
@@ -498,6 +740,29 @@ export default async function ProjectDetailPage({
           taskFilters={projectTaskFilters}
         />
       </Suspense>
+
+      <div className="mt-8">
+        <SectionTitle
+          title={t("sections.notes.title")}
+          description={t("sections.notes.description")}
+        />
+        <Card className="mb-8">
+          <CardContent className="p-4">
+            <Suspense
+              fallback={<div className="text-sm text-muted-foreground">{t("loading.notes")}</div>}
+            >
+              <ProjectNotesSection
+                orgId={session.orgId}
+                projectId={project.id}
+                currentUserId={session.userId}
+                canCreate={hasPermission(session, "projects.view")}
+                canManage={hasPermission(session, "projects.manage")}
+              />
+            </Suspense>
+          </CardContent>
+        </Card>
+      </div>
+
     </div>
   );
 }
@@ -514,7 +779,7 @@ async function ProjectTaskBoardSection({
   taskFilters: Parameters<typeof loadTaskBoardForGlobalView>[1];
 }) {
   const t = await getTranslations("ProjectDetailPage");
-  const tasks = await loadTaskBoardForGlobalView(orgId, taskFilters);
+  const tasks = (await loadTaskBoardForGlobalView(orgId, taskFilters)) as BoardTask[];
   if (tasks.length === 0) {
     return (
       <EmptyState
@@ -587,66 +852,6 @@ async function ProjectWhatsAppSection({
   return <WhatsAppPanel projectId={projectId} rows={rows} />;
 }
 
-async function ProjectFollowersSection({
-  orgId,
-  projectId,
-}: {
-  orgId: string;
-  projectId: string;
-}) {
-  const t = await getTranslations("ProjectDetailPage");
-  const { data } = await supabaseAdmin
-    .from("project_followers")
-    .select("employee:employee_profiles ( id, full_name, avatar_url, job_title )")
-    .eq("organization_id", orgId)
-    .eq("project_id", projectId);
-
-  const followers = ((data ?? []) as Array<{
-    employee:
-      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }
-      | { id: string; full_name: string; avatar_url: string | null; job_title: string | null }[]
-      | null;
-  }>)
-    .map((row) => (Array.isArray(row.employee) ? row.employee[0] : row.employee))
-    .filter((employee): employee is NonNullable<typeof employee> => employee !== null);
-
-  if (followers.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("empty.followers")}</p>;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {followers.map((employee) => (
-        <div
-          key={employee.id}
-          className="inline-flex items-center gap-2 rounded-full border border-soft bg-soft-1 ps-2 pe-1 py-1 text-xs text-foreground"
-          title={employee.job_title ?? employee.full_name}
-        >
-          {employee.avatar_url ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={employee.avatar_url}
-              alt={employee.full_name}
-              className="size-5 rounded-full object-cover"
-            />
-          ) : (
-            <span className="grid size-5 place-items-center rounded-full bg-cyan/20 text-[10px] font-semibold text-cyan">
-              {employee.full_name.slice(0, 1)}
-            </span>
-          )}
-          <span>{employee.full_name}</span>
-          <MessageButton
-            employeeId={employee.id}
-            employeeName={employee.full_name}
-            contextProjectId={projectId}
-            size="xs"
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 async function ProjectRenewalsSection({
   orgId,
   projectId,
@@ -680,13 +885,15 @@ async function ProjectRenewalsSection({
 async function ProjectTagsSection({
   orgId,
   projectId,
+  attached,
   canManage,
 }: {
   orgId: string;
   projectId: string;
+  attached: Awaited<ReturnType<typeof getProjectAttachedTags>>;
   canManage: boolean;
 }) {
-  const { attached, all } = await getProjectTagsForProject(orgId, projectId);
+  const all = await listProjectTags(orgId);
   return (
     <ProjectTagsPanel
       projectId={projectId}

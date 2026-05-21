@@ -52,7 +52,24 @@ export interface ListProjectsPagedOpts {
    *  present we resolve matching project IDs via PostgREST first, then pass
    *  the whitelist into the bundle RPC. */
   customFilter?: FilterTree | null;
+  /** Rwasem-style search facets. Each entry is a field-scoped query the user
+   *  built by typing in the search box and picking a row from the dropdown.
+   *  AND across distinct fields, OR within the same field — enforced by the
+   *  RPC (migration 0132). Mirrors the tasks `searchFacets` shape. */
+  searchFacets?: ProjectSearchFacet[];
 }
+
+export type ProjectSearchFacetField =
+  | "name"
+  | "code"
+  | "client"
+  | "manager"
+  | "tags";
+
+export type ProjectSearchFacet = {
+  field: ProjectSearchFacetField;
+  value: string;
+};
 
 /** Pre-filter project IDs via PostgREST using the custom-filter tree.
  *  Returns `null` when the tree compiles to nothing (no constraints). */
@@ -106,6 +123,7 @@ type BundleRow = {
   closed_task_count: number;
   services: Array<{ id: string; name: string; external_id: string | null }>;
   members: Array<{ full_name: string; avatar_url: string | null }>;
+  tags: Array<{ id: string; name: string; color: number }>;
 };
 
 type BundleResult = {
@@ -195,6 +213,10 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
     p_all_categories_archived: !!opts.allCategoriesArchived,
     p_over_timesheets: !!opts.overTimesheets,
     p_id_whitelist: customIds,
+    p_search_facets:
+      opts.searchFacets && opts.searchFacets.length > 0
+        ? (opts.searchFacets as unknown as Record<string, unknown>[])
+        : null,
   });
   if (error) throw error;
   const bundle = (
@@ -210,31 +232,6 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       },
     }
   ) as BundleResult;
-
-  // Custom project_tags (HOLD, Urgent, …) attached to the visible rows.
-  // One round-trip per page keeps render fast; tags are tiny by definition.
-  const projectIds = bundle.rows.map((r) => r.id);
-  type TagAssignmentRow = {
-    project_id: string;
-    tag: { id: string; name: string; color: number }
-      | { id: string; name: string; color: number }[]
-      | null;
-  };
-  const tagsByProject = new Map<string, { id: string; name: string; color: number }[]>();
-  if (projectIds.length > 0) {
-    const { data: tagRows } = await supabaseAdmin
-      .from("project_tag_assignments")
-      .select("project_id, tag:project_tags ( id, name, color )")
-      .eq("organization_id", opts.organizationId)
-      .in("project_id", projectIds);
-    for (const row of (tagRows ?? []) as TagAssignmentRow[]) {
-      const t = Array.isArray(row.tag) ? row.tag[0] : row.tag;
-      if (!t) continue;
-      const list = tagsByProject.get(row.project_id) ?? [];
-      list.push(t);
-      tagsByProject.set(row.project_id, list);
-    }
-  }
 
   const mapped: LiveProject[] = bundle.rows.map((r) => {
     const odooId = externalToOdooId(r.external_id);
@@ -269,7 +266,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
       stageName: null,
       siteAddress: r.client?.address ?? null,
       members: r.members.map((m) => ({ name: m.full_name, avatarUrl: m.avatar_url })),
-      customTags: tagsByProject.get(r.id) ?? [],
+      customTags: r.tags ?? [],
       externalSource: r.external_source ?? null,
     };
   });
@@ -365,35 +362,50 @@ export async function listProjects(orgId: string) {
 // page reads both lists in parallel — attached chips drive the panel display,
 // `all` feeds the search-and-pick combobox.
 export type ProjectTagRow = { id: string; name: string; color: number };
-export async function getProjectTagsForProject(
+export async function getProjectAttachedTags(
   orgId: string,
   projectId: string,
-): Promise<{ attached: ProjectTagRow[]; all: ProjectTagRow[] }> {
-  const [attachedRes, allRes] = await Promise.all([
-    supabaseAdmin
-      .from("project_tag_assignments")
-      .select("tag:project_tags ( id, name, color )")
-      .eq("organization_id", orgId)
-      .eq("project_id", projectId),
-    supabaseAdmin
-      .from("project_tags")
-      .select("id, name, color")
-      .eq("organization_id", orgId)
-      .order("name", { ascending: true }),
-  ]);
+): Promise<ProjectTagRow[]> {
+  const attachedRes = await supabaseAdmin
+    .from("project_tag_assignments")
+    .select("tag:project_tags ( id, name, color )")
+    .eq("organization_id", orgId)
+    .eq("project_id", projectId);
+
   if (attachedRes.error) throw attachedRes.error;
-  if (allRes.error) throw allRes.error;
 
   type AttRow = {
     tag: ProjectTagRow | ProjectTagRow[] | null;
   };
-  const attached: ProjectTagRow[] = (attachedRes.data ?? [])
+  return (attachedRes.data ?? [])
     .map((row) => {
       const t = (row as AttRow).tag;
       return Array.isArray(t) ? t[0] : t;
     })
     .filter((t): t is ProjectTagRow => Boolean(t));
-  return { attached, all: (allRes.data ?? []) as ProjectTagRow[] };
+}
+
+export async function listProjectTags(
+  orgId: string,
+): Promise<ProjectTagRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("project_tags")
+    .select("id, name, color")
+    .eq("organization_id", orgId)
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as ProjectTagRow[];
+}
+
+export async function getProjectTagsForProject(
+  orgId: string,
+  projectId: string,
+): Promise<{ attached: ProjectTagRow[]; all: ProjectTagRow[] }> {
+  const [attached, all] = await Promise.all([
+    getProjectAttachedTags(orgId, projectId),
+    listProjectTags(orgId),
+  ]);
+  return { attached, all };
 }
 
 export async function getProject(orgId: string, id: string) {
@@ -401,7 +413,8 @@ export async function getProject(orgId: string, id: string) {
     .from("projects")
     .select(`
       *,
-      client:clients ( id, name, contact_name, phone, email ),
+      client:clients ( id, name, contact_name, phone, email, address ),
+      project_manager:employee_profiles!projects_project_manager_employee_id_fkey ( id, full_name, job_title, avatar_url ),
       account_manager:employee_profiles!projects_account_manager_employee_id_fkey ( id, full_name, job_title ),
       social_specialist:employee_profiles!projects_social_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
       media_specialist:employee_profiles!projects_media_specialist_id_fkey ( id, full_name, job_title, avatar_url ),
@@ -468,7 +481,11 @@ export async function getProjectTaskSummary(orgId: string, projectId: string) {
     .from("tasks")
     .select("stage, status")
     .eq("organization_id", orgId)
-    .eq("project_id", projectId);
+    .eq("project_id", projectId)
+    // Mirror Rwasem's "Tasks" smart-button which excludes archived rows
+    // — without this, projects imported from Odoo with historical tasks
+    // inflate to ~7x the live count (see RWASEM_PARITY_NOTES §B2).
+    .is("archived_at", null);
 
   const summary = {
     total: 0,
@@ -491,7 +508,12 @@ export async function getProjectTaskSummary(orgId: string, projectId: string) {
   for (const row of data ?? []) {
     summary.total += 1;
     if (row.stage) summary[row.stage] = (summary[row.stage] ?? 0) + 1;
-    if (row.status) summary[row.status] = (summary[row.status] ?? 0) + 1;
+    // Status overlaps stage on 'done' and 'in_progress'. Double-counting
+    // pushed Total Progress past 100% (see RWASEM_PARITY_NOTES §B1) — only
+    // tally status when it's distinct from the stage value.
+    if (row.status && row.status !== row.stage) {
+      summary[row.status] = (summary[row.status] ?? 0) + 1;
+    }
   }
   return summary;
 }

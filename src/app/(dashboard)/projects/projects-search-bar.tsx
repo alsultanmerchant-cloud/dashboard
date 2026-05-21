@@ -15,6 +15,8 @@ import {
   Sliders,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { decodeProjectFacets, PROJECT_FACET_FIELDS } from "./_facets";
+import type { ProjectSearchFacet, ProjectSearchFacetField } from "@/lib/data/projects";
 import { CustomFilterDialog } from "@/components/custom-filter/dialog";
 import { buildProjectFields } from "@/lib/custom-filter/projects-fields";
 import {
@@ -232,6 +234,17 @@ export function ProjectsSearchBar() {
   const endDateTo = params.get("endDateTo") ?? "";
   const groupBy = (params.get("groupBy") ?? "") as GroupKey;
 
+  // Rwasem-style facets, decoded from `?sf=` JSON. Invalid entries are dropped
+  // so a hand-edited URL doesn't crash the bar.
+  const currentFacets = useMemo<ProjectSearchFacet[]>(
+    () => decodeProjectFacets(params.get("sf")),
+    [params],
+  );
+  const facetFieldLabel = useCallback(
+    (field: ProjectSearchFacetField) => t(`facets.fields.${field}`),
+    [t],
+  );
+
   const hasDateFilter = Boolean(startDateFrom || startDateTo || endDateFrom || endDateTo);
 
   useEffect(() => {
@@ -247,17 +260,10 @@ export function ProjectsSearchBar() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed === currentQuery) return;
-    const timer = window.setTimeout(() => {
-      const sp = new URLSearchParams(params.toString());
-      if (trimmed) sp.set("q", trimmed);
-      else sp.delete("q");
-      router.replace(sp.toString() ? `${pathname}?${sp.toString()}` : pathname);
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [query, currentQuery, params, pathname, router]);
+  // Note: typed text is no longer auto-committed to `?q=`. The Rwasem flow is
+  // that text becomes a facet chip (Enter, or click a "Search X for: …" row).
+  // Saved searches with `?q=` still apply on initial load because page.tsx
+  // reads sp.q directly; we just don't write to it during a typing session.
 
   const updateParams = (mutate: (sp: URLSearchParams) => void) => {
     const sp = new URLSearchParams(params.toString());
@@ -333,6 +339,31 @@ export function ProjectsSearchBar() {
   const clearQuery = () => {
     setQuery("");
     updateParams((sp) => sp.delete("q"));
+  };
+
+  // Append a facet for the typed text. Dedup matches Rwasem (same field+value
+  // is a no-op). Stale free-text `q` is dropped so both search models don't
+  // apply at once.
+  const addFacet = (field: ProjectSearchFacetField) => {
+    const value = query.trim();
+    if (!value) return;
+    const exists = currentFacets.some((f) => f.field === field && f.value === value);
+    const next = exists ? currentFacets : [...currentFacets, { field, value }];
+    setQuery("");
+    setOpen(false);
+    updateParams((sp) => {
+      sp.delete("q");
+      if (next.length === 0) sp.delete("sf");
+      else sp.set("sf", JSON.stringify(next));
+    });
+  };
+
+  const removeFacet = (index: number) => {
+    const next = currentFacets.filter((_, i) => i !== index);
+    updateParams((sp) => {
+      if (next.length === 0) sp.delete("sf");
+      else sp.set("sf", JSON.stringify(next));
+    });
   };
 
   const labelOf = (key: BoolFilterKey) =>
@@ -434,14 +465,46 @@ export function ProjectsSearchBar() {
           </span>
         )}
 
+        {/* Search facet chips — Rwasem two-segment pill: solid-purple field
+            label on the left, white value box on the right, × outside the
+            white box (sits on the bar background). */}
+        {currentFacets.map((facet, i) => (
+          <span
+            key={`${facet.field}-${facet.value}-${i}`}
+            className="inline-flex h-7 items-center overflow-hidden rounded-full bg-white text-[11px] font-medium shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+          >
+            <span className="flex h-full items-center bg-primary px-2.5 font-semibold text-white">
+              {facetFieldLabel(facet.field)}
+            </span>
+            <span className="flex h-full items-center gap-1.5 bg-white px-2.5 text-primary">
+              <span className="max-w-[10rem] truncate">{facet.value}</span>
+              <button
+                type="button"
+                onClick={() => removeFacet(i)}
+                aria-label={`${facetFieldLabel(facet.field)}: ${facet.value}`}
+                className="text-primary/60 hover:text-primary"
+              >
+                <X className="size-3.5" />
+              </button>
+            </span>
+          </span>
+        ))}
         <Search className="size-3.5 shrink-0 text-white/80" />
         <input
           type="search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
           onFocus={() => setOpen(true)}
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
+            if (event.key === "Enter" && query.trim()) {
+              // Enter applies the highlighted (first) row — Search by name.
+              event.preventDefault();
+              addFacet("name");
+            }
           }}
           placeholder={t("searchPlaceholder")}
           className="min-w-0 flex-1 bg-transparent text-white placeholder:text-white/60 focus:outline-none"
@@ -473,6 +536,39 @@ export function ProjectsSearchBar() {
 
       {open && (
         <div className="absolute end-0 top-[calc(100%+6px)] z-30 w-[min(96vw,720px)] rounded-2xl border border-soft bg-popover p-4 shadow-2xl">
+          {/* Rwasem faceted search — typed text becomes a list of
+              field-scoped options. First row is highlighted; Enter applies
+              that one (Search by name), click picks any. */}
+          {query.trim().length >= 1 && (
+            <div className="mb-3 border-b border-soft pb-2">
+              <div className="mb-1 flex items-center gap-1.5 px-1 pb-1 text-[11px] font-semibold text-muted-foreground">
+                <Search className="size-3.5" />
+                {t("facets.heading")}
+              </div>
+              <div className="flex flex-col">
+                {PROJECT_FACET_FIELDS.map((field, i) => (
+                  <button
+                    key={field}
+                    type="button"
+                    onClick={() => addFacet(field)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-soft-1",
+                      i === 0 && "bg-soft-1",
+                    )}
+                  >
+                    <Search className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 shrink-0 text-muted-foreground">
+                      {t("facets.searchFor", { field: facetFieldLabel(field) })}
+                      {":"}
+                    </span>
+                    <span className="min-w-0 truncate font-semibold text-primary">
+                      {query.trim()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
             {/* Filters column */}
             <div className="min-w-0">

@@ -12,7 +12,9 @@ import { Loader2 } from "lucide-react";
 import type { LiveProject } from "@/lib/odoo/live";
 import { ProjectCard } from "./project-card";
 import { loadMoreProjectsAction, type ProjectFilters } from "./_load-more";
+import { decodeProjectFacets } from "./_facets";
 import { useTopbarControls } from "@/components/layout/topbar-context";
+import { RecordPaginationListTap } from "@/components/layout/record-pagination";
 
 const ProjectsTable = dynamic(
   () =>
@@ -89,6 +91,8 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       // Pass through the raw URL `cf=` so the server action can decode it
       // (avoids shipping the custom-filter helpers to the client bundle).
       customFilterEncoded: params.get("cf") || undefined,
+      // Rwasem faceted search — typed text becomes one chip per pick.
+      searchFacets: decodeProjectFacets(params.get("sf")),
     };
   }, [params]);
 
@@ -147,6 +151,15 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* Feeds the detail page's `n / N < >` pagination via sessionStorage
+          (RWASEM_PARITY_NOTES §NAV-2). Only project UUIDs are captured —
+          Odoo-source rows whose Supabase id is null fall back to no
+          pagination once the user clicks in. */}
+      <RecordPaginationListTap
+        kind="projects"
+        ids={items.map((p) => p.id).filter((id): id is string => Boolean(id))}
+        hrefPattern="/projects/{id}"
+      />
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
           لا توجد نتائج

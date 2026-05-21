@@ -2,9 +2,8 @@
 
 // Rwasem / Odoo-style module sub-nav. Each Odoo "app" exposes a row of
 // horizontal tabs under the purple header (Projects · Tasks · Project
-// Category · Reporting · Configuration · Import). We mirror that for the
-// modules we already have routes for; the rest stay disabled with a
-// "soon" tooltip so the chrome looks complete.
+// Category · Reporting). We mirror that for the modules we already have
+// routes for.
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -36,15 +35,14 @@ const MODULES: Module[] = [
   {
     name: "Project",
     prefixes: /^\/(projects|tasks|task-templates|service-categories|reports)/,
+    // Task templates is our extension and lives after the core project
+    // navigation items.
     tabs: [
       { labelKey: "projects", href: "/projects", match: /^\/projects(?!\/odoo|\/new)/ },
-      // The new-project wizard lives under /projects/new but is conceptually
-      // the same "Projects" page from Odoo's tab perspective.
       { labelKey: "tasks", href: "/tasks", match: /^\/tasks/ },
-      { labelKey: "serviceCategories", href: "/service-categories", match: /^\/service-categories/ },
+      { labelKey: "projectCategory", href: "/service-categories", match: /^\/service-categories/ },
+      { labelKey: "reporting", href: "/reports", match: /^\/reports/ },
       { labelKey: "taskTemplates", href: "/task-templates", match: /^\/task-templates/ },
-      { labelKey: "reports", href: "/reports", match: /^\/reports/ },
-      { labelKey: "import", comingSoon: true },
     ],
   },
   {
@@ -87,12 +85,29 @@ export function ModuleTabs() {
   const mod = MODULES.find((m) => m.prefixes.test(pathname));
   if (!mod) return null;
   const isProjectsIndex = /^\/projects$/.test(pathname);
+  const isTasksIndex = /^\/tasks\/?$/.test(pathname);
   const projectView = ((): "kanban" | "list" | "calendar" => {
     const v = searchParams.get("view");
     if (v === "list") return "list";
     if (v === "calendar") return "calendar";
     return "kanban";
   })();
+  // Odoo's Tasks menu opens to a "My Tasks / All Tasks" split. When we're
+  // already on /tasks, swap the redundant Tasks tab for the same split so a
+  // click does something useful (RWASEM_PARITY_NOTES §NAV-5).
+  const tasksFilterKeys = (searchParams.get("f") ?? searchParams.get("filter") ?? "").split(",").filter(Boolean);
+  const isMyTasks = tasksFilterKeys.includes("mine");
+
+  function tasksHrefFor(scope: "mine" | "all"): string {
+    const next = new URLSearchParams(searchParams.toString());
+    const current = (next.get("f") ?? "").split(",").filter((k) => k && k !== "mine");
+    if (scope === "mine") current.push("mine");
+    if (current.length === 0) next.delete("f");
+    else next.set("f", current.join(","));
+    next.delete("filter");
+    const query = next.toString();
+    return query ? `/tasks?${query}` : "/tasks";
+  }
 
   function setProjectView(nextView: "kanban" | "list" | "calendar") {
     const next = new URLSearchParams(searchParams.toString());
@@ -113,6 +128,43 @@ export function ModuleTabs() {
             const active = isActive(pathname, tab);
             const baseCls =
               "shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors";
+            // §NAV-5 — swap the redundant Tasks tab for a My/All split
+            // when the user is already on /tasks. Detail pages
+            // (/tasks/<id>) still get the normal link so they can return
+            // to the list.
+            if (tab.labelKey === "tasks" && isTasksIndex) {
+              return (
+                <div
+                  key={tab.labelKey}
+                  className="flex shrink-0 overflow-hidden rounded-md border border-border"
+                  role="group"
+                  aria-label={t("tasks")}
+                >
+                  <Link
+                    href={tasksHrefFor("mine")}
+                    className={cn(
+                      "px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      isMyTasks
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    {t("myTasks")}
+                  </Link>
+                  <Link
+                    href={tasksHrefFor("all")}
+                    className={cn(
+                      "border-s border-border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      !isMyTasks
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    {t("allTasks")}
+                  </Link>
+                </div>
+              );
+            }
             if (tab.comingSoon || !tab.href) {
               return (
                 <span

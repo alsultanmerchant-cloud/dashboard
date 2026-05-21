@@ -1,14 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
-import { TaskBoard, type BoardTask, type TaskGroupKey } from "../projects/[id]/task-board";
-import { TasksListView } from "./tasks-list-view";
-import { TasksCalendarView } from "./tasks-calendar-view";
-import { TasksPivotView } from "./tasks-pivot-view";
+import type { BoardTask, TaskGroupKey } from "../projects/[id]/task-board";
 import type { ListTaskRow } from "./_loaders";
 import { useTasksLoadedCount } from "./tasks-count-badge";
 import { cn } from "@/lib/utils";
+import { RecordPaginationListTap } from "@/components/layout/record-pagination";
+
+const TaskBoard = dynamic(
+  () => import("../projects/[id]/task-board").then((mod) => mod.TaskBoard),
+);
+const TasksListView = dynamic(
+  () => import("./tasks-list-view").then((mod) => mod.TasksListView),
+);
+const TasksCalendarView = dynamic(
+  () => import("./tasks-calendar-view").then((mod) => mod.TasksCalendarView),
+);
+const TasksPivotView = dynamic(
+  () => import("./tasks-pivot-view").then((mod) => mod.TasksPivotView),
+);
 
 type Props = {
   view: string;
@@ -110,8 +122,16 @@ export function TasksInfiniteView({
     return () => observer.disconnect();
   }, [view, hasMore, loading, loadedCount, loadMore, queryString]);
 
+  // Feed the task detail page's `n / N < >` pagination from whichever view
+  // the user is in (RWASEM_PARITY_NOTES §NAV-2). Board and list views share
+  // the same underlying task IDs.
+  const paginationIds = view === "kanban"
+    ? boardTasks.map((t) => t.id)
+    : listTasks.map((t) => t.id);
+
   return (
     <>
+      <RecordPaginationListTap kind="tasks" ids={paginationIds} hrefPattern="/tasks/{id}" />
       {view === "list" && <TasksListView tasks={listTasks} />}
       {view === "kanban" && (
         <TaskBoard tasks={boardTasks} groupBy={groupBy} />

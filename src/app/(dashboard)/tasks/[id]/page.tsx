@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
 import { AlertTriangle } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { getTask, getTaskSummary } from "@/lib/data/tasks";
+import { getTaskSummary } from "@/lib/data/tasks";
 import { getTaskActivityFeed } from "@/lib/data/task-activity";
 import {
   listTaskFollowers,
@@ -13,13 +13,15 @@ import {
   listTaskStageHistory,
   listInheritedProjectFollowers,
 } from "@/lib/data/task-detail";
-import { PageHeader } from "@/components/page-header";
+import { ActionBar, type SmartPill } from "@/components/layout/action-bar";
+import { FileText, Folder } from "lucide-react";
 import { SectionTitle } from "@/components/section-title";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import type { TaskStage } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
 import { TaskStarToggle } from "./task-star-toggle";
+import { TaskPriorityStar } from "./task-priority-star";
 import { RecordPagination } from "./record-pagination";
 import { TaskExceptionBadge } from "../../escalations/task-exception-badge";
 import { MessageButton } from "@/components/dm/message-button";
@@ -51,9 +53,6 @@ const StageStepper = dynamic(
 );
 const TaskFormCard = dynamic(
   () => import("./task-form-card").then((mod) => ({ default: mod.TaskFormCard })),
-);
-const TaskFollowToggle = dynamic(
-  () => import("./follow-toggle").then((mod) => ({ default: mod.TaskFollowToggle })),
 );
 const TaskApprovalPanel = dynamic(
   () => import("./task-approval-panel").then((mod) => ({ default: mod.TaskApprovalPanel })),
@@ -106,38 +105,55 @@ export default async function TaskDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const { id } = await params;
-  const sp = await searchParams;
-  const session = await requirePagePermission("tasks.view");
-  const t = await getTranslations("TaskDetailPage");
-  const locale = await getLocale();
-  const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
+  const [{ id }, sp, session, t, locale] = await Promise.all([
+    params,
+    searchParams,
+    requirePagePermission("tasks.view"),
+    getTranslations("TaskDetailPage"),
+    getLocale(),
+  ]);
+  // Guard: route is dynamic `[id]`, so `/tasks/new` or `/tasks/foo` would
+  // otherwise reach getTaskSummary and hit Postgres with a non-UUID,
+  // surfacing a 22P02 invalid_text_representation error. Bail to 404.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    notFound();
+  }
+  // Default to the activity tab when no explicit `?tab=` is present.
+  const activeTab = isTaskTab(sp.tab) ? sp.tab : "activities";
 
-  const [task, followingRes, openExc] = await Promise.all([
+  const [task, openExc, stageHistoryForStepper, positions, attachmentCountRes] = await Promise.all([
     getTaskSummary(session.orgId, id),
-    supabaseAdmin
-      .from("task_followers")
-      .select("user_id")
-      .eq("organization_id", session.orgId)
-      .eq("task_id", id)
-      .eq("user_id", session.userId)
-      .limit(1),
     supabaseAdmin
       .from("exceptions")
       .select("id")
       .eq("task_id", id)
       .is("resolved_at", null)
       .limit(1),
+    // §TASK-INFO-1 — per-stage dwell time displayed inline on each
+    // completed stage chip. The DB trigger tg_task_stage_history
+    // (migration 0007) writes one row per stage transition; we sum
+    // duration_seconds by `to_stage` and let the client format the
+    // result. Tasks with no history pre-dating the trigger fall back to
+    // showing only the current stage's running timer.
+    supabaseAdmin
+      .from("task_stage_history")
+      .select("to_stage, duration_seconds")
+      .eq("organization_id", session.orgId)
+      .eq("task_id", id),
+    listPositions(session.orgId),
+    supabaseAdmin
+      .from("task_attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", session.orgId)
+      .eq("task_id", id),
   ]);
   if (!task) notFound();
-  const positions = await listPositions(session.orgId);
   const positionNameBySlug = new Map(positions.map((p) => [p.slug, p.name]));
   const positionRoleBySlug: Record<string, string> = Object.fromEntries(
     positions.map((p) => [p.slug, p.role]),
   );
   const hasOpenException = (openExc ?? []).length > 0;
   const canOpenException = hasPermission(session, "exception.open");
-  const isFollowing = (followingRes.data ?? []).length > 0;
 
   const roleSlots = (task.task_assignees ?? [])
     .map((ta) => {
@@ -214,6 +230,12 @@ export default async function TaskDetailPage({
 
   const project = Array.isArray(task.project) ? task.project[0] : task.project;
   const deadline = task.planned_date ?? task.due_date;
+
+  // §TASK-INFO-3: at minimum the action bar shows the "All Documents"
+  // smart-button. Pulling the count here is cheap (one head/count) and lets
+  // the action bar render synchronously without a Suspense boundary inside
+  // the breadcrumb row.
+  const attachmentCount = attachmentCountRes.count ?? 0;
   // For DONE tasks, prefer the stored generated column (migration 0023):
   // it freezes at the actual completion delay and survives re-renders.
   // For in-flight tasks, compute the running delay from "now".
@@ -228,49 +250,37 @@ export default async function TaskDetailPage({
       : null;
   const showDelayBanner = delayDays !== null && delayDays > 0;
 
+  const taskActionSmartPills: SmartPill[] = [
+    ...(project
+      ? [
+          {
+            key: "project",
+            label: t("breadcrumbs.tasks"),
+            value: project.name,
+            icon: <Folder className="size-3.5" />,
+            href: `/projects/${project.id}`,
+          } satisfies SmartPill,
+        ]
+      : []),
+    {
+      key: "documents",
+      label: t("smartButtons.documents"),
+      value: String(attachmentCount),
+      icon: <FileText className="size-3.5" />,
+      href: `/tasks/${task.id}?tab=documents`,
+    },
+  ];
+
   return (
     <div className="mx-auto w-full max-w-6xl">
-      <PageHeader
-        title={task.title}
-        description={(() => {
-          // §2.1: topbar slot is narrow — surface the task title alone in the
-          // h2 and demote the project name to the subtitle line. Operators
-          // already navigated *from* the project; they need the task name
-          // to scan tabs/breadcrumbs without ellipsis truncation.
-          const proj = Array.isArray(task.project)
-            ? task.project[0]
-            : (task as { project?: { id: string; name: string } | null }).project;
-          return proj?.name ?? undefined;
-        })()}
-        breadcrumbs={(() => {
-          const proj = Array.isArray(task.project)
-            ? task.project[0]
-            : (task as { project?: { id: string; name: string } | null }).project;
-          const taskCode = (task as { task_code?: string | null }).task_code;
-          return [
-            { label: t("breadcrumbs.tasks"), href: "/tasks" },
-            ...(proj
-              ? [{ label: proj.name, href: `/projects/${proj.id}` }]
-              : []),
-            { label: taskCode ? `${taskCode} — ${task.title}` : task.title },
-          ];
-        })()}
-        actions={
-          <div className="flex items-center gap-2">
-            <Suspense fallback={null}>
-              <TaskRecordPagination
-                orgId={session.orgId}
-                taskId={task.id}
-                projectId={(task as { project_id?: string | null }).project_id ?? null}
-              />
-            </Suspense>
-            <TaskFollowToggle
-              taskId={task.id}
-              currentUserId={session.userId}
-              isFollowing={isFollowing}
-            />
-          </div>
-        }
+      <ActionBar
+        moduleLabel={t("breadcrumbs.tasks")}
+        moduleHref="/tasks"
+        recordName={task.title}
+        recordCode={(task as { task_code?: string | null }).task_code ?? null}
+        recordId={task.id}
+        recordKind="tasks"
+        smartPills={taskActionSmartPills}
       />
 
       <div className="mb-6">
@@ -278,6 +288,18 @@ export default async function TaskDetailPage({
           taskId={task.id}
           currentStage={task.stage as TaskStage}
           stageEnteredAt={task.stage_entered_at ?? null}
+          stageDwellSeconds={(() => {
+            const m: Record<string, number> = {};
+            for (const row of (stageHistoryForStepper.data ?? []) as Array<{
+              to_stage: string;
+              duration_seconds: number | null;
+            }>) {
+              if (typeof row.duration_seconds === "number") {
+                m[row.to_stage] = (m[row.to_stage] ?? 0) + row.duration_seconds;
+              }
+            }
+            return m;
+          })()}
         />
       </div>
 
@@ -308,9 +330,16 @@ export default async function TaskDetailPage({
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
-              {task.title}
-            </h1>
+            <div className="flex items-center gap-2 rtl:flex-row-reverse">
+              <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
+                {task.title}
+              </h1>
+              {/* §TASK-INFO-2 — Odoo's inline "High priority" star. */}
+              <TaskPriorityStar
+                taskId={task.id}
+                initialPriority={(task.priority as "low" | "medium" | "high") ?? "medium"}
+              />
+            </div>
           </div>
         </div>
         <div className="shrink-0">

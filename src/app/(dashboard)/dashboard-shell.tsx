@@ -6,7 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { TopbarProvider } from "@/components/layout/topbar-context";
+import { StackedSheetProvider } from "@/components/ui/stacked-sheet";
 import { ModuleTabs } from "@/components/layout/module-tabs";
+import { RightRail } from "@/components/layout/right-rail";
 import { AuthProvider, useAuth, type AuthInitialUser } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { createClient } from "@/lib/supabase/client";
@@ -178,6 +180,7 @@ export function DashboardShell({
     <OrgProvider>
       <AuthProvider initialUser={initialUser}>
         <TopbarProvider>
+          <StackedSheetProvider>
           <CommandPaletteProvider />
           <NotificationsLoader onLoad={addNotifications} />
           <DmUnreadLoader onChange={setDmUnreadCount} />
@@ -197,10 +200,13 @@ export function DashboardShell({
               </main>
             </div>
 
+            <RightRail />
+
             {!isAgentPage && (
               <AIChatFAB onClick={() => router.push("/agent")} />
             )}
           </div>
+          </StackedSheetProvider>
         </TopbarProvider>
       </AuthProvider>
     </OrgProvider>

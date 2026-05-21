@@ -150,6 +150,8 @@ type TaskBundleRow = {
   project_id: string;
   // PR-F (#3): origin — "odoo" for synced rows, null for dashboard-created.
   external_source: string | null;
+  external_id: string | null;
+  sequence: number | null;
   // #19: counts surfaced as new task list columns. Both default to 0.
   design_count: number | null;
   closed_subtask_count: number | null;
@@ -163,6 +165,7 @@ type TaskBundleRow = {
     | null;
   service: { id: string; name: string; slug: string } | null;
   tags?: Array<{ id: string; name: string; color: number }>;
+  task_tags?: Array<{ id: string; name: string; color: number }>;
   task_assignees: Array<{
     role_type: string;
     employee: { id: string; full_name: string; avatar_url: string | null };
@@ -291,6 +294,8 @@ export async function listBoardTasks(
       allocated_time_minutes: t.allocated_time_minutes ?? null,
       delay_days: t.delay_days ?? null,
       current_stage_duration: t.current_stage_duration ?? null,
+      sequence: typeof t.sequence === "number" ? t.sequence : 10,
+      external_id: t.external_id ?? null,
       completed_at: t.completed_at ?? null,
       external_source: t.external_source ?? null,
       task_code: t.task_code ?? null,
@@ -303,58 +308,13 @@ export async function listBoardTasks(
       role_slots,
       design_count: t.design_count ?? 0,
       closed_subtask_count: t.closed_subtask_count ?? 0,
-      tags: t.tags ?? [],
+      // listBoardTasks historically exposed `tags` as TASK tags (from
+      // task_tag_assignments). Preserve that — the bundle now ships both
+      // project tags (`tags`) and task tags (`task_tags`).
+      tags: t.task_tags ?? [],
       created_at: t.created_at,
     };
   });
-
-  // `current_stage_duration` and task tags aren't part of the
-  // list_tasks_bundle RPC payload — attach them with two batched reads.
-  if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-
-    const { data: durRows } = await supabaseAdmin
-      .from("tasks")
-      .select("id, current_stage_duration, sequence, external_id")
-      .in("id", ids);
-    const extraMap = new Map(
-      (durRows ?? []).map((d) => [
-        d.id as string,
-        {
-          duration: (d.current_stage_duration as string | null) ?? null,
-          sequence: typeof d.sequence === "number" ? d.sequence : 10,
-          external_id: (d.external_id as string | null) ?? null,
-        },
-      ]),
-    );
-    for (const r of rows) {
-      const e = extraMap.get(r.id);
-      r.current_stage_duration = e?.duration ?? null;
-      r.sequence = e?.sequence ?? 10;
-      r.external_id = e?.external_id ?? null;
-    }
-
-    type TagRow = {
-      task_id: string;
-      tag:
-        | { id: string; name: string; color: number }
-        | { id: string; name: string; color: number }[]
-        | null;
-    };
-    const { data: tagRows } = await supabaseAdmin
-      .from("task_tag_assignments")
-      .select("task_id, tag:project_tags ( id, name, color )")
-      .in("task_id", ids);
-    const tagsByTask = new Map<string, { id: string; name: string; color: number }[]>();
-    for (const row of (tagRows ?? []) as TagRow[]) {
-      const tag = Array.isArray(row.tag) ? row.tag[0] : row.tag;
-      if (!tag) continue;
-      const list = tagsByTask.get(row.task_id) ?? [];
-      list.push(tag);
-      tagsByTask.set(row.task_id, list);
-    }
-    for (const r of rows) r.tags = tagsByTask.get(r.id) ?? [];
-  }
 
   return rows;
 }
@@ -402,6 +362,8 @@ async function listBoardTasksFromRows(data: TaskBundleRow[]): Promise<BoardTaskD
       allocated_time_minutes: t.allocated_time_minutes ?? null,
       delay_days: t.delay_days ?? null,
       current_stage_duration: t.current_stage_duration ?? null,
+      sequence: typeof t.sequence === "number" ? t.sequence : 10,
+      external_id: t.external_id ?? null,
       completed_at: t.completed_at ?? null,
       external_source: t.external_source ?? null,
       task_code: t.task_code ?? null,
@@ -418,31 +380,6 @@ async function listBoardTasksFromRows(data: TaskBundleRow[]): Promise<BoardTaskD
       created_at: t.created_at,
     };
   });
-
-  if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-
-    const { data: durRows } = await supabaseAdmin
-      .from("tasks")
-      .select("id, current_stage_duration, sequence, external_id")
-      .in("id", ids);
-    const extraMap = new Map(
-      (durRows ?? []).map((d) => [
-        d.id as string,
-        {
-          duration: (d.current_stage_duration as string | null) ?? null,
-          sequence: typeof d.sequence === "number" ? d.sequence : 10,
-          external_id: (d.external_id as string | null) ?? null,
-        },
-      ]),
-    );
-    for (const r of rows) {
-      const e = extraMap.get(r.id);
-      r.current_stage_duration = e?.duration ?? null;
-      r.sequence = e?.sequence ?? 10;
-      r.external_id = e?.external_id ?? null;
-    }
-  }
 
   return rows;
 }

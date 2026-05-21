@@ -685,3 +685,50 @@ export async function resetTaskApprovalAction(input: {
   revalidatePath(`/tasks/${parsed.data.task_id}`);
   return { ok: true };
 }
+
+// §TASK-INFO-2 — Odoo's inline priority star toggles `priority` between
+// "high" and "medium" (their "Normal" default). Permission: same as other
+// task mutations.
+const SetPrioritySchema = z.object({
+  task_id: z.string().uuid({ message: "معرف المهمة غير صالح" }),
+  priority: z.enum(["low", "medium", "high"]),
+});
+
+export async function setTaskPriorityAction(input: {
+  task_id: string;
+  priority: "low" | "medium" | "high";
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("tasks.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = SetPrioritySchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const task = await loadTaskOrError(parsed.data.task_id, session.orgId);
+  if (!task) return { error: "المهمة غير موجودة" };
+
+  const { error } = await supabaseAdmin
+    .from("tasks")
+    .update({ priority: parsed.data.priority })
+    .eq("id", parsed.data.task_id)
+    .eq("organization_id", session.orgId);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "task.priority_changed",
+    entityType: "task",
+    entityId: parsed.data.task_id,
+    metadata: { priority: parsed.data.priority },
+  });
+
+  revalidatePath(`/tasks/${parsed.data.task_id}`);
+  return { ok: true };
+}

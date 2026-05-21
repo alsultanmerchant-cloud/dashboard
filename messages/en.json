@@ -75,6 +75,17 @@
       }
     },
     "searchPlaceholder": "Search projects…",
+    "facets": {
+      "heading": "Quick search",
+      "searchFor": "Search {field} for",
+      "fields": {
+        "name": "Project",
+        "code": "Project Code",
+        "client": "Client",
+        "manager": "Manager",
+        "tags": "Tags"
+      }
+    },
     "aria": {
       "projectFilters": "Project filters",
       "clearSearch": "Clear search",
@@ -528,6 +539,11 @@
     "projectManager": "Project Manager",
     "accountManager": "Account Manager",
     "client": "Customer",
+    "customer": "Customer",
+    "name": "Name",
+    "projectId": "Project ID",
+    "statusDot": "Status",
+    "viewTasks": "View Tasks",
     "ref": "Reference",
     "tasks": "Tasks",
     "completePercent": "{percent}% Complete",
@@ -566,7 +582,72 @@
       "seo": "SEO",
       "unassigned": "Not assigned yet"
     },
+    "overview": {
+      "emptyDescription": "No project description yet.",
+      "none": "Not available",
+      "side": {
+        "status": "Status",
+        "timeline": "Timeline"
+      },
+      "labels": {
+        "client": "Client",
+        "projectManager": "Project manager",
+        "services": "Categories",
+        "description": "Project brief",
+        "renewal": "Next renewal",
+        "specialists": "Assigned specialists",
+        "priority": "Priority",
+        "status": "Status"
+      },
+      "sections": {
+        "teamAndTags": "Team and tags",
+        "teamAndTagsHint": "The people currently attached to this project and the labels operators use to organize it.",
+        "quickFacts": "Quick facts",
+        "quickFactsHint": "Operational counters pulled from the same task bundle shown below."
+      }
+    },
+    "smartPills": {
+      "activities": "Activities"
+    },
+    "activitiesSheet": {
+      "title": "Scheduled activities"
+    },
+    "activityLog": {
+      "title": "Rwasem activity log",
+      "description": "System activity and comments imported from Rwasem/Odoo (read-only)"
+    },
+    "pixelFields": {
+      "taskName": "Name of the Tasks",
+      "categories": "Categories",
+      "nameColumn": "Name",
+      "assigneesColumn": "Assignees",
+      "workingCalendar": "Working Calendar",
+      "standardCalendar": "Standard 40 hours/week",
+      "siteAddress": "Site Address",
+      "sitePlaceholder": "Search and select project site location...",
+      "startDate": "Start Date",
+      "totalProgress": "Total Progress (%)",
+      "plannedDate": "Planned Date",
+      "allocatedHours": "Allocated Hours",
+      "defaultHours": "00:00"
+    },
+    "customerInfo": {
+      "storeName": "Store Name",
+      "target": "Target",
+      "accountManager": "Account Manager",
+      "targets": {
+        "on_target": "ON Target",
+        "off_target": "OFF Target",
+        "out": "OUT",
+        "sales_deposit": "Sales Deposit",
+        "renewed": "Renewed"
+      }
+    },
     "sections": {
+      "customerInfo": {
+        "title": "Customer Info"
+      },
+      "extrasBanner": "Dashboard extras",
       "tags": {
         "title": "Tags",
         "description": "Add quick project tags like HOLD or Urgent. Shared across all projects."
@@ -938,13 +1019,43 @@
     "emptyTitle": "No employees",
     "emptyDescription": "Start by adding the first employee to the agency."
   },
+  "RecordPagination": {
+    "label": "Record pagination",
+    "previous": "Previous record",
+    "next": "Next record"
+  },
+  "RightRail": {
+    "label": "Power-user shortcuts",
+    "bookmarkPanel": "Bookmark panel",
+    "favorite": "Favorite",
+    "search": "Search (⌘K)",
+    "enterFullscreen": "Enter fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "addBookmark": "Add bookmark"
+  },
+  "AppSwitcher": {
+    "openLabel": "Open app switcher",
+    "heading": "Apps",
+    "project": "Project",
+    "discuss": "Discuss",
+    "calendar": "Calendar",
+    "employees": "Employees",
+    "sales": "Sales",
+    "settings": "Settings"
+  },
   "ModuleTabs": {
     "projects": "Projects",
     "tasks": "Tasks",
+    "myTasks": "My Tasks",
+    "allTasks": "All Tasks",
     "serviceCategories": "Service categories",
+    "projectCategory": "Project Category",
     "taskTemplates": "Task templates",
     "reports": "Reports",
+    "reporting": "Reporting",
+    "configuration": "Configuration",
     "import": "Import",
+    "importProject": "Import Project",
     "employees": "Employees",
     "departments": "Departments",
     "rolesPermissions": "Roles & permissions",
@@ -1094,14 +1205,14 @@
     "tabs": {
       "activity": "Activity",
       "description": "Description",
-      "subtasks": "Subtasks",
-      "links": "Links",
+      "subtasks": "Sub-tasks",
+      "links": "Link Task",
       "timesheets": "Timesheets",
       "activities": "Activities",
       "documents": "Documents",
-      "history": "History",
-      "gantt": "Gantt",
-      "extra": "Extra info"
+      "history": "Task Stage History",
+      "gantt": "Gantt Detail",
+      "extra": "Extra Info"
     },
     "notLinkedToProject": "Task is not linked to a project.",
     "smartButtons": {
@@ -1467,6 +1578,10 @@
     "star": {
       "star": "Add to favorites",
       "unstar": "Remove from favorites"
+    },
+    "priorityStar": {
+      "setHigh": "Mark as high priority",
+      "unsetHigh": "Unmark high priority"
     }
   },
   "TaskLabels": {

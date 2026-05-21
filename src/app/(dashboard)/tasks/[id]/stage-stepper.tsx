@@ -29,14 +29,30 @@ function formatStageDuration(
   return locale === "ar" ? `${days}ي` : `${days}d`;
 }
 
+// Compact "12h" / "14d" / "30m" — same suffix language as the live counter,
+// driven by a fixed seconds value summed across all dwells in a stage.
+function formatSeconds(seconds: number, locale: string): string | null {
+  if (!Number.isFinite(seconds) || seconds < 60) return null;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return locale === "ar" ? `${minutes}د` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return locale === "ar" ? `${hours}س` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return locale === "ar" ? `${days}ي` : `${days}d`;
+}
+
 export function StageStepper({
   taskId,
   currentStage,
   stageEnteredAt,
+  stageDwellSeconds,
 }: {
   taskId: string;
   currentStage: TaskStage;
   stageEnteredAt: string | null;
+  /** Summed dwell seconds per stage, from task_stage_history. Past stages
+   *  display this value; the current stage shows a live-counting label. */
+  stageDwellSeconds?: Record<string, number>;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -113,6 +129,16 @@ export function StageStepper({
                   {elapsed}
                 </span>
               )}
+              {/* §TASK-INFO-1 — show per-stage dwell on past chips, e.g.
+                  "14d", matching Odoo's progression bar. */}
+              {isPast && stageDwellSeconds && (() => {
+                const fmt = formatSeconds(stageDwellSeconds[stage] ?? 0, locale);
+                return fmt ? (
+                  <span className="rounded bg-soft-2 px-1 py-0.5 text-[10px] tabular-nums text-muted-foreground/80">
+                    {fmt}
+                  </span>
+                ) : null;
+              })()}
               {isCurrent && pending && (
                 <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
               )}

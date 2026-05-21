@@ -570,6 +570,11 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       // Sky Light fills these in on every project; date_start/date are mostly blank.
       "ks_project_start",
       "ks_project_end",
+      // Rwasem operator list hides non-employee-visibility projects
+      // (the default "Internal" portal project, mostly). Read it so we
+      // can mirror the same archive behaviour locally — see B5 in
+      // RWASEM_PARITY_NOTES.
+      "privacy_visibility",
     ],
     // active_test=false bypasses the implicit `active=true` filter Odoo
     // applies to every model with an `active` column.
@@ -642,10 +647,16 @@ async function importProjects(ctx: ImportContext): Promise<number> {
           ? p.ks_project_end.slice(0, 10)
           : null) ?? nullable(p.date),
       description: nullable(p.description),
-      // Mirror Odoo's archive flag: an `active=false` project becomes
-      // `status='archived'` here so the dashboard UI can hide it from
-      // active-only views while still keeping its tasks + chatter reachable.
-      status: p.active === false ? "archived" : "active",
+      // Mirror Odoo's archive flag AND its operator-list visibility rule:
+      // projects whose privacy_visibility is anything other than 'employees'
+      // (typically the demo "Internal" project at id=1, set to 'portal')
+      // never appear in Rwasem's operator project list. Treat them as
+      // archived locally so our counts match Odoo (RWASEM_PARITY_NOTES §B5).
+      status:
+        p.active === false ||
+        (p.privacy_visibility && p.privacy_visibility !== "employees")
+          ? "archived"
+          : "active",
       priority: "medium",
       store_name: nullable(p.store_name),
       target,

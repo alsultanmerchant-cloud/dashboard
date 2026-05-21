@@ -75,6 +75,17 @@
       }
     },
     "searchPlaceholder": "ابحث في المشاريع…",
+    "facets": {
+      "heading": "بحث سريع",
+      "searchFor": "ابحث في {field} عن",
+      "fields": {
+        "name": "المشروع",
+        "code": "كود المشروع",
+        "client": "العميل",
+        "manager": "المدير",
+        "tags": "الوسوم"
+      }
+    },
     "aria": {
       "projectFilters": "فلاتر المشاريع",
       "clearSearch": "مسح البحث",
@@ -528,6 +539,11 @@
     "projectManager": "مدير المشروع",
     "accountManager": "مدير الحساب",
     "client": "العميل",
+    "customer": "العميل",
+    "name": "الاسم",
+    "projectId": "رقم المشروع",
+    "statusDot": "الحالة",
+    "viewTasks": "عرض المهام",
     "ref": "المرجع",
     "tasks": "المهام",
     "completePercent": "مكتمل {percent}%",
@@ -566,7 +582,72 @@
       "seo": "السيو",
       "unassigned": "لم يُعيَّن بعد"
     },
+    "overview": {
+      "emptyDescription": "لا يوجد وصف للمشروع بعد.",
+      "none": "غير متوفر",
+      "side": {
+        "status": "الحالة",
+        "timeline": "المدة"
+      },
+      "labels": {
+        "client": "العميل",
+        "projectManager": "مدير المشروع",
+        "services": "التصنيفات",
+        "description": "وصف المشروع",
+        "renewal": "التجديد القادم",
+        "specialists": "المتخصصون المعيَّنون",
+        "priority": "الأولوية",
+        "status": "الحالة"
+      },
+      "sections": {
+        "teamAndTags": "الفريق والوسوم",
+        "teamAndTagsHint": "الأشخاص المرتبطون بالمشروع حاليًا والوسوم التي يستخدمها الفريق لتنظيمه.",
+        "quickFacts": "ملخص سريع",
+        "quickFactsHint": "مؤشرات تشغيلية مأخوذة من نفس تجميعة المهام الظاهرة أسفل الصفحة."
+      }
+    },
+    "smartPills": {
+      "activities": "الأنشطة"
+    },
+    "activitiesSheet": {
+      "title": "الأنشطة المجدولة"
+    },
+    "activityLog": {
+      "title": "سجل Rwasem",
+      "description": "نشاط النظام والتعليقات المستوردة من Rwasem/Odoo (للقراءة فقط)"
+    },
+    "pixelFields": {
+      "taskName": "اسم المهام",
+      "categories": "التصنيفات",
+      "nameColumn": "الاسم",
+      "assigneesColumn": "المكلّفون",
+      "workingCalendar": "تقويم العمل",
+      "standardCalendar": "Standard 40 hours/week",
+      "siteAddress": "عنوان الموقع",
+      "sitePlaceholder": "ابحث واختر موقع المشروع...",
+      "startDate": "تاريخ البدء",
+      "totalProgress": "إجمالي التقدم (%)",
+      "plannedDate": "التاريخ المخطط",
+      "allocatedHours": "الساعات المخصصة",
+      "defaultHours": "00:00"
+    },
+    "customerInfo": {
+      "storeName": "اسم المتجر",
+      "target": "الهدف",
+      "accountManager": "مدير الحساب",
+      "targets": {
+        "on_target": "على الهدف",
+        "off_target": "خارج الهدف",
+        "out": "خرج",
+        "sales_deposit": "دفعة مبدئية",
+        "renewed": "مُجدّد"
+      }
+    },
     "sections": {
+      "customerInfo": {
+        "title": "معلومات العميل"
+      },
+      "extrasBanner": "الأقسام الإضافية",
       "tags": {
         "title": "الوسوم",
         "description": "ضع وسومًا سريعة على المشروع (مثل HOLD أو Urgent) — مشتركة بين كل المشاريع."
@@ -938,13 +1019,43 @@
     "emptyTitle": "لا يوجد موظفون",
     "emptyDescription": "ابدأ بإضافة أول موظف للوكالة."
   },
+  "RecordPagination": {
+    "label": "تنقل بين السجلات",
+    "previous": "السجل السابق",
+    "next": "السجل التالي"
+  },
+  "RightRail": {
+    "label": "اختصارات سريعة",
+    "bookmarkPanel": "لوحة المفضلة",
+    "favorite": "تفضيل",
+    "search": "بحث (⌘K)",
+    "enterFullscreen": "وضع ملء الشاشة",
+    "exitFullscreen": "إنهاء ملء الشاشة",
+    "addBookmark": "إضافة إلى المفضلة"
+  },
+  "AppSwitcher": {
+    "openLabel": "فتح قائمة التطبيقات",
+    "heading": "التطبيقات",
+    "project": "المشاريع",
+    "discuss": "المحادثات",
+    "calendar": "التقويم",
+    "employees": "الموظفون",
+    "sales": "المبيعات",
+    "settings": "الإعدادات"
+  },
   "ModuleTabs": {
     "projects": "المشاريع",
     "tasks": "المهام",
+    "myTasks": "مهامي",
+    "allTasks": "كل المهام",
     "serviceCategories": "تصنيفات الخدمات",
+    "projectCategory": "تصنيف المشاريع",
     "taskTemplates": "قوالب المهام",
     "reports": "التقارير",
+    "reporting": "التقارير",
+    "configuration": "الإعدادات",
     "import": "استيراد",
+    "importProject": "استيراد مشروع",
     "employees": "الموظفون",
     "departments": "الأقسام",
     "rolesPermissions": "الأدوار والصلاحيات",
@@ -1100,7 +1211,7 @@
       "activities": "الأنشطة",
       "documents": "الملفات",
       "history": "تاريخ المراحل",
-      "gantt": "المخطط",
+      "gantt": "تفاصيل المخطط",
       "extra": "معلومات إضافية"
     },
     "notLinkedToProject": "المهمة غير مرتبطة بمشروع.",
@@ -1467,6 +1578,10 @@
     "star": {
       "star": "إضافة إلى المفضّلة",
       "unstar": "إزالة من المفضّلة"
+    },
+    "priorityStar": {
+      "setHigh": "وضع كأولوية عالية",
+      "unsetHigh": "إلغاء الأولوية العالية"
     }
   },
   "TaskLabels": {
