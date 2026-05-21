@@ -1203,12 +1203,12 @@
       "activityFeed": "جاري تحميل سجل النشاط…"
     },
     "tabs": {
-      "activity": "النشاط",
+      "activity": "السجل والملاحظات",
       "description": "الوصف",
       "subtasks": "المهام الفرعية",
       "links": "ربط المهام",
       "timesheets": "سجلات الوقت",
-      "activities": "الأنشطة",
+      "activities": "الأنشطة المجدولة",
       "documents": "الملفات",
       "history": "تاريخ المراحل",
       "gantt": "تفاصيل المخطط",

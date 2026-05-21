@@ -1203,12 +1203,12 @@
       "activityFeed": "Loading activity feed…"
     },
     "tabs": {
-      "activity": "Activity",
+      "activity": "Log / Notes",
       "description": "Description",
       "subtasks": "Sub-tasks",
       "links": "Link Task",
       "timesheets": "Timesheets",
-      "activities": "Activities",
+      "activities": "Scheduled activities",
       "documents": "Documents",
       "history": "Task Stage History",
       "gantt": "Gantt Detail",

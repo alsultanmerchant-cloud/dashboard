@@ -118,8 +118,8 @@ export default async function TaskDetailPage({
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     notFound();
   }
-  // Default to the activity tab when no explicit `?tab=` is present.
-  const activeTab = isTaskTab(sp.tab) ? sp.tab : "activities";
+  // Default to the activity (log / notes) tab when no explicit `?tab=` is present.
+  const activeTab = isTaskTab(sp.tab) ? sp.tab : "activity";
 
   const [task, openExc, stageHistoryForStepper, positions, attachmentCountRes] = await Promise.all([
     getTaskSummary(session.orgId, id),

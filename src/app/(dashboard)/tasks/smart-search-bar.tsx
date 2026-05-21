@@ -655,17 +655,18 @@ export function SmartSearchBar({
             </button>
           </span>
         ))}
-        {/* Search facet chips — two-segment: bold field name + typed value,
-            mirroring Rwasem's "Assignees احمد ✕" pill. */}
+        {/* Search facet chips — Rwasem two-segment pill: solid-primary field
+            label on the left, white value box on the right. Same look as the
+            /projects bar so both pages feel like one product. */}
         {currentFacets.map((facet, i) => (
           <span
             key={`${facet.field}-${facet.value}-${i}`}
-            className="inline-flex items-center overflow-hidden rounded-full border border-primary/25 text-[11px] font-medium text-primary rtl:flex-row-reverse"
+            className="inline-flex h-7 items-center overflow-hidden rounded-full bg-white text-[11px] font-medium shadow-[0_1px_0_rgba(0,0,0,0.04)] rtl:flex-row-reverse"
           >
-            <span className="bg-primary/15 px-2 py-1">
+            <span className="flex h-full items-center bg-primary px-2.5 font-semibold text-white">
               {facetFieldLabel(facet.field)}
             </span>
-            <span className="flex items-center gap-1 bg-primary/8 px-2 py-1 rtl:flex-row-reverse">
+            <span className="flex h-full items-center gap-1.5 bg-white px-2.5 text-primary rtl:flex-row-reverse">
               <span className="max-w-[10rem] truncate">{facet.value}</span>
               <button
                 type="button"
@@ -673,9 +674,9 @@ export function SmartSearchBar({
                 aria-label={t("aria.removeChip", {
                   label: `${facetFieldLabel(facet.field)}: ${facet.value}`,
                 })}
-                className="opacity-70 hover:opacity-100"
+                className="text-primary/60 hover:text-primary"
               >
-                <X className="size-3" />
+                <X className="size-3.5" />
               </button>
             </span>
           </span>
