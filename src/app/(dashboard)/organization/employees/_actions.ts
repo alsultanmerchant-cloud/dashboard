@@ -522,3 +522,134 @@ export async function createPositionAction(input: {
   revalidatePath("/task-templates");
   return { ok: true, position: created };
 }
+
+// =========================================================================
+// Create a dashboard sign-in account for an existing employee_profiles row.
+// Used by the "+ user" button on the employees admin table. The owner enters
+// an email and password; we provision an auth.users row (or reuse an existing
+// one with the same email and reset its password) and link it to the profile.
+// Roles are NOT assigned here — the owner manages those separately on
+// /organization/roles. The returned credentials are displayed once so the
+// owner can copy + send them to the employee.
+// =========================================================================
+
+const CreateAccountSchema = z.object({
+  employee_id: z.string().uuid(),
+  email: z.string().trim().email("بريد غير صالح").max(160),
+  password: z
+    .string()
+    .min(8, "كلمة المرور قصيرة جدًا (8 أحرف على الأقل)")
+    .max(72, "كلمة المرور طويلة جدًا"),
+});
+
+export type CreateAccountResult =
+  | { ok: true; email: string; password: string; reusedExistingUser: boolean }
+  | { error: string };
+
+export async function createAccountForEmployeeAction(input: {
+  employeeId: string;
+  email: string;
+  password: string;
+}): Promise<CreateAccountResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = CreateAccountSchema.safeParse({
+    employee_id: input.employeeId,
+    email: input.email,
+    password: input.password,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const { data: existing } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, user_id, employment_status")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data.employee_id)
+    .maybeSingle();
+  if (!existing) return { error: "الموظف غير موجود" };
+  if (existing.employment_status === "terminated") {
+    return { error: "لا يمكن إنشاء حساب لموظف منتهي الخدمة" };
+  }
+  if (existing.user_id) {
+    return { error: "هذا الموظف لديه حساب بالفعل" };
+  }
+
+  // 1) Create auth user; if email already exists in auth, reuse + reset pwd.
+  let authUserId: string | null = null;
+  let reusedExistingUser = false;
+  const { data: created, error: createErr } =
+    await supabaseAdmin.auth.admin.createUser({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      email_confirm: true,
+      user_metadata: { full_name: existing.full_name },
+    });
+
+  if (createErr) {
+    const isDup =
+      createErr.message?.toLowerCase().includes("already") ||
+      createErr.status === 422;
+    if (!isDup) return { error: createErr.message };
+    const { data: list } = await supabaseAdmin.auth.admin.listUsers();
+    const found = list?.users?.find(
+      (u) => u.email?.toLowerCase() === parsed.data.email.toLowerCase(),
+    );
+    if (!found) return { error: createErr.message };
+    authUserId = found.id;
+    reusedExistingUser = true;
+    const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(
+      authUserId,
+      { password: parsed.data.password },
+    );
+    if (updErr) return { error: updErr.message };
+  } else {
+    authUserId = created.user.id;
+  }
+  if (!authUserId) return { error: "تعذر إنشاء حساب الوصول" };
+
+  // 2) Defensive: make sure this auth user isn't already linked to another
+  // employee_profile in this org — auth.users → employee_profiles is 1:1.
+  const { data: clash } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id")
+    .eq("organization_id", session.orgId)
+    .eq("user_id", authUserId)
+    .maybeSingle();
+  if (clash && clash.id !== existing.id) {
+    return { error: "هذا الحساب مرتبط بموظف آخر بالفعل" };
+  }
+
+  // 3) Link the auth user to the employee_profile row.
+  const { error: linkErr } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({ user_id: authUserId, email: parsed.data.email })
+    .eq("id", existing.id);
+  if (linkErr) return { error: linkErr.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.account_created",
+    entityType: "employee",
+    entityId: existing.id,
+    metadata: {
+      email: parsed.data.email,
+      reused_existing_auth_user: reusedExistingUser,
+    },
+  });
+
+  revalidatePath("/organization/employees");
+  return {
+    ok: true,
+    email: parsed.data.email,
+    password: parsed.data.password,
+    reusedExistingUser,
+  };
+}

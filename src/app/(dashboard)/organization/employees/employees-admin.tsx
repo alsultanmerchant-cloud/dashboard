@@ -10,7 +10,19 @@
 // here we just hide row actions when canManage is false.
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { Loader2, Pencil, UserMinus, UserCheck, Trash2, X, Search } from "lucide-react";
+import {
+  Loader2,
+  Pencil,
+  UserMinus,
+  UserCheck,
+  UserPlus,
+  Trash2,
+  X,
+  Search,
+  Copy,
+  RefreshCw,
+  Check,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -33,6 +45,7 @@ import {
   terminateEmployeeAction,
   restoreEmployeeAction,
   hardDeleteEmployeeAction,
+  createAccountForEmployeeAction,
 } from "./_actions";
 
 export type EmployeeRow = {
@@ -81,6 +94,7 @@ export function EmployeesAdmin({
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<EmployeeRow | null>(null);
   const [hardDeleting, setHardDeleting] = useState<EmployeeRow | null>(null);
+  const [creatingAccount, setCreatingAccount] = useState<EmployeeRow | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -242,6 +256,18 @@ export function EmployeesAdmin({
                     {canManage && (
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1">
+                          {!terminated && !r.user_id && (
+                            <button
+                              type="button"
+                              onClick={() => setCreatingAccount(r)}
+                              disabled={pending}
+                              aria-label={`إنشاء حساب دخول لـ ${r.full_name}`}
+                              title="إنشاء حساب دخول"
+                              className="rounded p-1.5 text-muted-foreground hover:bg-cyan-dim hover:text-cyan"
+                            >
+                              <UserPlus className="size-3.5" />
+                            </button>
+                          )}
                           <RowEditButton
                             row={r}
                             departments={departments}
@@ -317,6 +343,17 @@ export function EmployeesAdmin({
           onClose={() => setHardDeleting(null)}
           onDeleted={() => {
             setHardDeleting(null);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {creatingAccount && (
+        <CreateAccountDialog
+          employee={creatingAccount}
+          onClose={() => setCreatingAccount(null)}
+          onCreated={() => {
+            setCreatingAccount(null);
             router.refresh();
           }}
         />
