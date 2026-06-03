@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { FileSignature } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
-import { listContractsGrid, type GridContract } from "@/lib/data/contracts";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import {
+  listContractsGrid,
+  listContractTypes,
+  type GridContract,
+} from "@/lib/data/contracts";
+import { listAccountManagers } from "@/lib/data/employees";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { ContractsGrid } from "./contracts-grid";
@@ -13,10 +18,29 @@ import { ContractsGrid } from "./contracts-grid";
 // feedback on every chip/search keystroke. The 4-color row rule
 // (NO=red, Hold=yellow, Closed=gray) lives in `contracts-grid.tsx` as
 // derived CSS, no schema change needed.
+//
+// Inline-edit (Phase 3b) is gated on `contract.manage`; viewers without
+// the permission get the same grid in read-only mode.
 
 export default async function ContractsPage() {
   const session = await requirePagePermission("contract.view");
-  const rows: GridContract[] = await listContractsGrid(session.orgId);
+  const canEdit = hasPermission(session, "contract.manage");
+
+  const [rows, types, ams] = await Promise.all([
+    listContractsGrid(session.orgId),
+    listContractTypes(session.orgId),
+    listAccountManagers(session.orgId),
+  ]);
+
+  const typeOptions = types.map((t) => ({
+    id: t.id,
+    key: t.key,
+    label: t.name_ar,
+  }));
+  const amOptions = ams.map((a) => ({
+    id: a.id,
+    full_name: a.full_name,
+  }));
 
   return (
     <div>
@@ -33,14 +57,20 @@ export default async function ContractsPage() {
         }
       />
 
-      {rows.length === 0 ? (
+      {(rows as GridContract[]).length === 0 ? (
         <EmptyState
           icon={<FileSignature className="size-6" />}
           title="لا توجد عقود بعد"
           description="بمجرد استيراد ورقة Acc-Sheet ستظهر هنا كل عقود الوكالة مع الدفعات ودورات المتابعة."
         />
       ) : (
-        <ContractsGrid rows={rows} meEmployeeId={session.employeeId ?? null} />
+        <ContractsGrid
+          rows={rows}
+          meEmployeeId={session.employeeId ?? null}
+          canEdit={canEdit}
+          contractTypes={typeOptions}
+          accountManagers={amOptions}
+        />
       )}
     </div>
   );

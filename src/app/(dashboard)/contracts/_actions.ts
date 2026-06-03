@@ -397,3 +397,187 @@ export async function addCycleAction(
   revalidatePath(`/contracts/${contract.id}`);
   return { ok: true, id: row.id };
 }
+
+// ---------------------------------------------------------------------------
+// updateContractFieldAction — single-cell inline-edit gateway for the grid.
+//
+// The new /contracts grid edits one cell at a time. Rather than a separate
+// action per field (which would balloon to ~15 endpoints), we route every
+// edit through one action with a discriminated payload. Per-field zod
+// validation runs server-side so a hand-rolled HTTP call can't bypass the
+// enum/check constraints. All mutations log to audit_log; the
+// business-relevant ones (target/status/renewed_status) also emit an
+// ai_event so the assistant can answer "which contracts moved to On Target
+// this week" without re-scanning the row history.
+// ---------------------------------------------------------------------------
+
+const TARGET_VALUES = [
+  "Overdue",
+  "Sales Deposit",
+  "On Target",
+  "Closed",
+  "Lost",
+  "Renewed",
+] as const;
+const STATUS_VALUES = [
+  "active",
+  "hold",
+  "closed",
+  "expired",
+  "lost",
+  "renewed",
+] as const;
+const RENEWED_VALUES = ["YES", "NO", "Closed"] as const;
+const PAYMENT_VALUES = ["Complete", "Installments"] as const;
+
+const FieldUpdateSchema = z.discriminatedUnion("field", [
+  z.object({ field: z.literal("target"), value: z.enum(TARGET_VALUES) }),
+  z.object({ field: z.literal("status"), value: z.enum(STATUS_VALUES) }),
+  z.object({
+    field: z.literal("renewed_status"),
+    value: z.enum(RENEWED_VALUES).nullable(),
+  }),
+  z.object({
+    field: z.literal("payment_status"),
+    value: z.enum(PAYMENT_VALUES).nullable(),
+  }),
+  z.object({
+    field: z.literal("contract_type_id"),
+    value: z.string().regex(UUID_RE).nullable(),
+  }),
+  z.object({
+    field: z.literal("account_manager_id"),
+    value: z.string().regex(UUID_RE).nullable(),
+  }),
+  z.object({
+    field: z.literal("notes"),
+    value: z.string().trim().max(4000).nullable(),
+  }),
+  // Money fields — finite numbers, capped to keep typos from blowing the
+  // running totals on the dashboard.
+  z.object({
+    field: z.enum([
+      "total_value",
+      "paid_value",
+      "next_contract_value",
+      "renewal_paid_value",
+      "repeated_services_value",
+    ]),
+    value: z.number().finite().min(0).max(10_000_000).nullable(),
+  }),
+  // Date fields — ISO date only, nullable.
+  z.object({
+    field: z.enum(["start_date", "end_date", "actual_end_date"]),
+    value: z.string().regex(DATE_RE).nullable(),
+  }),
+  // Small int fields.
+  z.object({
+    field: z.enum(["duration_months", "extension_days", "delay_days"]),
+    value: z.number().int().min(0).max(3650).nullable(),
+  }),
+]);
+
+// Field set that warrants an ai_event in addition to audit_log: these are
+// the ones the team's renewal-funnel workflow keys on.
+const AI_RELEVANT_FIELDS = new Set([
+  "target",
+  "status",
+  "renewed_status",
+  "contract_type_id",
+]);
+
+export async function updateContractFieldAction(input: {
+  id: string;
+  field: string;
+  value: string | number | null;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  if (!UUID_RE.test(input.id)) return { error: "معرف عقد غير صالح" };
+
+  const parsed = FieldUpdateSchema.safeParse({
+    field: input.field,
+    value: input.value,
+  });
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "بيانات غير صالحة";
+    return { error: msg };
+  }
+
+  // Org-scope + fetch before-state for the audit log. PostgREST + the
+  // generated supabase types model the column union as a union, so cast
+  // through unknown to a flat record for the field-name index.
+  const { data: beforeRaw } = await supabaseAdmin
+    .from("contracts")
+    .select(
+      "id, organization_id, target, status, renewed_status, payment_status, " +
+        "contract_type_id, account_manager_id, notes, total_value, paid_value, " +
+        "next_contract_value, renewal_paid_value, repeated_services_value, " +
+        "start_date, end_date, actual_end_date, duration_months, " +
+        "extension_days, delay_days",
+    )
+    .eq("id", input.id)
+    .maybeSingle();
+  const before = beforeRaw as unknown as Record<string, unknown> | null;
+  if (!before || before.organization_id !== session.orgId) {
+    return { error: "العقد غير موجود" };
+  }
+
+  const previousValue = before[parsed.data.field] ?? null;
+  // No-op short-circuit: avoids audit-log noise when the user picks the
+  // same value, which happens often with dropdowns.
+  if (previousValue === parsed.data.value) return { ok: true, id: input.id };
+
+  const patch: Record<string, unknown> = { [parsed.data.field]: parsed.data.value };
+  // contract_type_id → also refresh package_name? No — they're orthogonal.
+  // status / renewed_status / target are intentionally independent because
+  // the team uses them to mean different things (status = lifecycle,
+  // target = AM health, renewed_status = end-of-cycle outcome).
+
+  const { error } = await supabaseAdmin
+    .from("contracts")
+    .update(patch)
+    .eq("id", input.id);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.update_field",
+    entityType: "contract",
+    entityId: input.id,
+    metadata: {
+      field: parsed.data.field,
+      from: previousValue,
+      to: parsed.data.value,
+    },
+  });
+
+  if (AI_RELEVANT_FIELDS.has(parsed.data.field)) {
+    await logAiEvent({
+      organizationId: session.orgId,
+      actorUserId: session.userId,
+      eventType: "CONTRACT_FIELD_CHANGED",
+      entityType: "contract",
+      entityId: input.id,
+      payload: {
+        field: parsed.data.field,
+        from: previousValue,
+        to: parsed.data.value,
+      },
+      importance:
+        parsed.data.field === "renewed_status" && parsed.data.value === "NO"
+          ? "high"
+          : "normal",
+    });
+  }
+
+  revalidatePath("/contracts");
+  revalidatePath(`/contracts/${input.id}`);
+  return { ok: true, id: input.id };
+}

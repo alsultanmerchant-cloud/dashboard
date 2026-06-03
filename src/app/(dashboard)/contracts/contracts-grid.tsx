@@ -18,16 +18,52 @@
 // in a follow-up; this PR ships read-only parity so the team can verify
 // every cell matches the sheet before we turn them loose to edit live.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Check, Loader2, Search, X } from "lucide-react";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { GridContract } from "@/lib/data/contracts";
+import { updateContractFieldAction } from "./_actions";
+
+type TypeOption = { id: string; key: string; label: string };
+type AmOption = { id: string; full_name: string };
 
 type Props = {
   rows: GridContract[];
   meEmployeeId: string | null;
+  canEdit: boolean;
+  contractTypes: TypeOption[];
+  accountManagers: AmOption[];
 };
+
+// Discriminated payload for the single inline-edit action. Mirrors the
+// zod schema on the server so the client can't drift.
+type FieldValue =
+  | { field: "target"; value: string }
+  | { field: "renewed_status"; value: string | null }
+  | { field: "payment_status"; value: string | null }
+  | { field: "contract_type_id"; value: string | null }
+  | { field: "account_manager_id"; value: string | null }
+  | { field: "notes"; value: string | null }
+  | {
+      field:
+        | "total_value"
+        | "paid_value"
+        | "next_contract_value"
+        | "renewal_paid_value"
+        | "repeated_services_value";
+      value: number | null;
+    }
+  | {
+      field: "start_date" | "end_date" | "actual_end_date";
+      value: string | null;
+    }
+  | {
+      field: "duration_months" | "extension_days" | "delay_days";
+      value: number | null;
+    };
 
 const TARGET_TONE: Record<string, string> = {
   Overdue: "bg-rose-500/15 text-rose-300 border-rose-500/30",
@@ -132,12 +168,60 @@ function Pill({
   );
 }
 
-export function ContractsGrid({ rows, meEmployeeId }: Props) {
+export function ContractsGrid({
+  rows: initialRows,
+  meEmployeeId,
+  canEdit,
+  contractTypes,
+  accountManagers,
+}: Props) {
+  // Optimistic mirror of the server rows. Inline edits write here
+  // immediately, then the server action either confirms (revalidate
+  // re-seeds from the source) or errors (we revert and toast).
+  const [rows, setRows] = useState<GridContract[]>(initialRows);
+  // Reset to fresh server data when the parent re-fetches (router.refresh
+  // post-commit, or filter changes that come down as new props). React 19
+  // "derived from prop" pattern — avoids the cascading-render setState-in-
+  // effect lint error.
+  const [lastInitial, setLastInitial] = useState(initialRows);
+  if (lastInitial !== initialRows) {
+    setLastInitial(initialRows);
+    setRows(initialRows);
+  }
+  const router = useRouter();
+
   const [search, setSearch] = useState("");
   const [target, setTarget] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [typeKey, setTypeKey] = useState<string | null>(null);
   const [scope, setScope] = useState<"all" | "mine">("all");
+
+  // Shared save handler — patches the row optimistically, then calls the
+  // server action. On failure we revert to the prior snapshot. Same code
+  // path serves every editable cell, so error UX stays consistent.
+  function commit(id: string, patch: FieldValue, label: string) {
+    const before = rows.find((r) => r.id === id);
+    if (!before) return Promise.resolve(false);
+
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? applyPatch(r, patch, contractTypes, accountManagers) : r)),
+    );
+    return updateContractFieldAction({
+      id,
+      field: patch.field,
+      value: patch.value,
+    }).then((res) => {
+      if ("error" in res) {
+        // Revert
+        setRows((prev) => prev.map((r) => (r.id === id ? before : r)));
+        toast.error(res.error);
+        return false;
+      }
+      toast.success(`تم حفظ ${label}`, { duration: 1200 });
+      router.refresh();
+      return true;
+    });
+  }
 
   // Derived option lists for filter chips.
   const counts = useMemo(() => {
@@ -330,19 +414,107 @@ export function ContractsGrid({ rows, meEmployeeId }: Props) {
                       </Link>
                     </Td>
                     <Td className="text-muted-foreground">
-                      {c.account_manager_name ?? "—"}
+                      {canEdit ? (
+                        <EditableSelect
+                          value={c.account_manager_id ?? ""}
+                          options={[
+                            { value: "", label: "—" },
+                            ...accountManagers.map((a) => ({
+                              value: a.id,
+                              label: a.full_name,
+                            })),
+                          ]}
+                          renderView={() => c.account_manager_name ?? "—"}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "account_manager_id", value: v || null },
+                              "المسوّق",
+                            )
+                          }
+                        />
+                      ) : (
+                        c.account_manager_name ?? "—"
+                      )}
                     </Td>
                     <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
-                      {fmtDate(c.start_date)}
+                      {canEdit ? (
+                        <EditableDate
+                          value={c.start_date}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "start_date", value: v },
+                              "تاريخ البدء",
+                            )
+                          }
+                        />
+                      ) : (
+                        fmtDate(c.start_date)
+                      )}
                     </Td>
                     <Td>
-                      <Pill
-                        label={c.target}
-                        tone={TARGET_TONE[c.target] ?? "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"}
-                      />
+                      {canEdit ? (
+                        <EditableSelect
+                          value={c.target}
+                          options={[
+                            { value: "Overdue", label: "Overdue" },
+                            { value: "Sales Deposit", label: "Sales Deposit" },
+                            { value: "On Target", label: "On Target" },
+                            { value: "Closed", label: "Closed" },
+                          ]}
+                          renderView={() => (
+                            <Pill
+                              label={c.target}
+                              tone={
+                                TARGET_TONE[c.target] ??
+                                "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"
+                              }
+                            />
+                          )}
+                          onCommit={(v) =>
+                            commit(c.id, { field: "target", value: v }, "Target")
+                          }
+                        />
+                      ) : (
+                        <Pill
+                          label={c.target}
+                          tone={TARGET_TONE[c.target] ?? "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"}
+                        />
+                      )}
                     </Td>
                     <Td>
-                      {c.contract_type_key ? (
+                      {canEdit ? (
+                        <EditableSelect
+                          value={
+                            contractTypes.find((t) => t.key === c.contract_type_key)?.id ?? ""
+                          }
+                          options={[
+                            { value: "", label: "—" },
+                            ...contractTypes.map((t) => ({
+                              value: t.id,
+                              label: t.label,
+                            })),
+                          ]}
+                          renderView={() =>
+                            c.contract_type_key ? (
+                              <Pill
+                                label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
+                                tone={TYPE_TONE[c.contract_type_key] ?? "bg-zinc-500/15"}
+                              />
+                            ) : (
+                              "—"
+                            )
+                          }
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "contract_type_id", value: v || null },
+                              "النوع",
+                            )
+                          }
+                        />
+                      ) : c.contract_type_key ? (
                         <Pill
                           label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
                           tone={TYPE_TONE[c.contract_type_key] ?? "bg-zinc-500/15"}
@@ -368,35 +540,174 @@ export function ContractsGrid({ rows, meEmployeeId }: Props) {
                       )}
                     </Td>
                     <Td className="text-center tabular-nums">
-                      {c.duration_months ?? "—"}
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.duration_months}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "duration_months", value: v },
+                              "المدة",
+                            )
+                          }
+                        />
+                      ) : (
+                        c.duration_months ?? "—"
+                      )}
                     </Td>
-                    <Td className="text-end tabular-nums">{fmtMoney(c.paid_value)}</Td>
+                    <Td className="text-end tabular-nums">
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.paid_value}
+                          allowDecimal
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "paid_value", value: v },
+                              "المدفوع",
+                            )
+                          }
+                          render={() => fmtMoney(c.paid_value)}
+                        />
+                      ) : (
+                        fmtMoney(c.paid_value)
+                      )}
+                    </Td>
                     <Td className="text-end tabular-nums text-muted-foreground">
-                      {fmtMoney(c.repeated_services_value)}
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.repeated_services_value}
+                          allowDecimal
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "repeated_services_value", value: v },
+                              "المتكرر",
+                            )
+                          }
+                          render={() => fmtMoney(c.repeated_services_value)}
+                        />
+                      ) : (
+                        fmtMoney(c.repeated_services_value)
+                      )}
                     </Td>
                     <Td className="text-muted-foreground text-[11px]">
-                      {c.payment_status ?? "—"}
+                      {canEdit ? (
+                        <EditableSelect
+                          value={c.payment_status ?? ""}
+                          options={[
+                            { value: "", label: "—" },
+                            { value: "Complete", label: "Complete" },
+                            { value: "Installments", label: "Installments" },
+                          ]}
+                          renderView={() => c.payment_status ?? "—"}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "payment_status", value: v || null },
+                              "الدفع",
+                            )
+                          }
+                        />
+                      ) : (
+                        c.payment_status ?? "—"
+                      )}
                     </Td>
                     <Td className="text-center tabular-nums text-muted-foreground">
                       {c.total_days_computed ?? "—"}
                     </Td>
                     <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
-                      {fmtDate(c.end_date)}
+                      {canEdit ? (
+                        <EditableDate
+                          value={c.end_date}
+                          onCommit={(v) =>
+                            commit(c.id, { field: "end_date", value: v }, "نهاية متوقعة")
+                          }
+                        />
+                      ) : (
+                        fmtDate(c.end_date)
+                      )}
                     </Td>
                     <Td className="text-[11px] text-muted-foreground">
                       {c.contract_status_label ?? STATUS_LABEL[c.status] ?? c.status}
                     </Td>
                     <Td className="text-end tabular-nums text-muted-foreground">
-                      {fmtMoney(c.next_contract_value)}
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.next_contract_value}
+                          allowDecimal
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "next_contract_value", value: v },
+                              "قيمة التجديد",
+                            )
+                          }
+                          render={() => fmtMoney(c.next_contract_value)}
+                        />
+                      ) : (
+                        fmtMoney(c.next_contract_value)
+                      )}
                     </Td>
                     <Td className="text-end tabular-nums text-muted-foreground">
-                      {fmtMoney(c.renewal_paid_value)}
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.renewal_paid_value}
+                          allowDecimal
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "renewal_paid_value", value: v },
+                              "دفعة التجديد",
+                            )
+                          }
+                          render={() => fmtMoney(c.renewal_paid_value)}
+                        />
+                      ) : (
+                        fmtMoney(c.renewal_paid_value)
+                      )}
                     </Td>
                     <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
-                      {fmtDate(c.actual_end_date)}
+                      {canEdit ? (
+                        <EditableDate
+                          value={c.actual_end_date}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "actual_end_date", value: v },
+                              "نهاية فعلية",
+                            )
+                          }
+                        />
+                      ) : (
+                        fmtDate(c.actual_end_date)
+                      )}
                     </Td>
                     <Td className="text-center tabular-nums">
-                      {c.delay_days != null ? (
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.delay_days}
+                          render={() =>
+                            c.delay_days != null ? (
+                              <span
+                                className={cn(
+                                  "inline-block min-w-[28px] rounded px-1.5 py-0.5",
+                                  c.delay_days > 0
+                                    ? "bg-rose-500/15 text-rose-300"
+                                    : "text-muted-foreground",
+                                )}
+                              >
+                                {c.delay_days}
+                              </span>
+                            ) : (
+                              "—"
+                            )
+                          }
+                          onCommit={(v) =>
+                            commit(c.id, { field: "delay_days", value: v }, "تأخير")
+                          }
+                        />
+                      ) : c.delay_days != null ? (
                         <span
                           className={cn(
                             "inline-block min-w-[28px] rounded px-1.5 py-0.5",
@@ -412,7 +723,35 @@ export function ContractsGrid({ rows, meEmployeeId }: Props) {
                       )}
                     </Td>
                     <Td>
-                      {c.renewed_status ? (
+                      {canEdit ? (
+                        <EditableSelect
+                          value={c.renewed_status ?? ""}
+                          options={[
+                            { value: "", label: "—" },
+                            { value: "YES", label: "YES" },
+                            { value: "NO", label: "NO" },
+                            { value: "Closed", label: "Closed" },
+                          ]}
+                          renderView={() =>
+                            c.renewed_status ? (
+                              <Pill
+                                label={RENEWED_LABEL[c.renewed_status]?.label ?? c.renewed_status}
+                                tone={RENEWED_LABEL[c.renewed_status]?.cls ?? "bg-zinc-500/15"}
+                                size="xs"
+                              />
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )
+                          }
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "renewed_status", value: v || null },
+                              "تجديد",
+                            )
+                          }
+                        />
+                      ) : c.renewed_status ? (
                         <Pill
                           label={RENEWED_LABEL[c.renewed_status]?.label ?? c.renewed_status}
                           tone={RENEWED_LABEL[c.renewed_status]?.cls ?? "bg-zinc-500/15"}
@@ -423,10 +762,35 @@ export function ContractsGrid({ rows, meEmployeeId }: Props) {
                       )}
                     </Td>
                     <Td className="text-center tabular-nums text-muted-foreground">
-                      {c.extension_days ?? "—"}
+                      {canEdit ? (
+                        <EditableNumber
+                          value={c.extension_days}
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "extension_days", value: v },
+                              "تمديد",
+                            )
+                          }
+                        />
+                      ) : (
+                        c.extension_days ?? "—"
+                      )}
                     </Td>
                     <Td className="max-w-[260px]">
-                      {c.notes ? (
+                      {canEdit ? (
+                        <EditableText
+                          value={c.notes ?? ""}
+                          placeholder="—"
+                          onCommit={(v) =>
+                            commit(
+                              c.id,
+                              { field: "notes", value: v || null },
+                              "ملاحظات",
+                            )
+                          }
+                        />
+                      ) : c.notes ? (
                         <span
                           className="block truncate text-[11px] text-muted-foreground"
                           title={c.notes}
@@ -496,6 +860,388 @@ function Td({
       {children}
     </td>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Inline-edit primitives
+//
+// Each cell that's editable wraps its display in one of these. The view
+// shows the formatted value with a subtle hover ring; clicking swaps in
+// the matching input (native <select>, <input type=number|date>, or a
+// growable <textarea> for notes). Commit fires on blur / Enter; cancel on
+// Escape. Saves are routed through the single `commit` function so the
+// optimistic + revert + toast logic stays in one place.
+// ---------------------------------------------------------------------------
+
+const editShellCls =
+  "inline-flex min-h-[24px] cursor-pointer items-center gap-1 rounded px-1 -mx-1 hover:bg-soft-1 hover:ring-1 hover:ring-soft transition-colors";
+
+function EditableSelect({
+  value,
+  options,
+  renderView,
+  onCommit,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  renderView: () => React.ReactNode;
+  onCommit: (v: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+  const [local, setLocal] = useState(value);
+  // React 19 idiom: derive in render when the prop changes mid-mount,
+  // instead of an effect that mutates state (causes cascading renders).
+  const [lastProp, setLastProp] = useState(value);
+  if (lastProp !== value) {
+    setLastProp(value);
+    setLocal(value);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={editShellCls}
+        onClick={() => setEditing(true)}
+        title="انقر للتعديل"
+      >
+        {renderView()}
+      </button>
+    );
+  }
+
+  return (
+    <select
+      autoFocus
+      value={local}
+      disabled={pending}
+      onChange={(e) => {
+        const next = e.target.value;
+        setLocal(next);
+        start(async () => {
+          await onCommit(next);
+          setEditing(false);
+        });
+      }}
+      onBlur={() => setEditing(false)}
+      className="h-7 rounded-md border border-cyan/40 bg-input px-1 text-[12px] outline-none"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function EditableNumber({
+  value,
+  onCommit,
+  render,
+  allowDecimal,
+}: {
+  value: number | null;
+  onCommit: (v: number | null) => Promise<boolean>;
+  render?: () => React.ReactNode;
+  allowDecimal?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(value == null ? "" : String(value));
+  const [pending, start] = useTransition();
+  const [lastProp, setLastProp] = useState(value);
+  if (lastProp !== value) {
+    setLastProp(value);
+    setLocal(value == null ? "" : String(value));
+  }
+
+  function done() {
+    const trimmed = local.trim();
+    const next = trimmed === "" ? null : Number(trimmed);
+    if (next != null && !Number.isFinite(next)) {
+      toast.error("قيمة عددية غير صالحة");
+      setLocal(value == null ? "" : String(value));
+      setEditing(false);
+      return;
+    }
+    if (next === value) {
+      setEditing(false);
+      return;
+    }
+    start(async () => {
+      const ok = await onCommit(next);
+      if (!ok) setLocal(value == null ? "" : String(value));
+      setEditing(false);
+    });
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={editShellCls}
+        onClick={() => setEditing(true)}
+        title="انقر للتعديل"
+      >
+        {render ? render() : value ?? "—"}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      type="number"
+      inputMode={allowDecimal ? "decimal" : "numeric"}
+      step={allowDecimal ? "0.01" : "1"}
+      value={local}
+      disabled={pending}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setLocal(value == null ? "" : String(value));
+          setEditing(false);
+        }
+      }}
+      dir="ltr"
+      className="h-7 w-20 rounded-md border border-cyan/40 bg-input px-1 text-[12px] outline-none tabular-nums text-end"
+    />
+  );
+}
+
+function EditableDate({
+  value,
+  onCommit,
+}: {
+  value: string | null;
+  onCommit: (v: string | null) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(value ?? "");
+  const [pending, start] = useTransition();
+  const [lastProp, setLastProp] = useState(value);
+  if (lastProp !== value) {
+    setLastProp(value);
+    setLocal(value ?? "");
+  }
+
+  function done() {
+    const next = local.trim() || null;
+    if (next === value) {
+      setEditing(false);
+      return;
+    }
+    start(async () => {
+      const ok = await onCommit(next);
+      if (!ok) setLocal(value ?? "");
+      setEditing(false);
+    });
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={editShellCls}
+        onClick={() => setEditing(true)}
+        title="انقر للتعديل"
+      >
+        {fmtDate(value)}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      type="date"
+      value={local}
+      disabled={pending}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setLocal(value ?? "");
+          setEditing(false);
+        }
+      }}
+      dir="ltr"
+      className="h-7 rounded-md border border-cyan/40 bg-input px-1 text-[12px] outline-none"
+    />
+  );
+}
+
+function EditableText({
+  value,
+  placeholder,
+  onCommit,
+}: {
+  value: string;
+  placeholder: string;
+  onCommit: (v: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(value);
+  const [pending, start] = useTransition();
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [lastProp, setLastProp] = useState(value);
+  if (lastProp !== value) {
+    setLastProp(value);
+    setLocal(value);
+  }
+  useEffect(() => {
+    if (editing) ref.current?.focus();
+  }, [editing]);
+
+  function done() {
+    const next = local.trim();
+    if (next === value.trim()) {
+      setEditing(false);
+      return;
+    }
+    start(async () => {
+      const ok = await onCommit(next);
+      if (!ok) setLocal(value);
+      setEditing(false);
+    });
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={cn(editShellCls, "max-w-[260px] text-start")}
+        onClick={() => setEditing(true)}
+        title={value || "انقر للتعديل"}
+      >
+        {value ? (
+          <span className="block truncate text-[11px] text-muted-foreground">
+            {value}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">{placeholder}</span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-1">
+      <textarea
+        ref={ref}
+        value={local}
+        disabled={pending}
+        onChange={(e) => setLocal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) done();
+          if (e.key === "Escape") {
+            setLocal(value);
+            setEditing(false);
+          }
+        }}
+        rows={2}
+        className="min-h-[28px] w-[240px] resize-y rounded-md border border-cyan/40 bg-input p-1 text-[11px] outline-none"
+      />
+      <div className="flex flex-col gap-0.5">
+        <button
+          type="button"
+          onClick={done}
+          disabled={pending}
+          title="حفظ (Ctrl+Enter)"
+          className="rounded bg-cyan-dim p-1 text-cyan hover:bg-cyan-dim/80"
+        >
+          {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setLocal(value);
+            setEditing(false);
+          }}
+          disabled={pending}
+          title="إلغاء (Esc)"
+          className="rounded bg-soft-1 p-1 text-muted-foreground hover:bg-soft-2"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Mirror the field write client-side so the row repaints instantly with
+// the new value (and the row color recomputes via rowTone()).
+function applyPatch(
+  row: GridContract,
+  patch: FieldValue,
+  types: TypeOption[],
+  ams: AmOption[],
+): GridContract {
+  const next = { ...row };
+  switch (patch.field) {
+    case "contract_type_id": {
+      const t = types.find((x) => x.id === patch.value);
+      next.contract_type_key = t?.key ?? null;
+      next.contract_type_label = t?.label ?? null;
+      break;
+    }
+    case "account_manager_id": {
+      const a = ams.find((x) => x.id === patch.value);
+      next.account_manager_id = patch.value;
+      next.account_manager_name = a?.full_name ?? null;
+      break;
+    }
+    case "target":
+      next.target = patch.value;
+      break;
+    case "renewed_status":
+      next.renewed_status = patch.value;
+      break;
+    case "payment_status":
+      next.payment_status = patch.value;
+      break;
+    case "notes":
+      next.notes = patch.value;
+      break;
+    case "total_value":
+      next.total_value = patch.value ?? 0;
+      break;
+    case "paid_value":
+      next.paid_value = patch.value ?? 0;
+      break;
+    case "next_contract_value":
+      next.next_contract_value = patch.value;
+      break;
+    case "renewal_paid_value":
+      next.renewal_paid_value = patch.value;
+      break;
+    case "repeated_services_value":
+      next.repeated_services_value = patch.value;
+      break;
+    case "start_date":
+      next.start_date = patch.value ?? row.start_date;
+      break;
+    case "end_date":
+      next.end_date = patch.value;
+      break;
+    case "actual_end_date":
+      next.actual_end_date = patch.value;
+      break;
+    case "duration_months":
+      next.duration_months = patch.value;
+      break;
+    case "extension_days":
+      next.extension_days = patch.value;
+      break;
+    case "delay_days":
+      next.delay_days = patch.value;
+      break;
+  }
+  return next;
 }
 
 function ChipGroup<T extends string>({
