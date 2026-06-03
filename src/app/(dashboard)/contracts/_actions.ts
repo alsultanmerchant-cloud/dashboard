@@ -581,3 +581,153 @@ export async function updateContractFieldAction(input: {
   revalidatePath(`/contracts/${input.id}`);
   return { ok: true, id: input.id };
 }
+
+// ---------------------------------------------------------------------------
+// createContractAction — new-row creation from the grid header.
+//
+// The team's sheet has rows added by hand; the dashboard equivalent is a
+// modal triggered by the "+ عقد جديد" button. Minimum payload mirrors the
+// sheet's required cells: client, AM, type, start date, package, total
+// value. Everything else falls back to safe defaults (target = Overdue,
+// status = active, payment_status = Complete). The team can then refine
+// each cell inline.
+// ---------------------------------------------------------------------------
+
+const CreateContractSchema = z.object({
+  client_id: z.string().regex(UUID_RE),
+  account_manager_id: z.string().regex(UUID_RE).nullable(),
+  contract_type_id: z.string().regex(UUID_RE).nullable(),
+  package_id: z.string().regex(UUID_RE).nullable(),
+  start_date: z.string().regex(DATE_RE),
+  duration_months: z.number().int().min(0).max(120).nullable(),
+  total_value: z.number().finite().min(0).max(10_000_000),
+  paid_value: z.number().finite().min(0).max(10_000_000).nullable(),
+  notes: z.string().trim().max(4000).nullable(),
+});
+
+export async function createContractAction(input: {
+  client_id: string;
+  account_manager_id: string | null;
+  contract_type_id: string | null;
+  package_id: string | null;
+  start_date: string;
+  duration_months: number | null;
+  total_value: number;
+  paid_value: number | null;
+  notes: string | null;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = CreateContractSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  // Org-scope: client must belong to this org.
+  const { data: client } = await supabaseAdmin
+    .from("clients")
+    .select("id, name, organization_id, external_id")
+    .eq("id", parsed.data.client_id)
+    .maybeSingle();
+  if (!client || client.organization_id !== session.orgId) {
+    return { error: "العميل غير موجود" };
+  }
+
+  // External key matches the importer's convention so manual rows + future
+  // re-imports don't collide on the same client.
+  const startNoDash = parsed.data.start_date.replace(/-/g, "");
+  const clientExt = client.external_id ?? client.id.slice(0, 8);
+  const externalId = `${clientExt}|${startNoDash}`;
+
+  // Pre-resolve the package name + type label for the denormalized fields
+  // the grid reads when the embedded join isn't refreshed yet.
+  let packageName: string | null = null;
+  if (parsed.data.package_id) {
+    const { data: pkg } = await supabaseAdmin
+      .from("packages")
+      .select("name_ar")
+      .eq("id", parsed.data.package_id)
+      .maybeSingle();
+    packageName = pkg?.name_ar ?? null;
+  }
+  let amName: string | null = null;
+  if (parsed.data.account_manager_id) {
+    const { data: am } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("full_name")
+      .eq("id", parsed.data.account_manager_id)
+      .maybeSingle();
+    amName = am?.full_name ?? null;
+  }
+
+  const { data: row, error } = await supabaseAdmin
+    .from("contracts")
+    .insert({
+      organization_id: session.orgId,
+      external_source: "dashboard",
+      external_id: externalId,
+      client_id: parsed.data.client_id,
+      account_manager_id: parsed.data.account_manager_id,
+      account_manager_name: amName,
+      contract_type_id: parsed.data.contract_type_id,
+      package_id: parsed.data.package_id,
+      package_name: packageName,
+      start_date: parsed.data.start_date,
+      duration_months: parsed.data.duration_months,
+      total_value: parsed.data.total_value,
+      paid_value: parsed.data.paid_value ?? 0,
+      target: "Overdue",
+      status: "active",
+      payment_status: "Complete",
+      notes: parsed.data.notes,
+    })
+    .select("id")
+    .single();
+  if (error || !row) {
+    return { error: error?.message ?? "تعذّر إنشاء العقد" };
+  }
+
+  // Mirror into the junction so multi-package reads stay uniform with the
+  // imported rows. Single package on create; team can add more inline.
+  if (parsed.data.package_id) {
+    await supabaseAdmin.from("contract_packages").insert({
+      contract_id: row.id,
+      package_id: parsed.data.package_id,
+      sort_order: 0,
+    });
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.create",
+    entityType: "contract",
+    entityId: row.id,
+    metadata: {
+      client_id: parsed.data.client_id,
+      external_id: externalId,
+      total_value: parsed.data.total_value,
+    },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "CONTRACT_CREATED",
+    entityType: "contract",
+    entityId: row.id,
+    payload: {
+      client_id: parsed.data.client_id,
+      total_value: parsed.data.total_value,
+      package_id: parsed.data.package_id,
+    },
+    importance: "normal",
+  });
+
+  revalidatePath("/contracts");
+  return { ok: true, id: row.id };
+}
