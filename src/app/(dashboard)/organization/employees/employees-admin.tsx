@@ -653,6 +653,231 @@ function HardDeleteDialog({
   );
 }
 
+function CreateAccountDialog({
+  employee,
+  onClose,
+  onCreated,
+}: {
+  employee: EmployeeRow;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [email, setEmail] = useState(employee.email ?? "");
+  const [password, setPassword] = useState(() => generateRandomPassword());
+  const [pending, start] = useTransition();
+  const [done, setDone] = useState<{ email: string; password: string } | null>(
+    null,
+  );
+  const [copied, setCopied] = useState<"email" | "password" | "both" | null>(
+    null,
+  );
+
+  function copy(value: string, kind: "email" | "password" | "both") {
+    navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(kind);
+        setTimeout(() => setCopied(null), 1500);
+      },
+      () => toast.error("تعذر النسخ"),
+    );
+  }
+
+  function submit() {
+    start(async () => {
+      const res = await createAccountForEmployeeAction({
+        employeeId: employee.id,
+        email: email.trim(),
+        password,
+      });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(
+        res.reusedExistingUser
+          ? "تم ربط حساب موجود وتحديث كلمة المرور"
+          : "تم إنشاء الحساب",
+      );
+      setDone({ email: res.email, password: res.password });
+    });
+  }
+
+  const valid = /^\S+@\S+\.\S+$/.test(email.trim()) && password.length >= 8;
+
+  if (done) {
+    const combined = `البريد: ${done.email}\nكلمة المرور: ${done.password}`;
+    return (
+      <Modal onClose={onCreated} title={`بيانات دخول: ${employee.full_name}`}>
+        <div className="space-y-3 p-4">
+          <div className="rounded-lg border border-cyan/30 bg-cyan-dim/40 p-3 text-xs text-cyan">
+            <p className="font-semibold">احفظ هذه البيانات الآن</p>
+            <p className="mt-1 text-cyan/90">
+              لن تظهر كلمة المرور مرة أخرى. أرسلها للموظف عبر قناة آمنة.
+            </p>
+          </div>
+          <CredentialField
+            label="البريد"
+            value={done.email}
+            onCopy={() => copy(done.email, "email")}
+            copied={copied === "email"}
+          />
+          <CredentialField
+            label="كلمة المرور"
+            value={done.password}
+            mono
+            onCopy={() => copy(done.password, "password")}
+            copied={copied === "password"}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => copy(combined, "both")}
+          >
+            {copied === "both" ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+            نسخ الكل
+          </Button>
+          <Button size="sm" onClick={onCreated}>
+            تم
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose} title={`إنشاء حساب دخول: ${employee.full_name}`}>
+      <div className="space-y-3 p-4">
+        <div className="rounded-lg border border-soft bg-soft-1/40 p-3 text-[11px] text-muted-foreground">
+          سيتمكن الموظف من تسجيل الدخول بهذا البريد وكلمة المرور. الصلاحيات
+          تُدار من{" "}
+          <span className="font-medium text-foreground">صفحة الأدوار</span>{" "}
+          بعد إنشاء الحساب.
+        </div>
+        <Field label="البريد الإلكتروني">
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={pending}
+            dir="ltr"
+            placeholder="employee@agency.com"
+            autoFocus
+          />
+        </Field>
+        <Field label="كلمة المرور">
+          <div className="flex gap-2">
+            <Input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={pending}
+              dir="ltr"
+              className="font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => setPassword(generateRandomPassword())}
+              disabled={pending}
+              title="توليد كلمة مرور جديدة"
+              aria-label="توليد كلمة مرور جديدة"
+              className="rounded-lg border border-soft bg-card px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => copy(password, "password")}
+              disabled={pending}
+              title="نسخ"
+              aria-label="نسخ كلمة المرور"
+              className="rounded-lg border border-soft bg-card px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {copied === "password" ? (
+                <Check className="size-3.5" />
+              ) : (
+                <Copy className="size-3.5" />
+              )}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            8 أحرف على الأقل. يُنصح بكلمة مرور قوية مُولَّدة عشوائيًا.
+          </p>
+        </Field>
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          إلغاء
+        </Button>
+        <Button size="sm" onClick={submit} disabled={pending || !valid}>
+          {pending && <Loader2 className="size-3.5 animate-spin" />}
+          إنشاء الحساب
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CredentialField({
+  label,
+  value,
+  onCopy,
+  copied,
+  mono,
+}: {
+  label: string;
+  value: string;
+  onCopy: () => void;
+  copied: boolean;
+  mono?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <div className="flex items-center gap-2">
+        <div
+          dir="ltr"
+          className={cn(
+            "flex-1 select-all rounded-lg border border-soft bg-input px-3 py-2 text-sm",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </div>
+        <button
+          type="button"
+          onClick={onCopy}
+          title="نسخ"
+          aria-label={`نسخ ${label}`}
+          className="rounded-lg border border-soft bg-card px-2 py-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {copied ? (
+            <Check className="size-3.5 text-emerald-300" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 12-char URL-safe-ish random password generated client-side for the
+// admin's convenience. Server still validates length on submit.
+function generateRandomPassword(): string {
+  const alphabet =
+    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const arr = new Uint32Array(12);
+  crypto.getRandomValues(arr);
+  let out = "";
+  for (const n of arr) out += alphabet[n % alphabet.length];
+  return out;
+}
+
 function Field({
   label,
   children,
