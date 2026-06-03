@@ -102,6 +102,158 @@ export async function listContractTypes(orgId: string) {
   return data ?? [];
 }
 
+/**
+ * Sheet-parity grid fetcher.
+ *
+ * Pulls every column the Skylight "Client's Contracts" sheet exposes so the
+ * new editable grid can render identically (4-color row rule, sticky
+ * dropdowns, multi-package chips). Single round-trip with PostgREST embeds:
+ * contract row + client + AM + type + (primary) package + all linked
+ * packages from the junction. Sorted to match the team's sheet (newest
+ * Client ID first; client numeric on prefix).
+ *
+ * Returned shape is intentionally flat so the client component can do its
+ * own filtering/grouping without re-deriving from nested rows.
+ */
+export type GridContract = {
+  id: string;
+  external_id: string | null;
+  client_id: string;
+  client_name: string | null;
+  client_external_id: string | null;
+  account_manager_id: string | null;
+  account_manager_name: string | null;
+  contract_type_key: string | null;
+  contract_type_label: string | null;
+  primary_package_name: string | null;
+  package_names: string[];
+  start_date: string;
+  end_date: string | null;
+  actual_end_date: string | null;
+  duration_months: number | null;
+  total_value: number;
+  paid_value: number;
+  next_contract_value: number | null;
+  renewal_paid_value: number | null;
+  repeated_services_value: number | null;
+  payment_status: string | null;
+  target: string;
+  status: string;
+  contract_status_label: string | null;
+  renewed_status: string | null;
+  extension_days: number | null;
+  delay_days: number | null;
+  total_days_computed: number | null;
+  notes: string | null;
+};
+
+export async function listContractsGrid(
+  orgId: string,
+  filters: ContractListFilters = {},
+): Promise<GridContract[]> {
+  let q = supabaseAdmin
+    .from("contracts")
+    .select(
+      `id, external_id, start_date, end_date, actual_end_date, duration_months,
+       total_value, paid_value, next_contract_value, renewal_paid_value,
+       repeated_services_value, payment_status, target, status,
+       contract_status_label, renewed_status, extension_days, delay_days,
+       total_days_computed, notes, account_manager_id, account_manager_name,
+       client:clients(id, name, external_id),
+       am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
+       type:contract_types(key, name_ar),
+       package:packages!contracts_package_id_fkey(name_ar),
+       packages:contract_packages(sort_order, package:packages(name_ar))`,
+    )
+    .eq("organization_id", orgId)
+    .order("start_date", { ascending: false })
+    .limit(1000);
+
+  if (filters.status) q = q.eq("status", filters.status);
+  if (filters.target) q = q.eq("target", filters.target);
+  if (filters.amEmployeeId) q = q.eq("account_manager_id", filters.amEmployeeId);
+  if (filters.startFrom) q = q.gte("start_date", filters.startFrom);
+  if (filters.startTo) q = q.lte("start_date", filters.startTo);
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    external_id: string | null;
+    start_date: string;
+    end_date: string | null;
+    actual_end_date: string | null;
+    duration_months: number | null;
+    total_value: number | string | null;
+    paid_value: number | string | null;
+    next_contract_value: number | string | null;
+    renewal_paid_value: number | string | null;
+    repeated_services_value: number | string | null;
+    payment_status: string | null;
+    target: string;
+    status: string;
+    contract_status_label: string | null;
+    renewed_status: string | null;
+    extension_days: number | null;
+    delay_days: number | null;
+    total_days_computed: number | null;
+    notes: string | null;
+    account_manager_id: string | null;
+    account_manager_name: string | null;
+    client: { id: string; name: string | null; external_id: string | null } | null;
+    am: { id: string; full_name: string } | null;
+    type: { key: string; name_ar: string } | null;
+    package: { name_ar: string } | null;
+    packages: Array<{ sort_order: number; package: { name_ar: string } | null }>;
+  };
+
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const pkgs = [...(r.packages ?? [])]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((p) => p.package?.name_ar)
+      .filter((x): x is string => !!x);
+    return {
+      id: r.id,
+      external_id: r.external_id,
+      client_id: r.client?.id ?? "",
+      client_name: r.client?.name ?? null,
+      client_external_id: r.client?.external_id ?? null,
+      account_manager_id: r.account_manager_id,
+      // Prefer the resolved employee name; fall back to the raw string when
+      // the AM couldn't be matched (1 contract today: مدى الجميري).
+      account_manager_name: r.am?.full_name ?? r.account_manager_name,
+      contract_type_key: r.type?.key ?? null,
+      contract_type_label: r.type?.name_ar ?? null,
+      primary_package_name: r.package?.name_ar ?? null,
+      package_names: pkgs,
+      start_date: r.start_date,
+      end_date: r.end_date,
+      actual_end_date: r.actual_end_date,
+      duration_months: r.duration_months,
+      total_value: Number(r.total_value ?? 0),
+      paid_value: Number(r.paid_value ?? 0),
+      next_contract_value:
+        r.next_contract_value == null ? null : Number(r.next_contract_value),
+      renewal_paid_value:
+        r.renewal_paid_value == null ? null : Number(r.renewal_paid_value),
+      repeated_services_value:
+        r.repeated_services_value == null
+          ? null
+          : Number(r.repeated_services_value),
+      payment_status: r.payment_status,
+      target: r.target,
+      status: r.status,
+      contract_status_label: r.contract_status_label,
+      renewed_status: r.renewed_status,
+      extension_days: r.extension_days,
+      delay_days: r.delay_days,
+      total_days_computed: r.total_days_computed,
+      notes: r.notes,
+    };
+  });
+}
+
 export async function listPackages(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("packages")
