@@ -106,33 +106,60 @@ async function importEmployees(ctx: ImportContext): Promise<number> {
   // Build avatar URL from the Odoo instance host. The /web/image/ route is
   // public for users (no auth needed) so the dashboard can <img> it directly.
   const odooBase = process.env.ODOO_URL?.replace(/\/+$/, "") ?? "";
+  // Dashboard is the source of truth for employee data (name, email, phone,
+  // job_title, org-chart). Odoo seeds NEW hires but must never overwrite an
+  // existing row's editable fields — Skylight edits in the dashboard and a
+  // blind upsert would wipe their changes on every sync. We still refresh
+  // avatar_url since nobody edits that in the dashboard.
   for (const u of users) {
     const partner = u.partner_id ? partnerMap.get(u.partner_id[0]) : undefined;
     const avatarUrl =
       odooAvatarDataUrl(u) ??
       (odooBase ? `${odooBase}/web/image/res.users/${u.id}/avatar_1` : null);
-    const row = {
-      organization_id: ctx.organizationId,
-      external_source: SOURCE,
-      external_id: u.id,
-      full_name: u.name,
-      email: nullable(u.login),
-      phone: nullable(partner?.phone) ?? nullable(partner?.mobile),
-      job_title: nullable(partner?.function),
-      avatar_url: avatarUrl,
-      employment_status: "active",
-    };
-    const { data, error } = await supabaseAdmin
+
+    const { data: existing } = await supabaseAdmin
       .from("employee_profiles")
-      .upsert(row, {
-        onConflict: "organization_id,external_source,external_id",
-      })
       .select("id")
-      .single();
-    if (error) throw new Error(`user ${u.id} (${u.name}): ${error.message}`);
-    ctx.employeeIdMap.set(u.id, data.id);
+      .eq("organization_id", ctx.organizationId)
+      .eq("external_source", SOURCE)
+      .eq("external_id", u.id)
+      .maybeSingle();
+
+    let profileId: string;
+    if (existing) {
+      // Existing row: refresh only fields the dashboard doesn't own.
+      profileId = existing.id as string;
+      if (avatarUrl) {
+        await supabaseAdmin
+          .from("employee_profiles")
+          .update({ avatar_url: avatarUrl })
+          .eq("id", profileId);
+      }
+    } else {
+      // New hire: seed the row from Odoo.
+      const row = {
+        organization_id: ctx.organizationId,
+        external_source: SOURCE,
+        external_id: u.id,
+        full_name: u.name,
+        email: nullable(u.login),
+        phone: nullable(partner?.phone) ?? nullable(partner?.mobile),
+        job_title: nullable(partner?.function),
+        avatar_url: avatarUrl,
+        employment_status: "active",
+      };
+      const { data, error } = await supabaseAdmin
+        .from("employee_profiles")
+        .insert(row)
+        .select("id")
+        .single();
+      if (error) throw new Error(`user ${u.id} (${u.name}): ${error.message}`);
+      profileId = data.id as string;
+    }
+
+    ctx.employeeIdMap.set(u.id, profileId);
     // res.users.id is the same id used in task.user_ids — direct mapping.
-    ctx.odooUserToEmployee.set(u.id, data.id);
+    ctx.odooUserToEmployee.set(u.id, profileId);
   }
 
   return users.length;
@@ -298,25 +325,24 @@ async function importEmployeeHR(ctx: ImportContext): Promise<number> {
     // like "Social Media Specialist" into the tier enum would need rules the
     // team hasn't defined yet, so leave `position` alone.
     //
-    // Org-chart fields (department_id, manager_employee_id, head_employee_id)
-    // are owned by the dashboard's /organization pages — Odoo's HR data is
-    // sparser than the operations PDF, so we only seed these when the local
-    // row is still null. Once set in the dashboard, Odoo will never overwrite.
-    // Phone / job_title remain always-refreshed; Odoo's hr.employee is the
-    // authoritative source for those.
-    const refreshable: Record<string, unknown> = {};
-    if (e.work_phone) refreshable.phone = e.work_phone;
-    if (jobName && jobName.length > 0) refreshable.job_title = jobName;
-
-    if (Object.keys(refreshable).length > 0) {
-      const { error } = await supabaseAdmin
+    // Dashboard is the source of truth for all editable employee fields
+    // (phone, job_title, department, manager, etc.). Odoo seeds these only
+    // when the local row is still null — once a value exists in the dashboard,
+    // Odoo never overwrites it. Skylight edits in the dashboard; a blind
+    // refresh here would wipe their work on every sync.
+    if (e.work_phone) {
+      await supabaseAdmin
         .from("employee_profiles")
-        .update(refreshable)
-        .eq("id", empProfileId);
-      if (error) {
-        console.warn(`[odoo-import] employee_hr ${e.id} (${e.name}): ${error.message}`);
-        continue;
-      }
+        .update({ phone: e.work_phone })
+        .eq("id", empProfileId)
+        .is("phone", null);
+    }
+    if (jobName && jobName.length > 0) {
+      await supabaseAdmin
+        .from("employee_profiles")
+        .update({ job_title: jobName })
+        .eq("id", empProfileId)
+        .is("job_title", null);
     }
 
     // Seed department_id only if dashboard hasn't set one.

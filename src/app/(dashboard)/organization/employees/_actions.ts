@@ -221,7 +221,18 @@ export async function updateEmployeeAction(input: {
   if (!existing) return { error: "الموظف غير موجود" };
 
   // Resolve the picked position so job_title stays in sync as a display copy.
-  let jobTitle: string | null = null;
+  // IMPORTANT: only touch position_id / job_title when a position was actually
+  // picked in this edit. Many legacy rows (imported from Odoo) carry a
+  // free-text job_title with position_id=null; blindly writing null here would
+  // wipe their visible "المسمى" — which is exactly the bug Skylight hit.
+  const updatePayload: Record<string, unknown> = {
+    full_name: parsed.data.full_name,
+    email: parsed.data.email,
+    phone: parsed.data.phone,
+    department_id: parsed.data.department_id,
+    manager_employee_id: parsed.data.manager_employee_id,
+    team_leader_employee_id: parsed.data.team_leader_employee_id,
+  };
   if (parsed.data.position_id) {
     const { data: pos } = await supabaseAdmin
       .from("positions")
@@ -230,21 +241,13 @@ export async function updateEmployeeAction(input: {
       .eq("id", parsed.data.position_id)
       .maybeSingle();
     if (!pos) return { error: "المسمى الوظيفي غير موجود" };
-    jobTitle = pos.name;
+    updatePayload.position_id = parsed.data.position_id;
+    updatePayload.job_title = pos.name;
   }
 
   const { error } = await supabaseAdmin
     .from("employee_profiles")
-    .update({
-      full_name: parsed.data.full_name,
-      email: parsed.data.email,
-      phone: parsed.data.phone,
-      position_id: parsed.data.position_id,
-      job_title: jobTitle,
-      department_id: parsed.data.department_id,
-      manager_employee_id: parsed.data.manager_employee_id,
-      team_leader_employee_id: parsed.data.team_leader_employee_id,
-    })
+    .update(updatePayload)
     .eq("id", parsed.data.id);
   if (error) return { error: error.message };
 
