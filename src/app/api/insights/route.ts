@@ -4,9 +4,10 @@ import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { InsightsSchema, type InsightsResult, type StoredInsightRun } from "@/lib/ai-insights-schema";
 import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
+import { GEMINI_MODEL } from "@/lib/ai-model";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const INSIGHT_MODEL = "gemini-3-flash-preview";
+const INSIGHT_MODEL = GEMINI_MODEL;
 
 // How long a stored insight is considered fresh. Clicking "تحديث التحليل"
 // within this window returns the cached run instead of burning another

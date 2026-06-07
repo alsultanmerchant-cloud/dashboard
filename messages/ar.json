@@ -2342,6 +2342,24 @@
     "risks": "مخاطر العلاقة",
     "highlights": "أبرز اللحظات",
     "emptyOverview": "لم يتم استيراد أي محادثات بعد. اختر عميلًا وابدأ الاستيراد.",
+    "viewBoard": "لوحة",
+    "viewTable": "جدول",
+    "search": "ابحث عن عميل…",
+    "clientsCount": "{n} عميل",
+    "openClient": "فتح",
+    "board": {
+      "atRisk": "في خطر",
+      "atRiskHint": "انطباع سلبي أو تقييم أقل من ٥٥ — تصرّف الآن",
+      "watch": "يحتاج متابعة",
+      "watchHint": "تقييم ٥٥–٦٩ — راقبه عن قرب",
+      "healthy": "ممتاز",
+      "healthyHint": "تقييم ٧٠ فأكثر — عملاء سعداء",
+      "pending": "لم يُحلَّل",
+      "pendingHint": "تم استيراد المحادثات دون تحليل بالذكاء الاصطناعي بعد",
+      "emptyColumn": "لا يوجد عملاء هنا",
+      "noGroups": "لم تُستورد محادثات",
+      "analyze": "تحليل"
+    },
     "sentiment": {
       "positive": "إيجابي",
       "neutral": "محايد",
@@ -2377,10 +2395,22 @@
       "col": {
         "group": "المجموعة",
         "messages": "الرسائل",
+        "members": "الأعضاء",
         "client": "العميل",
+        "project": "المشروع",
         "kind": "النوع",
         "active": "مفعّلة"
-      }
+      },
+      "membersAdmins": "{n} مشرف",
+      "refreshMembers": "تحديث الأعضاء",
+      "membersRefreshed": "تم جلب {n} عدد أعضاء · بقي {r} (اضغط مرة أخرى)",
+      "importHistory": "استيراد السجل",
+      "historyImported": "تم استيراد {n} رسالة من {g} مجموعة",
+      "autoLink": "ربط تلقائي بالمشاريع",
+      "autoLinked": "تم ربط {n} بالمشاريع · وتصنيف {k} (💫 عميل / 📍 فريق)",
+      "unmappedProject": "بدون مشروع",
+      "searchProject": "بحث عن مشروع…",
+      "noProjects": "لا توجد مشاريع"
     },
     "connect": {
       "title": "ربط رقم واتساب",

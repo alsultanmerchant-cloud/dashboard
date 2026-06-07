@@ -6,7 +6,9 @@ import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit } from "@/lib/audit";
 import { parseWhatsAppChat } from "@/lib/whatsapp/parse";
-import { listGroups, waConfigured } from "@/lib/wa/openwa-client";
+import { listGroups, waConfigured, getGroupsMeta, fetchChatHistory } from "@/lib/wa/openwa-client";
+import { matchGroups, detectGroupKind } from "@/lib/wa/match-groups";
+import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
 
 const UploadSchema = z.object({
   clientId: z.string().uuid("اختر عميلًا"),
@@ -98,6 +100,7 @@ export async function uploadChatImportAction(
 const MapSchema = z.object({
   chatId: z.string().min(3),
   clientId: z.string().uuid().nullable(),
+  projectId: z.string().uuid().nullable(),
   groupKind: z.enum(["client", "technical"]).nullable(),
   isActive: z.boolean(),
 });
@@ -107,6 +110,7 @@ export type MapState = { ok?: true; error?: string };
 export async function mapWaGroupAction(input: {
   chatId: string;
   clientId: string | null;
+  projectId: string | null;
   groupKind: "client" | "technical" | null;
   isActive: boolean;
 }): Promise<MapState> {
@@ -118,12 +122,13 @@ export async function mapWaGroupAction(input: {
   }
   const parsed = MapSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
-  const { chatId, clientId, groupKind, isActive } = parsed.data;
+  const { chatId, clientId, projectId, groupKind, isActive } = parsed.data;
 
   const { error } = await supabaseAdmin
     .from("wa_group_links")
     .update({
       client_id: clientId,
+      project_id: projectId,
       group_kind: groupKind,
       is_active: isActive,
       updated_at: new Date().toISOString(),
@@ -146,12 +151,116 @@ export async function mapWaGroupAction(input: {
     action: "wa_group.mapped",
     entityType: "wa_group_link",
     entityId: chatId,
-    metadata: { clientId, groupKind, isActive },
+    metadata: { clientId, projectId, groupKind, isActive },
   });
 
   revalidatePath("/satisfaction/groups");
   revalidatePath("/satisfaction");
   return { ok: true };
+}
+
+// ---- Auto-link groups → projects by name (high-confidence only) -----------
+export type AutoLinkState = {
+  ok?: true;
+  error?: string;
+  linked?: number;
+  classified?: number;
+  scanned?: number;
+};
+
+export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const [linksRes, clientsRes, projectsRes] = await Promise.all([
+    supabaseAdmin
+      .from("wa_group_links")
+      .select("chat_id, chat_name, client_id, project_id, group_kind")
+      .eq("organization_id", session.orgId),
+    supabaseAdmin.from("clients").select("id, name").eq("organization_id", session.orgId),
+    supabaseAdmin
+      .from("projects")
+      .select("id, name, client_id, status")
+      .eq("organization_id", session.orgId),
+  ]);
+  if (linksRes.error) return { error: linksRes.error.message };
+  if (clientsRes.error) return { error: clientsRes.error.message };
+  if (projectsRes.error) return { error: projectsRes.error.message };
+
+  const links = linksRes.data ?? [];
+  const matches = matchGroups(
+    links.map((l) => ({ id: l.chat_id, name: l.chat_name })),
+    (clientsRes.data ?? []).map((c) => ({ id: c.id, name: c.name })),
+    (projectsRes.data ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      clientId: p.client_id,
+      status: p.status,
+    })),
+  );
+
+  const existing = new Map(links.map((l) => [l.chat_id, l]));
+  let linked = 0; // groups newly linked to a project
+  let classified = 0; // groups newly tagged client/technical from emoji
+
+  for (const m of matches) {
+    const row = existing.get(m.chatId);
+    if (!row) continue;
+    const update: Record<string, unknown> = {};
+
+    // Project: only strong matches that resolved a project, never overwrite manual.
+    const willLink =
+      m.projectId && (m.confidence === "exact" || m.confidence === "high") && !row.project_id;
+    if (willLink) {
+      update.project_id = m.projectId;
+      if (!row.client_id && m.clientId) update.client_id = m.clientId;
+    }
+
+    // Kind: 💫/📍 convention, only fill when blank (never override manual).
+    const willClassify = m.groupKind && !row.group_kind;
+    if (willClassify) update.group_kind = m.groupKind;
+
+    if (Object.keys(update).length === 0) continue;
+    update.updated_at = new Date().toISOString();
+
+    const { error } = await supabaseAdmin
+      .from("wa_group_links")
+      .update(update)
+      .eq("organization_id", session.orgId)
+      .eq("chat_id", m.chatId);
+    if (error) continue;
+    if (willLink) linked += 1;
+    if (willClassify) classified += 1;
+
+    // Backfill stored messages so transcripts pick up the new client/kind.
+    if (update.client_id || update.group_kind) {
+      const msgUpdate: Record<string, unknown> = {};
+      if (update.client_id) msgUpdate.client_id = update.client_id;
+      if (update.group_kind) msgUpdate.group_kind = update.group_kind;
+      await supabaseAdmin
+        .from("wa_messages")
+        .update(msgUpdate)
+        .eq("organization_id", session.orgId)
+        .eq("chat_id", m.chatId);
+    }
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.auto_linked_projects",
+    entityType: "wa_group_link",
+    entityId: session.orgId,
+    metadata: { linked, classified, scanned: links.length },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true, linked, classified, scanned: links.length };
 }
 
 // ---- Pull the group list from the OpenWA gateway -------------------------
@@ -180,25 +289,176 @@ export async function syncWaGroupsAction(): Promise<SyncState> {
   }
 
   for (const g of groups) {
+    // 💫 = client group, 📍 = internal team group (agency naming convention).
+    const kind = detectGroupKind(g.name);
     const { data: existing } = await supabaseAdmin
       .from("wa_group_links")
-      .select("id")
+      .select("id, group_kind")
       .eq("organization_id", session.orgId)
       .eq("chat_id", g.id)
       .maybeSingle();
     if (existing) {
       await supabaseAdmin
         .from("wa_group_links")
-        .update({ chat_name: g.name, updated_at: new Date().toISOString() })
+        .update({
+          chat_name: g.name,
+          // only auto-fill kind when not already set (never override manual)
+          ...(existing.group_kind ? {} : kind ? { group_kind: kind } : {}),
+          updated_at: new Date().toISOString(),
+        })
         .eq("organization_id", session.orgId)
         .eq("chat_id", g.id);
     } else {
-      await supabaseAdmin
-        .from("wa_group_links")
-        .insert({ organization_id: session.orgId, chat_id: g.id, chat_name: g.name });
+      await supabaseAdmin.from("wa_group_links").insert({
+        organization_id: session.orgId,
+        chat_id: g.id,
+        chat_name: g.name,
+        group_kind: kind,
+      });
     }
   }
 
   revalidatePath("/satisfaction/groups");
   return { ok: true, found: groups.length };
+}
+
+// ---- Import historical messages from OpenWA (WA-Web store) ----------------
+// Pulls past messages for MAPPED, ACTIVE groups via the gateway's history
+// endpoint and ingests them (ingestWaMessages stamps client/kind from the link
+// and refreshes counts). Resumable: skips groups that already have messages.
+export type ImportHistoryState = {
+  ok?: true;
+  error?: string;
+  groups?: number;
+  imported?: number;
+  remaining?: number;
+};
+
+const HISTORY_LIMIT = 1000;
+const HISTORY_CONCURRENCY = 2;
+
+export async function importWaHistoryAction(): Promise<ImportHistoryState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!waConfigured()) {
+    return { error: "WA_API_URL غير مهيأ — أضف عنوان خدمة OpenWA في متغيرات البيئة" };
+  }
+
+  // Target: mapped (client_id set) + active groups that have no messages yet.
+  const { data: targets, error } = await supabaseAdmin
+    .from("wa_group_links")
+    .select("chat_id, chat_name, message_count")
+    .eq("organization_id", session.orgId)
+    .not("client_id", "is", null)
+    .eq("is_active", true)
+    .eq("message_count", 0);
+  if (error) return { error: error.message };
+  const queue = (targets ?? []).map((t) => ({
+    chatId: t.chat_id as string,
+    chatName: (t.chat_name as string | null) ?? null,
+  }));
+  if (queue.length === 0) return { ok: true, groups: 0, imported: 0, remaining: 0 };
+
+  let imported = 0;
+  let done = 0;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < queue.length) {
+      const { chatId, chatName } = queue[cursor++];
+      try {
+        const hist = await fetchChatHistory(chatId, HISTORY_LIMIT);
+        const msgs: NormalMessage[] = hist
+          .filter((m) => m.body && m.body.trim().length > 0)
+          .map((m) => ({
+            chatId,
+            chatName,
+            waMessageId: m.id,
+            sender: null,
+            senderId: m.from,
+            body: m.body,
+            messageType: m.type,
+            isFromMe: m.fromMe,
+            sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
+          }));
+        if (msgs.length > 0) {
+          const res = await ingestWaMessages(msgs);
+          imported += res.ingested;
+        }
+      } catch {
+        /* skip this group; remains message_count=0, retried next run */
+      }
+      done += 1;
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(HISTORY_CONCURRENCY, queue.length) }, () => worker()),
+  );
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_history.imported",
+    entityType: "wa_group_link",
+    entityId: session.orgId,
+    metadata: { groups: done, imported },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true, groups: done, imported, remaining: queue.length - done };
+}
+
+// ---- Refresh member counts from OpenWA (resumable, throttled) -------------
+// The gateway caps concurrency on its per-group endpoint, so this is slow for
+// hundreds of groups. It is RESUMABLE: each run only fetches groups whose count
+// is still missing (member_count is null), so clicking again fills the rest.
+export type RefreshMembersState = {
+  ok?: true;
+  error?: string;
+  refreshed?: number;
+  remaining?: number;
+};
+
+export async function refreshWaMembersAction(): Promise<RefreshMembersState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!waConfigured()) {
+    return { error: "WA_API_URL غير مهيأ — أضف عنوان خدمة OpenWA في متغيرات البيئة" };
+  }
+
+  // Only the ones we don't have yet (resumable).
+  const { data: pending, error: pErr } = await supabaseAdmin
+    .from("wa_group_links")
+    .select("chat_id")
+    .eq("organization_id", session.orgId)
+    .is("member_count", null);
+  if (pErr) return { error: pErr.message };
+  const chatIds = (pending ?? []).map((r) => r.chat_id);
+  if (chatIds.length === 0) return { ok: true, refreshed: 0, remaining: 0 };
+
+  const metas = await getGroupsMeta(chatIds);
+  const now = new Date().toISOString();
+  for (const [chatId, meta] of Object.entries(metas)) {
+    await supabaseAdmin
+      .from("wa_group_links")
+      .update({
+        member_count: meta.memberCount,
+        admin_count: meta.adminCount,
+        members_synced_at: now,
+      })
+      .eq("organization_id", session.orgId)
+      .eq("chat_id", chatId);
+  }
+
+  const refreshed = Object.keys(metas).length;
+  revalidatePath("/satisfaction/groups");
+  return { ok: true, refreshed, remaining: chatIds.length - refreshed };
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition, useRef } from "react";
+import { useState, useTransition, useRef, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Upload,
@@ -16,6 +16,10 @@ import {
   Quote,
   Link2,
   Smartphone,
+  LayoutGrid,
+  TableProperties,
+  Search,
+  ChevronLeft,
 } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Card, CardContent } from "@/components/ui/card";
@@ -87,19 +91,23 @@ export function SatisfactionWorkspace({ options, rows, detail, selectedId }: Pro
     if (id) router.push(`/satisfaction?client=${id}`);
   };
 
+  const analyzeClient = async (clientId: string) => {
+    const res = await fetch("/api/satisfaction/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "تعذر التحليل");
+    router.refresh();
+  };
+
   const analyze = async () => {
     if (!selectedId) return;
     setError(null);
     setAnalyzing(true);
     try {
-      const res = await fetch("/api/satisfaction/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: selectedId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "تعذر التحليل");
-      router.refresh();
+      await analyzeClient(selectedId);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -147,7 +155,7 @@ export function SatisfactionWorkspace({ options, rows, detail, selectedId }: Pro
       </div>
 
       {!selectedId ? (
-        <Overview rows={rows} onSelect={select} t={t} />
+        <SatisfactionOverview rows={rows} onSelect={select} onAnalyze={analyzeClient} t={t} />
       ) : detail ? (
         <div className="space-y-6">
           {/* Upload zones */}
@@ -217,16 +225,47 @@ export function SatisfactionWorkspace({ options, rows, detail, selectedId }: Pro
   );
 }
 
-// ---- Overview table ------------------------------------------------------
-function Overview({
+// ---- Overview: board + table with view toggle ----------------------------
+type BucketKey = "atRisk" | "watch" | "healthy" | "pending";
+
+const BUCKETS: {
+  key: BucketKey;
+  accent: string; // text + border accent
+  bar: string; // top bar bg
+  dot: string;
+}[] = [
+  { key: "atRisk", accent: "text-cc-red", bar: "bg-cc-red", dot: "bg-cc-red" },
+  { key: "watch", accent: "text-amber", bar: "bg-amber", dot: "bg-amber" },
+  { key: "healthy", accent: "text-cc-green", bar: "bg-cc-green", dot: "bg-cc-green" },
+  { key: "pending", accent: "text-muted-foreground", bar: "bg-border", dot: "bg-muted-foreground/40" },
+];
+
+function bucketOf(r: SatisfactionRow): BucketKey {
+  if (!r.analyzedAt || r.satisfactionScore === null) return "pending";
+  if (r.sentiment === "negative" || r.satisfactionScore < 55) return "atRisk";
+  if (r.satisfactionScore < 70) return "watch";
+  return "healthy";
+}
+
+function SatisfactionOverview({
   rows,
   onSelect,
+  onAnalyze,
   t,
 }: {
   rows: SatisfactionRow[];
   onSelect: (id: string) => void;
+  onAnalyze: (id: string) => Promise<void>;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [view, setView] = useState<"board" | "table">("board");
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? rows.filter((r) => r.clientName.toLowerCase().includes(q)) : rows;
+  }, [rows, query]);
+
   if (rows.length === 0) {
     return (
       <Card>
@@ -236,6 +275,176 @@ function Overview({
       </Card>
     );
   }
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar: search + view toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-xs">
+          <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("search")}
+            className="h-9 w-full rounded-lg border border-border bg-card ps-8 pe-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/40"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {t("clientsCount", { n: filtered.length })}
+          </span>
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("board")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                view === "board" ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <LayoutGrid className="size-3.5" />
+              {t("viewBoard")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("table")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                view === "table" ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <TableProperties className="size-3.5" />
+              {t("viewTable")}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {view === "board" ? (
+        <SatisfactionBoard rows={filtered} onSelect={onSelect} t={t} />
+      ) : (
+        <OverviewTable rows={filtered} onSelect={onSelect} t={t} />
+      )}
+    </div>
+  );
+}
+
+// ---- Kanban board (health buckets) ---------------------------------------
+function SatisfactionBoard({
+  rows,
+  onSelect,
+  t,
+}: {
+  rows: SatisfactionRow[];
+  onSelect: (id: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const grouped = useMemo(() => {
+    const map: Record<BucketKey, SatisfactionRow[]> = {
+      atRisk: [],
+      watch: [],
+      healthy: [],
+      pending: [],
+    };
+    for (const r of rows) map[bucketOf(r)].push(r);
+    return map;
+  }, [rows]);
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {BUCKETS.map((b) => {
+        const items = grouped[b.key];
+        return (
+          <div
+            key={b.key}
+            className="flex min-h-[8rem] flex-col overflow-hidden rounded-xl border border-border bg-soft-1/40"
+          >
+            <div className={cn("h-1 w-full", b.bar)} />
+            <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
+              <div className="flex items-center gap-2">
+                <span className={cn("size-2 rounded-full", b.dot)} />
+                <span className="text-sm font-semibold">{t(`board.${b.key}`)}</span>
+                <span className="rounded-full bg-soft-2 px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+                  {items.length}
+                </span>
+              </div>
+            </div>
+            <p className="px-3 pb-2 text-[10px] leading-snug text-muted-foreground/70">
+              {t(`board.${b.key}Hint`)}
+            </p>
+            <div className="flex flex-1 flex-col gap-2 p-2 pt-0">
+              {items.length === 0 ? (
+                <p className="px-1 py-4 text-center text-[11px] text-muted-foreground/60">
+                  {t("board.emptyColumn")}
+                </p>
+              ) : (
+                items.map((r) => (
+                  <BoardCard key={r.clientId} row={r} accent={b.accent} onSelect={onSelect} t={t} />
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BoardCard({
+  row,
+  accent,
+  onSelect,
+  t,
+}: {
+  row: SatisfactionRow;
+  accent: string;
+  onSelect: (id: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const analyzed = row.satisfactionScore !== null;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(row.clientId)}
+      className="group flex items-center gap-3 rounded-lg border border-border bg-card p-2.5 text-start transition-colors hover:border-cyan/40 hover:bg-soft-1"
+    >
+      {analyzed ? (
+        <Ring score={row.satisfactionScore} size={44} />
+      ) : (
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-[10px] text-muted-foreground">
+          —
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{row.clientName}</p>
+        <p className={cn("text-[11px] font-medium", accent)}>
+          {row.sentiment ? t(`sentiment.${row.sentiment}`) : t("board.noGroups")}
+        </p>
+        <div className="mt-1 flex items-center gap-1.5">
+          <Dot on={row.hasClient} label={t("clientGroup")} />
+          <Dot on={row.hasTechnical} label={t("technicalGroup")} />
+          {row.analyzedAt && (
+            <span className="text-[10px] tabular-nums text-muted-foreground/60">
+              {row.analyzedAt.slice(0, 10)}
+            </span>
+          )}
+        </div>
+      </div>
+      <ChevronLeft className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-cyan rtl:rotate-0 ltr:rotate-180" />
+    </button>
+  );
+}
+
+// ---- Overview table ------------------------------------------------------
+function OverviewTable({
+  rows,
+  onSelect,
+  t,
+}: {
+  rows: SatisfactionRow[];
+  onSelect: (id: string) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
   return (
     <Card>
       <CardContent className="p-0">

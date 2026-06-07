@@ -321,9 +321,14 @@ export interface WaGroupLink {
   chatName: string | null;
   clientId: string | null;
   clientName: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  projectCode: string | null;
   groupKind: GroupKind | null;
   isActive: boolean;
   messageCount: number;
+  memberCount: number | null;
+  adminCount: number | null;
   lastMessageAt: string | null;
 }
 
@@ -331,7 +336,7 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
   const { data, error } = await supabaseAdmin
     .from("wa_group_links")
     .select(
-      "id, chat_id, chat_name, client_id, group_kind, is_active, message_count, last_message_at, client:clients(name)",
+      "id, chat_id, chat_name, client_id, project_id, group_kind, is_active, message_count, member_count, admin_count, last_message_at, client:clients(name), project:projects(name, project_code)",
     )
     .eq("organization_id", orgId)
     .order("last_message_at", { ascending: false, nullsFirst: false });
@@ -342,29 +347,54 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     chat_id: string;
     chat_name: string | null;
     client_id: string | null;
+    project_id: string | null;
     group_kind: GroupKind | null;
     is_active: boolean;
     message_count: number;
+    member_count: number | null;
+    admin_count: number | null;
     last_message_at: string | null;
     client: { name: string } | { name: string }[] | null;
+    project:
+      | { name: string; project_code: string | null }
+      | { name: string; project_code: string | null }[]
+      | null;
   };
 
   return (data as unknown as Row[]).map((r) => {
     const c = Array.isArray(r.client) ? r.client[0] : r.client;
+    const p = Array.isArray(r.project) ? r.project[0] : r.project;
     return {
       id: r.id,
       chatId: r.chat_id,
       chatName: r.chat_name,
       clientId: r.client_id,
       clientName: c?.name ?? null,
+      projectId: r.project_id,
+      projectName: p?.name ?? null,
+      projectCode: p?.project_code ?? null,
       groupKind: r.group_kind,
       isActive: r.is_active,
       messageCount: r.message_count,
+      memberCount: r.member_count,
+      adminCount: r.admin_count,
       lastMessageAt: r.last_message_at,
     };
   });
 }
 export const getWaGroupLinks = cache(_getWaGroupLinks);
+
+// Lightweight project options for the group-mapping selector.
+export async function listProjectOptions(orgId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("projects")
+    .select("id, name, project_code, client_id, status")
+    .eq("organization_id", orgId)
+    .order("status")
+    .order("name");
+  if (error) throw error;
+  return data ?? [];
+}
 
 // ---- At-risk clients (for the Executive AI report + drill-down) ----------
 export interface AtRiskClient {

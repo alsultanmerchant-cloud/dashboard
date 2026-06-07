@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import { SatisfactionSchema, type SatisfactionResult } from "@/lib/satisfaction-schema";
 import { buildClientTranscripts } from "@/lib/data/satisfaction";
+import { GEMINI_MODEL } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
 // (/api/satisfaction/analyze) AND the daily cron (/api/cron/wa-analyze).
@@ -12,12 +13,12 @@ import { buildClientTranscripts } from "@/lib/data/satisfaction";
 // runs Gemini, and stores the result as the client's current analysis.
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const MODEL = "gemini-3-flash-preview";
+const MODEL = GEMINI_MODEL;
 const MAX_CHARS = 45_000;
 
-function trim(t: string): string {
-  if (t.length <= MAX_CHARS) return t;
-  return "…(الأقدم محذوف)\n" + t.slice(t.length - MAX_CHARS);
+function trim(t: string, budget: number = MAX_CHARS): string {
+  if (t.length <= budget) return t;
+  return "…(الأقدم محذوف)\n" + t.slice(t.length - budget);
 }
 
 export class NoTranscriptError extends Error {
@@ -51,10 +52,13 @@ export async function analyzeClientSatisfaction(
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
 
-  const { object: result } = await generateObject({
-    model: google(MODEL),
-    schema: SatisfactionSchema,
-    prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب:
+  const runOnce = async (budget: number) =>
+    (
+      await generateObject({
+        model: google(MODEL),
+        maxRetries: 2,
+        schema: SatisfactionSchema,
+        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب:
 
 1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
 2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ (منها نقيس مدى الالتزام بالبريف).
@@ -66,11 +70,28 @@ export async function analyzeClientSatisfaction(
 استند فقط لما ورد في المحادثات.
 
 === مجموعة العميل ===
-${trim(clientBlock)}
+${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني ===
-${trim(technicalBlock)}`,
-  });
+${trim(technicalBlock, budget)}`,
+      })
+    ).object;
+
+  // gemini-2.5-flash-lite occasionally fails structured output on long/messy
+  // transcripts. Retry with a progressively SMALLER transcript each attempt —
+  // a tighter input is much more likely to yield schema-valid output.
+  const budgets = [MAX_CHARS, 22_000, 10_000, 5_000];
+  let result: Awaited<ReturnType<typeof runOnce>> | undefined;
+  let lastErr: unknown;
+  for (const budget of budgets) {
+    try {
+      result = await runOnce(budget);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
 
   // Latest import ids (for provenance), best-effort.
   const { data: imp } = await supabaseAdmin

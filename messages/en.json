@@ -2342,6 +2342,24 @@
     "risks": "Relationship risks",
     "highlights": "Highlights",
     "emptyOverview": "No chats imported yet. Select a client to get started.",
+    "viewBoard": "Board",
+    "viewTable": "Table",
+    "search": "Search clients…",
+    "clientsCount": "{n} clients",
+    "openClient": "Open",
+    "board": {
+      "atRisk": "At risk",
+      "atRiskHint": "Negative sentiment or score under 55 — act now",
+      "watch": "Needs attention",
+      "watchHint": "Score 55–69 — keep an eye on it",
+      "healthy": "Healthy",
+      "healthyHint": "Score 70+ — happy clients",
+      "pending": "Not analyzed",
+      "pendingHint": "Chats imported but no AI analysis yet",
+      "emptyColumn": "No clients here",
+      "noGroups": "No chats imported",
+      "analyze": "Analyze"
+    },
     "sentiment": {
       "positive": "Positive",
       "neutral": "Neutral",
@@ -2377,10 +2395,22 @@
       "col": {
         "group": "Group",
         "messages": "Messages",
+        "members": "Members",
         "client": "Client",
+        "project": "Project",
         "kind": "Kind",
         "active": "Active"
-      }
+      },
+      "membersAdmins": "{n} admins",
+      "refreshMembers": "Refresh members",
+      "membersRefreshed": "Fetched {n} member counts · {r} remaining (click again)",
+      "importHistory": "Import history",
+      "historyImported": "Imported {n} messages from {g} groups",
+      "autoLink": "Auto-link projects",
+      "autoLinked": "Linked {n} to projects · classified {k} (💫 client / 📍 team)",
+      "unmappedProject": "No project",
+      "searchProject": "Search project…",
+      "noProjects": "No projects found"
     },
     "connect": {
       "title": "Connect WhatsApp number",

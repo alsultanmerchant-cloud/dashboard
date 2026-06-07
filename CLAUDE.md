@@ -64,7 +64,8 @@ The Skylight team runs on a customized Odoo 17 deployment (addons mirrored at `/
 - `supabase/migrations/` — SQL migrations (already applied)
 - `docs/MVP_PLAN.md` — 10-phase execution plan with gates
 - `src/app/(dashboard)/` — modules
-- `src/app/api/agent/route.ts` — AI assistant (Gemini via @ai-sdk/google, model `gemini-3-flash-preview`). System prompt is grounded on the Rwasem schema + the Sky Light operations PDF workflow rules.
+- `src/app/api/agent/route.ts` — AI assistant (Gemini via @ai-sdk/google). System prompt is grounded on the Rwasem schema + the Sky Light operations PDF workflow rules.
+- `src/lib/ai-model.ts` — **single source of truth for the Gemini model** (`GEMINI_MODEL`, currently `gemini-2.5-flash-lite`). All AI surfaces (agent, insights, reports digest, satisfaction analysis) import it — change the model in one place.
 
 ## Working rules
 - Never commit secrets; `.env.local` contains real keys, `.env.example` placeholders

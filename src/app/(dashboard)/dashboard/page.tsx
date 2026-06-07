@@ -4,7 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { FileSignature } from "lucide-react";
 import { requireSession, getDashboardScope, type ServerSession } from "@/lib/auth-server";
 import { DepartmentDashboard } from "@/components/department/department-dashboard";
-import { AgentDashboard } from "@/components/department/agent-dashboard";
+import { AgentCockpit } from "@/components/cockpit/agent-cockpit";
 import { getTeamActivityOverview } from "@/lib/data/activity-scores";
 import { ActivityPulseBand } from "@/components/activity/activity-pulse-band";
 import { getCeoCommercialTiles } from "@/lib/data/contracts";
@@ -216,7 +216,7 @@ export default async function DashboardPage({
   }
 
   if (scope.kind === "agent") {
-    return <AgentDashboard session={session} employeeId={scope.employeeId} />;
+    return <AgentCockpit session={session} employeeId={scope.employeeId} />;
   }
 
   const { month } = await searchParams;

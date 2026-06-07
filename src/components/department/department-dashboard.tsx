@@ -9,7 +9,6 @@ import {
   getDepartmentScores,
   getDepartmentCapacity,
   getDepartmentStuckStages,
-  getDepartmentEscalations,
   getDepartmentSubtaskUploadDelay,
   getEmployeePerformance,
   getMonthlyClosing,
@@ -22,11 +21,17 @@ import {
   DepartmentKpiBand,
   DepartmentCapacity,
   DepartmentStuckStages,
-  DepartmentEscalations,
   DepartmentSubtaskUpload,
 } from "@/components/department/department-sections";
 import { EmployeePerformanceTable } from "@/components/department/employee-performance-table";
 import { MonthlyClosing } from "@/components/department/monthly-closing";
+import {
+  getMyReviewQueue,
+  getTeamBlockers,
+  getEscalationsToMe,
+} from "@/lib/data/cockpit";
+import { ReviewQueue } from "@/components/cockpit/review-queue";
+import { TeamBlockers, EscalationsToMe } from "@/components/cockpit/lead-action-sections";
 
 type HeadOrLead = Extract<DashboardScope, { kind: "head" | "team_lead" }>;
 
@@ -71,11 +76,6 @@ async function StuckStages({ scope }: { scope: DeptScope }) {
   return <DepartmentStuckStages info={info} />;
 }
 
-async function Escalations({ scope }: { scope: DeptScope }) {
-  const rows = await getDepartmentEscalations(scope);
-  return <DepartmentEscalations rows={rows} />;
-}
-
 async function SubtaskUpload({ scope }: { scope: DeptScope }) {
   const stats = await getDepartmentSubtaskUploadDelay(scope);
   return <DepartmentSubtaskUpload stats={stats} />;
@@ -100,6 +100,21 @@ async function MonthlyClosingSection({
   return <MonthlyClosing data={data} months={months} selectedMonth={month} />;
 }
 
+async function ReviewQueueSection({ session }: { session: ServerSession }) {
+  const items = await getMyReviewQueue(session.orgId, session.employeeId);
+  return <ReviewQueue items={items} />;
+}
+
+async function EscalationsToMeSection({ session }: { session: ServerSession }) {
+  const items = await getEscalationsToMe(session.orgId, session.userId);
+  return <EscalationsToMe items={items} />;
+}
+
+async function TeamBlockersSection({ scope }: { scope: DeptScope }) {
+  const items = await getTeamBlockers(scope.orgId, scope.memberEmployeeIds);
+  return <TeamBlockers items={items} />;
+}
+
 // ---- Composition root ----------------------------------------------------
 
 export function DepartmentDashboard({
@@ -121,14 +136,34 @@ export function DepartmentDashboard({
   const title = scope.kind === "head" ? "لوحة رئيس القسم" : "لوحة قائد الفريق";
   const description =
     scope.kind === "head"
-      ? `نظرة شاملة على أداء ${departmentName} وأعضائه`
-      : "نظرة على أداء فريقك المباشر";
+      ? `ما الذي يحتاج قرارك الآن في ${departmentName}`
+      : "ما الذي يحتاج قرارك الآن في فريقك";
 
   return (
     <div>
       <PageHeader title={`${title} · مرحبًا ${session.fullName}`} description={description} />
 
-      {/* Section A — Department Overview */}
+      {/* What needs you now — the action cockpit */}
+      <SectionTitle title="يحتاج قرارك الآن" />
+      <div className="mb-4 grid gap-4 lg:grid-cols-2">
+        <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
+          <ReviewQueueSection session={session} />
+        </Suspense>
+        <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
+          <EscalationsToMeSection session={session} />
+        </Suspense>
+      </div>
+      <div className="mb-8 grid gap-4 lg:grid-cols-2">
+        <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
+          <TeamBlockersSection scope={deptScope} />
+        </Suspense>
+        <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
+          <Capacity scope={deptScope} />
+        </Suspense>
+      </div>
+
+      {/* Context — department overview & health */}
+      <SectionTitle title="نظرة عامة على القسم" />
       <Suspense fallback={<Skeleton className="mb-6 h-[150px] rounded-2xl" />}>
         <OverviewHeader scope={deptScope} departmentName={departmentName} />
       </Suspense>
@@ -141,19 +176,10 @@ export function DepartmentDashboard({
         <KpiBand scope={deptScope} />
       </Suspense>
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-3">
-        <Suspense fallback={<Skeleton className="h-[300px] rounded-2xl" />}>
-          <Capacity scope={deptScope} />
-        </Suspense>
+      <div className="mb-8 grid gap-4 lg:grid-cols-2">
         <Suspense fallback={<Skeleton className="h-[300px] rounded-2xl" />}>
           <StuckStages scope={deptScope} />
         </Suspense>
-        <Suspense fallback={<Skeleton className="h-[300px] rounded-2xl" />}>
-          <Escalations scope={deptScope} />
-        </Suspense>
-      </div>
-
-      <div className="mb-8">
         <Suspense fallback={<Skeleton className="h-[100px] rounded-2xl" />}>
           <SubtaskUpload scope={deptScope} />
         </Suspense>

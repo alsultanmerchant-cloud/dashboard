@@ -210,7 +210,9 @@ export async function startSession(): Promise<{ ok: boolean; error?: string }> {
         method: "POST",
         body: JSON.stringify({
           url: webhookUrl,
-          events: ["message"],
+          // OpenWA gateway event names: incoming messages = "message.received"
+          // (NOT "message", which it silently ignores). See docs/06-api-spec.
+          events: ["message.received", "session.status"],
           secret: process.env.WA_WEBHOOK_SECRET ?? undefined,
         }),
       }).catch(() => {});
@@ -232,6 +234,42 @@ export async function logoutSession(): Promise<{ ok: boolean; error?: string }> 
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+export interface WaHistoryMessage {
+  id: string;
+  from: string | null;
+  body: string;
+  type: string;
+  timestamp: number; // unix seconds
+  fromMe: boolean;
+}
+
+// Fetch historical messages for a chat from the WhatsApp-Web store via the
+// custom gateway endpoint (added to OpenWA: GET /groups/:chatId/messages).
+// Returns up to `limit` messages (the store caps at whatever WA synced).
+export async function fetchChatHistory(
+  chatId: string,
+  limit = 1000,
+): Promise<WaHistoryMessage[]> {
+  if (!waConfigured()) return [];
+  const uuid = await findSessionUuid();
+  if (!uuid) return [];
+  const { ok, json } = await call(
+    `/api/sessions/${uuid}/groups/${chatId}/messages?limit=${limit}`,
+    { timeoutMs: 90000 },
+  );
+  if (!ok || !json) return [];
+  const arr = (json as { messages?: unknown }).messages;
+  if (!Array.isArray(arr)) return [];
+  return (arr as Array<Record<string, unknown>>).map((m) => ({
+    id: String(m.id ?? ""),
+    from: typeof m.from === "string" ? m.from : null,
+    body: typeof m.body === "string" ? m.body : "",
+    type: String(m.type ?? "chat"),
+    timestamp: Number(m.timestamp ?? 0),
+    fromMe: m.fromMe === true,
+  })).filter((m) => m.id);
 }
 
 export interface WaRemoteGroup {
@@ -257,4 +295,66 @@ export async function listGroups(): Promise<WaRemoteGroup[]> {
       name: (g.name as string) ?? (g.subject as string) ?? null,
     }))
     .filter((g) => g.id.endsWith("@g.us"));
+}
+
+export interface WaGroupMeta {
+  memberCount: number;
+  adminCount: number;
+  owner: string | null;
+  description: string | null;
+}
+
+// Live group metadata from GET /api/sessions/:uuid/groups/:gid — the only
+// source of participant/member info (OpenWA stores no message history).
+// The gateway caps concurrency on this endpoint (~3-4) and returns 429 beyond
+// that, so callers MUST go through getGroupsMeta (bounded pool + retry).
+async function fetchGroupMeta(uuid: string, chatId: string): Promise<WaGroupMeta | null> {
+  // Retry on 429 (concurrency cap) with exponential backoff + jitter. The gateway
+  // budget drifts under sustained load over hundreds of groups, so be patient.
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const res = await call(`/api/sessions/${uuid}/groups/${chatId}`, {
+      timeoutMs: 12000,
+    }).catch(() => ({ ok: false, status: 0, json: null }) as Awaited<ReturnType<typeof call>>);
+    if (res.status === 429) {
+      const backoff = Math.min(3000, 300 * 2 ** attempt) + Math.floor(Math.random() * 250);
+      await new Promise((r) => setTimeout(r, backoff));
+      continue;
+    }
+    if (!res.ok || !res.json || typeof res.json !== "object") return null;
+    const g = res.json as Record<string, unknown>;
+    const participants = Array.isArray(g.participants)
+      ? (g.participants as Array<Record<string, unknown>>)
+      : [];
+    return {
+      memberCount: participants.length,
+      adminCount: participants.filter((p) => p.isAdmin === true || p.isSuperAdmin === true).length,
+      owner: typeof g.owner === "string" ? g.owner : null,
+      description: typeof g.description === "string" ? g.description : null,
+    };
+  }
+  return null;
+}
+
+// Fetch member counts for many groups with a BOUNDED worker pool. The OpenWA
+// gateway 429s above ~3-4 concurrent requests, so we cap at 3. Failures for
+// individual groups are skipped (omitted from the map), never thrown.
+const META_CONCURRENCY = 2;
+export async function getGroupsMeta(chatIds: string[]): Promise<Record<string, WaGroupMeta>> {
+  if (!waConfigured() || chatIds.length === 0) return {};
+  const uuid = await findSessionUuid();
+  if (!uuid) return {};
+  const queue = Array.from(new Set(chatIds.filter((id) => id.endsWith("@g.us"))));
+  const out: Record<string, WaGroupMeta> = {};
+  let cursor = 0;
+  async function worker() {
+    while (cursor < queue.length) {
+      const chatId = queue[cursor++];
+      const meta = await fetchGroupMeta(uuid!, chatId);
+      if (meta) out[chatId] = meta;
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(META_CONCURRENCY, queue.length) }, () => worker()),
+  );
+  return out;
 }

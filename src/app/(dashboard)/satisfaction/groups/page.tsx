@@ -3,19 +3,28 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listClientOptions } from "@/lib/data/clients";
-import { getWaGroupLinks } from "@/lib/data/satisfaction";
+import { getWaGroupLinks, listProjectOptions } from "@/lib/data/satisfaction";
 import { PageHeader } from "@/components/page-header";
 import { WaGroupsWorkspace } from "./groups-workspace";
+
+// Sync refreshes member counts for ~368 groups via the OpenWA gateway with a
+// bounded (concurrency 3) pool — allow extra time so it doesn't time out.
+export const maxDuration = 300;
 
 export default async function WaGroupsPage() {
   const session = await requirePagePermission("clients.view");
   const t = await getTranslations("SatisfactionPage");
 
-  const [links, clients] = await Promise.all([
+  const [links, clients, projects] = await Promise.all([
     getWaGroupLinks(session.orgId),
     listClientOptions(session.orgId),
+    listProjectOptions(session.orgId),
   ]);
   const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
+  const projectOptions = projects.map((p) => ({
+    value: p.id as string,
+    label: p.project_code ? `${p.project_code} · ${p.name}` : (p.name as string),
+  }));
 
   return (
     <div>
@@ -27,7 +36,7 @@ export default async function WaGroupsPage() {
         <ArrowRight className="size-3.5 rtl:rotate-180" />
         {t("groups.back")}
       </Link>
-      <WaGroupsWorkspace links={links} options={options} />
+      <WaGroupsWorkspace links={links} options={options} projectOptions={projectOptions} />
     </div>
   );
 }

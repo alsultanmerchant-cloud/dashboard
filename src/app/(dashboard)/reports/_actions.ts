@@ -5,6 +5,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { requirePermission } from "@/lib/auth-server";
 import { getCEOWeeklyDigest } from "@/lib/data/reports";
 import { logAiEvent } from "@/lib/audit";
+import { GEMINI_MODEL } from "@/lib/ai-model";
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -34,7 +35,7 @@ export async function summarizeWeekAction(): Promise<
 ${JSON.stringify(payload, null, 2)}`;
 
     const r = await generateText({
-      model: google("gemini-3-flash-preview"),
+      model: google(GEMINI_MODEL),
       prompt,
     });
 

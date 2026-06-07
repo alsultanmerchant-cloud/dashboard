@@ -6031,6 +6031,7 @@ export type Database = {
       }
       wa_group_links: {
         Row: {
+          admin_count: number | null
           chat_id: string
           chat_name: string | null
           client_id: string | null
@@ -6039,11 +6040,15 @@ export type Database = {
           id: string
           is_active: boolean
           last_message_at: string | null
+          member_count: number | null
+          members_synced_at: string | null
           message_count: number
           organization_id: string
+          project_id: string | null
           updated_at: string
         }
         Insert: {
+          admin_count?: number | null
           chat_id: string
           chat_name?: string | null
           client_id?: string | null
@@ -6052,11 +6057,15 @@ export type Database = {
           id?: string
           is_active?: boolean
           last_message_at?: string | null
+          member_count?: number | null
+          members_synced_at?: string | null
           message_count?: number
           organization_id: string
+          project_id?: string | null
           updated_at?: string
         }
         Update: {
+          admin_count?: number | null
           chat_id?: string
           chat_name?: string | null
           client_id?: string | null
@@ -6065,8 +6074,11 @@ export type Database = {
           id?: string
           is_active?: boolean
           last_message_at?: string | null
+          member_count?: number | null
+          members_synced_at?: string | null
           message_count?: number
           organization_id?: string
+          project_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -6075,6 +6087,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_group_links_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
           {

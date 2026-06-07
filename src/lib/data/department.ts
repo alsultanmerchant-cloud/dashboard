@@ -47,6 +47,12 @@ type TeamTask = TaskRow & { employeeId: string };
 const DAY_MS = 86_400_000;
 const STUCK_DAYS = 5; // open task with no stage movement for ≥5 days = idle
 
+// Accountability is for EXECUTORS only — account managers and heads/team-leads
+// are never measured for overdue/duties (owner directive). Matches the activity
+// audit's scored_roles. We scope team tasks + rosters to people holding these
+// roles on tasks.
+const EXECUTOR_ROLES = ["agent", "specialist", "supporting_agent"] as const;
+
 function isOpen(stage: string): boolean {
   return stage !== "done";
 }
@@ -67,7 +73,7 @@ async function _getTeamTasks(scope: DeptScope): Promise<TeamTask[]> {
       "employee_id, task:tasks!inner(id, stage, is_overdue, delay_days, completed_at, due_date, planned_date, actual_done_date, stage_entered_at, created_at, revision_count, design_count, parent_task_id, project_id, archived_at)",
     )
     .eq("organization_id", scope.orgId)
-    .eq("role_type", "agent")
+    .in("role_type", EXECUTOR_ROLES as unknown as string[])
     .in("employee_id", scope.memberEmployeeIds);
   if (error) throw error;
 
@@ -138,7 +144,7 @@ export interface CapacityRow {
 async function _getDepartmentCapacity(scope: DeptScope): Promise<CapacityRow[]> {
   const [tasks, members] = await Promise.all([
     getTeamTasks(scope),
-    getMemberProfiles(scope),
+    getExecutorMembers(scope),
   ]);
 
   const agg = new Map<string, { open: number; overdue: number }>();
@@ -351,6 +357,36 @@ async function _getMemberProfiles(scope: DeptScope): Promise<MemberProfile[]> {
 
 export const getMemberProfiles = cache(_getMemberProfiles);
 
+// Executors only: members whose POSITION is an executor (agent/specialist/
+// supporting_agent). Account managers / heads (manager) / team-leads are
+// dropped from every accountability roster (owner directive). Discriminator is
+// the person's position, NOT task-role — AMs get role_type='agent' on their own
+// tasks, so task-role would leak them.
+async function _getExecutorMembers(scope: DeptScope): Promise<MemberProfile[]> {
+  if (scope.memberEmployeeIds.length === 0) return [];
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select(
+      "id, full_name, job_title, employment_status, position:positions!employee_profiles_position_id_fkey(slug)",
+    )
+    .in("id", scope.memberEmployeeIds)
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? [])
+    .filter((m) => {
+      const pos = Array.isArray(m.position) ? m.position[0] : m.position;
+      return pos?.slug != null && (EXECUTOR_ROLES as readonly string[]).includes(pos.slug);
+    })
+    .map((m) => ({
+      id: m.id,
+      full_name: m.full_name,
+      job_title: m.job_title,
+      employment_status: m.employment_status,
+    }));
+}
+
+export const getExecutorMembers = cache(_getExecutorMembers);
+
 export interface DeptTeamSummary {
   memberCount: number;
   totalOverdue: number;
@@ -364,26 +400,38 @@ async function _getDepartmentTeamSummary(scope: DeptScope): Promise<DeptTeamSumm
     return { memberCount: 0, totalOverdue: 0, openWarnings: 0, pendingLeaves: 0 };
   }
 
+  const executors = await getExecutorMembers(scope);
+  const execIds = executors.map((e) => e.id);
+  if (execIds.length === 0) {
+    const tasks0 = await getTeamTasks(scope);
+    return {
+      memberCount: 0,
+      totalOverdue: tasks0.filter((t) => isOpen(t.stage) && t.is_overdue).length,
+      openWarnings: 0,
+      pendingLeaves: 0,
+    };
+  }
+
   const [tasks, warnings, leaves] = await Promise.all([
     getTeamTasks(scope),
     supabaseAdmin
       .from("employee_warnings")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", scope.orgId)
-      .in("employee_profile_id", ids)
+      .in("employee_profile_id", execIds)
       .is("acknowledged_at", null),
     supabaseAdmin
       .from("leaves")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", scope.orgId)
-      .in("employee_profile_id", ids)
+      .in("employee_profile_id", execIds)
       .eq("status", "pending"),
   ]);
 
   const totalOverdue = tasks.filter((t) => isOpen(t.stage) && t.is_overdue).length;
 
   return {
-    memberCount: ids.length,
+    memberCount: execIds.length,
     totalOverdue,
     openWarnings: warnings.count ?? 0,
     pendingLeaves: leaves.count ?? 0,
@@ -419,7 +467,7 @@ async function _getEmployeePerformance(scope: DeptScope): Promise<EmployeePerfRo
   const since30 = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
 
   const [members, tasks, attendance, warnings, leaves] = await Promise.all([
-    getMemberProfiles(scope),
+    getExecutorMembers(scope),
     getTeamTasks(scope),
     supabaseAdmin
       .from("attendance_records")
