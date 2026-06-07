@@ -129,6 +129,9 @@ export default async function TaskTemplateDetailPage({
                         stage_owner_positions:
                           (it as { stage_owner_positions?: Record<string, string | null> | null })
                             .stage_owner_positions ?? null,
+                        stage_sla_overrides:
+                          (it as { stage_sla_overrides?: Record<string, number | null> | null })
+                            .stage_sla_overrides ?? null,
                       }}
                       departments={departments.map((d) => ({
                         id: d.id,

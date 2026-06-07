@@ -3,6 +3,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { InsightsSchema, type InsightsResult, type StoredInsightRun } from "@/lib/ai-insights-schema";
+import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 const INSIGHT_MODEL = "gemini-3-flash-preview";
@@ -486,6 +487,38 @@ async function buildSignalPack(orgId: string): Promise<{
       }
     : null;
 
+  // Client satisfaction (from imported WhatsApp chats analyzed by AI). Merge
+  // satisfaction-derived at-risk clients into the at-risk list so the report's
+  // clientsAtRisk + executive summary reflect relationship/churn signals.
+  const [satAgg, satAtRisk] = await Promise.all([
+    getOrgSatisfactionAggregate(orgId),
+    getAtRiskClients(orgId),
+  ]);
+  const satClientRisk = satAtRisk.map((c) => ({
+    clientName: c.clientName,
+    projectCode: null,
+    reasons: [
+      c.satisfactionScore !== null ? `رضا ${c.satisfactionScore}/100` : "انطباع سلبي",
+      ...(c.sentiment ? [`الانطباع: ${c.sentiment}`] : []),
+      ...(c.topRisk ? [c.topRisk] : []),
+    ],
+    overdueSampleCodes: [] as string[],
+  }));
+  const mergedClientsAtRisk = [...clientsAtRisk, ...satClientRisk].slice(0, 8);
+
+  const clientSatisfaction = {
+    avgScore: satAgg.avgSatisfaction,
+    avgBriefAdherence: satAgg.avgBriefAdherence,
+    analyzedClients: satAgg.analyzedClients,
+    atRiskCount: satAgg.atRiskClients,
+    lowest: satAtRisk.slice(0, 5).map((c) => ({
+      clientName: c.clientName,
+      score: c.satisfactionScore,
+      sentiment: c.sentiment,
+      topRisk: c.topRisk,
+    })),
+  };
+
   const payloadForModel = {
     today,
     headline: {
@@ -496,10 +529,11 @@ async function buildSignalPack(orgId: string): Promise<{
     },
     deliveryTrend,
     moneyAndGrowth,
+    clientSatisfaction,
     peoplePerformance: peopleForModel,
     stageBottlenecks,
     serviceHealth,
-    clientsAtRisk,
+    clientsAtRisk: mergedClientsAtRisk,
     teamHotspots,
     context: {
       stages: [
@@ -603,7 +637,8 @@ ${JSON.stringify(payloadForModel)}
 - **deliveryTrend**: انسخ الأرقام كما هي من deliveryTrend في البيانات (direction, onTimePctThisMonth, onTimePctLastMonth, completedThisMonth, completedLastMonth) واكتب narrative من جملتين يشرح الاتجاه وسببه. إذا كان deliveryTrend في البيانات null، أعِد null.
 - **peoplePerformance**: لكل موظف في القائمة، انسخ الحقول الرقمية وtier وtrend كما هي، واكتب assessment (تقييم واقعي مبني على الأرقام) وrecommendation (دعم، تخفيف حمل، أو تقدير للمتميزين). أبرز المتعثّرين (at_risk) والمحمّلين فوق طاقتهم والمتميزين بوضوح.
 - **stageBottlenecks**: مراحل تتراكم فيها المهام >3 أيام — narrative يشرح الأثر التشغيلي.
-- **clientsAtRisk**: الاقتراح إجراء ملموس. راعِ التجديدات القادمة في moneyAndGrowth.
+- **clientsAtRisk**: الاقتراح إجراء ملموس. راعِ التجديدات القادمة في moneyAndGrowth، **وأدرج العملاء ذوي الرضا المنخفض أو الانطباع السلبي من clientSatisfaction.lowest** مع ذكر درجة الرضا وسبب الخطر، واقترح خطوة لإنقاذ العلاقة.
+- استخدم **clientSatisfaction** (متوسط الرضا، الالتزام بالبريف، عدد العملاء المعرضين للفقد) في **executiveSummary** و**topPriorities** عند وجوده — تراجع الرضا أو ارتفاع عدد العملاء المعرضين للفقد إشارة عالية الأولوية.
 - **serviceHealth**: note قصيرة تشخّص الفجوة لكل خدمة.
 - **teamHotspots**: اقترح إعادة توزيع أو دعمًا محددًا.
 - **quickWins**: إجراءات قابلة للتنفيذ هذا الأسبوع، كل واحدة مربوطة بأكواد مهام.

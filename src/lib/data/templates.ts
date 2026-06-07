@@ -23,7 +23,7 @@ export async function getTaskTemplate(orgId: string, id: string) {
       service:services ( id, name, slug ),
       task_template_items (
         id, title, description, default_role_key, offset_days_from_project_start,
-        duration_days, priority, order_index, stage_owner_positions,
+        duration_days, priority, order_index, stage_owner_positions, stage_sla_overrides,
         default_department:departments ( id, name )
       )
     `)

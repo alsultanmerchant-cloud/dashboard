@@ -41,6 +41,24 @@ function cleanStageOwnerMap(
   return out;
 }
 
+// Per-stage SLA in working minutes (0147). Map: stage → minutes(int) | null.
+// Null = use org default (sla_rules) / N-A. Unknown stages dropped.
+const StageSlaMapSchema = z
+  .record(z.string(), z.union([z.number().int().min(0).max(100000), z.null()]))
+  .optional();
+
+function cleanStageSlaMap(
+  raw: Record<string, number | null> | undefined | null,
+): Record<string, number | null> | undefined {
+  if (!raw) return undefined;
+  const out: Record<string, number | null> = {};
+  for (const stage of STAGE_KEYS) {
+    const v = raw[stage];
+    out[stage] = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
+  }
+  return out;
+}
+
 const PRIORITY_KEYS = ["low", "medium", "high", "urgent"] as const;
 
 const CreateItemSchema = z.object({
@@ -67,6 +85,7 @@ const CreateItemSchema = z.object({
   duration_days: z.coerce.number().int().min(1).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
+  stage_sla_overrides: StageSlaMapSchema,
 });
 
 export type CreateItemResult =
@@ -83,6 +102,7 @@ export async function createTaskTemplateItemAction(input: {
   duration_days: number;
   priority?: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions?: Record<string, string | null> | null;
+  stage_sla_overrides?: Record<string, number | null> | null;
 }): Promise<CreateItemResult> {
   let session;
   try {
@@ -101,6 +121,7 @@ export async function createTaskTemplateItemAction(input: {
     duration_days: input.duration_days,
     priority: input.priority ?? "medium",
     stage_owner_positions: input.stage_owner_positions ?? undefined,
+    stage_sla_overrides: input.stage_sla_overrides ?? undefined,
   });
   if (!parsed.success) {
     return {
@@ -132,6 +153,7 @@ export async function createTaskTemplateItemAction(input: {
   // Omit stage_owner_positions when not supplied so the column default
   // (the Sky Light convention from migration 0077) applies.
   const stageOwners = cleanStageOwnerMap(parsed.data.stage_owner_positions);
+  const stageSla = cleanStageSlaMap(parsed.data.stage_sla_overrides);
 
   const { data: inserted, error } = await supabaseAdmin
     .from("task_template_items")
@@ -147,6 +169,7 @@ export async function createTaskTemplateItemAction(input: {
       priority: parsed.data.priority,
       order_index: nextOrder,
       ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
+      ...(stageSla ? { stage_sla_overrides: stageSla } : {}),
     })
     .select("id")
     .single();
@@ -199,6 +222,7 @@ const UpdateItemSchema = z.object({
   duration_days: z.coerce.number().int().min(1).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
+  stage_sla_overrides: StageSlaMapSchema,
 });
 
 export async function updateTaskTemplateItemAction(input: {
@@ -211,6 +235,7 @@ export async function updateTaskTemplateItemAction(input: {
   duration_days: number;
   priority?: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions?: Record<string, string | null> | null;
+  stage_sla_overrides?: Record<string, number | null> | null;
 }): Promise<CreateItemResult> {
   let session;
   try {
@@ -229,6 +254,7 @@ export async function updateTaskTemplateItemAction(input: {
     duration_days: input.duration_days,
     priority: input.priority ?? "medium",
     stage_owner_positions: input.stage_owner_positions ?? undefined,
+    stage_sla_overrides: input.stage_sla_overrides ?? undefined,
   });
   if (!parsed.success) {
     return {
@@ -250,6 +276,7 @@ export async function updateTaskTemplateItemAction(input: {
   // Only overwrite stage_owner_positions when the caller supplied a map —
   // a bare metadata edit must not wipe an existing per-phase owner config.
   const stageOwners = cleanStageOwnerMap(parsed.data.stage_owner_positions);
+  const stageSla = cleanStageSlaMap(parsed.data.stage_sla_overrides);
 
   const { error } = await supabaseAdmin
     .from("task_template_items")
@@ -262,6 +289,7 @@ export async function updateTaskTemplateItemAction(input: {
       duration_days: parsed.data.duration_days,
       priority: parsed.data.priority,
       ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
+      ...(stageSla ? { stage_sla_overrides: stageSla } : {}),
     })
     .eq("id", parsed.data.itemId)
     .eq("organization_id", session.orgId);

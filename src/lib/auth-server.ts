@@ -102,6 +102,80 @@ async function loadSession(): Promise<ServerSession | null> {
   };
 }
 
+/**
+ * Which dashboard a user sees is derived from ORG STRUCTURE, not an RBAC role
+ * (there is no `head`/`team_lead` role). Resolution order: owner/admin → ceo;
+ * else department head (departments.head_employee_id) → head; else referenced
+ * by employee_profiles.team_leader_employee_id → team_lead; else ceo fallback.
+ *
+ * `memberEmployeeIds` is the set of employee_profiles.id the leader oversees
+ * (excluding self). Used to scope task/leave/warning queries on the dashboard.
+ */
+export type DashboardScope =
+  | { kind: "ceo" }
+  | { kind: "head"; departmentId: string; departmentName: string; memberEmployeeIds: string[] }
+  | { kind: "team_lead"; departmentId: string | null; memberEmployeeIds: string[] }
+  | { kind: "agent"; employeeId: string };
+
+export const getDashboardScope = cache(async (session: ServerSession): Promise<DashboardScope> => {
+  // Owner/admin always get the executive (CEO) view.
+  if (session.isOwner || session.roleKeys.includes("admin")) {
+    return { kind: "ceo" };
+  }
+
+  // Head: this employee heads at least one department.
+  const { data: headed } = await supabaseAdmin
+    .from("departments")
+    .select("id, name")
+    .eq("organization_id", session.orgId)
+    .eq("head_employee_id", session.employeeId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (headed && headed.length > 0) {
+    const dept = headed[0];
+    const { data: members } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id")
+      .eq("organization_id", session.orgId)
+      .eq("department_id", dept.id)
+      .neq("id", session.employeeId);
+    return {
+      kind: "head",
+      departmentId: dept.id,
+      departmentName: dept.name,
+      memberEmployeeIds: (members ?? []).map((m) => m.id),
+    };
+  }
+
+  // Team lead: at least one employee reports to this employee as team leader.
+  const { data: reports } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, department_id")
+    .eq("organization_id", session.orgId)
+    .eq("team_leader_employee_id", session.employeeId);
+
+  if (reports && reports.length > 0) {
+    return {
+      kind: "team_lead",
+      departmentId: reports.find((r) => r.department_id)?.department_id ?? session.departmentId,
+      memberEmployeeIds: reports.map((r) => r.id),
+    };
+  }
+
+  // Executive-capable non-leaders (manager/viewer with reports.view) keep the
+  // org-wide CEO view; everyone else who can work tasks gets a PERSONAL view
+  // (My Performance / My Tasks) instead of leaking the executive dashboard.
+  if (hasPermission(session, "reports.view")) {
+    return { kind: "ceo" };
+  }
+  if (hasPermission(session, "tasks.view")) {
+    return { kind: "agent", employeeId: session.employeeId };
+  }
+
+  return { kind: "ceo" };
+});
+
 export async function requireSession(): Promise<ServerSession> {
   const session = await getServerSession();
   if (!session) redirect("/login");
@@ -165,7 +239,9 @@ export function landingPathFor(session: ServerSession): string {
     return `/am/${session.employeeId}/dashboard`;
   }
   if (session.roleKeys.includes("specialist")) return "/uploads";
-  if (session.roleKeys.includes("team_lead")) return "/tasks";
+  // Structural heads / team-leaders land on /dashboard, which self-routes to
+  // the scoped department view via getDashboardScope().
+  if (session.roleKeys.includes("team_lead")) return "/dashboard";
   if (session.roleKeys.includes("agent")) return "/tasks";
   return "/dashboard";
 }

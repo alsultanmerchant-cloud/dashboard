@@ -76,7 +76,7 @@ export async function generateTasksForProjectFromServices(args: {
          id, title, description, default_department_id, default_role_key,
          offset_days_from_project_start, duration_days, priority,
          upload_offset_days_before_deadline, week_index,
-         stage_owner_positions
+         stage_owner_positions, stage_sla_overrides
        )`,
     )
     .eq("organization_id", args.organizationId)
@@ -103,6 +103,7 @@ export async function generateTasksForProjectFromServices(args: {
     created_by: string | null;
     status: "todo";
     stage_owner_positions: Record<string, string | null> | null;
+    stage_sla_overrides: Record<string, number | null> | null;
     template_service_id: string; // local field to attribute slot during fan-out
   };
 
@@ -133,6 +134,11 @@ export async function generateTasksForProjectFromServices(args: {
         stage_owner_positions:
           (item as { stage_owner_positions?: Record<string, string | null> })
             .stage_owner_positions ?? null,
+        // Carry the per-stage SLA (working minutes) onto the task so the
+        // ownership-episode trigger (0147) can snapshot it at stage entry.
+        stage_sla_overrides:
+          (item as { stage_sla_overrides?: Record<string, number | null> })
+            .stage_sla_overrides ?? null,
         template_service_id: tmpl.service_id,
       };
     }),

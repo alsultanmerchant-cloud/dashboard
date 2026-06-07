@@ -248,6 +248,13 @@ function TemplateDetail({
                               string | null
                             > | null;
                           }).stage_owner_positions ?? null,
+                        stage_sla_overrides:
+                          (it as {
+                            stage_sla_overrides?: Record<
+                              string,
+                              number | null
+                            > | null;
+                          }).stage_sla_overrides ?? null,
                       }}
                       departments={departments}
                       positions={positions}

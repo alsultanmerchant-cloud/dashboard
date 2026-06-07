@@ -101,6 +101,20 @@ export type EditableTemplateItem = {
   duration_days: number;
   priority: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions: Record<string, string | null> | null;
+  stage_sla_overrides: Record<string, number | null> | null;
+};
+
+// Org-default SLAs (working minutes) shown as placeholders. New/In Progress
+// have no org default → set per task here. Keep in sync with sla_rules seed (0147).
+const DEFAULT_SLA_MINUTES: Record<string, number | null> = {
+  new: null,
+  in_progress: null,
+  manager_review: 90,
+  specialist_review: 90,
+  ready_to_send: 60,
+  sent_to_client: 240,
+  client_changes: 480,
+  done: null,
 };
 
 // #10: edit an existing template item in place — Rwasem's project.category
@@ -139,6 +153,16 @@ export function EditTemplateItemDialog({
   const [stageOwners, setStageOwners] = useState<Record<string, string>>(
     seedStageOwners,
   );
+  const seedStageSla = () => {
+    const seed = item.stage_sla_overrides ?? {};
+    const out: Record<string, string> = {};
+    for (const s of STAGES) {
+      const v = seed[s.key];
+      out[s.key] = v == null ? "" : String(v);
+    }
+    return out;
+  };
+  const [stageSla, setStageSla] = useState<Record<string, string>>(seedStageSla);
 
   // Re-sync local state to the row whenever the dialog is (re)opened so a
   // stale edit from a prior cancel never lingers.
@@ -151,6 +175,7 @@ export function EditTemplateItemDialog({
     setDuration(String(item.duration_days));
     setPriority(item.priority);
     setStageOwners(seedStageOwners());
+    setStageSla(seedStageSla());
   };
 
   const onSubmit = (e: React.FormEvent) => {
@@ -172,6 +197,13 @@ export function EditTemplateItemDialog({
         priority,
         stage_owner_positions: Object.fromEntries(
           STAGES.map((s) => [s.key, stageOwners[s.key] || null]),
+        ),
+        stage_sla_overrides: Object.fromEntries(
+          STAGES.map((s) => {
+            const raw = (stageSla[s.key] ?? "").trim();
+            const n = raw === "" ? null : Math.max(0, Math.round(Number(raw)));
+            return [s.key, Number.isFinite(n as number) ? n : null];
+          }),
         ),
       });
       if (!res.ok) {
@@ -310,16 +342,17 @@ export function EditTemplateItemDialog({
               </div>
             </div>
             <div className="space-y-1.5 rounded-lg border border-soft bg-soft-1/40 p-3">
-              <Label>الدور المسؤول عن كل مرحلة</Label>
+              <Label>الدور المسؤول و SLA لكل مرحلة</Label>
               <p className="text-[11px] text-muted-foreground">
-                يُحدَّد لكل مرحلة الدور المسؤول عنها، ويُنسخ تلقائيًا إلى كل
-                مهمة تُنشأ من هذا القالب.
+                يُحدَّد لكل مرحلة الدور المسؤول و مدة الـ SLA (بالدقائق، وقت عمل
+                فقط). القيم القياسية معبّأة مسبقًا — اتركها فارغة لاستخدام
+                الافتراضي. مرحلتا «جديدة» و«قيد التنفيذ» تُحدَّد لكل مهمة هنا.
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 {STAGES.map((s) => (
                   <div
                     key={s.key}
-                    className={`grid grid-cols-[minmax(0,1fr)_9rem] items-center gap-2 rounded-xl border p-2 ${s.rowTone}`}
+                    className={`grid grid-cols-[minmax(0,1fr)_7.5rem_5rem] items-center gap-2 rounded-xl border p-2 ${s.rowTone}`}
                   >
                     <span
                       className={`inline-flex min-w-0 items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold text-start ${s.badgeTone}`}
@@ -340,11 +373,28 @@ export function EditTemplateItemDialog({
                     >
                       <option value="">— بدون —</option>
                       {positions.map((p) => (
-                    <option key={p.slug} value={p.slug}>
-                      {p.name}
-                    </option>
-                  ))}
+                        <option key={p.slug} value={p.slug}>
+                          {p.name}
+                        </option>
+                      ))}
                     </select>
+                    <Input
+                      type="number"
+                      min={0}
+                      dir="ltr"
+                      className="h-9 w-full"
+                      value={stageSla[s.key] ?? ""}
+                      placeholder={
+                        DEFAULT_SLA_MINUTES[s.key] != null
+                          ? `${DEFAULT_SLA_MINUTES[s.key]}د`
+                          : "—"
+                      }
+                      onChange={(e) =>
+                        setStageSla((m) => ({ ...m, [s.key]: e.target.value }))
+                      }
+                      disabled={pending}
+                      aria-label={`SLA لمرحلة ${s.label} بالدقائق`}
+                    />
                   </div>
                 ))}
               </div>

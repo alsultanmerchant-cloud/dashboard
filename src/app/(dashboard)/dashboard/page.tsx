@@ -2,8 +2,13 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { FileSignature } from "lucide-react";
-import { requireSession } from "@/lib/auth-server";
+import { requireSession, getDashboardScope, type ServerSession } from "@/lib/auth-server";
+import { DepartmentDashboard } from "@/components/department/department-dashboard";
+import { AgentDashboard } from "@/components/department/agent-dashboard";
+import { getTeamActivityOverview } from "@/lib/data/activity-scores";
+import { ActivityPulseBand } from "@/components/activity/activity-pulse-band";
 import { getCeoCommercialTiles } from "@/lib/data/contracts";
+import { getExecutiveScores } from "@/lib/data/executive-scores";
 import {
   getHeroKpis,
   getOnTimeTrend30d,
@@ -23,6 +28,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { ExecutiveHeroRow } from "@/components/executive/hero-row";
 import { PulseStrip } from "@/components/executive/pulse-strip";
 import { ClientHealthSection } from "@/components/executive/client-health";
@@ -39,6 +45,16 @@ const sar = (n: number) =>
   new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 // ---- Sections (each streams behind its own Suspense) ---------------------
+
+async function ScoresBand({ orgId }: { orgId: string }) {
+  const data = await getExecutiveScores(orgId);
+  return <ExecutiveScoresBand data={data} />;
+}
+
+async function PulseBand({ orgId }: { orgId: string }) {
+  const data = await getTeamActivityOverview(orgId);
+  return <ActivityPulseBand data={data} />;
+}
 
 async function HeroSection({ orgId }: { orgId: string }) {
   const [data, trend] = await Promise.all([getHeroKpis(orgId), getOnTimeTrend30d(orgId)]);
@@ -147,6 +163,20 @@ async function CommercialStrip({ orgId }: { orgId: string }) {
 
 // ---- Skeletons -----------------------------------------------------------
 
+function ScoresSkeleton() {
+  return (
+    <div className="mb-8 grid gap-3 lg:grid-cols-[1.15fr_2fr]">
+      <Skeleton className="h-[220px] rounded-2xl" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Skeleton className="h-[220px] rounded-2xl" />
+        <Skeleton className="h-[220px] rounded-2xl" />
+        <Skeleton className="h-[220px] rounded-2xl" />
+        <Skeleton className="h-[220px] rounded-2xl" />
+      </div>
+    </div>
+  );
+}
+
 function HeroSkeleton() {
   return (
     <div className="mb-8 grid gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
@@ -173,8 +203,35 @@ function SectionSkeleton({ h = 220 }: { h?: number }) {
 
 // ---- Page ----------------------------------------------------------------
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
   const session = await requireSession();
+  const scope = await getDashboardScope(session);
+
+  if (scope.kind === "ceo") {
+    return <ExecutiveDashboard session={session} />;
+  }
+
+  if (scope.kind === "agent") {
+    return <AgentDashboard session={session} employeeId={scope.employeeId} />;
+  }
+
+  const { month } = await searchParams;
+
+  return (
+    <DepartmentDashboard
+      session={session}
+      scope={scope}
+      canMonthlyClosing={scope.kind === "head"}
+      month={month}
+    />
+  );
+}
+
+async function ExecutiveDashboard({ session }: { session: ServerSession }) {
   const orgId = session.orgId;
   const t = await getTranslations("Dashboard");
 
@@ -184,6 +241,14 @@ export default async function DashboardPage() {
         title={t("welcome", { name: session.fullName })}
         description={t("welcomeDescription")}
       />
+
+      <Suspense fallback={<StripSkeleton />}>
+        <PulseBand orgId={orgId} />
+      </Suspense>
+
+      <Suspense fallback={<ScoresSkeleton />}>
+        <ScoresBand orgId={orgId} />
+      </Suspense>
 
       <Suspense fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />

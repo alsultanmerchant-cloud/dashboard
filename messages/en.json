@@ -528,7 +528,13 @@
     "rolesPermissions": "Roles & permissions",
     "reports": "Reports",
     "settings": "Settings",
-    "featureFlags": "Feature flags"
+    "featureFlags": "Feature flags",
+    "satisfaction": "Client satisfaction",
+    "attendance": "Attendance",
+    "warnings": "Warnings",
+    "targets": "Targets",
+    "messages": "Chats",
+    "teamActivity": "Team Pulse"
   },
   "ProjectCard": {
     "storeName": "Store Name",
@@ -1951,7 +1957,17 @@
     "hrTitle": "HR",
     "hrSubtitle": "Launches in a later phase",
     "financeTitle": "Finance",
-    "financeSubtitle": "Launches in a later phase"
+    "financeSubtitle": "Launches in a later phase",
+    "satisfactionTitle": "Client Satisfaction",
+    "satisfactionSubtitle": "Analyze WhatsApp chats to measure client satisfaction & execution quality",
+    "attendanceTitle": "Attendance",
+    "attendanceSubtitle": "Record and track employee attendance",
+    "warningsTitle": "Warnings",
+    "warningsSubtitle": "Issue and track employee warnings",
+    "targetsTitle": "Monthly Targets",
+    "targetsSubtitle": "Set employee and department targets",
+    "teamActivityTitle": "Team Pulse",
+    "teamActivitySubtitle": "Per-employee activity vs duties"
   },
   "CustomFilter": {
     "title": "Add Custom Filter",
@@ -2237,6 +2253,165 @@
       "revisions": "revs",
       "emptyTitle": "No recent revisions",
       "emptyDescription": "Tasks that get revised repeatedly will appear here"
+    },
+    "scores": {
+      "title": "Executive Indicators",
+      "subtitle": "Five composite indices summarizing operational health",
+      "grades": {
+        "A": "Excellent",
+        "B": "Good",
+        "C": "Fair",
+        "D": "Weak",
+        "F": "Critical"
+      },
+      "vsPrev": "vs. previous period",
+      "noData": "Not enough data",
+      "na": "N/A",
+      "naSource": "Awaiting data source",
+      "delivery": {
+        "name": "Delivery Commitment",
+        "desc": "Operational stability and the teams' ability to deliver without disruption",
+        "onTime": "On-time delivery %",
+        "overdue": "Overdue tasks",
+        "avgDelay": "Avg. delay (days)",
+        "lateProjects": "Late projects",
+        "blocked": "Blocked tasks"
+      },
+      "quality": {
+        "name": "Execution Quality & Satisfaction",
+        "desc": "Execution quality and understanding of client requirements",
+        "rework": "Rework rate",
+        "rejection": "Rejection rate",
+        "revisions": "Avg. revisions",
+        "satisfaction": "Client satisfaction",
+        "briefAdherence": "Brief adherence"
+      },
+      "discipline": {
+        "name": "Discipline & Activity",
+        "desc": "Staff commitment and real engagement with daily operations",
+        "active": "Active members",
+        "actions": "Actions (7d)",
+        "stale": "Tasks without updates",
+        "sla": "SLA compliance"
+      },
+      "productivity": {
+        "name": "Productivity & Capacity",
+        "desc": "Workload distribution efficiency and team output capacity",
+        "completed": "Completed (30d)",
+        "perMember": "Tasks per member",
+        "utilization": "Capacity utilization",
+        "overloaded": "Overloaded members",
+        "underutilized": "Underutilized members"
+      },
+      "stability": {
+        "name": "Operational Stability",
+        "desc": "Fast executive view of the overall operational state",
+        "riskProjects": "At-risk projects",
+        "escalations": "Unanswered escalations",
+        "critical": "Critical delays",
+        "atRiskClients": "At-risk clients"
+      },
+      "naSourceSatisfaction": "Import client chats on the Satisfaction page",
+      "analyzedClients": "{n} clients analyzed"
+    }
+  },
+  "SatisfactionPage": {
+    "title": "Client Satisfaction",
+    "subtitle": "Import each client's two WhatsApp groups (client + technical) and let AI score satisfaction and execution quality",
+    "selectClient": "Select client",
+    "selectClientPlaceholder": "Choose a client to import chats",
+    "searchClient": "Search clients…",
+    "noClients": "No clients",
+    "clientGroup": "Client group",
+    "clientGroupHint": "Direct WhatsApp chat with the client — measures satisfaction & complaints",
+    "technicalGroup": "Technical group",
+    "technicalGroupHint": "Internal team coordination chat — measures brief adherence",
+    "uploadFile": "Upload .txt",
+    "replaceFile": "Replace file",
+    "uploadHelp": "Export the chat from WhatsApp as “Without media” (.txt file)",
+    "analyze": "Analyze with AI",
+    "reanalyze": "Re-analyze",
+    "uploadFirst": "Upload at least one chat first",
+    "lastAnalyzed": "Last analyzed",
+    "messages": "{n} messages",
+    "participants": "{n} participants",
+    "satisfactionScore": "Satisfaction",
+    "briefAdherence": "Brief adherence",
+    "summary": "Summary",
+    "timeline": "Satisfaction trend",
+    "risks": "Relationship risks",
+    "highlights": "Highlights",
+    "emptyOverview": "No chats imported yet. Select a client to get started.",
+    "sentiment": {
+      "positive": "Positive",
+      "neutral": "Neutral",
+      "negative": "Negative",
+      "mixed": "Mixed"
+    },
+    "highlightType": {
+      "praise": "Praise",
+      "complaint": "Complaint",
+      "request": "Request",
+      "escalation": "Escalation",
+      "milestone": "Milestone"
+    },
+    "col": {
+      "client": "Client",
+      "groups": "Groups",
+      "satisfaction": "Satisfaction",
+      "brief": "Brief",
+      "sentiment": "Sentiment",
+      "analyzed": "Analyzed"
+    },
+    "groups": {
+      "title": "Link WhatsApp groups",
+      "subtitle": "Map each WhatsApp group coming from OpenWA to a client and group kind",
+      "back": "Back to Client Satisfaction",
+      "manageLink": "Link WhatsApp groups (OpenWA)",
+      "sync": "Sync from OpenWA",
+      "syncHint": "Pulls the group list from the OpenWA service. Groups also appear automatically as messages arrive.",
+      "synced": "Synced — {n} groups",
+      "empty": "No groups yet. Run sync or wait for the first message via the webhook.",
+      "unmapped": "Unmapped",
+      "save": "Save",
+      "col": {
+        "group": "Group",
+        "messages": "Messages",
+        "client": "Client",
+        "kind": "Kind",
+        "active": "Active"
+      }
+    },
+    "connect": {
+      "title": "Connect WhatsApp number",
+      "subtitle": "Link the dedicated number so group messages stream in automatically via OpenWA",
+      "back": "Back to Client Satisfaction",
+      "connectLink": "Connect WhatsApp number",
+      "connectPrompt": "No number linked yet. Click to start and show the QR code.",
+      "connectBtn": "Connect number now",
+      "working": "Working…",
+      "scanTitle": "Scan this QR from WhatsApp on the dedicated number's phone",
+      "scanStep1": "Open WhatsApp on the phone",
+      "scanStep2": "Settings → Linked devices → Link a device",
+      "scanStep3": "Point the camera at this code",
+      "connected": "Connected",
+      "disconnect": "Disconnect",
+      "goMapGroups": "Map groups to clients",
+      "retry": "Retry",
+      "notConfiguredTitle": "OpenWA service not configured",
+      "notConfiguredBody": "To enable linking, run the OpenWA service on an always-on host and add these environment variables:",
+      "seeRunbook": "Full runbook in",
+      "unreachableBody": "Could not reach the OpenWA service. Make sure it's running and WA_API_URL is correct.",
+      "state": {
+        "connected": "Connected",
+        "scan": "Waiting for QR scan",
+        "connecting": "Connecting",
+        "disconnected": "Disconnected",
+        "notConfigured": "Not configured",
+        "unreachable": "Unreachable",
+        "failed": "Failed",
+        "loading": "Loading"
+      }
     }
   }
 }

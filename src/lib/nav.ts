@@ -26,7 +26,12 @@ import {
   Siren,
   Upload,
   Scale,
+  Heart,
   KeyRound,
+  ShieldAlert,
+  Target,
+  MessageCircle,
+  Activity,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,9 +58,10 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       // Routes server-side to the role's home page (specialist→/uploads,
       // AM→/am/<id>/dashboard, head/admin/owner→/dashboard, etc).
-      { labelKey: "aiAgent", href: "/agent", icon: BrainCircuit },
-      { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles },
+      { labelKey: "aiAgent", href: "/agent", icon: BrainCircuit, perm: "reports.view" },
+      { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles, perm: "reports.view" },
       { labelKey: "myDashboard", href: "/dashboard", icon: LayoutDashboard },
+      { labelKey: "messages", href: "/messages", icon: MessageCircle, perm: "notifications.view" },
       { labelKey: "notifications", href: "/notifications", icon: Bell },
     ],
   },
@@ -87,6 +93,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { labelKey: "escalations", href: "/escalations", icon: Siren, perm: "escalation.view_own" },
       { labelKey: "governance", href: "/governance", icon: Scale, perm: "governance.view" },
+      { labelKey: "teamActivity", href: "/team-activity", icon: Activity, perm: "reports.view" },
+      { labelKey: "attendance", href: "/attendance", icon: CalendarCheck, perm: "attendance.view" },
+      { labelKey: "warnings", href: "/warnings", icon: ShieldAlert, perm: "warning.view" },
+      { labelKey: "targets", href: "/targets", icon: Target, perm: "target.view" },
+      { labelKey: "satisfaction", href: "/satisfaction", icon: Heart, perm: "clients.view" },
       { labelKey: "reports", href: "/reports", icon: BarChart3, perm: "reports.view" },
     ],
   },
@@ -138,7 +149,12 @@ export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: s
   "/settings": { titleKey: "settingsTitle", subtitleKey: "settingsSubtitle" },
   "/settings/feature-flags": { titleKey: "featureFlagsTitle", subtitleKey: "featureFlagsSubtitle" },
   "/escalations": { titleKey: "escalationsTitle", subtitleKey: "escalationsSubtitle" },
+  "/team-activity": { titleKey: "teamActivityTitle", subtitleKey: "teamActivitySubtitle" },
+  "/attendance": { titleKey: "attendanceTitle", subtitleKey: "attendanceSubtitle" },
+  "/warnings": { titleKey: "warningsTitle", subtitleKey: "warningsSubtitle" },
+  "/targets": { titleKey: "targetsTitle", subtitleKey: "targetsSubtitle" },
   "/governance": { titleKey: "governanceTitle", subtitleKey: "governanceSubtitle" },
+  "/satisfaction": { titleKey: "satisfactionTitle", subtitleKey: "satisfactionSubtitle" },
   "/hr": { titleKey: "hrTitle", subtitleKey: "hrSubtitle" },
   "/finance": { titleKey: "financeTitle", subtitleKey: "financeSubtitle" },
 };

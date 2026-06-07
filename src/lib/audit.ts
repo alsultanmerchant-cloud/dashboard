@@ -20,6 +20,28 @@ export async function logAudit(params: {
     metadata: (params.metadata ?? {}) as never,
   });
   if (error) console.error("[audit_log_failed]", params.action, error.message);
+
+  // Activity-audit attribution (Phase 3): the ownership-episode triggers can't
+  // see the real actor of a dashboard stage advance (moves run as service-role).
+  // Stamp it here, best-effort, from the audited actor. Only fires for the two
+  // relevant actions so unrelated audit writes pay no cost.
+  if (params.actorUserId && params.entityId) {
+    if (params.action === "task.stage_change") {
+      const { error: e } = await supabaseAdmin.rpc("mark_episode_actor", {
+        p_org: params.organizationId,
+        p_task: params.entityId,
+        p_user: params.actorUserId,
+      });
+      if (e) console.error("[mark_episode_actor_failed]", e.message);
+    } else if (params.action === "task.comment_add") {
+      const { error: e } = await supabaseAdmin.rpc("mark_episode_comment", {
+        p_org: params.organizationId,
+        p_task: params.entityId,
+        p_user: params.actorUserId,
+      });
+      if (e) console.error("[mark_episode_comment_failed]", e.message);
+    }
+  }
 }
 
 export async function logAiEvent(params: {
