@@ -3,8 +3,9 @@ import { createMiddlewareClient } from "@/lib/supabase/middleware";
 
 // `/dev/*` is a development-only design-system / preview namespace.
 // `/api/cron/*` is hit by Supabase pg_cron + secret header — must skip auth.
+// `/api/wa/webhook` is hit by the OpenWA gateway + HMAC signature — skip auth.
 // Kept public so we can demo primitives without touching auth/RBAC.
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev", "/api/cron"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/dev", "/api/cron", "/api/wa/webhook"];
 
 export async function proxy(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request);
