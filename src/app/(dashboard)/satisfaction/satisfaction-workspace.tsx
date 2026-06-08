@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { uploadChatImportAction } from "./_actions";
 import type {
+  ClientExecutionSnapshot,
   ClientSatisfactionDetail,
   GroupKind,
   ImportInfo,
@@ -37,6 +38,7 @@ interface Props {
   options: { value: string; label: string }[];
   rows: SatisfactionRow[];
   detail: ClientSatisfactionDetail | null;
+  execution: ClientExecutionSnapshot | null;
   selectedId: string | null;
 }
 
@@ -80,8 +82,9 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
   );
 }
 
-export function SatisfactionWorkspace({ options, rows, detail, selectedId }: Props) {
+export function SatisfactionWorkspace({ options, rows, detail, execution, selectedId }: Props) {
   const t = useTranslations("SatisfactionPage");
+  const tStages = useTranslations("TasksPage.stages");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [analyzing, setAnalyzing] = useState(false);
@@ -194,28 +197,37 @@ export function SatisfactionWorkspace({ options, rows, detail, selectedId }: Pro
             </p>
           )}
 
-          {/* Analyze */}
+          {/* Analyze — enabled when there's ANY transcript: a .txt import OR
+              live WhatsApp messages (buildClientTranscripts merges both). */}
           <div className="flex items-center gap-3">
-            <Button
-              onClick={analyze}
-              disabled={analyzing || (!detail.imports.client && !detail.imports.technical)}
-            >
-              {analyzing ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Sparkles className="size-4" />
-              )}
-              {detail.analysis ? t("reanalyze") : t("analyze")}
-            </Button>
-            {!detail.imports.client && !detail.imports.technical && (
-              <span className="text-xs text-muted-foreground">{t("uploadFirst")}</span>
-            )}
+            {(() => {
+              const hasTranscript =
+                !!detail.imports.client || !!detail.imports.technical || detail.hasMessages;
+              return (
+                <>
+                  <Button onClick={analyze} disabled={analyzing || !hasTranscript}>
+                    {analyzing ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
+                    {detail.analysis ? t("reanalyze") : t("analyze")}
+                  </Button>
+                  {!hasTranscript && (
+                    <span className="text-xs text-muted-foreground">{t("uploadFirst")}</span>
+                  )}
+                </>
+              );
+            })()}
             {detail.analysis && (
               <span className="text-xs text-muted-foreground">
                 {t("lastAnalyzed")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}
               </span>
             )}
           </div>
+
+          {/* Real delivery work — delayed tasks tied to this client */}
+          {execution && <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />}
 
           {/* Results */}
           {detail.analysis && <AnalysisView analysis={detail.analysis} t={t} sentimentLabel={sentimentLabel} />}
@@ -260,11 +272,28 @@ function SatisfactionOverview({
 }) {
   const [view, setView] = useState<"board" | "table">("board");
   const [query, setQuery] = useState("");
+  // Active clients (≥1 non-archived project) vs lost/archived relationships.
+  // Defaults to "active" so the board isn't dominated by clients we've lost.
+  const [relation, setRelation] = useState<"active" | "lost" | "all">("active");
+
+  const counts = useMemo(
+    () => ({
+      active: rows.filter((r) => r.hasActiveProject).length,
+      lost: rows.filter((r) => !r.hasActiveProject).length,
+      all: rows.length,
+    }),
+    [rows],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? rows.filter((r) => r.clientName.toLowerCase().includes(q)) : rows;
-  }, [rows, query]);
+    return rows.filter((r) => {
+      if (relation === "active" && !r.hasActiveProject) return false;
+      if (relation === "lost" && r.hasActiveProject) return false;
+      if (q && !r.clientName.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [rows, query, relation]);
 
   if (rows.length === 0) {
     return (
@@ -278,16 +307,38 @@ function SatisfactionOverview({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar: search + view toggle */}
+      {/* Toolbar: search + relation filter + view toggle */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full max-w-xs">
-          <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("search")}
-            className="h-9 w-full rounded-lg border border-border bg-card ps-8 pe-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/40"
-          />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("search")}
+              className="h-9 w-full rounded-lg border border-border bg-card ps-8 pe-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/40"
+            />
+          </div>
+          <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+            {(["active", "lost", "all"] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRelation(key)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  relation === key
+                    ? "bg-soft-2 text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(`relationFilter.${key}`)}
+                <span className="rounded-full bg-soft-1 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+                  {counts[key]}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
@@ -321,7 +372,7 @@ function SatisfactionOverview({
       </div>
 
       {view === "board" ? (
-        <SatisfactionBoard rows={filtered} onSelect={onSelect} t={t} />
+        <SatisfactionBoard rows={filtered} onSelect={onSelect} onAnalyze={onAnalyze} t={t} />
       ) : (
         <OverviewTable rows={filtered} onSelect={onSelect} t={t} />
       )}
@@ -333,10 +384,12 @@ function SatisfactionOverview({
 function SatisfactionBoard({
   rows,
   onSelect,
+  onAnalyze,
   t,
 }: {
   rows: SatisfactionRow[];
   onSelect: (id: string) => void;
+  onAnalyze: (id: string) => Promise<void>;
   t: ReturnType<typeof useTranslations>;
 }) {
   const grouped = useMemo(() => {
@@ -379,7 +432,14 @@ function SatisfactionBoard({
                 </p>
               ) : (
                 items.map((r) => (
-                  <BoardCard key={r.clientId} row={r} accent={b.accent} onSelect={onSelect} t={t} />
+                  <BoardCard
+                    key={r.clientId}
+                    row={r}
+                    accent={b.accent}
+                    onSelect={onSelect}
+                    onAnalyze={onAnalyze}
+                    t={t}
+                  />
                 ))
               )}
             </div>
@@ -394,19 +454,43 @@ function BoardCard({
   row,
   accent,
   onSelect,
+  onAnalyze,
   t,
 }: {
   row: SatisfactionRow;
   accent: string;
   onSelect: (id: string) => void;
+  onAnalyze: (id: string) => Promise<void>;
   t: ReturnType<typeof useTranslations>;
 }) {
   const analyzed = row.satisfactionScore !== null;
+  // Analyzable from a .txt import OR live WhatsApp messages.
+  const hasImport = row.hasClient || row.hasTechnical || row.hasMessages;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const runAnalyze = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setErr(false);
+    setBusy(true);
+    try {
+      await onAnalyze(row.clientId);
+    } catch {
+      setErr(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(row.clientId)}
-      className="group flex items-center gap-3 rounded-lg border border-border bg-card p-2.5 text-start transition-colors hover:border-cyan/40 hover:bg-soft-1"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onSelect(row.clientId);
+      }}
+      className="group flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card p-2.5 text-start transition-colors hover:border-cyan/40 hover:bg-soft-1"
     >
       {analyzed ? (
         <Ring score={row.satisfactionScore} size={44} />
@@ -416,8 +500,15 @@ function BoardCard({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{row.clientName}</p>
-        <p className={cn("text-[11px] font-medium", accent)}>
+        <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+          <span className="truncate">{row.clientName}</span>
+          {!row.hasActiveProject && (
+            <span className="shrink-0 rounded bg-soft-2 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+              {t("relationFilter.lostBadge")}
+            </span>
+          )}
+        </p>
+        <p className={cn("text-[11px] font-medium", err ? "text-cc-red" : accent)}>
           {row.sentiment ? t(`sentiment.${row.sentiment}`) : t("board.noGroups")}
         </p>
         <div className="mt-1 flex items-center gap-1.5">
@@ -430,8 +521,21 @@ function BoardCard({
           )}
         </div>
       </div>
-      <ChevronLeft className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-cyan rtl:rotate-0 ltr:rotate-180" />
-    </button>
+      {!analyzed && hasImport ? (
+        <button
+          type="button"
+          onClick={runAnalyze}
+          disabled={busy}
+          title={t("board.analyze")}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-soft-2 px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:bg-cyan/10 disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+          {t("board.analyze")}
+        </button>
+      ) : (
+        <ChevronLeft className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-cyan ltr:rotate-180 rtl:rotate-0" />
+      )}
+    </div>
   );
 }
 
@@ -469,7 +573,16 @@ function OverviewTable({
                     onClick={() => onSelect(r.clientId)}
                     className="cursor-pointer border-b border-border/60 transition-colors hover:bg-soft-1"
                   >
-                    <td className="p-3 font-medium">{r.clientName}</td>
+                    <td className="p-3 font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        {r.clientName}
+                        {!r.hasActiveProject && (
+                          <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+                            {t("relationFilter.lostBadge")}
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="p-3 text-center">
                       <span className="inline-flex gap-1">
                         <Dot on={r.hasClient} label={t("clientGroup")} />
@@ -614,6 +727,91 @@ function UploadCard({
   );
 }
 
+// ---- Execution panel: client's delayed tasks (ties chat → real work) -----
+function ExecutionPanel({
+  snapshot,
+  t,
+  tStages,
+}: {
+  snapshot: ClientExecutionSnapshot;
+  t: ReturnType<typeof useTranslations>;
+  tStages: ReturnType<typeof useTranslations>;
+}) {
+  const stageLabel = (s: string) => {
+    try {
+      return tStages(s);
+    } catch {
+      return s;
+    }
+  };
+  return (
+    <Card className="border-amber/25">
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <AlertTriangle className="size-4 text-amber" /> {t("execution.title")}
+          </p>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="tabular-nums">
+              {t("execution.overdueCount", { n: snapshot.overdueCount })}
+            </span>
+            {snapshot.maxDaysStuck !== null && (
+              <span className="tabular-nums">
+                {t("execution.maxStuck", { n: snapshot.maxDaysStuck })}
+              </span>
+            )}
+          </div>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("execution.hint")}</p>
+
+        {/* by-stage distribution — shows whether delays cluster in one phase */}
+        {snapshot.byStage.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {snapshot.byStage.map((s) => (
+              <span
+                key={s.stage}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-soft-1 px-2 py-1 text-[11px]"
+              >
+                <span className="text-muted-foreground">{stageLabel(s.stage)}</span>
+                <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">{s.count}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* worst-stuck tasks */}
+        <ul className="mt-3 space-y-1.5">
+          {snapshot.topTasks.map((task, i) => (
+            <li
+              key={i}
+              className="flex items-center justify-between gap-3 rounded-lg bg-soft-1/60 px-2.5 py-1.5 text-[13px]"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                {task.taskCode && (
+                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
+                    {task.taskCode}
+                  </span>
+                )}
+                <span className="truncate">{task.title}</span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2 text-[11px]">
+                <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
+                  {stageLabel(task.stage)}
+                </span>
+                {task.daysStuck !== null && (
+                  <span className="tabular-nums text-amber">
+                    {t("execution.daysStuck", { n: task.daysStuck })}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---- Analysis view -------------------------------------------------------
 const HL_TONE: Record<string, string> = {
   praise: "text-cc-green",
@@ -723,21 +921,45 @@ function AnalysisView({
               <Quote className="size-4 text-cyan" /> {t("highlights")}
             </p>
             <ul className="space-y-2">
-              {analysis.highlights.map((h, i) => (
-                <li key={i} className="flex items-start justify-between gap-3 text-[13px]">
-                  <span className="flex items-start gap-2">
-                    <span className={cn("mt-0.5 text-xs font-semibold", HL_TONE[h.type] ?? "text-muted-foreground")}>
-                      {t(`highlightType.${h.type}`)}
-                    </span>
-                    <span className="text-muted-foreground">{h.text}</span>
-                  </span>
-                  {h.date && (
-                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
-                      {h.date}
-                    </span>
-                  )}
-                </li>
-              ))}
+              {[...analysis.highlights]
+                // Client-facing items first; internal team items grouped after.
+                .sort((a, b) =>
+                  (a.audience === "team" ? 1 : 0) - (b.audience === "team" ? 1 : 0),
+                )
+                .map((h, i) => {
+                  const isTeam = h.audience === "team";
+                  return (
+                    <li
+                      key={i}
+                      className={cn(
+                        "flex items-start justify-between gap-3 text-[13px]",
+                        isTeam && "opacity-70",
+                      )}
+                    >
+                      <span className="flex items-start gap-2">
+                        <span
+                          className={cn(
+                            "mt-0.5 text-xs font-semibold",
+                            HL_TONE[h.type] ?? "text-muted-foreground",
+                          )}
+                        >
+                          {t(`highlightType.${h.type}`)}
+                        </span>
+                        {isTeam && (
+                          <span className="mt-0.5 shrink-0 rounded bg-soft-2 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+                            {t("highlightAudience.team")}
+                          </span>
+                        )}
+                        <span className="text-muted-foreground">{h.text}</span>
+                      </span>
+                      {h.date && (
+                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                          {h.date}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
             </ul>
           </CardContent>
         </Card>

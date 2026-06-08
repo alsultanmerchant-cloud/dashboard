@@ -33,6 +33,8 @@ export interface SatisfactionRow {
   clientName: string;
   hasClient: boolean;
   hasTechnical: boolean;
+  hasMessages: boolean; // has live wa_messages → analyzable even without a .txt import
+  hasActiveProject: boolean; // false → archived/lost client (separated in the UI)
   satisfactionScore: number | null;
   briefAdherenceScore: number | null;
   sentiment: string | null;
@@ -41,7 +43,7 @@ export interface SatisfactionRow {
 
 // ---- Hub overview: every client that has an import or analysis -----------
 async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
-  const [importsRes, analysesRes, clientsRes] = await Promise.all([
+  const [importsRes, analysesRes, clientsRes, projectsRes, linksRes] = await Promise.all([
     supabaseAdmin
       .from("client_chat_imports")
       .select("client_id, group_kind")
@@ -52,14 +54,38 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
       .eq("organization_id", orgId)
       .eq("is_current", true),
     supabaseAdmin.from("clients").select("id, name").eq("organization_id", orgId),
+    supabaseAdmin
+      .from("projects")
+      .select("client_id, status")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("wa_group_links")
+      .select("client_id, message_count")
+      .eq("organization_id", orgId)
+      .not("client_id", "is", null),
   ]);
   if (importsRes.error) throw importsRes.error;
   if (analysesRes.error) throw analysesRes.error;
   if (clientsRes.error) throw clientsRes.error;
+  if (projectsRes.error) throw projectsRes.error;
+  if (linksRes.error) throw linksRes.error;
 
   const names = new Map<string, string>();
   for (const c of (clientsRes.data ?? []) as Array<{ id: string; name: string }>) {
     names.set(c.id, c.name);
+  }
+
+  // A client is "active" if it has at least one non-archived project; otherwise
+  // it's a lost/archived relationship (kept off the default board view).
+  const activeClients = new Set<string>();
+  for (const p of (projectsRes.data ?? []) as Array<{ client_id: string | null; status: string | null }>) {
+    if (p.client_id && p.status && p.status !== "archived") activeClients.add(p.client_id);
+  }
+
+  // A client has live coverage if any of its mapped groups carry ingested messages.
+  const clientsWithMessages = new Set<string>();
+  for (const l of (linksRes.data ?? []) as Array<{ client_id: string | null; message_count: number | null }>) {
+    if (l.client_id && (l.message_count ?? 0) > 0) clientsWithMessages.add(l.client_id);
   }
 
   const rowByClient = new Map<string, SatisfactionRow>();
@@ -71,6 +97,8 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
         clientName: names.get(clientId) ?? "—",
         hasClient: false,
         hasTechnical: false,
+        hasMessages: clientsWithMessages.has(clientId),
+        hasActiveProject: activeClients.has(clientId),
         satisfactionScore: null,
         briefAdherenceScore: null,
         sentiment: null,
@@ -116,6 +144,7 @@ export interface ClientSatisfactionDetail {
   clientId: string;
   clientName: string;
   imports: { client: ImportInfo | null; technical: ImportInfo | null };
+  hasMessages: boolean; // live wa_messages exist → analyzable without a .txt import
   analysis: AnalysisInfo | null;
 }
 
@@ -123,7 +152,7 @@ async function _getClientSatisfactionDetail(
   orgId: string,
   clientId: string,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, messagesRes] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -149,6 +178,11 @@ async function _getClientSatisfactionDetail(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabaseAdmin
+      .from("wa_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId),
   ]);
   if (clientRes.error) throw clientRes.error;
   if (!clientRes.data) return null;
@@ -194,6 +228,7 @@ async function _getClientSatisfactionDetail(
     clientId,
     clientName: clientRes.data.name as string,
     imports: { client: clientImp, technical: techImp },
+    hasMessages: (messagesRes.count ?? 0) > 0,
     analysis,
   };
 }
@@ -238,7 +273,10 @@ async function _buildClientTranscripts(
     if (!importByKind[r.group_kind]) importByKind[r.group_kind] = r.transcript ?? "";
   }
 
-  // Live messages per kind (text only, non-empty).
+  // Live messages per kind (text only, non-empty). Messages linked to this
+  // client but whose group_kind is still unclassified (null) default to the
+  // CLIENT block — they're this client's conversation and dropping them
+  // silently skewed satisfaction scores too rosy (whole groups vanished).
   const liveByKind: Record<GroupKind, string[]> = { client: [], technical: [] };
   const counts: Record<GroupKind, number> = { client: 0, technical: 0 };
   for (const r of (waRes.data ?? []) as Array<{
@@ -248,13 +286,13 @@ async function _buildClientTranscripts(
     sent_at: string | null;
     message_type: string | null;
   }>) {
-    if (!r.group_kind) continue;
+    const kind: GroupKind = r.group_kind ?? "client";
     const type = r.message_type ?? "chat";
     if (type !== "chat" && type !== "text") continue;
     const body = (r.body ?? "").trim();
     if (!body) continue;
-    liveByKind[r.group_kind].push(renderWaLine(r.sent_at, r.sender, body));
-    counts[r.group_kind] += 1;
+    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, body));
+    counts[kind] += 1;
   }
 
   const merge = (kind: GroupKind) =>
@@ -268,6 +306,80 @@ async function _buildClientTranscripts(
   };
 }
 export const buildClientTranscripts = cache(_buildClientTranscripts);
+
+// ---- Client execution snapshot (ties satisfaction to real delivery work) -
+// Surfaces the client's actually-delayed tasks next to the AI analysis, so a
+// "تأخير" complaint maps to concrete delayed work and the stage it's stuck in.
+// Date columns (due_date/delay_days) are sparse for Odoo-synced tasks, so the
+// primary "how late" signal is days stuck in the current stage (stage_entered_at,
+// fully populated). Stage grouping shows whether delays cluster in one phase.
+export interface ExecutionTask {
+  taskCode: string | null;
+  title: string;
+  stage: string;
+  daysStuck: number | null; // whole days since entering the current stage
+  delayDays: number | null; // working-days overdue, when the data exists
+}
+export interface ClientExecutionSnapshot {
+  overdueCount: number;
+  totalTasks: number;
+  maxDaysStuck: number | null;
+  byStage: Array<{ stage: string; count: number }>;
+  topTasks: ExecutionTask[]; // worst-stuck first
+}
+
+async function _getClientExecutionSnapshot(
+  orgId: string,
+  clientId: string,
+): Promise<ClientExecutionSnapshot | null> {
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      "task_code, title, stage, delay_days, stage_entered_at, is_overdue, project:projects!inner(client_id, status)",
+    )
+    .eq("organization_id", orgId)
+    .eq("project.client_id", clientId)
+    .neq("project.status", "archived");
+  if (error || !data) return null;
+
+  type Row = {
+    task_code: string | null;
+    title: string | null;
+    stage: string | null;
+    delay_days: number | null;
+    stage_entered_at: string | null;
+    is_overdue: boolean | null;
+  };
+  const rows = data as unknown as Row[];
+  const overdue = rows.filter((r) => r.is_overdue);
+  if (overdue.length === 0) return null;
+
+  const now = Date.now();
+  const daysSince = (iso: string | null): number | null =>
+    iso ? Math.max(0, Math.floor((now - new Date(iso).getTime()) / 86_400_000)) : null;
+
+  const tasks: ExecutionTask[] = overdue.map((r) => ({
+    taskCode: r.task_code,
+    title: (r.title ?? "").trim() || "—",
+    stage: r.stage ?? "new",
+    daysStuck: daysSince(r.stage_entered_at),
+    delayDays: r.delay_days,
+  }));
+
+  const stageCounts = new Map<string, number>();
+  for (const t of tasks) stageCounts.set(t.stage, (stageCounts.get(t.stage) ?? 0) + 1);
+  const byStage = Array.from(stageCounts.entries())
+    .map(([stage, count]) => ({ stage, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const topTasks = [...tasks]
+    .sort((a, b) => (b.daysStuck ?? -1) - (a.daysStuck ?? -1))
+    .slice(0, 8);
+  const maxDaysStuck = topTasks.length ? topTasks[0].daysStuck : null;
+
+  return { overdueCount: overdue.length, totalTasks: rows.length, maxDaysStuck, byStage, topTasks };
+}
+export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);
 
 // ---- Org aggregate (feeds the Execution Quality executive index) ---------
 export interface SatisfactionAggregate {

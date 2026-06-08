@@ -12,6 +12,11 @@ export const HIGHLIGHT_TYPES = [
   "milestone",
 ] as const;
 
+// Who the highlight is about: a message FROM the client (client group) vs an
+// internal team message (technical group). Lets the UI keep team chatter — an
+// account manager chasing an approval — out of the client requests/complaints.
+export const HIGHLIGHT_AUDIENCES = ["client", "team"] as const;
+
 export const SatisfactionSchema = z.object({
   // 0-100 overall satisfaction inferred from the CLIENT group tone & outcomes.
   satisfactionScore: z.number().int().min(0).max(100),
@@ -25,6 +30,7 @@ export const SatisfactionSchema = z.object({
     .array(
       z.object({
         type: z.enum(HIGHLIGHT_TYPES),
+        audience: z.enum(HIGHLIGHT_AUDIENCES), // client message vs internal team
         text: z.string(), // Arabic, one line
         date: z.string().nullable(), // YYYY-MM-DD if identifiable
       }),
@@ -45,3 +51,4 @@ export const SatisfactionSchema = z.object({
 
 export type SatisfactionResult = z.infer<typeof SatisfactionSchema>;
 export type SatisfactionHighlightType = (typeof HIGHLIGHT_TYPES)[number];
+export type SatisfactionHighlightAudience = (typeof HIGHLIGHT_AUDIENCES)[number];

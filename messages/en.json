@@ -2346,6 +2346,12 @@
     "viewTable": "Table",
     "search": "Search clients…",
     "clientsCount": "{n} clients",
+    "relationFilter": {
+      "active": "Active",
+      "lost": "Lost / archived",
+      "all": "All",
+      "lostBadge": "Archived"
+    },
     "openClient": "Open",
     "board": {
       "atRisk": "At risk",
@@ -2372,6 +2378,16 @@
       "request": "Request",
       "escalation": "Escalation",
       "milestone": "Milestone"
+    },
+    "highlightAudience": {
+      "team": "Team"
+    },
+    "execution": {
+      "title": "Delayed work",
+      "hint": "Open tasks for this client that are behind — match a delay complaint to the actual work and the stage it's stuck in.",
+      "overdueCount": "{n} overdue",
+      "maxStuck": "up to {n}d stuck",
+      "daysStuck": "{n}d stuck"
     },
     "col": {
       "client": "Client",

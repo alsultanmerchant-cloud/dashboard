@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import { SatisfactionSchema, type SatisfactionResult } from "@/lib/satisfaction-schema";
 import { buildClientTranscripts } from "@/lib/data/satisfaction";
+import { getClientBrief } from "@/lib/satisfaction-brief";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
@@ -52,32 +53,49 @@ export async function analyzeClientSatisfaction(
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
 
+  // The documented brief (Google Doc from the project's documents) is the source
+  // of truth for brief-adherence when available; otherwise we fall back to
+  // inferring it from the technical group's coordination.
+  const brief = await getClientBrief(orgId, clientId);
+
+  const briefInstruction = brief
+    ? `- briefAdherenceScore (0-100): مدى مطابقة العمل المُسلَّم (كما يظهر في المحادثتين) لمتطلبات العميل الموثقة في "البريف" أدناه. قارن بنودًا فعلية. null فقط إذا تعذّر الحكم.`
+    : `- briefAdherenceScore (0-100): مدى مطابقة التنفيذ لمتطلبات العميل كما يظهر في "مجموعة الفريق التقني". null إن لم تتوفر.`;
+
+  const briefBlock = brief
+    ? `\n\n=== البريف (متطلبات العميل الموثقة) ===\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
+    : "";
+
   const runOnce = async (budget: number) =>
     (
       await generateObject({
         model: google(MODEL),
         maxRetries: 2,
         schema: SatisfactionSchema,
-        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب:
+        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب${brief ? " والبريف الموثق" : ""}:
 
 1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
-2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ (منها نقيس مدى الالتزام بالبريف).
+2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ.${brief ? '\n3) "البريف" — وثيقة متطلبات العميل الأساسية المعتمدة في بداية المشروع.' : ""}
 
 التعليمات:
 - satisfactionScore (0-100): من نبرة العميل ونتائج التعامل في "مجموعة العميل".
-- briefAdherenceScore (0-100): مدى مطابقة التنفيذ لمتطلبات العميل كما يظهر في "مجموعة الفريق التقني". null إن لم تتوفر.
+${briefInstruction}
 - sentiment, summary (عربي ٢-٤ جمل), highlights (ثناء/شكوى/طلب/تصعيد/إنجاز مع التاريخ)، sentimentTimeline (period مثل 2026-04)، risks (الأهم أولًا).
-استند فقط لما ورد في المحادثات.
+- لكل عنصر في highlights حدّد audience:
+  • "client" = رسالة أو موقف صادر من العميل نفسه (طلب/شكوى/ثناء حقيقي من العميل).
+  • "team" = تنسيق داخلي بين الفريق (مثل أن يستعجل الأكاونت مانجر العميل على الاعتماد). لا تَعُدّ رسائل الفريق الداخلية طلباتٍ للعميل.
+- "إنجاز" (milestone) يكون فقط لإنجاز إيجابي حقيقي في التنفيذ (إطلاق حملة، اعتماد تسليم، نتيجة جيدة). الاسترداد المالي أو إنهاء التعاقد أو مغادرة العميل أو فسخ الاتفاق ليست إنجازًا أبدًا — صنّفها "تصعيد" (escalation) واعكسها في خفض satisfactionScore والمخاطر.
+استند فقط لما ورد في المحادثات${brief ? " والبريف" : ""}.
 
 === مجموعة العميل ===
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني ===
-${trim(technicalBlock, budget)}`,
+${trim(technicalBlock, budget)}${briefBlock}`,
       })
     ).object;
 
-  // gemini-2.5-flash-lite occasionally fails structured output on long/messy
+  // The model can occasionally fail structured output on long/messy
   // transcripts. Retry with a progressively SMALLER transcript each attempt —
   // a tighter input is much more likely to yield schema-valid output.
   const budgets = [MAX_CHARS, 22_000, 10_000, 5_000];
@@ -151,6 +169,7 @@ ${trim(technicalBlock, budget)}`,
       satisfactionScore: result.satisfactionScore,
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
+      briefUsed: brief ? brief.url : null,
     },
     importance: result.satisfactionScore < 50 ? "high" : "normal",
   });

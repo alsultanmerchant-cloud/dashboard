@@ -4,6 +4,7 @@ import { listClientOptions } from "@/lib/data/clients";
 import {
   getSatisfactionRows,
   getClientSatisfactionDetail,
+  getClientExecutionSnapshot,
 } from "@/lib/data/satisfaction";
 import { PageHeader } from "@/components/page-header";
 import { SatisfactionWorkspace } from "./satisfaction-workspace";
@@ -18,10 +19,11 @@ export default async function SatisfactionPage({
   const sp = await searchParams;
   const selectedId = sp.client ?? null;
 
-  const [clients, rows, detail] = await Promise.all([
+  const [clients, rows, detail, execution] = await Promise.all([
     listClientOptions(session.orgId),
     getSatisfactionRows(session.orgId),
     selectedId ? getClientSatisfactionDetail(session.orgId, selectedId) : Promise.resolve(null),
+    selectedId ? getClientExecutionSnapshot(session.orgId, selectedId) : Promise.resolve(null),
   ]);
 
   const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
@@ -33,6 +35,7 @@ export default async function SatisfactionPage({
         options={options}
         rows={rows}
         detail={detail}
+        execution={execution}
         selectedId={selectedId}
       />
     </div>

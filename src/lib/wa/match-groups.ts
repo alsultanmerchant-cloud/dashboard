@@ -92,32 +92,53 @@ interface ScoredClient {
   client: ClientRef;
 }
 
+// Score a single group-core token against one normalized client name.
+function scoreOne(gcore: string, norm: string): { score: number; conf: MatchConfidence } | null {
+  if (!gcore || !norm) return null;
+  if (norm === gcore) return { score: 100, conf: "exact" };
+
+  if (gcore.includes(norm) || norm.includes(gcore)) {
+    const shorter = Math.min(norm.length, gcore.length);
+    const longer = Math.max(norm.length, gcore.length);
+    const coverage = shorter / longer; // how much of the longer string is covered
+    // Guard against short-token false positives — a 2–3 char client name (or a
+    // tiny shared fragment) swallowed by a longer group subject must NOT score
+    // as a confident link. This was the main source of WRONG auto-links.
+    if (shorter < 4 || coverage < 0.6) {
+      return { score: Math.round(40 * coverage), conf: "low" };
+    }
+    const conf: MatchConfidence = coverage >= 0.85 ? "exact" : "high";
+    return { score: 70 + Math.round(coverage * 15), conf };
+  }
+
+  // Token overlap — require the smaller side to be fully covered.
+  const gt = new Set(gcore.split(" ").filter(Boolean));
+  const ct = new Set(norm.split(" ").filter(Boolean));
+  const overlap = [...gt].filter((w) => ct.has(w)).length;
+  if (overlap === 0) return null;
+  const minLen = Math.min(gt.size, ct.size);
+  if (overlap < minLen) return null;
+  return { score: 50 + overlap, conf: overlap >= 2 ? "high" : "low" };
+}
+
 function scoreClient(gcore: string, clients: { ref: ClientRef; norm: string }[]): ScoredClient | null {
   if (!gcore) return null;
-  let best: ScoredClient | null = null;
+  const scored: ScoredClient[] = [];
   for (const { ref, norm } of clients) {
-    if (!norm) continue;
-    let score = 0;
-    let conf: MatchConfidence = "low";
-    if (norm === gcore) {
-      score = 100;
-      conf = "exact";
-    } else if (gcore.includes(norm) || norm.includes(gcore)) {
-      // containment — strong when lengths are close
-      const diff = Math.abs(norm.length - gcore.length);
-      score = 85 - diff;
-      conf = diff <= 3 ? "exact" : "high";
-    } else {
-      const gt = new Set(gcore.split(" ").filter(Boolean));
-      const ct = new Set(norm.split(" ").filter(Boolean));
-      const overlap = [...gt].filter((w) => ct.has(w)).length;
-      const minLen = Math.min(gt.size, ct.size);
-      if (overlap > 0 && overlap >= minLen) {
-        score = 50 + overlap;
-        conf = overlap >= 2 ? "high" : "low";
-      }
-    }
-    if (score > 0 && (!best || score > best.score)) best = { score, confidence: conf, client: ref };
+    const s = scoreOne(gcore, norm);
+    if (s && s.score > 0) scored.push({ score: s.score, confidence: s.conf, client: ref });
+  }
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  const runner = scored[1];
+
+  // Ambiguity guard: if two different clients both match at a linkable
+  // confidence and are nearly tied, it's not safe to auto-pick one — downgrade
+  // to "low" so the auto-linker leaves it for a human.
+  const linkable = (c: MatchConfidence) => c === "exact" || c === "high";
+  if (runner && linkable(best.confidence) && linkable(runner.confidence) && best.score - runner.score < 8) {
+    return { ...best, confidence: "low" };
   }
   return best;
 }

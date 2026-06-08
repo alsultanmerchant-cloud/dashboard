@@ -2346,6 +2346,12 @@
     "viewTable": "جدول",
     "search": "ابحث عن عميل…",
     "clientsCount": "{n} عميل",
+    "relationFilter": {
+      "active": "نشط",
+      "lost": "مفقود / مؤرشف",
+      "all": "الكل",
+      "lostBadge": "مؤرشف"
+    },
     "openClient": "فتح",
     "board": {
       "atRisk": "في خطر",
@@ -2372,6 +2378,16 @@
       "request": "طلب",
       "escalation": "تصعيد",
       "milestone": "إنجاز"
+    },
+    "highlightAudience": {
+      "team": "فريق"
+    },
+    "execution": {
+      "title": "المهام المتأخرة",
+      "hint": "مهام هذا العميل المتأخرة — اربط شكوى التأخير بالعمل الفعلي والمرحلة المتوقف عندها.",
+      "overdueCount": "{n} متأخرة",
+      "maxStuck": "حتى {n} يوم توقف",
+      "daysStuck": "{n} يوم"
     },
     "col": {
       "client": "العميل",
