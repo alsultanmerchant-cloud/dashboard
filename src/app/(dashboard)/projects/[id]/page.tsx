@@ -547,7 +547,7 @@ export default async function ProjectDetailPage({
           Odoo body continuation — Categories (= Services), Documents
           (Odoo's "All Documents" smart-button target), Collaborators
           (Odoo's "Collaborators" smart-button target). Pixel-perfect
-          ordering per RWASEM_PARITY_NOTES §1 mandate; extensions live
+          ordering follows the Odoo parity layout; extensions live
           below in their own labelled section.
           ────────────────────────────────────────────────────────────── */}
       <SectionTitle title={t("sections.services.title")} />
@@ -654,7 +654,7 @@ export default async function ProjectDetailPage({
       </Card>
 
       {/* ──────────────────────────────────────────────────────────────
-          الأقسام الإضافية / Dashboard extras (RWASEM_PARITY_NOTES §8).
+          الأقسام الإضافية / Dashboard extras.
           Anything below this banner is a paid-for differentiator and
           MUST stay positioned after the Odoo body so a Rwasem-trained
           operator scrolling top-to-bottom sees Rwasem's layout first.

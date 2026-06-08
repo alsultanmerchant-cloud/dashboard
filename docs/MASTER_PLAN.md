@@ -299,7 +299,7 @@ Before any phase is called done:
 5. **Arabic copy** sourced from `lib/copy.ts` — no hardcoded strings.
 6. **Audit log + AI event** wired on every mutation.
 7. **At least one AI affordance** added that uses the new data.
-8. **Phase report** at `docs/phase-NN-report.md` with screenshots + smoke-test result.
+8. **PR summary** includes screenshots + smoke-test result when UI behavior changes.
 9. **Behind a feature flag** until owner sign-off.
 
 ---

@@ -4,7 +4,7 @@
 // the §1 pixel-perfect mandate:
 //   ★ · Project ID · Name · Customer · Project Manager · status dot · View Tasks
 // followed by our dashboard extras (Store Name, Start, End, Account Manager).
-// See RWASEM_PARITY_NOTES §PROJ-LIST-5.
+// Keep this order aligned with the Odoo project list muscle memory.
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";

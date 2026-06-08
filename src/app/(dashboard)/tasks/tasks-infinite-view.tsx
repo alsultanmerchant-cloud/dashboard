@@ -123,7 +123,7 @@ export function TasksInfiniteView({
   }, [view, hasMore, loading, loadedCount, loadMore, queryString]);
 
   // Feed the task detail page's `n / N < >` pagination from whichever view
-  // the user is in (RWASEM_PARITY_NOTES §NAV-2). Board and list views share
+  // the user is in. Board and list views share
   // the same underlying task IDs.
   const paginationIds = view === "kanban"
     ? boardTasks.map((t) => t.id)

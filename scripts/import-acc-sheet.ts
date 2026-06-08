@@ -4,9 +4,8 @@
  *
  * Status: DRY-RUN only. Reads docs/data/acc-sheet.xlsx, validates the
  * 7 expected tabs, and writes tmp/acc-sheet-diff.csv as a preview.
- * The --commit branch is intentionally unimplemented in this partial
- * commit — see docs/phase-T7-5-followups.md for the row-by-row mapping
- * spec the next agent must wire up to write into Supabase.
+ * The --commit branch is intentionally unimplemented until the row-by-row
+ * mapping is confirmed and wired up to write into Supabase.
  *
  * Usage:
  *   bun scripts/import-acc-sheet.ts            # dry-run, writes tmp/ diff
@@ -115,7 +114,7 @@ async function main() {
 
     // T7.5-finish: only the easiest tab is wired here (Clients Contracts).
     // The other 6 tabs are TODO until column mappings are confirmed against
-    // the live xlsx — see docs/phase-T7-5-followups.md §2.
+    // the live xlsx.
     const ccRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
       wb.Sheets["Clients Contracts"],
       { defval: null },

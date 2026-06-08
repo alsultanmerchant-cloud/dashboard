@@ -606,8 +606,7 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       "closed_task_count",
       // Rwasem operator list hides non-employee-visibility projects
       // (the default "Internal" portal project, mostly). Read it so we
-      // can mirror the same archive behaviour locally — see B5 in
-      // RWASEM_PARITY_NOTES.
+      // can mirror the same archive behaviour locally.
       "privacy_visibility",
     ],
     // active_test=false bypasses the implicit `active=true` filter Odoo

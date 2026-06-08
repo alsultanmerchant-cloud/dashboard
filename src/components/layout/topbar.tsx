@@ -97,7 +97,7 @@ export function Topbar({
             <Menu className="w-5 h-5 text-white/90 dark:text-muted-foreground" />
           </Button>
 
-          {/* Odoo-style 9-dot app switcher (RWASEM_PARITY_NOTES §NAV-6).
+          {/* Odoo-style 9-dot app switcher.
               Hidden on the mobile breakpoint where the hamburger covers it. */}
           <AppSwitcher className="hidden lg:inline-flex" />
 

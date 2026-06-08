@@ -77,7 +77,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/admin/users" \
   -H "Content-Type: application/json" \
   -d '{"email":"alsultain@agency.com","password":"alsultain22","email_confirm":true}'
 ```
-Then link the new user to `employee_profiles` + `user_roles` (see the bootstrap snippet in `docs/phase-0-report.md`).
+Then link the new user to `employee_profiles` + `user_roles`.
 
 ---
 
@@ -123,8 +123,8 @@ src/
 │   └── utils.ts
 ├── middleware.ts                           # Supabase session refresh + login redirect
 └── types/                                  # AppNotification etc.
-supabase/migrations/                        # 6 SQL migrations (already applied)
-docs/                                       # phase-0…phase-9 reports + design-system + MVP_PLAN + HANDOFF
+supabase/migrations/                        # SQL migrations
+docs/                                       # evergreen specs, plans, onboarding, and design notes
 ```
 
 ---
@@ -143,7 +143,7 @@ Reproduce manually:
 1. **Handover** form (`/handover`) → fill client + 2 services + AM + urgency → submit.
 2. **Tasks** (`/tasks?filter=open`) → open any task → change status → add comment with `@السلطان`.
 3. Backdate a task in DB to verify Scenario C, then refresh `/dashboard`.
-4. RLS test snippet is in `docs/phase-9-report.md`.
+4. Run the RLS Playwright coverage in `tests/playwright/rls-attack.spec.ts`.
 
 ---
 
@@ -210,4 +210,4 @@ curl -X POST "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/database
 ## Credits
 
 - Forked from [`mahm0udsaad/sales-ar`](https://github.com/mahm0udsaad/sales-ar) (CommandCenter shell, RTL fonts, agent UI shell).
-- Built phase-by-phase with documented gates — see [docs/MVP_PLAN.md](docs/MVP_PLAN.md), [docs/HANDOFF.md](docs/HANDOFF.md), and `docs/phase-N-report.md`.
+- Built phase-by-phase with documented gates — see [docs/MVP_PLAN.md](docs/MVP_PLAN.md) and [docs/ENGINEERING_PLAN.md](docs/ENGINEERING_PLAN.md).

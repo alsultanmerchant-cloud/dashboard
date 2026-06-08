@@ -152,7 +152,7 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
   return (
     <div className="space-y-4">
       {/* Feeds the detail page's `n / N < >` pagination via sessionStorage
-          (RWASEM_PARITY_NOTES §NAV-2). Only project UUIDs are captured —
+          Only project UUIDs are captured —
           Odoo-source rows whose Supabase id is null fall back to no
           pagination once the user clicks in. */}
       <RecordPaginationListTap

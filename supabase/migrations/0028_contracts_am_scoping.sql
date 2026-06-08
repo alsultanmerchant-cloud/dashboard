@@ -1,8 +1,7 @@
 -- =========================================================================
 -- Migration 0028 — Contracts per-AM RLS scoping (phase T7.5-finish)
 -- =========================================================================
--- Owner-decision: Option B from docs/phase-T7-5-followups.md §1.
---   contracts.account_manager_id is the authority for per-AM visibility.
+-- Owner-decision: contracts.account_manager_id is the authority for per-AM visibility.
 --   Heads/CEO/admin keep org-wide visibility via target.view_all OR
 --   contract.manage. Specialist AMs see only their own contracts.
 --

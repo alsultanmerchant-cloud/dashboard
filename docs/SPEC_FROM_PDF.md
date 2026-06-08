@@ -280,7 +280,7 @@ What the PDF requires that the dashboard does **not yet** fully cover:
 | `Project Box` fields (Project Manager field, HOLD overlay) | ✅ | T3: red HOLD ribbon on `/projects` list keys off `held_at IS NOT NULL`; reason on hover. Detail page banner already shipped pre-T3. |
 | Task `Delay (Days)` field shown after Done | ✅ | T3 (migration 0023): `tasks.delay_days` is a STORED GENERATED column, populated when `stage='done'` AND planned_date+completed_at are set. Surfaced as a red banner "تأخر التسليم بـ N يوم" on task detail. |
 | `Task Stage History` tab on task detail | ✅ | T3: task detail tab "تاريخ المراحل" surfaces real `task_stage_history` rows (populated by the 0007 trigger), via `src/lib/data/task-detail.ts`. Falls back to the activity feed for tasks predating the trigger. |
-| Log Note with file/Drive-link attachments + @mentions | ⚠ partial | Comments + @mentions + Drive-link auto-recognition already exist. Storage attachments BLOCKED on bucket configuration — see `docs/phase-T3-questions.md` §1. |
+| Log Note with file/Drive-link attachments + @mentions | ⚠ partial | Comments + @mentions + Drive-link auto-recognition already exist. Storage attachments require bucket configuration before full support. |
 | Supporting Sections as a separate org tier (Design, Content Writing, Video Editing, Programming) | ✅ | Shipped in T1 (migration 0021 + 0018 seed). |
 | Quality Control as an independent watcher role outside daily flow | ❌ DROPPED | Owner directive 2026-05-02 round 3 (`docs/DECISIONS_LOG.md`) — out of scope. |
 | Agent **cannot** change stage during `Client Changes` | ✅ | Trigger `assert_stage_transition_allowed` (migration 0015) gates by role_type; STAGE_EXIT_ROLE in `tasks/_actions.ts` mirrors it for friendly errors. Verified pre-T3. |

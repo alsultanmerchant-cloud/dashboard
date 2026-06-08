@@ -100,7 +100,7 @@ export function ModuleTabs() {
   })();
   // Odoo's Tasks menu opens to a "My Tasks / All Tasks" split. When we're
   // already on /tasks, swap the redundant Tasks tab for the same split so a
-  // click does something useful (RWASEM_PARITY_NOTES §NAV-5).
+  // click does something useful.
   const tasksFilterKeys = (searchParams.get("f") ?? searchParams.get("filter") ?? "").split(",").filter(Boolean);
   const isMyTasks = tasksFilterKeys.includes("mine");
 

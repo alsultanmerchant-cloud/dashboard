@@ -28,7 +28,6 @@ Plus running log:
 - [`DECISIONS_LOG.md`](DECISIONS_LOG.md) — every owner answer captured. Updated continuously. **Always check before guessing.**
 
 Raw sources (don't read unless verifying):
-- [`skylight-owner-system.md`](skylight-owner-system.md) — owner's raw doc
 - [`skylight-operations-pdf.txt`](skylight-operations-pdf.txt) — extracted PDF text
 - [`data/acc-sheet.xlsx`](data/acc-sheet.xlsx) — 5,000-row commercial Excel (drives T7.5)
 
@@ -54,7 +53,7 @@ Engineering Definition-of-Done per phase (from [`ENGINEERING_PLAN.md`](ENGINEERI
 5. Arabic copy in `lib/copy.ts`
 6. `audit_log` + `ai_event` on every mutation
 7. ≥1 AI affordance using the new data
-8. Phase report at `docs/phase-NN-report.md` with screenshots + smoke result
+8. PR summary includes screenshots + smoke result when UI behavior changes
 9. Behind a `feature_flags` row
 10. PR includes a Playwright test exercising the new gate
 
@@ -134,12 +133,12 @@ Deferred / parking lot:
 
 ## 7. How to dispatch agents
 
-See [`AGENT_DISPATCH.md`](AGENT_DISPATCH.md). Each phase has a **self-contained prompt** safe to hand to any agent that has read this onboarding doc + the five referenced specs.
+Each phase should be scoped from the evergreen specs above plus current product priorities.
 
 **Rules for any phase agent:**
 - Read [`MASTER_PLAN.md`](MASTER_PLAN.md), [`ENGINEERING_PLAN.md`](ENGINEERING_PLAN.md), [`SPEC_FROM_OWNER.md`](SPEC_FROM_OWNER.md), [`SPEC_FROM_PDF.md`](SPEC_FROM_PDF.md), [`DECISIONS_LOG.md`](DECISIONS_LOG.md) **before** writing code.
 - Apply migrations via the Supabase Management API endpoint above (NOT the Supabase MCP).
 - Touch Odoo **read-only** when you need reference data; use `src/lib/odoo/client.ts`.
 - Stop and surface a question to a human if owner intent is unclear — do not invent.
-- Write your phase report to `docs/phase-T{N}-report.md` when done.
-- Open a single PR per phase (`feat(T{N}): ...`) with the migration file, code, tests, and the report.
+- Include screenshots or smoke-test output in the PR when behavior changes.
+- Open a single PR per phase (`feat(T{N}): ...`) with the migration file, code, and tests.

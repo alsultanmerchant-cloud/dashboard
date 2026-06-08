@@ -1,8 +1,7 @@
 // Playwright spec — UI-level RLS contract for the tasks list (phase T2).
 //
-// Playwright runner is not yet installed at the repo root (see
-// docs/phase-T0-report.md, docs/phase-T1-report.md). This spec ships as a
-// contract that the QA agent picks up when the runner is wired.
+// This spec ships as a contract that the QA agent picks up when the runner is
+// wired.
 //
 // Coverage:
 //   1. Owner opens /tasks and sees a non-empty list (sanity / positive).

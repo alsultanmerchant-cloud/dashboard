@@ -31,8 +31,7 @@
 -- shipped in migration 0015 — it gates by `task_assignees.role_type` for
 -- the calling employee. We SEED the per-stage permission keys here so
 -- they exist in the catalog (for UI / future dynamic gating) but do NOT
--- replace the trigger mechanism. See docs/phase-T2-report.md for the
--- rationale.
+-- replace the trigger mechanism.
 --
 -- All operations are additive + idempotent.
 -- =========================================================================

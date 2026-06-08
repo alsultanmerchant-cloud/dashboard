@@ -1,8 +1,7 @@
 // Playwright spec — /organization/chart visibility + sales-flag gating.
 //
-// Playwright runner is not yet installed at the repo root (see
-// docs/phase-T0-report.md). This spec ships as a contract that the QA
-// agent picks up when the runner is wired.
+// This spec ships as a contract that the QA agent picks up when the runner is
+// wired.
 //
 // Coverage:
 //   1. Owner can open /organization/chart and see the technical depts.

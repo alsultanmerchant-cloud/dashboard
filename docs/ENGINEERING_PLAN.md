@@ -541,7 +541,7 @@ We will keep `kind='sales'` department records seeded in T1 so they exist when t
 5. Arabic copy in `lib/copy.ts`.
 6. `audit_log` + `ai_event` on every mutation.
 7. ≥1 AI affordance using the new data.
-8. Phase report at `docs/phase-NN-report.md` with screenshots + smoke result.
+8. PR summary includes screenshots + smoke result when UI behavior changes.
 9. Behind a `feature_flags` row.
 10. PR includes a Playwright test that exercises the new gate.
 

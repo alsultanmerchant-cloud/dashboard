@@ -3,7 +3,7 @@
 // Odoo's 9-dot app switcher, top-left of the topbar. Today it holds the
 // modules we actually have routes for; the rest are placeholders so the
 // muscle memory is in place when we expand to a full Rwasem replacement.
-// See RWASEM_PARITY_NOTES §NAV-6.
+// Keep the launcher discoverable for users coming from Odoo.
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";

@@ -603,7 +603,7 @@ export async function getProjectTaskSummary(orgId: string, projectId: string) {
     .eq("project_id", projectId)
     // Mirror Rwasem's "Tasks" smart-button which excludes archived rows
     // — without this, projects imported from Odoo with historical tasks
-    // inflate to ~7x the live count (see RWASEM_PARITY_NOTES §B2).
+    // inflate to ~7x the live count.
     .is("archived_at", null);
 
   const summary = {
@@ -628,7 +628,7 @@ export async function getProjectTaskSummary(orgId: string, projectId: string) {
     summary.total += 1;
     if (row.stage) summary[row.stage] = (summary[row.stage] ?? 0) + 1;
     // Status overlaps stage on 'done' and 'in_progress'. Double-counting
-    // pushed Total Progress past 100% (see RWASEM_PARITY_NOTES §B1) — only
+    // pushed Total Progress past 100% — only
     // tally status when it's distinct from the stage value.
     if (row.status && row.status !== row.stage) {
       summary[row.status] = (summary[row.status] ?? 0) + 1;
