@@ -163,12 +163,16 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 // 4-color row rule — matches the sheet's row fills (maroon / gold / gray /
-// none), tuned for the dark theme so cell chips stay readable on top.
+// none), tuned for the dark theme. On tinted rows we also brighten the plain-
+// text cells ([&_td] override) so client names / dates / numbers stay legible;
+// the colored pills use inline styles so they're unaffected.
 function rowTone(c: GridContract): string {
-  if (c.renewed_status === "NO") return "bg-[#4a1616] hover:bg-[#581a1a]"; // maroon
-  if (c.contract_type_key === "Hold") return "bg-[#5f4d0f] hover:bg-[#6e5912]"; // gold
+  if (c.renewed_status === "NO")
+    return "bg-[#4a1616] hover:bg-[#581a1a] [&_td]:text-rose-100/90"; // maroon
+  if (c.contract_type_key === "Hold")
+    return "bg-[#5f4d0f] hover:bg-[#6e5912] [&_td]:text-amber-50/90"; // gold
   if (c.renewed_status === "Closed")
-    return "bg-[#3a3a3a] hover:bg-[#454545] text-zinc-300"; // gray
+    return "bg-[#3a3a3a] hover:bg-[#454545] [&_td]:text-zinc-200/90"; // gray
   return "hover:bg-soft-1";
 }
 
