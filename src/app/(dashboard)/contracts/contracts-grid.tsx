@@ -65,23 +65,31 @@ type FieldValue =
       value: number | null;
     };
 
-const TARGET_TONE: Record<string, string> = {
-  Overdue: "bg-rose-500/15 text-rose-300 border-rose-500/30",
-  "Sales Deposit": "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  "On Target": "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  Closed: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
-  Lost: "bg-rose-700/20 text-rose-200 border-rose-700/40",
-  Renewed: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+// ── Sheet-exact color palette ──────────────────────────────────────────────
+// Lifted directly from the Skylight "Client's Contracts" tab so the grid
+// reads identically to the Excel the team knows. Target / Type / Payment are
+// SOLID-filled cells (not tinted pills); Package services are solid chips,
+// each service its own color; rows are tinted by renewed_status.
+
+type Swatch = { bg: string; fg: string };
+
+const TARGET_STYLE: Record<string, Swatch> = {
+  Overdue: { bg: "#E06666", fg: "#3D0000" },
+  "Sales Deposit": { bg: "#B6D7A8", fg: "#1E4112" },
+  "On Target": { bg: "#6FA8DC", fg: "#06283D" },
+  Closed: { bg: "#B7B7B7", fg: "#2A2A2A" },
+  Lost: { bg: "#EA9999", fg: "#3D0000" },
+  Renewed: { bg: "#A4C2F4", fg: "#06283D" },
 };
 
-const TYPE_TONE: Record<string, string> = {
-  New: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  Renew: "bg-sky-500/15 text-sky-300 border-sky-500/30",
-  UPSELL: "bg-violet-500/15 text-violet-300 border-violet-500/30",
-  WinBack: "bg-orange-500/15 text-orange-300 border-orange-500/30",
-  Hold: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  Switch: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",
-  Lost: "bg-rose-700/20 text-rose-200 border-rose-700/40",
+const TYPE_STYLE: Record<string, Swatch> = {
+  New: { bg: "#D9EAD3", fg: "#1E4112" },
+  Renew: { bg: "#9FC5E8", fg: "#06283D" },
+  UPSELL: { bg: "#D9D2E9", fg: "#20124D" },
+  WinBack: { bg: "#FCE5CD", fg: "#783F04" },
+  Hold: { bg: "#F9CB9C", fg: "#783F04" },
+  Switch: { bg: "#EAD1DC", fg: "#4C1130" },
+  Lost: { bg: "#EA9999", fg: "#3D0000" },
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -93,6 +101,51 @@ const TYPE_LABEL: Record<string, string> = {
   Switch: "تحويل",
   Lost: "Lost",
 };
+
+// Per-service chip colors (the sheet's smart-chip palette).
+const PACKAGE_STYLE: Record<string, Swatch> = {
+  حملات: { bg: "#38761D", fg: "#FFFFFF" },
+  "حملات lead generation": { bg: "#38761D", fg: "#FFFFFF" },
+  سوشيال: { bg: "#1155CC", fg: "#FFFFFF" },
+  سيو: { bg: "#B45F06", fg: "#FFFFFF" },
+  نوفا: { bg: "#E69138", fg: "#3D1C00" },
+  ذهبية: { bg: "#BF9000", fg: "#FFFFFF" },
+  "باقة فضية": { bg: "#999999", fg: "#FFFFFF" },
+  "باقة تصاميم": { bg: "#6AA84F", fg: "#FFFFFF" },
+  "باقة المشاهير": { bg: "#45818E", fg: "#FFFFFF" },
+  براندنج: { bg: "#7F7F7F", fg: "#FFFFFF" },
+  "انشاء متجر سلة/زد": { bg: "#434343", fg: "#FFFFFF" },
+  "انشاء متجر وورد بريس": { bg: "#434343", fg: "#FFFFFF" },
+  "انشاء بروفايل": { bg: "#434343", fg: "#FFFFFF" },
+  "🤖شات بوت": { bg: "#674EA7", fg: "#FFFFFF" },
+  "تيلي سيلز b2b": { bg: "#A64D79", fg: "#FFFFFF" },
+  تصوير: { bg: "#0B5394", fg: "#FFFFFF" },
+  موديريشن: { bg: "#76A5AF", fg: "#FFFFFF" },
+  "اعادة التهيئة": { bg: "#C27BA0", fg: "#FFFFFF" },
+  "لاندينج بيدج": { bg: "#8E7CC3", fg: "#FFFFFF" },
+  "اضافة منتجات": { bg: "#999999", fg: "#FFFFFF" },
+  Growth: { bg: "#38761D", fg: "#FFFFFF" },
+};
+const PACKAGE_DEFAULT: Swatch = { bg: "#666666", fg: "#FFFFFF" };
+
+const PAYMENT_STYLE: Record<string, Swatch> = {
+  Installments: { bg: "#E69138", fg: "#3D1C00" },
+  Complete: { bg: "#38761D", fg: "#FFFFFF" },
+};
+
+// AM pills — each account manager gets a stable color (the sheet assigns one
+// per person). Deterministic hash so it's consistent across renders.
+const AM_PALETTE = [
+  "#674EA7", "#1155CC", "#783F04", "#7F6000", "#0B5394",
+  "#A64D79", "#45818E", "#6AA84F", "#B45F06", "#434343",
+  "#990000", "#0C343D",
+];
+function amColor(name: string | null): string {
+  if (!name) return "#555555";
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AM_PALETTE[h % AM_PALETTE.length];
+}
 
 const RENEWED_LABEL: Record<string, { label: string; cls: string }> = {
   YES: { label: "YES", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
@@ -109,22 +162,37 @@ const STATUS_LABEL: Record<string, string> = {
   lost: "Lost",
 };
 
-// 4-color row rule. Returns the className for the <tr>, encoding the
-// semantic the team uses to scan the sheet at a glance.
+// 4-color row rule — matches the sheet's row fills (maroon / gold / gray /
+// none), tuned for the dark theme so cell chips stay readable on top.
 function rowTone(c: GridContract): string {
-  if (c.renewed_status === "NO") {
-    // Dark red — lost client.
-    return "bg-rose-950/40 hover:bg-rose-950/60";
-  }
-  if (c.contract_type_key === "Hold") {
-    // Yellow — waiting on client.
-    return "bg-amber-900/20 hover:bg-amber-900/30";
-  }
-  if (c.renewed_status === "Closed") {
-    // Gray — cleanly closed.
-    return "bg-zinc-800/40 hover:bg-zinc-800/60 text-muted-foreground";
-  }
+  if (c.renewed_status === "NO") return "bg-[#4a1616] hover:bg-[#581a1a]"; // maroon
+  if (c.contract_type_key === "Hold") return "bg-[#5f4d0f] hover:bg-[#6e5912]"; // gold
+  if (c.renewed_status === "Closed")
+    return "bg-[#3a3a3a] hover:bg-[#454545] text-zinc-300"; // gray
   return "hover:bg-soft-1";
+}
+
+// Solid-filled cell content matching the sheet (Target / Type / Payment).
+function SolidCell({
+  label,
+  swatch,
+  className,
+}: {
+  label: string;
+  swatch: Swatch;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-[64px] items-center justify-center rounded px-2 py-1 text-[11px] font-semibold whitespace-nowrap",
+        className,
+      )}
+      style={{ backgroundColor: swatch.bg, color: swatch.fg }}
+    >
+      {label}
+    </span>
+  );
 }
 
 function fmtMoney(n: number | null | undefined) {
@@ -164,6 +232,19 @@ function Pill({
       )}
     >
       {label}
+    </span>
+  );
+}
+
+// Account-manager pill — solid colored capsule per person, like the sheet.
+function AmPill({ name }: { name: string | null }) {
+  if (!name) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white whitespace-nowrap"
+      style={{ backgroundColor: amColor(name) }}
+    >
+      {name}
     </span>
   );
 }
@@ -424,7 +505,7 @@ export function ContractsGrid({
                               label: a.full_name,
                             })),
                           ]}
-                          renderView={() => c.account_manager_name ?? "—"}
+                          renderView={() => <AmPill name={c.account_manager_name} />}
                           onCommit={(v) =>
                             commit(
                               c.id,
@@ -434,7 +515,7 @@ export function ContractsGrid({
                           }
                         />
                       ) : (
-                        c.account_manager_name ?? "—"
+                        <AmPill name={c.account_manager_name} />
                       )}
                     </Td>
                     <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
@@ -464,12 +545,9 @@ export function ContractsGrid({
                             { value: "Closed", label: "Closed" },
                           ]}
                           renderView={() => (
-                            <Pill
+                            <SolidCell
                               label={c.target}
-                              tone={
-                                TARGET_TONE[c.target] ??
-                                "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"
-                              }
+                              swatch={TARGET_STYLE[c.target] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                             />
                           )}
                           onCommit={(v) =>
@@ -477,9 +555,9 @@ export function ContractsGrid({
                           }
                         />
                       ) : (
-                        <Pill
+                        <SolidCell
                           label={c.target}
-                          tone={TARGET_TONE[c.target] ?? "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"}
+                          swatch={TARGET_STYLE[c.target] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                         />
                       )}
                     </Td>
@@ -498,9 +576,9 @@ export function ContractsGrid({
                           ]}
                           renderView={() =>
                             c.contract_type_key ? (
-                              <Pill
+                              <SolidCell
                                 label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
-                                tone={TYPE_TONE[c.contract_type_key] ?? "bg-zinc-500/15"}
+                                swatch={TYPE_STYLE[c.contract_type_key] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                               />
                             ) : (
                               "—"
@@ -515,9 +593,9 @@ export function ContractsGrid({
                           }
                         />
                       ) : c.contract_type_key ? (
-                        <Pill
+                        <SolidCell
                           label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
-                          tone={TYPE_TONE[c.contract_type_key] ?? "bg-zinc-500/15"}
+                          swatch={TYPE_STYLE[c.contract_type_key] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                         />
                       ) : (
                         "—"
@@ -528,14 +606,18 @@ export function ContractsGrid({
                         <span className="text-muted-foreground">—</span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
-                          {c.package_names.map((p, i) => (
-                            <Pill
-                              key={`${p}-${i}`}
-                              label={p}
-                              tone="bg-soft-2 text-foreground border-soft"
-                              size="xs"
-                            />
-                          ))}
+                          {c.package_names.map((p, i) => {
+                            const sw = PACKAGE_STYLE[p.trim()] ?? PACKAGE_DEFAULT;
+                            return (
+                              <span
+                                key={`${p}-${i}`}
+                                className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                                style={{ backgroundColor: sw.bg, color: sw.fg }}
+                              >
+                                {p}
+                              </span>
+                            );
+                          })}
                         </div>
                       )}
                     </Td>
@@ -600,7 +682,16 @@ export function ContractsGrid({
                             { value: "Complete", label: "Complete" },
                             { value: "Installments", label: "Installments" },
                           ]}
-                          renderView={() => c.payment_status ?? "—"}
+                          renderView={() =>
+                            c.payment_status && PAYMENT_STYLE[c.payment_status] ? (
+                              <SolidCell
+                                label={c.payment_status}
+                                swatch={PAYMENT_STYLE[c.payment_status]}
+                              />
+                            ) : (
+                              "—"
+                            )
+                          }
                           onCommit={(v) =>
                             commit(
                               c.id,
@@ -608,6 +699,11 @@ export function ContractsGrid({
                               "الدفع",
                             )
                           }
+                        />
+                      ) : c.payment_status && PAYMENT_STYLE[c.payment_status] ? (
+                        <SolidCell
+                          label={c.payment_status}
+                          swatch={PAYMENT_STYLE[c.payment_status]}
                         />
                       ) : (
                         c.payment_status ?? "—"
