@@ -5,10 +5,16 @@
 // Actual + achievement bar), contracts movement, client-status overview, and
 // the per-AM target breakdown table. Colors match the sheet's semantics.
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Lock, Activity, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MonthlyDashboard, AmTargetRow } from "@/lib/data/contracts";
+import type {
+  MonthlyDashboard,
+  AmTargetRow,
+  MonthBuckets,
+  BucketClient,
+} from "@/lib/data/contracts";
 
 const AR_MONTHS = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
@@ -29,11 +35,13 @@ function fmtSR(n: number): string {
 export function CeoDashboard({
   dashboard,
   amTargets,
+  buckets,
   months,
   selectedMonth,
 }: {
   dashboard: MonthlyDashboard;
   amTargets: AmTargetRow[];
+  buckets: MonthBuckets;
   months: Array<{ month: string; is_frozen: boolean; source: string }>;
   selectedMonth: string;
 }) {
@@ -239,6 +247,161 @@ export function CeoDashboard({
           </div>
         )}
       </div>
+
+      {/* Per-client target breakdown (Acc_Target_Breakdown) */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <BucketCard
+          title="On Target — قابلة للتجديد"
+          accent="emerald"
+          clients={buckets.on_target}
+        />
+        <BucketCard title="Overdue — متأخرة" accent="rose" clients={buckets.overdue} />
+        <BucketCard
+          title="جُدِّدت من التارجت ✅"
+          accent="sky"
+          clients={buckets.renewed}
+          hideValue
+        />
+        <BucketCard
+          title="فُقدت من التارجت"
+          accent="zinc"
+          clients={buckets.lost}
+          hideValue
+        />
+      </div>
+
+      {/* Installments due this month */}
+      <div className="rounded-2xl border border-soft bg-card">
+        <div className="flex items-center justify-between border-b border-soft px-4 py-3">
+          <h3 className="text-sm font-semibold">الدفعات المستحقّة هذا الشهر</h3>
+          <span className="text-[11px] text-muted-foreground">
+            {buckets.installments_due.length} دفعة
+          </span>
+        </div>
+        {buckets.installments_due.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            لا توجد دفعات مستحقّة هذا الشهر.
+          </p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto">
+            <table className="w-full text-right text-[12px]">
+              <thead className="sticky top-0 bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-start font-medium">العميل</th>
+                  <th className="px-3 py-2 text-start font-medium">المسوّق</th>
+                  <th className="px-3 py-2 text-end font-medium">المبلغ</th>
+                  <th className="px-3 py-2 font-medium">الحالة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {buckets.installments_due.map((i, idx) => (
+                  <tr key={`${i.contract_id}-${idx}`} className="border-t border-soft/60">
+                    <td className="px-3 py-1.5">
+                      {i.contract_id ? (
+                        <Link href={`/contracts/${i.contract_id}`} className="hover:underline">
+                          {i.client_name ?? "—"}
+                        </Link>
+                      ) : (
+                        i.client_name ?? "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      {i.account_manager_name ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5 text-end tabular-nums">
+                      {fmtSR(i.expected_amount)}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span
+                        className={cn(
+                          "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                          i.status === "received"
+                            ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                            : i.status === "overdue"
+                              ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                              : "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
+                        )}
+                      >
+                        {INST_STATUS[i.status] ?? i.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const INST_STATUS: Record<string, string> = {
+  received: "مستلمة",
+  overdue: "متأخرة",
+  pending: "منتظرة",
+  partial: "جزئية",
+};
+
+function BucketCard({
+  title,
+  accent,
+  clients,
+  hideValue,
+}: {
+  title: string;
+  accent: "emerald" | "rose" | "sky" | "zinc";
+  clients: BucketClient[];
+  hideValue?: boolean;
+}) {
+  const dot = {
+    emerald: "bg-emerald-400",
+    rose: "bg-rose-400",
+    sky: "bg-sky-400",
+    zinc: "bg-zinc-400",
+  }[accent];
+  const total = clients.reduce((s, c) => s + c.value, 0);
+  return (
+    <div className="rounded-2xl border border-soft bg-card">
+      <div className="flex items-center justify-between border-b border-soft px-4 py-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <span className={cn("size-2 rounded-full", dot)} />
+          {title}
+          <span className="text-muted-foreground font-normal">({clients.length})</span>
+        </h3>
+        {!hideValue && total > 0 && (
+          <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+            {fmtSR(total)}
+          </span>
+        )}
+      </div>
+      {clients.length === 0 ? (
+        <p className="px-4 py-5 text-center text-xs text-muted-foreground">— لا يوجد —</p>
+      ) : (
+        <div className="max-h-60 overflow-y-auto divide-y divide-soft/50">
+          {clients.map((c) => (
+            <Link
+              key={c.contract_id}
+              href={`/contracts/${c.contract_id}`}
+              className="flex items-center justify-between gap-2 px-4 py-2 text-[12px] hover:bg-soft-1"
+            >
+              <span className="min-w-0 truncate">
+                {c.client_code && (
+                  <span className="me-1.5 font-mono text-[10px] text-muted-foreground">
+                    {c.client_code}
+                  </span>
+                )}
+                {c.client_name ?? "—"}
+              </span>
+              {!hideValue && (
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {fmtSR(c.value)}
+                </span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

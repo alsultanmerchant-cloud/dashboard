@@ -233,6 +233,136 @@ export async function getAmTargets(
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Per-client target breakdown (the sheet's Acc_Target_Breakdown tab).
+// For a given month, lists which clients fall into each bucket — On-Target,
+// Overdue, Renewed, Lost — plus the installments due that month. This is the
+// CEO drill-down behind the dashboard aggregate numbers.
+// ---------------------------------------------------------------------------
+
+export type BucketClient = {
+  contract_id: string;
+  client_name: string | null;
+  client_code: string | null;
+  account_manager_name: string | null;
+  value: number;
+};
+export type InstallmentDue = {
+  contract_id: string;
+  client_name: string | null;
+  account_manager_name: string | null;
+  expected_amount: number;
+  status: string;
+};
+export type MonthBuckets = {
+  on_target: BucketClient[];
+  overdue: BucketClient[];
+  renewed: BucketClient[];
+  lost: BucketClient[];
+  installments_due: InstallmentDue[];
+};
+
+export async function getMonthTargetBuckets(
+  orgId: string,
+  monthIso?: string,
+): Promise<MonthBuckets> {
+  const month = monthIso ?? monthStartIso(new Date());
+  const start = month;
+  const endDate = new Date(
+    Date.UTC(
+      Number(month.slice(0, 4)),
+      Number(month.slice(5, 7)),
+      0,
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  // Contracts whose end-date falls in the month (the renewal pool + outcomes).
+  const { data: contracts, error } = await supabaseAdmin
+    .from("contracts")
+    .select(
+      `id, target, renewed_status, next_contract_value, total_value,
+       client:clients(name, external_id),
+       am:employee_profiles!contracts_account_manager_id_fkey(full_name),
+       package:packages!contracts_package_id_fkey(is_renewable)`,
+    )
+    .eq("organization_id", orgId)
+    .gte("end_date", start)
+    .lte("end_date", endDate);
+  if (error) throw error;
+
+  type CRow = {
+    id: string;
+    target: string;
+    renewed_status: string | null;
+    next_contract_value: number | string | null;
+    total_value: number | string | null;
+    client: { name: string | null; external_id: string | null } | null;
+    am: { full_name: string } | null;
+    package: { is_renewable: boolean } | null;
+  };
+
+  const on_target: BucketClient[] = [];
+  const overdue: BucketClient[] = [];
+  const renewed: BucketClient[] = [];
+  const lost: BucketClient[] = [];
+
+  for (const c of (contracts ?? []) as unknown as CRow[]) {
+    const row: BucketClient = {
+      contract_id: c.id,
+      client_name: c.client?.name ?? null,
+      client_code: c.client?.external_id ?? null,
+      account_manager_name: c.am?.full_name ?? null,
+      value: Number(c.next_contract_value ?? c.total_value ?? 0),
+    };
+    const renewable = c.package?.is_renewable ?? true;
+    if (c.renewed_status === "YES") renewed.push(row);
+    else if (c.renewed_status === "NO") lost.push(row);
+    if (renewable && c.target === "On Target") on_target.push(row);
+    else if (renewable && c.target === "Overdue") overdue.push(row);
+  }
+
+  // Installments due in the month.
+  const { data: insts, error: instErr } = await supabaseAdmin
+    .from("installments")
+    .select(
+      `expected_amount, status,
+       contract:contracts!inner(id, organization_id,
+         client:clients(name),
+         am:employee_profiles!contracts_account_manager_id_fkey(full_name))`,
+    )
+    .eq("contract.organization_id", orgId)
+    .gte("expected_date", start)
+    .lte("expected_date", endDate)
+    .order("expected_amount", { ascending: false });
+  if (instErr) throw instErr;
+
+  type IRow = {
+    expected_amount: number | string;
+    status: string;
+    contract: {
+      id: string;
+      client: { name: string | null } | null;
+      am: { full_name: string } | null;
+    } | null;
+  };
+  const installments_due: InstallmentDue[] = (
+    (insts ?? []) as unknown as IRow[]
+  ).map((i) => ({
+    contract_id: i.contract?.id ?? "",
+    client_name: i.contract?.client?.name ?? null,
+    account_manager_name: i.contract?.am?.full_name ?? null,
+    expected_amount: Number(i.expected_amount),
+    status: i.status,
+  }));
+
+  const byValue = (a: BucketClient, b: BucketClient) => b.value - a.value;
+  on_target.sort(byValue);
+  overdue.sort(byValue);
+  return { on_target, overdue, renewed, lost, installments_due };
+}
+
 export async function listContractTypes(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("contract_types")

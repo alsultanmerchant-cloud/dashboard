@@ -8,6 +8,7 @@ import {
   getMonthlyDashboard,
   listDashboardMonths,
   getAmTargets,
+  getMonthTargetBuckets,
   type GridContract,
 } from "@/lib/data/contracts";
 import { listAccountManagers } from "@/lib/data/employees";
@@ -174,9 +175,10 @@ async function DashboardSection({
   const months = await listDashboardMonths(orgId);
   const selected = month ?? months[0]?.month ?? undefined;
 
-  const [dashboard, amTargets] = await Promise.all([
+  const [dashboard, amTargets, buckets] = await Promise.all([
     getMonthlyDashboard(orgId, selected),
     getAmTargets(orgId, selected),
+    getMonthTargetBuckets(orgId, selected),
   ]);
 
   if (!dashboard) {
@@ -192,6 +194,7 @@ async function DashboardSection({
     <CeoDashboard
       dashboard={dashboard}
       amTargets={amTargets}
+      buckets={buckets}
       months={months}
       selectedMonth={selected ?? dashboard.month}
     />
