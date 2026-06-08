@@ -173,14 +173,6 @@ export function CeoDashboard({
       <div className="rounded-2xl border border-soft bg-card">
         <div className="flex items-center justify-between border-b border-soft px-4 py-3">
           <h3 className="text-sm font-semibold">تارجت الأكونت (هذا الشهر)</h3>
-          {d.is_frozen && (
-            <span
-              className="text-[10px] text-amber-300/80"
-              title="إجماليات الشهر مُجمّدة ومطابقة للشيت؛ تفصيل كل أكونت محسوب مباشرة وقد يختلف قليلًا"
-            >
-              تفصيل تقديري (محسوب مباشرة)
-            </span>
-          )}
         </div>
         {amTargets.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -249,6 +241,12 @@ export function CeoDashboard({
       </div>
 
       {/* Per-client target breakdown (Acc_Target_Breakdown) */}
+      {d.is_frozen && (
+        <p className="text-[11px] text-amber-300/70">
+          تفصيل العملاء أدناه محسوب مباشرة من الحالة الحالية وقد يختلف قليلًا عن
+          الشهر المُجمّد — الإجماليات وتارجت الأكونت أعلاه مطابقة للشيت.
+        </p>
+      )}
       <div className="grid gap-3 lg:grid-cols-2">
         <BucketCard
           title="On Target — قابلة للتجديد"
