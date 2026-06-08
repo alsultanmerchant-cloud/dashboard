@@ -6037,6 +6037,7 @@ export type Database = {
           client_id: string | null
           created_at: string
           group_kind: string | null
+          history_imported_at: string | null
           id: string
           is_active: boolean
           last_message_at: string | null
@@ -6054,6 +6055,7 @@ export type Database = {
           client_id?: string | null
           created_at?: string
           group_kind?: string | null
+          history_imported_at?: string | null
           id?: string
           is_active?: boolean
           last_message_at?: string | null
@@ -6071,6 +6073,7 @@ export type Database = {
           client_id?: string | null
           created_at?: string
           group_kind?: string | null
+          history_imported_at?: string | null
           id?: string
           is_active?: boolean
           last_message_at?: string | null

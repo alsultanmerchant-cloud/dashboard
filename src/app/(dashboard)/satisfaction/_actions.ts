@@ -347,15 +347,18 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
   if (!waConfigured()) {
     return { error: "WA_API_URL غير مهيأ — أضف عنوان خدمة OpenWA في متغيرات البيئة" };
   }
+  const orgId = session.orgId; // captured for use inside the worker closure
 
-  // Target: mapped (client_id set) + active groups that have no messages yet.
+  // Target: mapped (client_id set) + active groups not yet history-seeded.
+  // Keyed on history_imported_at (not message_count) so groups that only got a
+  // stray live webhook message still get a full backfill — see migration 0155.
   const { data: targets, error } = await supabaseAdmin
     .from("wa_group_links")
     .select("chat_id, chat_name, message_count")
-    .eq("organization_id", session.orgId)
+    .eq("organization_id", orgId)
     .not("client_id", "is", null)
     .eq("is_active", true)
-    .eq("message_count", 0);
+    .is("history_imported_at", null);
   if (error) return { error: error.message };
   const queue = (targets ?? []).map((t) => ({
     chatId: t.chat_id as string,
@@ -388,8 +391,16 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
           const res = await ingestWaMessages(msgs);
           imported += res.ingested;
         }
+        // Successful fetch (even if the store returned nothing) → mark seeded so
+        // the group isn't re-attempted forever. A thrown gateway error skips the
+        // stamp below, leaving it null to retry on the next run.
+        await supabaseAdmin
+          .from("wa_group_links")
+          .update({ history_imported_at: new Date().toISOString() })
+          .eq("organization_id", orgId)
+          .eq("chat_id", chatId);
       } catch {
-        /* skip this group; remains message_count=0, retried next run */
+        /* transient gateway error; leave history_imported_at null → retried next run */
       }
       done += 1;
     }
