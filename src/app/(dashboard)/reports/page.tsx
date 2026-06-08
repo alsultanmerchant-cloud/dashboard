@@ -218,43 +218,6 @@ async function OdooSections() {
       </div>
 
       <SectionTitle
-        title={t("projectCompliance.title")}
-        description={t("projectCompliance.description")}
-      />
-      {reports.projectCompliance.length === 0 ? (
-        <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
-          {t("projectCompliance.empty")}
-        </p>
-      ) : (
-        <Card className="mb-8">
-          <CardContent className="p-5 space-y-3">
-            {reports.projectCompliance.map((d) => (
-              <div key={d.projectId}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <Link
-                    href={`/projects/odoo/${d.projectId}`}
-                    className="text-sm font-medium hover:text-cyan transition-colors truncate max-w-[60%]"
-                  >
-                    {d.projectName}
-                  </Link>
-                  <span className="text-sm font-bold tabular-nums">
-                    {d.pct === null ? "—" : `${d.pct}%`}
-                    <span className="text-xs text-muted-foreground mx-1.5"> / {t("count.task", { count: d.total })}</span>
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-soft-2 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-l from-cc-green to-cyan"
-                    style={{ width: `${d.pct ?? 0}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      <SectionTitle
         title={t("reworkByProject.title")}
         description={t("reworkByProject.description")}
       />
