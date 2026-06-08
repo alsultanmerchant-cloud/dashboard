@@ -92,6 +92,147 @@ export async function listContractsPaged(
   return { rows: data ?? [], total: count ?? 0, page, pageSize };
 }
 
+// ---------------------------------------------------------------------------
+// Monthly target engine readers (the CEO dashboard + per-AM breakdown).
+// Past months are frozen (source='sheet_import' or 'computed_frozen') and
+// returned as-is; the current month is recomputed live via the RPC before
+// reading so the numbers are always fresh until the month-end freeze cron
+// locks them.
+// ---------------------------------------------------------------------------
+
+export type MonthlyDashboard = {
+  month: string;
+  expected_renewals: number;
+  expected_installments: number;
+  total_expected: number;
+  actual_renewals: number;
+  actual_installments: number;
+  total_actual: number;
+  achievement_pct: number;
+  mov_new: number;
+  mov_renewed: number;
+  mov_lost: number;
+  mov_upsell: number;
+  mov_winback: number;
+  mov_closed: number;
+  mov_hold: number;
+  cnt_total_clients: number;
+  cnt_on_target: number;
+  cnt_overdue: number;
+  cnt_sales_deposit: number;
+  is_frozen: boolean;
+  source: string;
+};
+
+function monthStartIso(d: Date): string {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Returns the dashboard totals for a month. If the month is NOT frozen
+ * (current/future), recomputes live first so the figures are fresh.
+ */
+export async function getMonthlyDashboard(
+  orgId: string,
+  monthIso?: string,
+): Promise<MonthlyDashboard | null> {
+  const month = monthIso ?? monthStartIso(new Date());
+
+  // Recompute live (the RPC is a no-op for frozen months).
+  await supabaseAdmin.rpc("compute_monthly_dashboard", {
+    p_org: orgId,
+    p_month: month,
+  });
+
+  const { data, error } = await supabaseAdmin
+    .from("monthly_dashboard_totals")
+    .select("*")
+    .eq("organization_id", orgId)
+    .eq("month", month)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as MonthlyDashboard) ?? null;
+}
+
+/** All months we have totals for, newest first — for the month picker. */
+export async function listDashboardMonths(orgId: string): Promise<
+  Array<{ month: string; is_frozen: boolean; source: string }>
+> {
+  const { data, error } = await supabaseAdmin
+    .from("monthly_dashboard_totals")
+    .select("month, is_frozen, source")
+    .eq("organization_id", orgId)
+    .order("month", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export type AmTargetRow = {
+  account_manager_id: string;
+  account_manager_name: string | null;
+  expected_total: number;
+  achieved_total: number;
+  achievement_pct: number;
+  breakdown: {
+    expected_renewals?: number;
+    expected_installments?: number;
+    achieved_renewals?: number;
+    achieved_installments?: number;
+  } | null;
+};
+
+/** Per-AM target rollup for a month. Recomputes live for non-frozen months. */
+export async function getAmTargets(
+  orgId: string,
+  monthIso?: string,
+): Promise<AmTargetRow[]> {
+  const month = monthIso ?? monthStartIso(new Date());
+
+  // Only recompute when the month isn't frozen.
+  const { data: mdt } = await supabaseAdmin
+    .from("monthly_dashboard_totals")
+    .select("is_frozen")
+    .eq("organization_id", orgId)
+    .eq("month", month)
+    .maybeSingle();
+  if (!mdt?.is_frozen) {
+    await supabaseAdmin.rpc("compute_am_monthly_targets", {
+      p_org: orgId,
+      p_month: month,
+    });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("am_targets")
+    .select(
+      `account_manager_id, expected_total, achieved_total, achievement_pct, breakdown_json,
+       am:employee_profiles!am_targets_account_manager_id_fkey(full_name)`,
+    )
+    .eq("organization_id", orgId)
+    .eq("month", month)
+    .order("expected_total", { ascending: false });
+  if (error) throw error;
+
+  type Row = {
+    account_manager_id: string;
+    expected_total: number | string;
+    achieved_total: number | string;
+    achievement_pct: number | string;
+    breakdown_json: AmTargetRow["breakdown"];
+    am: { full_name: string } | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    account_manager_id: r.account_manager_id,
+    account_manager_name: r.am?.full_name ?? null,
+    expected_total: Number(r.expected_total),
+    achieved_total: Number(r.achieved_total),
+    achievement_pct: Number(r.achievement_pct),
+    breakdown: r.breakdown_json,
+  }));
+}
+
 export async function listContractTypes(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("contract_types")
