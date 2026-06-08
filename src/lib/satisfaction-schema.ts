@@ -30,7 +30,10 @@ export const SatisfactionSchema = z.object({
     .array(
       z.object({
         type: z.enum(HIGHLIGHT_TYPES),
-        audience: z.enum(HIGHLIGHT_AUDIENCES), // client message vs internal team
+        // client message vs internal team. `.catch` defaults a missing/invalid
+        // value to "client" so a single bad enum can't fail the whole analysis
+        // (flash occasionally omits it → schema-validation failures otherwise).
+        audience: z.enum(HIGHLIGHT_AUDIENCES).catch("client"),
         text: z.string(), // Arabic, one line
         date: z.string().nullable(), // YYYY-MM-DD if identifiable
       }),
