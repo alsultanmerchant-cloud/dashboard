@@ -12,7 +12,6 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
@@ -21,8 +20,8 @@ import {
   formatArabicShortDate,
   formatArabicDateTime,
 } from "@/lib/utils-format";
-import { InstallmentReceiveForm } from "./installment-receive-form";
 import { EventRecordForm } from "./event-record-form";
+import { InstallmentsEditor, type InstallmentRow } from "./installments-editor";
 
 const STATUS_LABEL: Record<string, string> = {
   active: "نشط",
@@ -37,14 +36,6 @@ const TARGET_LABEL: Record<string, string> = {
   Overdue: "متأخر",
   Lost: "مفقود",
   Renewed: "مُجدَّد",
-};
-
-const INSTALLMENT_STATUS: Record<string, string> = {
-  pending: "قيد الانتظار",
-  received: "مُستلَمة",
-  partial: "جزئية",
-  overdue: "متأخرة",
-  waived: "مُعفاة",
 };
 
 const CYCLE_STATE: Record<string, string> = {
@@ -177,57 +168,21 @@ export default async function ContractDetailPage({
         description="الدفعات المتوقّعة والمستلمة على هذا العقد"
       />
       <div className="mb-8">
-        {installments.length === 0 ? (
-          <Card>
-            <CardContent className="p-4 text-sm text-muted-foreground">
-              لا توجد دفعات مسجَّلة لهذا العقد بعد.
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {installments.map((i) => {
-              const isReceived = i.status === "received" || i.status === "partial";
-              return (
-                <Card
-                  key={i.id}
-                  className={isReceived ? "border-cc-green/30" : undefined}
-                >
-                  <CardContent className="p-3.5 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-8 rounded-lg bg-cyan-dim text-cyan flex items-center justify-center text-xs font-semibold tabular-nums shrink-0">
-                        {i.sequence}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">
-                          {formatCurrency(Number(i.expected_amount || 0))}
-                          <span className="text-xs text-muted-foreground mx-2">
-                            متوقَّع {formatArabicShortDate(i.expected_date)}
-                          </span>
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {i.actual_date
-                            ? `استُلِمت ${formatArabicShortDate(i.actual_date)} — ${formatCurrency(Number(i.actual_amount || 0))}`
-                            : "لم تُستلَم بعد"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Badge variant={isReceived ? "default" : "outline"}>
-                        {INSTALLMENT_STATUS[i.status] ?? i.status}
-                      </Badge>
-                      {canManage && i.status !== "received" && (
-                        <InstallmentReceiveForm
-                          installmentId={i.id}
-                          expectedAmount={Number(i.expected_amount || 0)}
-                        />
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+        <InstallmentsEditor
+          contractId={contract.id}
+          canManage={canManage}
+          rows={installments.map(
+            (i): InstallmentRow => ({
+              id: i.id,
+              sequence: i.sequence,
+              expected_date: i.expected_date,
+              expected_amount: Number(i.expected_amount || 0),
+              actual_date: i.actual_date,
+              actual_amount: i.actual_amount == null ? null : Number(i.actual_amount),
+              status: i.status,
+            }),
+          )}
+        />
       </div>
 
       {/* Monthly cycles */}

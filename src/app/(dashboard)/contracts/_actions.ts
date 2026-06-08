@@ -731,3 +731,266 @@ export async function createContractAction(input: {
   revalidatePath("/contracts");
   return { ok: true, id: row.id };
 }
+
+// ---------------------------------------------------------------------------
+// Installment management — add / edit / delete a payment on a contract.
+//
+// The team manages the 4-payment schedule by hand in the sheet's Installments
+// Tracker. These actions move that into the dashboard so the sheet can be
+// retired. Every write recomputes contracts.paid_value from the sum of
+// received installments, and derives each row's status from its dates/amount.
+// All gated on contract.manage; all log to audit_log.
+// ---------------------------------------------------------------------------
+
+function deriveInstallmentStatus(
+  expectedDate: string | null,
+  actualDate: string | null,
+  expectedAmount: number,
+  actualAmount: number | null,
+  todayIso: string,
+): "pending" | "received" | "partial" | "overdue" {
+  if (actualDate && (actualAmount ?? 0) > 0) {
+    return (actualAmount ?? 0) + 0.01 < expectedAmount ? "partial" : "received";
+  }
+  if (expectedDate && expectedDate < todayIso) return "overdue";
+  return "pending";
+}
+
+async function recomputeContractPaid(contractId: string) {
+  const { data: rows } = await supabaseAdmin
+    .from("installments")
+    .select("actual_amount")
+    .eq("contract_id", contractId);
+  const paid = (rows ?? []).reduce((s, r) => s + Number(r.actual_amount || 0), 0);
+  await supabaseAdmin
+    .from("contracts")
+    .update({ paid_value: paid })
+    .eq("id", contractId);
+  return paid;
+}
+
+const AddInstallmentSchema = z.object({
+  contract_id: z.string().regex(UUID_RE),
+  expected_date: z.string().regex(DATE_RE),
+  expected_amount: z.coerce.number().positive().max(10_000_000),
+});
+
+export async function addInstallmentAction(input: {
+  contractId: string;
+  expectedDate: string;
+  expectedAmount: number;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const parsed = AddInstallmentSchema.safeParse({
+    contract_id: input.contractId,
+    expected_date: input.expectedDate,
+    expected_amount: input.expectedAmount,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const { data: contract } = await supabaseAdmin
+    .from("contracts")
+    .select("id, organization_id")
+    .eq("id", parsed.data.contract_id)
+    .maybeSingle();
+  if (!contract || contract.organization_id !== session.orgId) {
+    return { error: "العقد غير موجود" };
+  }
+
+  // Next sequence number for this contract.
+  const { data: maxRow } = await supabaseAdmin
+    .from("installments")
+    .select("sequence")
+    .eq("contract_id", parsed.data.contract_id)
+    .order("sequence", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextSeq = (maxRow?.sequence ?? 0) + 1;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: row, error } = await supabaseAdmin
+    .from("installments")
+    .insert({
+      organization_id: session.orgId,
+      contract_id: parsed.data.contract_id,
+      sequence: nextSeq,
+      expected_date: parsed.data.expected_date,
+      expected_amount: parsed.data.expected_amount,
+      status: deriveInstallmentStatus(
+        parsed.data.expected_date,
+        null,
+        parsed.data.expected_amount,
+        null,
+        today,
+      ),
+    })
+    .select("id")
+    .single();
+  if (error || !row) return { error: error?.message ?? "تعذّر إضافة الدفعة" };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.installment_add",
+    entityType: "installment",
+    entityId: row.id,
+    metadata: {
+      contract_id: parsed.data.contract_id,
+      sequence: nextSeq,
+      expected_amount: parsed.data.expected_amount,
+    },
+  });
+
+  revalidatePath(`/contracts/${parsed.data.contract_id}`);
+  return { ok: true, id: row.id };
+}
+
+const UpdateInstallmentSchema = z.discriminatedUnion("field", [
+  z.object({ field: z.literal("expected_date"), value: z.string().regex(DATE_RE) }),
+  z.object({
+    field: z.literal("expected_amount"),
+    value: z.coerce.number().nonnegative().max(10_000_000),
+  }),
+  z.object({
+    field: z.literal("actual_date"),
+    value: z.string().regex(DATE_RE).nullable(),
+  }),
+  z.object({
+    field: z.literal("actual_amount"),
+    value: z.coerce.number().nonnegative().max(10_000_000).nullable(),
+  }),
+]);
+
+export async function updateInstallmentAction(input: {
+  id: string;
+  field: string;
+  value: string | number | null;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!UUID_RE.test(input.id)) return { error: "معرف غير صالح" };
+  const parsed = UpdateInstallmentSchema.safeParse({
+    field: input.field,
+    value: input.value,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const { data: inst } = await supabaseAdmin
+    .from("installments")
+    .select(
+      "id, organization_id, contract_id, expected_date, expected_amount, actual_date, actual_amount",
+    )
+    .eq("id", input.id)
+    .maybeSingle();
+  if (!inst || inst.organization_id !== session.orgId) {
+    return { error: "الدفعة غير موجودة" };
+  }
+
+  // Apply the change, then re-derive status from the resulting state.
+  const next = {
+    expected_date: inst.expected_date as string | null,
+    expected_amount: Number(inst.expected_amount || 0),
+    actual_date: inst.actual_date as string | null,
+    actual_amount:
+      inst.actual_amount == null ? null : Number(inst.actual_amount),
+  };
+  if (parsed.data.field === "expected_date") next.expected_date = parsed.data.value;
+  if (parsed.data.field === "expected_amount") next.expected_amount = parsed.data.value;
+  if (parsed.data.field === "actual_date") next.actual_date = parsed.data.value;
+  if (parsed.data.field === "actual_amount") next.actual_amount = parsed.data.value;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const status = deriveInstallmentStatus(
+    next.expected_date,
+    next.actual_date,
+    next.expected_amount,
+    next.actual_amount,
+    today,
+  );
+
+  const { error } = await supabaseAdmin
+    .from("installments")
+    .update({
+      expected_date: next.expected_date,
+      expected_amount: next.expected_amount,
+      actual_date: next.actual_date,
+      actual_amount: next.actual_amount,
+      status,
+    })
+    .eq("id", inst.id);
+  if (error) return { error: error.message };
+
+  const paid = await recomputeContractPaid(inst.contract_id);
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.installment_update",
+    entityType: "installment",
+    entityId: inst.id,
+    metadata: {
+      contract_id: inst.contract_id,
+      field: parsed.data.field,
+      value: parsed.data.value,
+      paid_value_total: paid,
+    },
+  });
+
+  revalidatePath(`/contracts/${inst.contract_id}`);
+  revalidatePath("/contracts");
+  return { ok: true, id: inst.id };
+}
+
+export async function deleteInstallmentAction(input: {
+  id: string;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  if (!UUID_RE.test(input.id)) return { error: "معرف غير صالح" };
+
+  const { data: inst } = await supabaseAdmin
+    .from("installments")
+    .select("id, organization_id, contract_id")
+    .eq("id", input.id)
+    .maybeSingle();
+  if (!inst || inst.organization_id !== session.orgId) {
+    return { error: "الدفعة غير موجودة" };
+  }
+
+  const { error } = await supabaseAdmin
+    .from("installments")
+    .delete()
+    .eq("id", inst.id);
+  if (error) return { error: error.message };
+
+  const paid = await recomputeContractPaid(inst.contract_id);
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.installment_delete",
+    entityType: "installment",
+    entityId: inst.id,
+    metadata: { contract_id: inst.contract_id, paid_value_total: paid },
+  });
+
+  revalidatePath(`/contracts/${inst.contract_id}`);
+  return { ok: true, id: inst.id };
+}
