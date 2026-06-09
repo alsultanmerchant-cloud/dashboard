@@ -450,7 +450,7 @@ export function ContractsGrid({
       <div className="rounded-2xl border border-soft bg-card">
         <div className="overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full border-collapse text-right text-[12px]">
-            <thead className="sticky top-0 z-20 bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <thead className="sticky top-0 z-20 bg-muted text-[10px] uppercase tracking-wider text-muted-foreground">
               <tr>
                 <Th sticky className="text-center min-w-[64px]">Client ID</Th>
                 <Th sticky stickyOffset="64px" className="min-w-[200px]">العميل</Th>
@@ -930,7 +930,7 @@ function Th({
     <th
       className={cn(
         "px-3 py-2.5 font-medium text-start whitespace-nowrap",
-        sticky && "sticky z-30 bg-soft-1",
+        sticky && "sticky z-30 bg-muted",
         className,
       )}
       style={sticky ? { insetInlineStart: stickyOffset ?? "0" } : undefined}
