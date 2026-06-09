@@ -16,6 +16,7 @@ import {
   UserMinus,
   UserCheck,
   UserPlus,
+  KeyRound,
   Trash2,
   X,
   Search,
@@ -46,6 +47,7 @@ import {
   restoreEmployeeAction,
   hardDeleteEmployeeAction,
   createAccountForEmployeeAction,
+  resetEmployeePasswordAction,
 } from "./_actions";
 
 export type EmployeeRow = {
@@ -95,6 +97,7 @@ export function EmployeesAdmin({
   const [editing, setEditing] = useState<EmployeeRow | null>(null);
   const [hardDeleting, setHardDeleting] = useState<EmployeeRow | null>(null);
   const [creatingAccount, setCreatingAccount] = useState<EmployeeRow | null>(null);
+  const [resettingPassword, setResettingPassword] = useState<EmployeeRow | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -268,6 +271,18 @@ export function EmployeesAdmin({
                               <UserPlus className="size-3.5" />
                             </button>
                           )}
+                          {!terminated && r.user_id && (
+                            <button
+                              type="button"
+                              onClick={() => setResettingPassword(r)}
+                              disabled={pending}
+                              aria-label={`تغيير كلمة مرور ${r.full_name}`}
+                              title="تغيير كلمة المرور"
+                              className="rounded p-1.5 text-muted-foreground hover:bg-amber-400/10 hover:text-amber-300"
+                            >
+                              <KeyRound className="size-3.5" />
+                            </button>
+                          )}
                           <RowEditButton
                             row={r}
                             departments={departments}
@@ -354,6 +369,17 @@ export function EmployeesAdmin({
           onClose={() => setCreatingAccount(null)}
           onCreated={() => {
             setCreatingAccount(null);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {resettingPassword && (
+        <ResetPasswordDialog
+          employee={resettingPassword}
+          onClose={() => setResettingPassword(null)}
+          onDone={() => {
+            setResettingPassword(null);
             router.refresh();
           }}
         />
@@ -816,6 +842,149 @@ function CreateAccountDialog({
         <Button size="sm" onClick={submit} disabled={pending || !valid}>
           {pending && <Loader2 className="size-3.5 animate-spin" />}
           إنشاء الحساب
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// Reset the password for an employee who already has a dashboard account.
+function ResetPasswordDialog({
+  employee,
+  onClose,
+  onDone,
+}: {
+  employee: EmployeeRow;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [password, setPassword] = useState(() => generateRandomPassword());
+  const [pending, start] = useTransition();
+  const [done, setDone] = useState<{ email: string | null; password: string } | null>(
+    null,
+  );
+  const [copied, setCopied] = useState<"password" | "both" | null>(null);
+
+  function copy(value: string, kind: "password" | "both") {
+    navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(kind);
+        setTimeout(() => setCopied(null), 1500);
+      },
+      () => toast.error("تعذر النسخ"),
+    );
+  }
+
+  function submit() {
+    if (password.length < 8) {
+      toast.error("كلمة المرور قصيرة جدًا");
+      return;
+    }
+    start(async () => {
+      const res = await resetEmployeePasswordAction({
+        employeeId: employee.id,
+        password,
+      });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success("تم تغيير كلمة المرور");
+      setDone({ email: res.email, password: res.password });
+    });
+  }
+
+  if (done) {
+    const combined = `البريد: ${done.email ?? "—"}\nكلمة المرور: ${done.password}`;
+    return (
+      <Modal onClose={onDone} title={`كلمة مرور جديدة: ${employee.full_name}`}>
+        <div className="space-y-3 p-4">
+          <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-200">
+            <p className="font-semibold">تم تغيير كلمة المرور</p>
+            <p className="mt-1 text-amber-200/90">
+              أرسل البيانات الجديدة للموظف عبر قناة آمنة. لن تظهر مرة أخرى.
+            </p>
+          </div>
+          {done.email && (
+            <CredentialField
+              label="البريد"
+              value={done.email}
+              onCopy={() => copy(done.email!, "both")}
+              copied={false}
+            />
+          )}
+          <CredentialField
+            label="كلمة المرور الجديدة"
+            value={done.password}
+            mono
+            onCopy={() => copy(done.password, "password")}
+            copied={copied === "password"}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
+          <Button variant="outline" size="sm" onClick={() => copy(combined, "both")}>
+            {copied === "both" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            نسخ الكل
+          </Button>
+          <Button size="sm" onClick={onDone}>
+            تم
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose} title={`تغيير كلمة المرور: ${employee.full_name}`}>
+      <div className="space-y-3 p-4">
+        <div className="rounded-lg border border-soft bg-soft-1/40 p-3 text-[11px] text-muted-foreground">
+          سيتم تعيين كلمة مرور جديدة لحساب{" "}
+          <span className="font-medium text-foreground" dir="ltr">
+            {employee.email ?? employee.full_name}
+          </span>
+          . لن يتأثر البريد ولا الصلاحيات.
+        </div>
+        <Field label="كلمة المرور الجديدة">
+          <div className="flex gap-2">
+            <Input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={pending}
+              dir="ltr"
+              className="font-mono"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setPassword(generateRandomPassword())}
+              disabled={pending}
+              title="توليد كلمة مرور جديدة"
+              aria-label="توليد كلمة مرور جديدة"
+              className="rounded-lg border border-soft bg-card px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => copy(password, "password")}
+              disabled={pending}
+              title="نسخ"
+              aria-label="نسخ كلمة المرور"
+              className="rounded-lg border border-soft bg-card px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {copied === "password" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">8 أحرف على الأقل.</p>
+        </Field>
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          إلغاء
+        </Button>
+        <Button size="sm" onClick={submit} disabled={pending || password.length < 8}>
+          {pending && <Loader2 className="size-3.5 animate-spin" />}
+          تغيير كلمة المرور
         </Button>
       </div>
     </Modal>

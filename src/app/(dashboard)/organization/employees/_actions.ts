@@ -653,3 +653,72 @@ export async function createAccountForEmployeeAction(input: {
     reusedExistingUser,
   };
 }
+
+// =========================================================================
+// Reset the dashboard sign-in password for an employee who already has an
+// account. Used by the "key" button on the employees admin table. The owner
+// sets a new password; we update the linked auth.users row. The new password
+// is returned once so the owner can copy + send it. Gated on
+// `employees.manage`; audit-logged (password value itself never logged).
+// =========================================================================
+
+const ResetPasswordSchema = z.object({
+  employee_id: z.string().uuid(),
+  password: z
+    .string()
+    .min(8, "كلمة المرور قصيرة جدًا (8 أحرف على الأقل)")
+    .max(72, "كلمة المرور طويلة جدًا"),
+});
+
+export type ResetPasswordResult =
+  | { ok: true; email: string | null; password: string }
+  | { error: string };
+
+export async function resetEmployeePasswordAction(input: {
+  employeeId: string;
+  password: string;
+}): Promise<ResetPasswordResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = ResetPasswordSchema.safeParse({
+    employee_id: input.employeeId,
+    password: input.password,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const { data: emp } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, email, user_id, employment_status")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data.employee_id)
+    .maybeSingle();
+  if (!emp) return { error: "الموظف غير موجود" };
+  if (!emp.user_id) {
+    return { error: "هذا الموظف لا يملك حساب دخول — أنشئ حسابًا أولًا" };
+  }
+
+  const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(
+    emp.user_id,
+    { password: parsed.data.password },
+  );
+  if (updErr) return { error: updErr.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.password_reset",
+    entityType: "employee",
+    entityId: emp.id,
+    metadata: { full_name: emp.full_name }, // never log the password
+  });
+
+  revalidatePath("/organization/employees");
+  return { ok: true, email: emp.email, password: parsed.data.password };
+}
