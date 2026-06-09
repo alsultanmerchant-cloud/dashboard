@@ -1025,10 +1025,17 @@ function EditableSelect({
         });
       }}
       onBlur={() => setEditing(false)}
-      className="h-7 rounded-md border border-cyan/40 bg-input px-1 text-[12px] outline-none"
+      className="h-7 rounded-md border border-cyan/40 bg-popover px-1 text-[12px] text-popover-foreground outline-none [color-scheme:light] dark:[color-scheme:dark]"
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value}>
+        <option
+          key={o.value}
+          value={o.value}
+          style={{
+            backgroundColor: "var(--popover)",
+            color: "var(--popover-foreground)",
+          }}
+        >
           {o.label}
         </option>
       ))}
