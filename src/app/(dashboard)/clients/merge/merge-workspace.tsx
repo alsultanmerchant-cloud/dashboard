@@ -14,6 +14,7 @@ import {
   Check,
   FileSignature,
   FolderKanban,
+  Layers,
   Loader2,
   MessagesSquare,
   Search,
@@ -22,7 +23,11 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
 import type { MergeClient } from "@/lib/data/clients";
-import { mergeClientsAction } from "./_actions";
+import {
+  mergeClientsAction,
+  previewBulkMergeAction,
+  bulkMergeHighConfidenceAction,
+} from "./_actions";
 
 export type SheetCandidate = {
   sheet: MergeClient;
@@ -64,6 +69,17 @@ export function MergeWorkspace({
 
   return (
     <div className="space-y-3">
+      {canManage && (
+        <BulkMergeBar
+          onDone={() => {
+            router.refresh();
+            // Force a fresh read of candidates on next render.
+            setDone(new Set());
+            setSkipped(new Set());
+          }}
+        />
+      )}
+
       {/* Progress + search */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-soft bg-card p-3">
         <div className="relative min-w-[240px] flex-1">
@@ -102,6 +118,98 @@ export function MergeWorkspace({
               }}
               onSkip={() => setSkipped((prev) => new Set(prev).add(c.sheet.id))}
             />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BulkMergeBar({ onDone }: { onDone: () => void }) {
+  const [threshold, setThreshold] = useState(85);
+  const [preview, setPreview] = useState<
+    { from: string; to: string; score: number }[] | null
+  >(null);
+  const [pending, start] = useTransition();
+
+  function runPreview() {
+    start(async () => {
+      const res = await previewBulkMergeAction({ minScore: threshold / 100 });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      setPreview(res.pairs);
+      if (res.pairs.length === 0) toast.info("لا توجد تطابقات عند هذا الحد");
+    });
+  }
+
+  function apply() {
+    start(async () => {
+      const res = await bulkMergeHighConfidenceAction({ minScore: threshold / 100 });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(
+        `تم دمج ${res.merged} عميل — عقود: ${res.moved.contracts ?? 0}، جروبات: ${res.moved.wa_group_links ?? 0}`,
+        { duration: 4000 },
+      );
+      setPreview(null);
+      onDone();
+    });
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Layers className="size-4 text-amber-300" />
+        <span className="text-sm font-medium">دمج جماعي للتطابقات العالية</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>الحد الأدنى للثقة</span>
+          <input
+            type="range"
+            min={70}
+            max={100}
+            value={threshold}
+            onChange={(e) => {
+              setThreshold(Number(e.target.value));
+              setPreview(null);
+            }}
+            className="accent-amber-400"
+          />
+          <span className="w-9 tabular-nums font-medium text-amber-300">{threshold}%</span>
+        </div>
+        <button
+          type="button"
+          onClick={runPreview}
+          disabled={pending}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-soft bg-card px-3 text-xs font-medium hover:bg-muted disabled:opacity-50"
+        >
+          {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          معاينة
+        </button>
+        {preview && preview.length > 0 && (
+          <button
+            type="button"
+            onClick={apply}
+            disabled={pending}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 text-xs font-medium text-amber-200 hover:bg-amber-500/25 disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            دمج {preview.length} عميل
+          </button>
+        )}
+      </div>
+      {preview && preview.length > 0 && (
+        <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-soft bg-card/60 p-2 text-[11px]">
+          {preview.map((p, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 px-1 py-0.5">
+              <span className="truncate">
+                {p.from} <span className="text-muted-foreground">→</span> {p.to}
+              </span>
+              <span className="shrink-0 tabular-nums text-amber-300">{Math.round(p.score * 100)}%</span>
+            </div>
           ))}
         </div>
       )}

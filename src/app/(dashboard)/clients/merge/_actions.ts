@@ -115,3 +115,106 @@ export async function unmergeClientAction(input: {
   revalidatePath("/clients/merge");
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// bulkMergeHighConfidence — merge every sheet client whose best Odoo match
+// scores >= minScore, the match is unambiguous (clearly ahead of the runner-
+// up), and the target carries a project. Uses the SAME matcher the page shows,
+// so "merge all ≥85%" does exactly what the visible confidence promises.
+// Returns how many merged + a sample, so the UI can report.
+// ---------------------------------------------------------------------------
+export async function bulkMergeHighConfidenceAction(input: {
+  minScore: number;
+}): Promise<
+  | { ok: true; merged: number; moved: Record<string, number>; samples: string[] }
+  | { error: string }
+> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const min = Math.min(1, Math.max(0.7, input.minScore || 0.85));
+
+  const { getClientMergeData } = await import("@/lib/data/clients");
+  const { bestClientMatch } = await import("@/lib/match/client-match");
+  const { sheetClients, odooClients } = await getClientMergeData(session.orgId);
+  const odooById = new Map(odooClients.map((o) => [o.id, o]));
+
+  // Build the merge list: best >= min, unambiguous (lead >= 0.05 over 2nd or
+  // an exact/alias 0.95+), and the target actually has a project.
+  const plan: Array<{ source: string; target: string; label: string }> = [];
+  for (const s of sheetClients) {
+    const { best, secondScore } = bestClientMatch(s, odooClients);
+    if (!best || best.score < min) continue;
+    const tgt = odooById.get(best.client.id);
+    if (!tgt || tgt.projects <= 0) continue;
+    const unambiguous = best.score >= 0.95 || best.score - secondScore >= 0.05;
+    if (!unambiguous) continue;
+    plan.push({ source: s.id, target: best.client.id, label: `${s.name} → ${tgt.name}` });
+  }
+
+  let merged = 0;
+  const moved: Record<string, number> = {};
+  const samples: string[] = [];
+  for (const p of plan) {
+    const { data, error } = await supabaseAdmin.rpc("merge_clients", {
+      p_source: p.source,
+      p_target: p.target,
+      p_org: session.orgId,
+    });
+    if (error) continue; // skip failures (e.g. target became merged mid-run)
+    merged += 1;
+    if (samples.length < 8) samples.push(p.label);
+    const m = (data as { moved?: Record<string, number> })?.moved ?? {};
+    for (const [k, v] of Object.entries(m)) moved[k] = (moved[k] ?? 0) + (v as number);
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "client.bulk_merge",
+    entityType: "client",
+    entityId: session.orgId,
+    metadata: { min_score: min, merged, moved },
+  });
+
+  revalidatePath("/clients/merge");
+  revalidatePath("/clients");
+  revalidatePath("/contracts");
+  revalidatePath("/satisfaction/groups");
+  return { ok: true, merged, moved, samples };
+}
+
+// Preview the bulk-merge plan at a threshold WITHOUT applying — so the team
+// (and the confirm dialog) can see exactly which pairs will merge first.
+export async function previewBulkMergeAction(input: {
+  minScore: number;
+}): Promise<
+  | { ok: true; pairs: Array<{ from: string; to: string; score: number }> }
+  | { error: string }
+> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const min = Math.min(1, Math.max(0.7, input.minScore || 0.85));
+  const { getClientMergeData } = await import("@/lib/data/clients");
+  const { bestClientMatch } = await import("@/lib/match/client-match");
+  const { sheetClients, odooClients } = await getClientMergeData(session.orgId);
+  const odooById = new Map(odooClients.map((o) => [o.id, o]));
+  const pairs: Array<{ from: string; to: string; score: number }> = [];
+  for (const s of sheetClients) {
+    const { best, secondScore } = bestClientMatch(s, odooClients);
+    if (!best || best.score < min) continue;
+    const tgt = odooById.get(best.client.id);
+    if (!tgt || tgt.projects <= 0) continue;
+    if (!(best.score >= 0.95 || best.score - secondScore >= 0.05)) continue;
+    pairs.push({ from: s.name, to: tgt.name, score: Math.round(best.score * 100) / 100 });
+  }
+  pairs.sort((a, b) => b.score - a.score);
+  return { ok: true, pairs };
+}

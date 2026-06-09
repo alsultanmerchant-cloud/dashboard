@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { getClientMergeData, type MergeClient } from "@/lib/data/clients";
+import { getClientMergeData } from "@/lib/data/clients";
+import { bestClientMatch } from "@/lib/match/client-match";
 import { PageHeader } from "@/components/page-header";
 import { MergeWorkspace, type SheetCandidate } from "./merge-workspace";
 
@@ -12,49 +13,6 @@ import { MergeWorkspace, type SheetCandidate } from "./merge-workspace";
 // overrides via search, or skips. Gated read on clients.view; merge on
 // clients.manage.
 
-// ---- Arabic-aware name matching (mirrors the contract/group matchers) ----
-const AR_DIAC = /[ؐ-ًؚ-ٰٟۖ-ۭ]/g;
-function norm(s: string): string {
-  let x = (s || "").trim().toLowerCase();
-  x = x.replace(AR_DIAC, "").replace(/ـ/g, "");
-  x = x.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
-  x = x.replace(/\(.*?\)/g, "").replace(/\s*[-–]\s*.*$/g, "");
-  return x.replace(/[^\w\s؀-ۿ]/g, " ").replace(/\s+/g, " ").trim();
-}
-function latins(s: string): Set<string> {
-  return new Set(
-    (s.match(/[A-Za-z][A-Za-z0-9 .&\-]{2,}/g) ?? []).map((t) => t.trim().toLowerCase()),
-  );
-}
-function ratio(a: string, b: string): number {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  // Simple Dice-coefficient on bigrams — cheap and good enough for a hint.
-  const big = (s: string) => {
-    const out = new Set<string>();
-    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
-    return out;
-  };
-  const A = big(a), B = big(b);
-  let inter = 0;
-  for (const g of A) if (B.has(g)) inter++;
-  return (2 * inter) / (A.size + B.size || 1);
-}
-
-function bestMatch(sheet: MergeClient, odoo: MergeClient[]) {
-  const sn = norm(sheet.name);
-  const sl = latins(sheet.name);
-  let best: { client: MergeClient; score: number } | null = null;
-  for (const o of odoo) {
-    const on = norm(o.name);
-    let score = ratio(sn, on);
-    const ol = latins(o.name);
-    for (const l of sl) if (ol.has(l)) score = Math.max(score, 0.95);
-    if (!best || score > best.score) best = { client: o, score };
-  }
-  return best;
-}
-
 export default async function ClientMergePage() {
   const session = await requirePagePermission("clients.view");
   const canManage = hasPermission(session, "clients.manage");
@@ -62,11 +20,12 @@ export default async function ClientMergePage() {
   const { sheetClients, odooClients } = await getClientMergeData(session.orgId);
 
   const candidates: SheetCandidate[] = sheetClients.map((s) => {
-    const m = bestMatch(s, odooClients);
+    const { best } = bestClientMatch(s, odooClients);
+    const m = best ? odooClients.find((o) => o.id === best.client.id) ?? null : null;
     return {
       sheet: s,
-      suggestion: m && m.score >= 0.6 ? m.client : null,
-      score: m ? Math.round(m.score * 100) / 100 : 0,
+      suggestion: best && best.score >= 0.6 ? m : null,
+      score: best ? Math.round(best.score * 100) / 100 : 0,
     };
   });
   // Highest-confidence + most-linked first so the team clears the big ones.
