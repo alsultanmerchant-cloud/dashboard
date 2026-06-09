@@ -34,7 +34,7 @@ export interface SatisfactionRow {
   hasClient: boolean;
   hasTechnical: boolean;
   hasMessages: boolean; // has live wa_messages → analyzable even without a .txt import
-  hasActiveProject: boolean; // false → archived/lost client (separated in the UI)
+  hasActiveProject: boolean; // false → archived/lost (has projects, ALL archived); separated in the UI
   satisfactionScore: number | null;
   briefAdherenceScore: number | null;
   sentiment: string | null;
@@ -75,12 +75,23 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     names.set(c.id, c.name);
   }
 
-  // A client is "active" if it has at least one non-archived project; otherwise
-  // it's a lost/archived relationship (kept off the default board view).
-  const activeClients = new Set<string>();
+  // Archived rule: a client is "lost/archived" ONLY when it has project
+  // records AND every one of them is archived. A client with NO project at
+  // all is treated as active — its project very likely lives on a duplicate
+  // client row (the sheet-imported copy vs the Odoo copy), so absence of a
+  // project here must not flag the relationship as lost. This fixes the team
+  // report (e.g. مركز واحة التغذية showing archived while active in Rawasm):
+  // the WhatsApp group is mapped to the project-less sheet duplicate.
+  const clientsWithAnyProject = new Set<string>();
+  const clientsWithActiveProject = new Set<string>();
   for (const p of (projectsRes.data ?? []) as Array<{ client_id: string | null; status: string | null }>) {
-    if (p.client_id && p.status && p.status !== "archived") activeClients.add(p.client_id);
+    if (!p.client_id) continue;
+    clientsWithAnyProject.add(p.client_id);
+    if (p.status && p.status !== "archived") clientsWithActiveProject.add(p.client_id);
   }
+  // active (not archived) = has no projects, OR has at least one active project.
+  const isActiveClient = (clientId: string) =>
+    !clientsWithAnyProject.has(clientId) || clientsWithActiveProject.has(clientId);
 
   // A client has live coverage if any of its mapped groups carry ingested messages.
   const clientsWithMessages = new Set<string>();
@@ -98,7 +109,7 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
         hasClient: false,
         hasTechnical: false,
         hasMessages: clientsWithMessages.has(clientId),
-        hasActiveProject: activeClients.has(clientId),
+        hasActiveProject: isActiveClient(clientId),
         satisfactionScore: null,
         briefAdherenceScore: null,
         sentiment: null,
