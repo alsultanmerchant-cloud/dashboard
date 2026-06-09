@@ -22,10 +22,27 @@ export interface ImportInfo {
   createdAt: string;
 }
 
+export type WindowKind = "week" | "all";
+
 export interface AnalysisInfo extends SatisfactionResult {
   id: string;
   model: string | null;
   createdAt: string;
+  windowKind: WindowKind;
+  windowStart: string | null;
+  windowEnd: string | null;
+}
+
+// One row in the per-client analysis history list (stored past snapshots).
+export interface AnalysisHistoryItem {
+  id: string;
+  windowKind: WindowKind;
+  satisfactionScore: number | null;
+  sentiment: string | null;
+  createdAt: string;
+  windowStart: string | null;
+  windowEnd: string | null;
+  isCurrent: boolean;
 }
 
 export interface SatisfactionRow {
@@ -156,14 +173,52 @@ export interface ClientSatisfactionDetail {
   clientName: string;
   imports: { client: ImportInfo | null; technical: ImportInfo | null };
   hasMessages: boolean; // live wa_messages exist → analyzable without a .txt import
-  analysis: AnalysisInfo | null;
+  analysis: AnalysisInfo | null; // the shown analysis (selected, else current week)
+  history: AnalysisHistoryItem[]; // all stored snapshots, newest first
 }
+
+const ANALYSIS_COLUMNS =
+  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, model, created_at, window_kind, window_start, window_end";
+
+function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
+  return {
+    id: a.id as string,
+    satisfactionScore: (a.satisfaction_score as number) ?? 0,
+    briefAdherenceScore: (a.brief_adherence_score as number | null) ?? null,
+    sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
+    summary: (a.summary as string) ?? "",
+    highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
+    sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
+    risks: (a.risks as string[]) ?? [],
+    model: (a.model as string | null) ?? null,
+    createdAt: a.created_at as string,
+    windowKind: ((a.window_kind as string) ?? "all") as WindowKind,
+    windowStart: (a.window_start as string | null) ?? null,
+    windowEnd: (a.window_end as string | null) ?? null,
+  };
+}
+
+// Load one specific stored analysis (for clicking into a past snapshot).
+async function _getAnalysisById(
+  orgId: string,
+  analysisId: string,
+): Promise<AnalysisInfo | null> {
+  const { data } = await supabaseAdmin
+    .from("client_satisfaction_analyses")
+    .select(ANALYSIS_COLUMNS)
+    .eq("organization_id", orgId)
+    .eq("id", analysisId)
+    .maybeSingle();
+  return data ? toAnalysisInfo(data as Record<string, unknown>) : null;
+}
+export const getAnalysisById = cache(_getAnalysisById);
 
 async function _getClientSatisfactionDetail(
   orgId: string,
   clientId: string,
+  selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, messagesRes] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, messagesRes] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -180,15 +235,22 @@ async function _getClientSatisfactionDetail(
       .order("created_at", { ascending: false }),
     supabaseAdmin
       .from("client_satisfaction_analyses")
-      .select(
-        "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, model, created_at",
-      )
+      .select(ANALYSIS_COLUMNS)
       .eq("organization_id", orgId)
       .eq("client_id", clientId)
       .eq("is_current", true)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select(
+        "id, satisfaction_score, sentiment, created_at, window_kind, window_start, window_end, is_current",
+      )
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false })
+      .limit(40),
     supabaseAdmin
       .from("wa_messages")
       .select("id", { count: "exact", head: true })
@@ -218,22 +280,28 @@ async function _getClientSatisfactionDetail(
     if (info.groupKind === "technical" && !techImp) techImp = info;
   }
 
-  let analysis: AnalysisInfo | null = null;
-  const a = analysisRes.data as Record<string, unknown> | null;
-  if (a) {
-    analysis = {
-      id: a.id as string,
-      satisfactionScore: (a.satisfaction_score as number) ?? 0,
-      briefAdherenceScore: (a.brief_adherence_score as number | null) ?? null,
-      sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
-      summary: (a.summary as string) ?? "",
-      highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
-      sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
-      risks: (a.risks as string[]) ?? [],
-      model: (a.model as string | null) ?? null,
-      createdAt: a.created_at as string,
-    };
+  const current = analysisRes.data as Record<string, unknown> | null;
+
+  // Shown analysis: an explicitly selected past snapshot, else the current
+  // week. A selected id is fetched separately (it may not be the current row).
+  let analysis: AnalysisInfo | null = current ? toAnalysisInfo(current) : null;
+  if (selectedAnalysisId && selectedAnalysisId !== analysis?.id) {
+    const picked = await getAnalysisById(orgId, selectedAnalysisId);
+    if (picked) analysis = picked;
   }
+
+  const history: AnalysisHistoryItem[] = (
+    (historyRes.data ?? []) as Array<Record<string, unknown>>
+  ).map((r) => ({
+    id: r.id as string,
+    windowKind: ((r.window_kind as string) ?? "all") as WindowKind,
+    satisfactionScore: (r.satisfaction_score as number | null) ?? null,
+    sentiment: (r.sentiment as string | null) ?? null,
+    createdAt: r.created_at as string,
+    windowStart: (r.window_start as string | null) ?? null,
+    windowEnd: (r.window_end as string | null) ?? null,
+    isCurrent: (r.is_current as boolean) ?? false,
+  }));
 
   return {
     clientId,
@@ -241,6 +309,7 @@ async function _getClientSatisfactionDetail(
     imports: { client: clientImp, technical: techImp },
     hasMessages: (messagesRes.count ?? 0) > 0,
     analysis,
+    history,
   };
 }
 export const getClientSatisfactionDetail = cache(_getClientSatisfactionDetail);
@@ -261,24 +330,39 @@ function renderWaLine(sentAt: string | null, sender: string | null, body: string
 async function _buildClientTranscripts(
   orgId: string,
   clientId: string,
+  opts?: { sinceDays?: number },
 ): Promise<MergedTranscripts> {
+  // Windowed (current-status) analysis: only the last `sinceDays` of LIVE
+  // messages. The one-time .txt import is a historical seed (one undated blob)
+  // so it is excluded from a recent window — it would drag old complaints into
+  // the "current" reading, which is exactly what the team asked us to stop.
+  const since =
+    opts?.sinceDays != null
+      ? new Date(Date.now() - opts.sinceDays * 86_400_000).toISOString()
+      : null;
+
+  let waQuery = supabaseAdmin
+    .from("wa_messages")
+    .select("group_kind, sender, body, sent_at, message_type")
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .order("sent_at", { ascending: true })
+    .limit(8000);
+  if (since) waQuery = waQuery.gte("sent_at", since);
+
   const [importsRes, waRes] = await Promise.all([
-    supabaseAdmin
-      .from("client_chat_imports")
-      .select("group_kind, transcript, created_at")
-      .eq("organization_id", orgId)
-      .eq("client_id", clientId)
-      .order("created_at", { ascending: false }),
-    supabaseAdmin
-      .from("wa_messages")
-      .select("group_kind, sender, body, sent_at, message_type")
-      .eq("organization_id", orgId)
-      .eq("client_id", clientId)
-      .order("sent_at", { ascending: true })
-      .limit(8000),
+    since
+      ? Promise.resolve({ data: [] as Array<{ group_kind: GroupKind; transcript: string }> })
+      : supabaseAdmin
+          .from("client_chat_imports")
+          .select("group_kind, transcript, created_at")
+          .eq("organization_id", orgId)
+          .eq("client_id", clientId)
+          .order("created_at", { ascending: false }),
+    waQuery,
   ]);
 
-  // Latest one-time import per kind (historical seed).
+  // Latest one-time import per kind (historical seed; empty for windowed runs).
   const importByKind: Record<GroupKind, string> = { client: "", technical: "" };
   for (const r of (importsRes.data ?? []) as Array<{ group_kind: GroupKind; transcript: string }>) {
     if (!importByKind[r.group_kind]) importByKind[r.group_kind] = r.transcript ?? "";
