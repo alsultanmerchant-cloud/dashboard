@@ -34,11 +34,36 @@ export interface AnalyzeOutcome {
   result: SatisfactionResult;
 }
 
+// Default "current status" window: the last 7 days of live conversation.
+const CURRENT_WINDOW_DAYS = 7;
+
+export interface AnalyzeOptions {
+  // 'week' (default) → current-status analysis over the last 7 days; this is
+  // the one that feeds the board + executive index (sets is_current).
+  // 'all' → on-demand full-history snapshot, stored but never is_current.
+  windowKind?: "week" | "all";
+}
+
+export class NoRecentActivityError extends Error {
+  constructor() {
+    super("لا توجد رسائل حديثة لهذا العميل في آخر ٧ أيام");
+    this.name = "NoRecentActivityError";
+  }
+}
+
 export async function analyzeClientSatisfaction(
   orgId: string,
   clientId: string,
   actorUserId: string | null,
+  opts?: AnalyzeOptions,
 ): Promise<AnalyzeOutcome> {
+  const windowKind = opts?.windowKind ?? "week";
+  const sinceDays = windowKind === "week" ? CURRENT_WINDOW_DAYS : undefined;
+  const windowStart = sinceDays
+    ? new Date(Date.now() - sinceDays * 86_400_000).toISOString()
+    : null;
+  const windowEnd = new Date().toISOString();
+
   const { data: client } = await supabaseAdmin
     .from("clients")
     .select("name")
@@ -47,8 +72,13 @@ export async function analyzeClientSatisfaction(
     .maybeSingle();
   if (!client) throw new Error("العميل غير موجود");
 
-  const transcripts = await buildClientTranscripts(orgId, clientId);
-  if (!transcripts.client && !transcripts.technical) throw new NoTranscriptError();
+  const transcripts = await buildClientTranscripts(orgId, clientId, { sinceDays });
+  if (!transcripts.client && !transcripts.technical) {
+    // A windowed run with nothing recent is not a hard error — it just means
+    // the client has been quiet (the team explicitly wants "quiet = not a live
+    // complaint"). Signal it distinctly so callers can fall back to all-time.
+    throw windowKind === "week" ? new NoRecentActivityError() : new NoTranscriptError();
+  }
 
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
@@ -73,6 +103,11 @@ export async function analyzeClientSatisfaction(
         maxRetries: 2,
         schema: SatisfactionSchema,
         prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب${brief ? " والبريف الموثق" : ""}:
+${
+  windowKind === "week"
+    ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم رضاه بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
+    : `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
+}
 
 1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
 2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ.${brief ? '\n3) "البريف" — وثيقة متطلبات العميل الأساسية المعتمدة في بداية المشروع.' : ""}
@@ -126,12 +161,19 @@ ${trim(technicalBlock, budget)}${briefBlock}`,
   const clientImportId = rows.find((r) => r.group_kind === "client")?.id ?? null;
   const technicalImportId = rows.find((r) => r.group_kind === "technical")?.id ?? null;
 
-  await supabaseAdmin
-    .from("client_satisfaction_analyses")
-    .update({ is_current: false })
-    .eq("organization_id", orgId)
-    .eq("client_id", clientId)
-    .eq("is_current", true);
+  // Only the current-status (weekly) analysis becomes is_current — that's what
+  // the board + executive index read, so they reflect the client's NOW. An
+  // all-time run is stored as a historical snapshot and never takes over the
+  // headline.
+  const isCurrent = windowKind === "week";
+  if (isCurrent) {
+    await supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .update({ is_current: false })
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId)
+      .eq("is_current", true);
+  }
 
   const { data: inserted, error: insErr } = await supabaseAdmin
     .from("client_satisfaction_analyses")
@@ -148,7 +190,10 @@ ${trim(technicalBlock, budget)}${briefBlock}`,
       model: MODEL,
       client_import_id: clientImportId,
       technical_import_id: technicalImportId,
-      is_current: true,
+      is_current: isCurrent,
+      window_kind: windowKind,
+      window_start: windowStart,
+      window_end: windowEnd,
       analyzed_by: actorUserId,
     })
     .select("id")
@@ -161,7 +206,7 @@ ${trim(technicalBlock, budget)}${briefBlock}`,
     action: "client.satisfaction_analyzed",
     entityType: "client",
     entityId: clientId,
-    metadata: { score: result.satisfactionScore, sentiment: result.sentiment },
+    metadata: { score: result.satisfactionScore, sentiment: result.sentiment, windowKind },
   });
   await logAiEvent({
     organizationId: orgId,
@@ -174,6 +219,7 @@ ${trim(technicalBlock, budget)}${briefBlock}`,
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
       briefUsed: brief ? brief.url : null,
+      windowKind,
     },
     importance: result.satisfactionScore < 50 ? "high" : "normal",
   });

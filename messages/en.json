@@ -2317,21 +2317,18 @@
   },
   "SatisfactionPage": {
     "title": "Client Satisfaction",
-    "subtitle": "Import each client's two WhatsApp groups (client + technical) and let AI score satisfaction and execution quality",
+    "subtitle": "Analyze automatically pulled WhatsApp chats and let AI score satisfaction and execution quality",
     "selectClient": "Select client",
-    "selectClientPlaceholder": "Choose a client to import chats",
+    "selectClientPlaceholder": "Choose a client to review chats",
     "searchClient": "Search clients…",
     "noClients": "No clients",
     "clientGroup": "Client group",
     "clientGroupHint": "Direct WhatsApp chat with the client — measures satisfaction & complaints",
     "technicalGroup": "Technical group",
     "technicalGroupHint": "Internal team coordination chat — measures brief adherence",
-    "uploadFile": "Upload .txt",
-    "replaceFile": "Replace file",
-    "uploadHelp": "Export the chat from WhatsApp as “Without media” (.txt file)",
     "analyze": "Analyze with AI",
     "reanalyze": "Re-analyze",
-    "uploadFirst": "Upload at least one chat first",
+    "uploadFirst": "Link and sync at least one WhatsApp chat first",
     "lastAnalyzed": "Last analyzed",
     "messages": "{n} messages",
     "participants": "{n} participants",
@@ -2341,7 +2338,7 @@
     "timeline": "Satisfaction trend",
     "risks": "Relationship risks",
     "highlights": "Highlights",
-    "emptyOverview": "No chats imported yet. Select a client to get started.",
+    "emptyOverview": "No synced chats yet. Connect WhatsApp groups to get started.",
     "viewBoard": "Board",
     "viewTable": "Table",
     "search": "Search clients…",
@@ -2363,7 +2360,7 @@
       "pending": "Not analyzed",
       "pendingHint": "Chats imported but no AI analysis yet",
       "emptyColumn": "No clients here",
-      "noGroups": "No chats imported",
+      "noGroups": "No synced chats",
       "analyze": "Analyze"
     },
     "sentiment": {
@@ -2458,6 +2455,24 @@
         "failed": "Failed",
         "loading": "Loading"
       }
+    },
+    "analyzeWeek": "Analyze current week",
+    "analyzeAll": "Analyze all time",
+    "reanalyzeWeek": "Re-analyze week",
+    "analyzeWeekHint": "Scores the client's current status from the last 7 days only",
+    "analyzeAllHint": "Whole-history overview of the relationship",
+    "noRecentActivity": "No recent messages in the last 7 days — try “Analyze all time”",
+    "window": {
+      "week": "Last 7 days",
+      "all": "All time",
+      "label": "Window"
+    },
+    "history": {
+      "title": "Past analyses",
+      "empty": "No past analyses yet",
+      "current": "Current",
+      "viewingPast": "You're viewing a past analysis — it doesn't reflect the client's current status",
+      "backToCurrent": "Back to current analysis"
     }
   }
 }

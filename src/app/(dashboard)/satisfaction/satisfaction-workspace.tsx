@@ -2,14 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition, useRef, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
-  Upload,
-  MessageSquare,
-  Wrench,
   Sparkles,
-  CheckCircle2,
   AlertTriangle,
   Loader2,
   TrendingUp,
@@ -20,17 +16,18 @@ import {
   TableProperties,
   Search,
   ChevronLeft,
+  History,
+  CalendarRange,
+  ArrowRight,
 } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { uploadChatImportAction } from "./_actions";
 import type {
+  AnalysisHistoryItem,
   ClientExecutionSnapshot,
   ClientSatisfactionDetail,
-  GroupKind,
-  ImportInfo,
   SatisfactionRow,
 } from "@/lib/data/satisfaction";
 
@@ -40,6 +37,7 @@ interface Props {
   detail: ClientSatisfactionDetail | null;
   execution: ClientExecutionSnapshot | null;
   selectedId: string | null;
+  selectedAnalysisId: string | null;
 }
 
 function scoreTone(score: number | null) {
@@ -82,39 +80,49 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
   );
 }
 
-export function SatisfactionWorkspace({ options, rows, detail, execution, selectedId }: Props) {
+export function SatisfactionWorkspace({
+  options,
+  rows,
+  detail,
+  execution,
+  selectedId,
+  selectedAnalysisId,
+}: Props) {
   const t = useTranslations("SatisfactionPage");
   const tStages = useTranslations("TasksPage.stages");
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzing, setAnalyzing] = useState<"week" | "all" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const select = (id: string) => {
     if (id) router.push(`/satisfaction?client=${id}`);
   };
 
-  const analyzeClient = async (clientId: string) => {
+  // Board cards always analyze the current week (the headline status).
+  const analyzeClient = async (clientId: string, windowKind: "week" | "all" = "week") => {
     const res = await fetch("/api/satisfaction/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId }),
+      body: JSON.stringify({ clientId, windowKind }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "تعذر التحليل");
     router.refresh();
   };
 
-  const analyze = async () => {
+  const analyze = async (windowKind: "week" | "all") => {
     if (!selectedId) return;
     setError(null);
-    setAnalyzing(true);
+    setAnalyzing(windowKind);
     try {
-      await analyzeClient(selectedId);
+      await analyzeClient(selectedId, windowKind);
+      // After re-analyzing, drop any historical-snapshot selection so the
+      // freshly stored result (current week, or the new all-time row) shows.
+      if (selectedAnalysisId) router.push(`/satisfaction?client=${selectedId}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setAnalyzing(false);
+      setAnalyzing(null);
     }
   };
 
@@ -161,57 +169,45 @@ export function SatisfactionWorkspace({ options, rows, detail, execution, select
         <SatisfactionOverview rows={rows} onSelect={select} onAnalyze={analyzeClient} t={t} />
       ) : detail ? (
         <div className="space-y-6">
-          {/* Upload zones */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <UploadCard
-              kind="client"
-              icon={<MessageSquare className="size-4" />}
-              title={t("clientGroup")}
-              hint={t("clientGroupHint")}
-              info={detail.imports.client}
-              clientId={selectedId}
-              isPending={isPending}
-              startTransition={startTransition}
-              onError={setError}
-              onDone={() => router.refresh()}
-              t={t}
-            />
-            <UploadCard
-              kind="technical"
-              icon={<Wrench className="size-4" />}
-              title={t("technicalGroup")}
-              hint={t("technicalGroupHint")}
-              info={detail.imports.technical}
-              clientId={selectedId}
-              isPending={isPending}
-              startTransition={startTransition}
-              onError={setError}
-              onDone={() => router.refresh()}
-              t={t}
-            />
-          </div>
-
           {error && (
             <p className="flex items-center gap-2 rounded-lg bg-red-dim px-3 py-2 text-sm text-cc-red">
               <AlertTriangle className="size-4" /> {error}
             </p>
           )}
 
-          {/* Analyze — enabled when there's ANY transcript: a .txt import OR
-              live WhatsApp messages (buildClientTranscripts merges both). */}
-          <div className="flex items-center gap-3">
+          {/* Analyze — two windows. Current week feeds the board; all time is
+              an on-demand full-history snapshot. */}
+          <div className="flex flex-wrap items-center gap-3">
             {(() => {
               const hasTranscript =
                 !!detail.imports.client || !!detail.imports.technical || detail.hasMessages;
+              const busy = analyzing !== null;
               return (
                 <>
-                  <Button onClick={analyze} disabled={analyzing || !hasTranscript}>
-                    {analyzing ? (
+                  <Button
+                    onClick={() => analyze("week")}
+                    disabled={busy || !hasTranscript}
+                    title={t("analyzeWeekHint")}
+                  >
+                    {analyzing === "week" ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Sparkles className="size-4" />
                     )}
-                    {detail.analysis ? t("reanalyze") : t("analyze")}
+                    {detail.analysis ? t("reanalyzeWeek") : t("analyzeWeek")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => analyze("all")}
+                    disabled={busy || !hasTranscript}
+                    title={t("analyzeAllHint")}
+                  >
+                    {analyzing === "all" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <TrendingUp className="size-4" />
+                    )}
+                    {t("analyzeAll")}
                   </Button>
                   {!hasTranscript && (
                     <span className="text-xs text-muted-foreground">{t("uploadFirst")}</span>
@@ -230,7 +226,15 @@ export function SatisfactionWorkspace({ options, rows, detail, execution, select
           {execution && <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />}
 
           {/* Results */}
-          {detail.analysis && <AnalysisView analysis={detail.analysis} t={t} sentimentLabel={sentimentLabel} />}
+          {detail.analysis && (
+            <AnalysisView
+              analysis={detail.analysis}
+              history={detail.history}
+              clientId={selectedId}
+              t={t}
+              sentimentLabel={sentimentLabel}
+            />
+          )}
         </div>
       ) : null}
     </div>
@@ -464,7 +468,7 @@ function BoardCard({
   t: ReturnType<typeof useTranslations>;
 }) {
   const analyzed = row.satisfactionScore !== null;
-  // Analyzable from a .txt import OR live WhatsApp messages.
+  // Analyzable once the client has synced WhatsApp messages.
   const hasImport = row.hasClient || row.hasTechnical || row.hasMessages;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(false);
@@ -621,112 +625,6 @@ function Dot({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-// ---- Upload card ---------------------------------------------------------
-function UploadCard({
-  kind,
-  icon,
-  title,
-  hint,
-  info,
-  clientId,
-  isPending,
-  startTransition,
-  onError,
-  onDone,
-  t,
-}: {
-  kind: GroupKind;
-  icon: React.ReactNode;
-  title: string;
-  hint: string;
-  info: ImportInfo | null;
-  clientId: string;
-  isPending: boolean;
-  startTransition: React.TransitionStartFunction;
-  onError: (e: string | null) => void;
-  onDone: () => void;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-
-  const onFile = async (file: File) => {
-    onError(null);
-    setBusy(true);
-    try {
-      const content = await file.text();
-      const fd = new FormData();
-      fd.set("clientId", clientId);
-      fd.set("groupKind", kind);
-      fd.set("filename", file.name);
-      fd.set("content", content);
-      startTransition(async () => {
-        const res = await uploadChatImportAction(undefined, fd);
-        setBusy(false);
-        if (res.error) onError(res.error);
-        else onDone();
-      });
-    } catch (e) {
-      setBusy(false);
-      onError((e as Error).message);
-    }
-  };
-
-  return (
-    <Card className={cn("border", info ? "border-cc-green/30" : "border-border")}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-soft-2 text-cyan">
-              {icon}
-            </span>
-            {title}
-          </p>
-          {info && <CheckCircle2 className="size-4 text-cc-green" />}
-        </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{hint}</p>
-
-        {info && (
-          <div className="mt-3 rounded-lg bg-soft-1 p-2.5 text-[11px] text-muted-foreground">
-            <p className="truncate font-medium text-foreground">{info.sourceFilename ?? "—"}</p>
-            <p className="mt-0.5 tabular-nums">
-              {t("messages", { n: info.messageCount })} · {t("participants", { n: info.participantCount })}
-            </p>
-            {info.firstMessageAt && info.lastMessageAt && (
-              <p className="tabular-nums">
-                {info.firstMessageAt.slice(0, 10)} → {info.lastMessageAt.slice(0, 10)}
-              </p>
-            )}
-          </div>
-        )}
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".txt,text/plain"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onFile(f);
-            e.target.value = "";
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="mt-3 w-full"
-          disabled={busy || isPending}
-          onClick={() => inputRef.current?.click()}
-        >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-          {info ? t("replaceFile") : t("uploadFile")}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ---- Execution panel: client's delayed tasks (ties chat → real work) -----
 function ExecutionPanel({
   snapshot,
@@ -823,17 +721,46 @@ const HL_TONE: Record<string, string> = {
 
 function AnalysisView({
   analysis,
+  history,
+  clientId,
   t,
   sentimentLabel,
 }: {
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
+  history: AnalysisHistoryItem[];
+  clientId: string;
   t: ReturnType<typeof useTranslations>;
   sentimentLabel: (s: string | null) => string;
 }) {
   const tone = scoreTone(analysis.satisfactionScore);
   const timeline = analysis.sentimentTimeline ?? [];
+  // We're viewing a past snapshot when the shown analysis isn't the current one.
+  const viewingPast = !history.some((h) => h.id === analysis.id && h.isCurrent);
+  const range = (a: {
+    windowKind: string;
+    windowStart: string | null;
+    windowEnd: string | null;
+  }) =>
+    a.windowKind === "week" && a.windowStart && a.windowEnd
+      ? `${a.windowStart.slice(0, 10)} → ${a.windowEnd.slice(0, 10)}`
+      : null;
   return (
     <div className="space-y-4">
+      {/* viewing-a-past-snapshot banner */}
+      {viewingPast && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-[13px]">
+          <span className="inline-flex items-center gap-2 text-amber">
+            <History className="size-4" /> {t("history.viewingPast")}
+          </span>
+          <Link
+            href={`/satisfaction?client=${clientId}`}
+            className="inline-flex items-center gap-1 font-medium text-cyan hover:underline"
+          >
+            {t("history.backToCurrent")} <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
+          </Link>
+        </div>
+      )}
+
       {/* headline */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-6 p-5">
@@ -845,6 +772,11 @@ function AnalysisView({
               </p>
               <p className={cn("text-sm font-semibold", tone.text)}>
                 {sentimentLabel(analysis.sentiment)}
+              </p>
+              <p className="mt-1 inline-flex items-center gap-1 rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <CalendarRange className="size-3" />
+                {t(`window.${analysis.windowKind}`)}
+                {range(analysis) && <span className="tabular-nums">· {range(analysis)}</span>}
               </p>
             </div>
           </div>
@@ -964,6 +896,77 @@ function AnalysisView({
           </CardContent>
         </Card>
       )}
+
+      {/* past analyses — click to view an earlier snapshot */}
+      <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
+  );
+}
+
+// ---- Past-analyses history ----------------------------------------------
+function HistoryList({
+  history,
+  clientId,
+  shownId,
+  t,
+}: {
+  history: AnalysisHistoryItem[];
+  clientId: string;
+  shownId: string;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (history.length <= 1) return null;
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+          <History className="size-4 text-cyan" /> {t("history.title")}
+        </p>
+        <ul className="space-y-1.5">
+          {history.map((h) => {
+            const tone = scoreTone(h.satisfactionScore);
+            const isShown = h.id === shownId;
+            const href = h.isCurrent
+              ? `/satisfaction?client=${clientId}`
+              : `/satisfaction?client=${clientId}&analysis=${h.id}`;
+            return (
+              <li key={h.id}>
+                <Link
+                  href={href}
+                  className={cn(
+                    "flex items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-[13px] transition-colors",
+                    isShown
+                      ? "border-cyan/40 bg-soft-1"
+                      : "border-border bg-card hover:border-cyan/30 hover:bg-soft-1",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={cn("text-base font-bold tabular-nums", tone.text)}>
+                      {h.satisfactionScore ?? "—"}
+                    </span>
+                    <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {t(`window.${h.windowKind}`)}
+                    </span>
+                    {h.isCurrent && (
+                      <span className="rounded bg-cc-green/15 px-1.5 py-0.5 text-[10px] font-medium text-cc-green">
+                        {t("history.current")}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>
+                      {h.sentiment ? t(`sentiment.${h.sentiment}`) : "—"}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground/70">
+                      {h.createdAt.slice(0, 10)}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }

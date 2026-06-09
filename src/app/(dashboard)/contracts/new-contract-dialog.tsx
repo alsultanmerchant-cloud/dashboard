@@ -9,7 +9,7 @@
 // importer's old rows + new manual rows compete cleanly.
 
 import { useMemo, useState, useTransition } from "react";
-import { Loader2, Plus, X } from "lucide-react";
+import { ChevronDown, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -84,6 +84,9 @@ function NewContractDialog({
   const [duration, setDuration] = useState("1");
   const [totalValue, setTotalValue] = useState("");
   const [paidValue, setPaidValue] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState<"Complete" | "Installments">(
+    "Complete",
+  );
   const [notes, setNotes] = useState("");
 
   const clientResults = useMemo(() => {
@@ -126,6 +129,7 @@ function NewContractDialog({
         duration_months: dur as number | null,
         total_value: total,
         paid_value: paid,
+        payment_status: paymentStatus,
         notes: notes.trim() || null,
       });
       if ("error" in res) {
@@ -225,20 +229,17 @@ function NewContractDialog({
           </Field>
 
           <div className="grid grid-cols-2 gap-2">
-            <Field label="المسوّق">
-              <select
+            <Field label="مدير الحساب">
+              <SearchSelect
                 value={amId}
-                onChange={(e) => setAmId(e.target.value)}
+                onChange={setAmId}
+                options={accountManagers.map((a) => ({
+                  id: a.id,
+                  label: a.full_name,
+                }))}
+                placeholder="— بدون —"
                 disabled={pending}
-                className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
-              >
-                <option value="">— بدون —</option>
-                {accountManagers.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.full_name}
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
             <Field label="النوع">
               <select
@@ -310,19 +311,34 @@ function NewContractDialog({
             </Field>
           </div>
 
-          <Field label="القيمة المدفوعة">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={paidValue}
-              onChange={(e) => setPaidValue(e.target.value)}
-              disabled={pending}
-              dir="ltr"
-              placeholder="افتراضي 0"
-              className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="القيمة المدفوعة">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={paidValue}
+                onChange={(e) => setPaidValue(e.target.value)}
+                disabled={pending}
+                dir="ltr"
+                placeholder="افتراضي 0"
+                className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
+              />
+            </Field>
+            <Field label="الدفع">
+              <select
+                value={paymentStatus}
+                onChange={(e) =>
+                  setPaymentStatus(e.target.value as "Complete" | "Installments")
+                }
+                disabled={pending}
+                className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
+              >
+                <option value="Complete">Complete — مكتمل</option>
+                <option value="Installments">Installments — دفعات</option>
+              </select>
+            </Field>
+          </div>
 
           <Field label="ملاحظات">
             <textarea
@@ -336,8 +352,8 @@ function NewContractDialog({
           </Field>
 
           <p className="text-[10px] text-muted-foreground">
-            القيم الافتراضية: Target = Overdue، الحالة = نشط، الدفع = Complete.
-            يمكن تعديلها من الجدول بعد الإنشاء.
+            القيم الافتراضية: Target = Overdue، الحالة = نشط. يمكن تعديلها من
+            الجدول بعد الإنشاء. لو اخترت «دفعات» جدوِل الأقساط من صفحة العقد.
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
@@ -360,6 +376,103 @@ function NewContractDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Searchable single-select. The account-manager list is the full active
+// roster (~50+ people), so a plain <select> made the team scroll forever —
+// this filters as they type. Closes on outside click via a transparent
+// backdrop so it behaves like a normal popover inside the modal.
+function SearchSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ id: string; label: string }>;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const picked = options.find((o) => o.id === value);
+  const results = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const src = t
+      ? options.filter((o) => o.label.toLowerCase().includes(t))
+      : options;
+    return src.slice(0, 50);
+  }, [options, q]);
+
+  function close() {
+    setOpen(false);
+    setQ("");
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((s) => !s)}
+        className="flex h-9 w-full items-center justify-between gap-1 rounded-lg border border-input bg-input px-2 text-sm disabled:opacity-50"
+      >
+        <span className={cn("truncate", !picked && "text-muted-foreground")}>
+          {picked ? picked.label : placeholder}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={close} />
+          <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-soft bg-popover text-popover-foreground shadow-xl">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="ابحث بالاسم…"
+              className="h-8 w-full border-b border-soft bg-popover px-2 text-xs outline-none"
+            />
+            <div className="max-h-48 overflow-y-auto py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  close();
+                }}
+                className="block w-full px-3 py-1.5 text-start text-xs text-muted-foreground hover:bg-soft-1"
+              >
+                {placeholder}
+              </button>
+              {results.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.id);
+                    close();
+                  }}
+                  className={cn(
+                    "block w-full px-3 py-1.5 text-start text-xs hover:bg-soft-1",
+                    o.id === value && "bg-soft-1 font-medium",
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+              {results.length === 0 && (
+                <div className="px-3 py-2 text-xs text-muted-foreground">
+                  لا توجد نتائج
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

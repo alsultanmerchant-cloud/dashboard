@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getDefaultOrgId } from "@/lib/wa/ingest";
-import { analyzeClientSatisfaction, NoTranscriptError } from "@/lib/satisfaction-analyze";
+import {
+  analyzeClientSatisfaction,
+  NoTranscriptError,
+  NoRecentActivityError,
+} from "@/lib/satisfaction-analyze";
 
 // Daily re-analysis of client satisfaction for clients whose WhatsApp groups
 // received new messages. Auth: CRON_SECRET (x-cron-secret header or ?secret=).
@@ -77,7 +81,8 @@ async function handle(request: NextRequest) {
       const { result } = await analyzeClientSatisfaction(orgId, clientId, null);
       results.push({ clientId, ok: true, score: result.satisfactionScore });
     } catch (e) {
-      if (e instanceof NoTranscriptError) continue; // not enough data yet
+      // No transcript at all, or no messages in the current 7-day window → skip.
+      if (e instanceof NoTranscriptError || e instanceof NoRecentActivityError) continue;
       results.push({ clientId, ok: false, error: (e as Error).message });
     }
   }

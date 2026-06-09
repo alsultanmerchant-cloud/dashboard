@@ -118,7 +118,7 @@ export default async function ContractDetailPage({
 
       <Card className="mb-6">
         <CardContent className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <DetailField label="المسوّق المسؤول" value={am?.full_name ?? "—"} />
+          <DetailField label="مدير الحساب المسؤول" value={am?.full_name ?? "—"} />
           <DetailField
             label="تاريخ البدء"
             value={formatArabicShortDate(contract.start_date as string)}

@@ -12,17 +12,20 @@ import { SatisfactionWorkspace } from "./satisfaction-workspace";
 export default async function SatisfactionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ client?: string }>;
+  searchParams: Promise<{ client?: string; analysis?: string }>;
 }) {
   const session = await requirePagePermission("clients.view");
   const t = await getTranslations("SatisfactionPage");
   const sp = await searchParams;
   const selectedId = sp.client ?? null;
+  const selectedAnalysisId = sp.analysis ?? null;
 
   const [clients, rows, detail, execution] = await Promise.all([
     listClientOptions(session.orgId),
     getSatisfactionRows(session.orgId),
-    selectedId ? getClientSatisfactionDetail(session.orgId, selectedId) : Promise.resolve(null),
+    selectedId
+      ? getClientSatisfactionDetail(session.orgId, selectedId, selectedAnalysisId)
+      : Promise.resolve(null),
     selectedId ? getClientExecutionSnapshot(session.orgId, selectedId) : Promise.resolve(null),
   ]);
 
@@ -37,6 +40,7 @@ export default async function SatisfactionPage({
         detail={detail}
         execution={execution}
         selectedId={selectedId}
+        selectedAnalysisId={selectedAnalysisId}
       />
     </div>
   );

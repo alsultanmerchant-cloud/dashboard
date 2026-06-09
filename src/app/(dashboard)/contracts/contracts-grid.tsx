@@ -173,7 +173,10 @@ function rowTone(c: GridContract): string {
     return "bg-[#5f4d0f] hover:bg-[#6e5912] [&_td]:text-amber-50/90"; // gold
   if (c.renewed_status === "Closed")
     return "bg-[#3a3a3a] hover:bg-[#454545] [&_td]:text-zinc-200/90"; // gray
-  return "hover:bg-soft-1";
+  // Default rows need an explicit OPAQUE fill: the sticky Client ID / العميل
+  // cells inherit the row background, and without a solid color the scrolled
+  // columns showed THROUGH them — the "text overlap" the team reported.
+  return "bg-card hover:bg-soft-1";
 }
 
 // Solid-filled cell content matching the sheet (Target / Type / Payment).
@@ -451,7 +454,7 @@ export function ContractsGrid({
               <tr>
                 <Th sticky className="text-center min-w-[64px]">Client ID</Th>
                 <Th sticky stickyOffset="64px" className="min-w-[200px]">العميل</Th>
-                <Th>المسوّق</Th>
+                <Th>مدير الحساب</Th>
                 <Th>تاريخ البدء</Th>
                 <Th>Target</Th>
                 <Th>النوع</Th>
@@ -514,7 +517,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "account_manager_id", value: v || null },
-                              "المسوّق",
+                              "مدير الحساب",
                             )
                           }
                         />

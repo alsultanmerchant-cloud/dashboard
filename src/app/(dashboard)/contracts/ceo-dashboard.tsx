@@ -286,7 +286,7 @@ export function CeoDashboard({
               <thead className="sticky top-0 bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-start font-medium">العميل</th>
-                  <th className="px-3 py-2 text-start font-medium">المسوّق</th>
+                  <th className="px-3 py-2 text-start font-medium">مدير الحساب</th>
                   <th className="px-3 py-2 text-end font-medium">المبلغ</th>
                   <th className="px-3 py-2 font-medium">الحالة</th>
                 </tr>

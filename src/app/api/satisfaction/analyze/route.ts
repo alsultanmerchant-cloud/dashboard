@@ -1,5 +1,9 @@
 import { requirePermission } from "@/lib/auth-server";
-import { analyzeClientSatisfaction, NoTranscriptError } from "@/lib/satisfaction-analyze";
+import {
+  analyzeClientSatisfaction,
+  NoTranscriptError,
+  NoRecentActivityError,
+} from "@/lib/satisfaction-analyze";
 
 export const maxDuration = 60;
 
@@ -12,8 +16,11 @@ export async function POST(req: Request) {
   }
 
   let clientId: string | undefined;
+  let windowKind: "week" | "all" = "week";
   try {
-    ({ clientId } = await req.json());
+    const body = await req.json();
+    clientId = body.clientId;
+    if (body.windowKind === "all" || body.windowKind === "week") windowKind = body.windowKind;
   } catch {
     /* ignore */
   }
@@ -26,10 +33,11 @@ export async function POST(req: Request) {
       session.orgId,
       clientId,
       session.userId,
+      { windowKind },
     );
     return Response.json({ ok: true, analysisId, result });
   } catch (e) {
-    if (e instanceof NoTranscriptError) {
+    if (e instanceof NoTranscriptError || e instanceof NoRecentActivityError) {
       return Response.json({ error: e.message }, { status: 400 });
     }
     return Response.json(

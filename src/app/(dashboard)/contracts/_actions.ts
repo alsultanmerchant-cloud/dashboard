@@ -15,6 +15,28 @@ import { logAudit, logAiEvent } from "@/lib/audit";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Shift an ISO date by N calendar days (N may be negative). UTC math so a
+// daylight-saving boundary can't drop or add a day.
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Add N whole months to an ISO date, clamping to month-end (e.g. Jan 31 + 1mo
+// → Feb 28/29, not Mar 3). Used to derive the expected end date from duration.
+function addMonthsIso(iso: string, months: number): string {
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().slice(0, 10);
+}
+
 export type ContractActionState = { ok: true; id?: string } | { error: string };
 
 // ---------------------------------------------------------------------------
@@ -472,8 +494,14 @@ const FieldUpdateSchema = z.discriminatedUnion("field", [
   }),
   // Small int fields.
   z.object({
-    field: z.enum(["duration_months", "extension_days", "delay_days"]),
+    field: z.enum(["duration_months", "delay_days"]),
     value: z.number().int().min(0).max(3650).nullable(),
+  }),
+  // Extension days — SIGNED: +N pushes the expected end date out, −N pulls it
+  // in. Unlike the others this is an input the team drives, not a derived read.
+  z.object({
+    field: z.literal("extension_days"),
+    value: z.number().int().min(-3650).max(3650).nullable(),
   }),
 ]);
 
@@ -518,8 +546,8 @@ export async function updateContractFieldAction(input: {
       "id, organization_id, target, status, renewed_status, payment_status, " +
         "contract_type_id, account_manager_id, notes, total_value, paid_value, " +
         "next_contract_value, renewal_paid_value, repeated_services_value, " +
-        "start_date, end_date, actual_end_date, duration_months, " +
-        "extension_days, delay_days",
+        "start_date, end_date, actual_end_date, original_end_date, " +
+        "duration_months, extension_days, delay_days",
     )
     .eq("id", input.id)
     .maybeSingle();
@@ -532,6 +560,46 @@ export async function updateContractFieldAction(input: {
   // No-op short-circuit: avoids audit-log noise when the user picks the
   // same value, which happens often with dropdowns.
   if (previousValue === parsed.data.value) return { ok: true, id: input.id };
+
+  // Extension is an INPUT, not a derived read: editing تمديد re-bases the
+  // expected end date off the original baseline (+N days out, −N in). We write
+  // the new end_date; the recompute trigger then refreshes total_days and
+  // re-derives extension_days to match, so everything stays consistent.
+  if (parsed.data.field === "extension_days") {
+    const ext = parsed.data.value;
+    const baseline =
+      (before.original_end_date as string | null) ??
+      (before.end_date as string | null);
+    if (ext != null && !baseline) {
+      return { error: "حدّد تاريخ النهاية المتوقعة أولًا قبل التمديد" };
+    }
+    const extPatch: Record<string, unknown> = { extension_days: ext };
+    if (baseline) {
+      // ext null → clear the extension and snap back to the baseline.
+      extPatch.end_date = ext == null ? baseline : addDaysIso(baseline, ext);
+      // Pin a stable baseline for legacy rows (null original_end_date) so a
+      // second extension re-bases off the original instead of compounding.
+      if (!before.original_end_date) extPatch.original_end_date = baseline;
+    }
+    const { error: extErr } = await supabaseAdmin
+      .from("contracts")
+      .update(extPatch)
+      .eq("id", input.id);
+    if (extErr) return { error: extErr.message };
+
+    await logAudit({
+      organizationId: session.orgId,
+      actorUserId: session.userId,
+      action: "contract.update_field",
+      entityType: "contract",
+      entityId: input.id,
+      metadata: { field: "extension_days", from: previousValue, to: ext },
+    });
+
+    revalidatePath("/contracts");
+    revalidatePath(`/contracts/${input.id}`);
+    return { ok: true, id: input.id };
+  }
 
   const patch: Record<string, unknown> = { [parsed.data.field]: parsed.data.value };
   // contract_type_id → also refresh package_name? No — they're orthogonal.
@@ -602,6 +670,7 @@ const CreateContractSchema = z.object({
   duration_months: z.number().int().min(0).max(120).nullable(),
   total_value: z.number().finite().min(0).max(10_000_000),
   paid_value: z.number().finite().min(0).max(10_000_000).nullable(),
+  payment_status: z.enum(PAYMENT_VALUES),
   notes: z.string().trim().max(4000).nullable(),
 });
 
@@ -614,6 +683,7 @@ export async function createContractAction(input: {
   duration_months: number | null;
   total_value: number;
   paid_value: number | null;
+  payment_status: "Complete" | "Installments";
   notes: string | null;
 }): Promise<ContractActionState> {
   let session;
@@ -643,6 +713,15 @@ export async function createContractAction(input: {
   const startNoDash = parsed.data.start_date.replace(/-/g, "");
   const clientExt = client.external_id ?? client.id.slice(0, 8);
   const externalId = `${clientExt}|${startNoDash}`;
+
+  // Derive the expected end date from start + duration so the grid's
+  // "نهاية متوقعة" and Total Days populate immediately (and the تمديد column
+  // has a baseline to extend from). The insert trigger captures this as
+  // original_end_date.
+  const endDate =
+    parsed.data.duration_months && parsed.data.duration_months > 0
+      ? addMonthsIso(parsed.data.start_date, parsed.data.duration_months)
+      : null;
 
   // Pre-resolve the package name + type label for the denormalized fields
   // the grid reads when the embedded join isn't refreshed yet.
@@ -678,12 +757,13 @@ export async function createContractAction(input: {
       package_id: parsed.data.package_id,
       package_name: packageName,
       start_date: parsed.data.start_date,
+      end_date: endDate,
       duration_months: parsed.data.duration_months,
       total_value: parsed.data.total_value,
       paid_value: parsed.data.paid_value ?? 0,
       target: "Overdue",
       status: "active",
-      payment_status: "Complete",
+      payment_status: parsed.data.payment_status,
       notes: parsed.data.notes,
     })
     .select("id")
