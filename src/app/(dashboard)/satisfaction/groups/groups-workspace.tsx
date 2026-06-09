@@ -162,26 +162,46 @@ function GroupRow({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const dirty =
-    clientId !== (link.clientId ?? "") ||
-    projectId !== (link.projectId ?? "") ||
-    kind !== (link.groupKind ?? "") ||
-    active !== link.isActive;
+  // Auto-save: each control change persists immediately (no Save button).
+  // We optimistically apply the change to local state and send the full
+  // current row to the action, computing the payload from state + patch so
+  // the not-yet-flushed React state doesn't get sent stale.
+  const persist = (patch: {
+    clientId?: string;
+    projectId?: string;
+    kind?: GroupKind | "";
+    active?: boolean;
+  }) => {
+    const next = {
+      clientId: patch.clientId ?? clientId,
+      projectId: patch.projectId ?? projectId,
+      kind: patch.kind ?? kind,
+      active: patch.active ?? active,
+    };
+    if (patch.clientId !== undefined) setClientId(patch.clientId);
+    if (patch.projectId !== undefined) setProjectId(patch.projectId);
+    if (patch.kind !== undefined) setKind(patch.kind);
+    if (patch.active !== undefined) setActive(patch.active);
 
-  const save = () => {
     setError(null);
     startTransition(async () => {
       const res = await mapWaGroupAction({
         chatId: link.chatId,
-        clientId: clientId || null,
-        projectId: projectId || null,
-        groupKind: (kind || null) as GroupKind | null,
-        isActive: active,
+        clientId: next.clientId || null,
+        projectId: next.projectId || null,
+        groupKind: (next.kind || null) as GroupKind | null,
+        isActive: next.active,
       });
-      if (res.error) setError(res.error);
-      else {
+      if (res.error) {
+        setError(res.error);
+        // Revert the optimistic change on failure.
+        setClientId(link.clientId ?? "");
+        setProjectId(link.projectId ?? "");
+        setKind(link.groupKind ?? "");
+        setActive(link.isActive);
+      } else {
         setSaved(true);
-        setTimeout(() => setSaved(false), 1500);
+        setTimeout(() => setSaved(false), 1200);
         onSaved();
       }
     });
@@ -214,7 +234,7 @@ function GroupRow({
       <td className="p-3 min-w-[180px]">
         <SearchableSelect
           value={clientId}
-          onValueChange={setClientId}
+          onValueChange={(v) => persist({ clientId: v })}
           options={options}
           placeholder={t("groups.unmapped")}
           searchPlaceholder={t("searchClient")}
@@ -225,7 +245,7 @@ function GroupRow({
       <td className="p-3 min-w-[200px]">
         <SearchableSelect
           value={projectId}
-          onValueChange={setProjectId}
+          onValueChange={(v) => persist({ projectId: v })}
           options={projectOptions}
           placeholder={t("groups.unmappedProject")}
           searchPlaceholder={t("groups.searchProject")}
@@ -235,14 +255,14 @@ function GroupRow({
       </td>
       <td className="p-3 text-center">
         <div className="inline-flex gap-1">
-          <KindBtn active={kind === "client"} onClick={() => setKind(kind === "client" ? "" : "client")} icon={<MessageSquare className="size-3.5" />} label={t("clientGroup")} />
-          <KindBtn active={kind === "technical"} onClick={() => setKind(kind === "technical" ? "" : "technical")} icon={<Wrench className="size-3.5" />} label={t("technicalGroup")} />
+          <KindBtn active={kind === "client"} onClick={() => persist({ kind: kind === "client" ? "" : "client" })} icon={<MessageSquare className="size-3.5" />} label={t("clientGroup")} />
+          <KindBtn active={kind === "technical"} onClick={() => persist({ kind: kind === "technical" ? "" : "technical" })} icon={<Wrench className="size-3.5" />} label={t("technicalGroup")} />
         </div>
       </td>
       <td className="p-3 text-center">
         <button
           type="button"
-          onClick={() => setActive((a) => !a)}
+          onClick={() => persist({ active: !active })}
           className={cn(
             "inline-flex size-6 items-center justify-center rounded-md border",
             active ? "border-cc-green/40 bg-green-dim text-cc-green" : "border-border text-muted-foreground",
@@ -253,11 +273,16 @@ function GroupRow({
         </button>
       </td>
       <td className="p-3 text-center">
-        <Button size="sm" variant={dirty ? "default" : "outline"} disabled={!dirty || pending} onClick={save}>
-          {pending ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5" /> : null}
-          {t("groups.save")}
-        </Button>
-        {error && <p className="mt-1 text-[10px] text-cc-red">{error}</p>}
+        {/* Auto-save status (no Save button) */}
+        {pending ? (
+          <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" />
+        ) : error ? (
+          <span className="text-[10px] text-cc-red" title={error}>تعذّر الحفظ</span>
+        ) : saved ? (
+          <Check className="mx-auto size-4 text-cc-green" />
+        ) : (
+          <span className="text-[10px] text-muted-foreground/50">—</span>
+        )}
       </td>
     </tr>
   );
