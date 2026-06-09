@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Building2, Phone, Mail, Briefcase, ChevronLeft, Globe } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
+import { Building2, Phone, Mail, Briefcase, ChevronLeft, Globe, Merge } from "lucide-react";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { listLiveClientsPaged } from "@/lib/odoo/live";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -19,7 +19,8 @@ export default async function ClientsPage({
 }: {
   searchParams: Promise<{ page?: string }>;
 }) {
-  await requirePagePermission("clients.view");
+  const session = await requirePagePermission("clients.view");
+  const canManage = hasPermission(session, "clients.manage");
   const t = await getTranslations("ClientsPage");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
@@ -33,6 +34,17 @@ export default async function ClientsPage({
       <PageHeader
         title={t("title")}
         description={t("description")}
+        actions={
+          canManage ? (
+            <Link
+              href="/clients/merge"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-300 hover:bg-amber-500/20 transition-colors"
+            >
+              <Merge className="size-3.5" />
+              دمج المكررين
+            </Link>
+          ) : null
+        }
       />
 
       {total > 0 && (
