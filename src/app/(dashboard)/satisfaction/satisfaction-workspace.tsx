@@ -19,7 +19,12 @@ import {
   History,
   CalendarRange,
   ArrowRight,
+  Archive,
+  ArchiveRestore,
+  Lightbulb,
+  ArrowRightCircle,
 } from "lucide-react";
+import { setClientArchivedAction } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -93,9 +98,31 @@ export function SatisfactionWorkspace({
   const router = useRouter();
   const [analyzing, setAnalyzing] = useState<"week" | "all" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+
+  const selRow = useMemo(
+    () => rows.find((r) => r.clientId === selectedId) ?? null,
+    [rows, selectedId],
+  );
 
   const select = (id: string) => {
     if (id) router.push(`/satisfaction?client=${id}`);
+  };
+
+  const toggleArchive = async () => {
+    if (!selectedId) return;
+    setError(null);
+    setArchiving(true);
+    try {
+      const res = await setClientArchivedAction({
+        clientId: selectedId,
+        archived: !selRow?.manuallyArchived,
+      });
+      if (res.error) setError(res.error);
+      else router.refresh();
+    } finally {
+      setArchiving(false);
+    }
   };
 
   // Board cards always analyze the current week (the headline status).
@@ -220,6 +247,23 @@ export function SatisfactionWorkspace({
                 {t("lastAnalyzed")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}
               </span>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleArchive}
+              disabled={archiving}
+              className="ms-auto text-muted-foreground hover:text-foreground"
+              title={selRow?.manuallyArchived ? t("restoreHint") : t("archiveHint")}
+            >
+              {archiving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : selRow?.manuallyArchived ? (
+                <ArchiveRestore className="size-4" />
+              ) : (
+                <Archive className="size-4" />
+              )}
+              {selRow?.manuallyArchived ? t("restore") : t("archive")}
+            </Button>
           </div>
 
           {/* Real delivery work — delayed tasks tied to this client */}
@@ -719,6 +763,13 @@ const HL_TONE: Record<string, string> = {
   escalation: "text-cc-red",
 };
 
+const REC_PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+const REC_PRIORITY_TONE: Record<string, string> = {
+  high: "bg-red-dim text-cc-red",
+  medium: "bg-soft-2 text-amber",
+  low: "bg-soft-2 text-muted-foreground",
+};
+
 function AnalysisView({
   analysis,
   history,
@@ -845,6 +896,42 @@ function AnalysisView({
         )}
       </div>
 
+      {/* recommendations — AI advice grounded in chat + real Rawasm tasks */}
+      {analysis.recommendations.length > 0 && (
+        <Card className="border-cyan/30">
+          <CardContent className="p-4">
+            <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+              <Lightbulb className="size-4 text-cyan" /> {t("recommendations")}
+            </p>
+            <ul className="space-y-3">
+              {[...analysis.recommendations]
+                .sort(
+                  (a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority],
+                )
+                .map((rec, i) => (
+                  <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
+                    <div className="mb-1.5 flex items-start gap-2">
+                      <span
+                        className={cn(
+                          "mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
+                          REC_PRIORITY_TONE[rec.priority],
+                        )}
+                      >
+                        {t(`recPriority.${rec.priority}`)}
+                      </span>
+                      <span className="text-[13px] font-medium leading-snug">{rec.issue}</span>
+                    </div>
+                    <p className="flex items-start gap-1.5 text-[13px] text-cyan">
+                      <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
+                      {rec.action}
+                    </p>
+                  </li>
+                ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       {/* highlights */}
       {analysis.highlights.length > 0 && (
         <Card>
@@ -855,9 +942,15 @@ function AnalysisView({
             <ul className="space-y-2">
               {[...analysis.highlights]
                 // Client-facing items first; internal team items grouped after.
-                .sort((a, b) =>
-                  (a.audience === "team" ? 1 : 0) - (b.audience === "team" ? 1 : 0),
-                )
+                // Within each group, oldest → newest (undated items sort last).
+                .sort((a, b) => {
+                  const teamDelta =
+                    (a.audience === "team" ? 1 : 0) - (b.audience === "team" ? 1 : 0);
+                  if (teamDelta !== 0) return teamDelta;
+                  const ad = a.date || "9999-99-99";
+                  const bd = b.date || "9999-99-99";
+                  return ad.localeCompare(bd);
+                })
                 .map((h, i) => {
                   const isTeam = h.audience === "team";
                   return (

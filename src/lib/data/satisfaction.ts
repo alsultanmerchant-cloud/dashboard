@@ -52,6 +52,7 @@ export interface SatisfactionRow {
   hasTechnical: boolean;
   hasMessages: boolean; // has live wa_messages → analyzable even without a .txt import
   hasActiveProject: boolean; // false → archived/lost (has projects, ALL archived); separated in the UI
+  manuallyArchived: boolean; // operator flagged clients.status !== 'active'
   satisfactionScore: number | null;
   briefAdherenceScore: number | null;
   sentiment: string | null;
@@ -70,14 +71,14 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
       .select("client_id, satisfaction_score, brief_adherence_score, sentiment, created_at")
       .eq("organization_id", orgId)
       .eq("is_current", true),
-    supabaseAdmin.from("clients").select("id, name").eq("organization_id", orgId),
+    supabaseAdmin.from("clients").select("id, name, status").eq("organization_id", orgId),
     supabaseAdmin
       .from("projects")
-      .select("client_id, status")
+      .select("id, client_id, status")
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("wa_group_links")
-      .select("client_id, message_count")
+      .select("client_id, message_count, project_id")
       .eq("organization_id", orgId)
       .not("client_id", "is", null),
   ]);
@@ -88,27 +89,52 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   if (linksRes.error) throw linksRes.error;
 
   const names = new Map<string, string>();
-  for (const c of (clientsRes.data ?? []) as Array<{ id: string; name: string }>) {
+  // Manual archive flag: clients.status !== 'active' (e.g. 'archived'/'lost'/
+  // 'cancelled') is an explicit override — the relationship is dead even if a
+  // project still looks active (cancelled contract not yet archived in Rawasm).
+  const manualStatus = new Map<string, string | null>();
+  for (const c of (clientsRes.data ?? []) as Array<{ id: string; name: string; status: string | null }>) {
     names.set(c.id, c.name);
+    manualStatus.set(c.id, c.status);
   }
 
-  // Archived rule: a client is "lost/archived" ONLY when it has project
-  // records AND every one of them is archived. A client with NO project at
-  // all is treated as active — its project very likely lives on a duplicate
-  // client row (the sheet-imported copy vs the Odoo copy), so absence of a
-  // project here must not flag the relationship as lost. This fixes the team
-  // report (e.g. مركز واحة التغذية showing archived while active in Rawasm):
-  // the WhatsApp group is mapped to the project-less sheet duplicate.
-  const clientsWithAnyProject = new Set<string>();
-  const clientsWithActiveProject = new Set<string>();
-  for (const p of (projectsRes.data ?? []) as Array<{ client_id: string | null; status: string | null }>) {
+  // Archived rule. A client is "lost/archived" when EITHER:
+  //  - it is manually flagged (clients.status !== 'active'), OR
+  //  - every project it is associated with is archived.
+  // "Associated" means projects it OWNS *plus* projects its WhatsApp groups
+  // LINK TO — because duplicate client rows split the relationship: the group
+  // is mapped to a project-less copy while the real (archived) project lives on
+  // the twin (e.g. مجوهرات نها / جزيرة الريف). Following the group link's
+  // project_id recovers the true status. A client with NO associated project
+  // at all stays active (genuine no-signal duplicate/sheet case).
+  const projectStatusById = new Map<string, string | null>();
+  const ownedStatuses = new Map<string, string[]>();
+  for (const p of (projectsRes.data ?? []) as Array<{ id: string; client_id: string | null; status: string | null }>) {
+    projectStatusById.set(p.id, p.status);
     if (!p.client_id) continue;
-    clientsWithAnyProject.add(p.client_id);
-    if (p.status && p.status !== "archived") clientsWithActiveProject.add(p.client_id);
+    const arr = ownedStatuses.get(p.client_id) ?? [];
+    arr.push(p.status ?? "");
+    ownedStatuses.set(p.client_id, arr);
   }
-  // active (not archived) = has no projects, OR has at least one active project.
-  const isActiveClient = (clientId: string) =>
-    !clientsWithAnyProject.has(clientId) || clientsWithActiveProject.has(clientId);
+  // Projects reached via each client's WhatsApp group links (may belong to a twin).
+  const linkedProjectIds = new Map<string, Set<string>>();
+  for (const l of (linksRes.data ?? []) as Array<{ client_id: string | null; project_id: string | null }>) {
+    if (!l.client_id || !l.project_id) continue;
+    const s = linkedProjectIds.get(l.client_id) ?? new Set<string>();
+    s.add(l.project_id);
+    linkedProjectIds.set(l.client_id, s);
+  }
+
+  const isActiveClient = (clientId: string) => {
+    const st = manualStatus.get(clientId);
+    if (st && st !== "active") return false; // manual archive/cancel wins
+    const statuses: Array<string | null> = [...(ownedStatuses.get(clientId) ?? [])];
+    for (const pid of linkedProjectIds.get(clientId) ?? []) {
+      if (projectStatusById.has(pid)) statuses.push(projectStatusById.get(pid)!);
+    }
+    if (statuses.length === 0) return true; // no project signal → keep active
+    return statuses.some((s) => s !== "archived"); // any non-archived project → active
+  };
 
   // A client has live coverage if any of its mapped groups carry ingested messages.
   const clientsWithMessages = new Set<string>();
@@ -127,6 +153,10 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
         hasTechnical: false,
         hasMessages: clientsWithMessages.has(clientId),
         hasActiveProject: isActiveClient(clientId),
+        manuallyArchived: (() => {
+          const s = manualStatus.get(clientId);
+          return !!s && s !== "active";
+        })(),
         satisfactionScore: null,
         briefAdherenceScore: null,
         sentiment: null,
@@ -178,7 +208,7 @@ export interface ClientSatisfactionDetail {
 }
 
 const ANALYSIS_COLUMNS =
-  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, model, created_at, window_kind, window_start, window_end";
+  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, model, created_at, window_kind, window_start, window_end";
 
 function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
   return {
@@ -190,6 +220,7 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
     sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
     risks: (a.risks as string[]) ?? [],
+    recommendations: (a.recommendations as SatisfactionResult["recommendations"]) ?? [],
     model: (a.model as string | null) ?? null,
     createdAt: a.created_at as string,
     windowKind: ((a.window_kind as string) ?? "all") as WindowKind,

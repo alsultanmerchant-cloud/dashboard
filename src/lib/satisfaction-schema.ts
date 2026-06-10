@@ -50,6 +50,20 @@ export const SatisfactionSchema = z.object({
     .max(24),
   // Relationship risks / churn signals, Arabic, most important first.
   risks: z.array(z.string()).max(8),
+  // Actionable advice for the team, grounded in BOTH the chats and the client's
+  // real Rawasm work (overdue tasks / stuck stages). Each item links a problem
+  // to a concrete next step. Empty array when there's nothing material to advise.
+  recommendations: z
+    .array(
+      z.object({
+        priority: z.enum(["high", "medium", "low"]).catch("medium"),
+        // The problem, correlating the chat with the real delivery state.
+        issue: z.string(), // Arabic, one line
+        // What the team should do next about it.
+        action: z.string(), // Arabic, one line
+      }),
+    )
+    .max(6),
 });
 
 export type SatisfactionResult = z.infer<typeof SatisfactionSchema>;

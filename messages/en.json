@@ -2355,6 +2355,12 @@
     "summary": "Summary",
     "timeline": "Satisfaction trend",
     "risks": "Relationship risks",
+    "recommendations": "Recommendations (chat ↔ Rawasm tasks)",
+    "recPriority": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
     "highlights": "Highlights",
     "emptyOverview": "No synced chats yet. Connect WhatsApp groups to get started.",
     "viewBoard": "Board",
@@ -2480,6 +2486,10 @@
     "analyzeWeekHint": "Scores the client's current status from the last 7 days only",
     "analyzeAllHint": "Whole-history overview of the relationship",
     "noRecentActivity": "No recent messages in the last 7 days — try “Analyze all time”",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archiveHint": "Mark this client as archived/cancelled so it leaves the Active list (e.g. cancelled contract not yet in Rawasm)",
+    "restoreHint": "Un-archive — return this client to the Active list",
     "window": {
       "week": "Last 7 days",
       "all": "All time",

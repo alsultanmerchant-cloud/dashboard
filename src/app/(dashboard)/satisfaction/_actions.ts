@@ -473,3 +473,60 @@ export async function refreshWaMembersAction(): Promise<RefreshMembersState> {
   revalidatePath("/satisfaction/groups");
   return { ok: true, refreshed, remaining: chatIds.length - refreshed };
 }
+
+// --- Manual archive / restore -------------------------------------------
+// For clients whose relationship is dead but carry no project signal — e.g. a
+// cancelled contract whose group was never added to Rawasm. These otherwise
+// stay "active" forever (no project → no archived signal), so the operator can
+// flag them manually; isActiveClient() in data/satisfaction.ts honors this.
+const ArchiveSchema = z.object({
+  clientId: z.string().uuid(),
+  archived: z.boolean(),
+});
+
+export type ArchiveClientState = { ok?: true; error?: string };
+
+export async function setClientArchivedAction(input: {
+  clientId: string;
+  archived: boolean;
+}): Promise<ArchiveClientState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = ArchiveSchema.safeParse(input);
+  if (!parsed.success) return { error: "بيانات غير صالحة" };
+  const { clientId, archived } = parsed.data;
+
+  const { data: client } = await supabaseAdmin
+    .from("clients")
+    .select("id")
+    .eq("organization_id", session.orgId)
+    .eq("id", clientId)
+    .maybeSingle();
+  if (!client) return { error: "العميل غير موجود" };
+
+  // clients.status CHECK allows only ('active','inactive','lead'); 'inactive'
+  // is our manual archive marker (isActiveClient treats any non-active status
+  // as archived).
+  const { error } = await supabaseAdmin
+    .from("clients")
+    .update({ status: archived ? "inactive" : "active" })
+    .eq("organization_id", session.orgId)
+    .eq("id", clientId);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: archived ? "client.archived" : "client.restored",
+    entityType: "client",
+    entityId: clientId,
+  });
+
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}

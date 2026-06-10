@@ -4,7 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import { SatisfactionSchema, type SatisfactionResult } from "@/lib/satisfaction-schema";
-import { buildClientTranscripts } from "@/lib/data/satisfaction";
+import { buildClientTranscripts, getClientExecutionSnapshot } from "@/lib/data/satisfaction";
 import { getClientBrief } from "@/lib/satisfaction-brief";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
@@ -89,12 +89,32 @@ export async function analyzeClientSatisfaction(
   const brief = await getClientBrief(orgId, clientId);
 
   const briefInstruction = brief
-    ? `- briefAdherenceScore (0-100): مدى مطابقة العمل المُسلَّم (كما يظهر في المحادثتين) لمتطلبات العميل الموثقة في "البريف" أدناه. قارن بنودًا فعلية. null فقط إذا تعذّر الحكم.`
-    : `- briefAdherenceScore (0-100): مدى مطابقة التنفيذ لمتطلبات العميل كما يظهر في "مجموعة الفريق التقني". null إن لم تتوفر.`;
+    ? `- briefAdherenceScore (0-100): يقيس بندًا ببند فقط مدى تنفيذ ما هو مكتوب حرفيًا في "البريف" أدناه (المخرجات/المتطلبات الموثقة): أيها سُلِّم، أيها قيد التنفيذ، أيها لم يُنفّذ. الدرجة تعكس نسبة بنود البريف المُنفّذة فقط. مهم: شكاوى تشغيلية أو علاقة عامة غير واردة في البريف (مثل ضعف أداء الحملات، مشاكل التفعيل، عدم شحن الفيزا، التأخير في الدفع) لا تخفّض briefAdherenceScore — مكانها satisfactionScore وrisks، لا البريف. اربط كل تقييم ببند بريف مذكور فعلًا. null فقط إذا لم يذكر البريف بنودًا قابلة للتقييم.`
+    : `- briefAdherenceScore (0-100): مدى مطابقة التنفيذ لمتطلبات العميل كما يظهر في "مجموعة الفريق التقني". الشكاوى التشغيلية أو العامة (حملات/تفعيل/فيزا/دفع) ليست جزءًا من البريف — لا تبنِ عليها هذه الدرجة. null إن لم تتوفر متطلبات واضحة.`;
 
   const briefBlock = brief
     ? `\n\n=== البريف (متطلبات العميل الموثقة) ===\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
     : "";
+
+  // Real delivery state from Rawasm — the client's actually-overdue tasks and
+  // the stages they're stuck in. Feeding this lets the model CORRELATE chat
+  // complaints with concrete delayed work and give grounded recommendations
+  // (the team's explicit ask: "compare the chat with the tasks in Rawasm").
+  const execution = await getClientExecutionSnapshot(orgId, clientId);
+  const executionBlock = execution
+    ? `\n\n=== العمل الفعلي في رواسم (المهام المتأخرة) ===\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
+        execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
+      }\nتوزّع المتأخرات على المراحل: ${execution.byStage
+        .map((s) => `${s.stage} (${s.count})`)
+        .join("، ")}\nأبرز المهام العالقة:\n${execution.topTasks
+        .map(
+          (t) =>
+            `- ${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
+              t.daysStuck != null ? ` — عالقة منذ ${t.daysStuck} يوم` : ""
+            }${t.delayDays != null ? ` — متأخرة ${t.delayDays} يوم عمل` : ""}`,
+        )
+        .join("\n")}`
+    : "\n\n=== العمل الفعلي في رواسم ===\n(لا توجد مهام متأخرة مسجّلة لهذا العميل في رواسم)";
 
   const runOnce = async (budget: number) =>
     (
@@ -111,11 +131,13 @@ ${
 
 1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
 2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ.${brief ? '\n3) "البريف" — وثيقة متطلبات العميل الأساسية المعتمدة في بداية المشروع.' : ""}
+4) "العمل الفعلي في رواسم" — المهام المتأخرة الحقيقية للعميل ومراحلها (بيانات نظام، ليست محادثة).
 
 التعليمات:
 - satisfactionScore (0-100): من نبرة العميل ونتائج التعامل في "مجموعة العميل".
 ${briefInstruction}
 - sentiment, summary (عربي ٢-٤ جمل), highlights (ثناء/شكوى/طلب/تصعيد/إنجاز مع التاريخ)، sentimentTimeline (period مثل 2026-04)، risks (الأهم أولًا).
+- recommendations (توصيات قابلة للتنفيذ للفريق، الأهم أولًا، حتى ٦): اربط ما يشكو منه العميل أو يطلبه في المحادثة بالعمل الفعلي في رواسم. لكل توصية: issue = المشكلة موصولة بالواقع (مثال: «العميل يستعجل تسليم الحملة، ويوجد فعليًا في رواسم مهمتان متأخرتان عالقتان في مرحلة التصميم منذ ١٢ يومًا»)، action = الخطوة العملية التالية (مثال: «تصعيد مهمة PRJ-007-014 لقسم التصميم وتحديد موعد تسليم للعميل»). استخدم رموز/عناوين المهام من قسم رواسم عند توفرها. لا تخترع مهامًا غير مذكورة. إن لم توجد مشكلة جوهرية تستحق توصية، أعِد مصفوفة فارغة.
 - لكل عنصر في highlights حدّد audience:
   • "client" = رسالة أو موقف صادر من العميل نفسه (طلب/شكوى/ثناء حقيقي من العميل).
   • "team" = تنسيق داخلي بين الفريق (مثل أن يستعجل الأكاونت مانجر العميل على الاعتماد). لا تَعُدّ رسائل الفريق الداخلية طلباتٍ للعميل.
@@ -130,7 +152,7 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني ===
-${trim(technicalBlock, budget)}${briefBlock}`,
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
       })
     ).object;
 
@@ -187,6 +209,7 @@ ${trim(technicalBlock, budget)}${briefBlock}`,
       highlights: result.highlights,
       sentiment_timeline: result.sentimentTimeline,
       risks: result.risks,
+      recommendations: result.recommendations,
       model: MODEL,
       client_import_id: clientImportId,
       technical_import_id: technicalImportId,
