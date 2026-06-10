@@ -2313,6 +2313,24 @@
       },
       "naSourceSatisfaction": "Import client chats on the Satisfaction page",
       "analyzedClients": "{n} clients analyzed"
+    },
+    "financial": {
+      "title": "Financial performance · this month",
+      "full": "Full breakdown →",
+      "expected": "Expected income",
+      "actual": "Actual income",
+      "achievement": "Achievement",
+      "ofExpected": "{pct}% of expected",
+      "accountTarget": "Account target",
+      "salesTarget": "Sales target",
+      "revenueGap": "Revenue gap",
+      "totalClients": "Total clients",
+      "newContracts": "New contracts",
+      "renewing": "Renewing",
+      "onTarget": "On target",
+      "overdue": "Overdue",
+      "expectedLabel": "expected",
+      "actualLabel": "actual"
     }
   },
   "SatisfactionPage": {

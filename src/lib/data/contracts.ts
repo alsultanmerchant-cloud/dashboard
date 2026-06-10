@@ -39,7 +39,7 @@ export async function listContracts(orgId: string, filters: ContractListFilters 
       `id, start_date, end_date, total_value, paid_value, target, status, duration_months,
        client:clients(id, name),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
-       type:contract_types(id, key, name_ar),
+       type:contract_types!contracts_contract_type_id_fkey(id, key, name_ar),
        package:packages(id, key, name_ar)`,
     )
     .eq("organization_id", orgId)
@@ -73,7 +73,7 @@ export async function listContractsPaged(
       `id, start_date, end_date, total_value, paid_value, target, status, duration_months,
        client:clients(id, name),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
-       type:contract_types(id, key, name_ar),
+       type:contract_types!contracts_contract_type_id_fkey(id, key, name_ar),
        package:packages(id, key, name_ar)`,
       { count: "exact" },
     )
@@ -389,6 +389,10 @@ export async function listContractTypes(orgId: string) {
 export type GridContract = {
   id: string;
   external_id: string | null;
+  contract_code: string | null;
+  hold_started_at: string | null;
+  hold_end_date: string | null;
+  type_before_hold_id: string | null;
   client_id: string;
   client_name: string | null;
   client_external_id: string | null;
@@ -425,14 +429,15 @@ export async function listContractsGrid(
   let q = supabaseAdmin
     .from("contracts")
     .select(
-      `id, external_id, start_date, end_date, actual_end_date, duration_months,
+      `id, external_id, contract_code, hold_started_at, hold_end_date,
+       type_before_hold_id, start_date, end_date, actual_end_date, duration_months,
        total_value, paid_value, next_contract_value, renewal_paid_value,
        repeated_services_value, payment_status, target, status,
        contract_status_label, renewed_status, extension_days, delay_days,
        total_days_computed, notes, account_manager_id, account_manager_name,
        client:clients(id, name, external_id),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
-       type:contract_types(key, name_ar),
+       type:contract_types!contracts_contract_type_id_fkey(key, name_ar),
        package:packages!contracts_package_id_fkey(name_ar),
        packages:contract_packages(sort_order, package:packages(name_ar))`,
     )
@@ -452,6 +457,10 @@ export async function listContractsGrid(
   type Row = {
     id: string;
     external_id: string | null;
+    contract_code: string | null;
+    hold_started_at: string | null;
+    hold_end_date: string | null;
+    type_before_hold_id: string | null;
     start_date: string;
     end_date: string | null;
     actual_end_date: string | null;
@@ -487,6 +496,10 @@ export async function listContractsGrid(
     return {
       id: r.id,
       external_id: r.external_id,
+      contract_code: r.contract_code,
+      hold_started_at: r.hold_started_at,
+      hold_end_date: r.hold_end_date,
+      type_before_hold_id: r.type_before_hold_id,
       client_id: r.client?.id ?? "",
       client_name: r.client?.name ?? null,
       client_external_id: r.client?.external_id ?? null,
@@ -549,10 +562,11 @@ export async function getContractById(orgId: string, id: string) {
     .select(
       `id, organization_id, start_date, end_date, duration_months,
        total_value, paid_value, target, status, notes,
+       contract_code, hold_started_at, hold_end_date, type_before_hold_id,
        project_id, account_manager_id, contract_type_id, package_id,
-       client:clients(id, name),
+       client:clients(id, name, client_code, external_id),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
-       type:contract_types(id, key, name_ar),
+       type:contract_types!contracts_contract_type_id_fkey(id, key, name_ar),
        package:packages(id, key, name_ar, grace_days),
        project:projects(id, name)`,
     )
@@ -561,6 +575,60 @@ export async function getContractById(orgId: string, id: string) {
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+/**
+ * All other contracts of the same client — the sheet's "duplicate Client ID"
+ * insight surfaced properly: the detail page shows «هذا العميل لديه N عقود».
+ */
+export async function getClientSiblingContracts(
+  orgId: string,
+  clientId: string,
+  excludeContractId: string,
+) {
+  const { data, error } = await supabaseAdmin
+    .from("contracts")
+    .select(
+      `id, contract_code, start_date, end_date, status, total_value,
+       package_name,
+       type:contract_types!contracts_contract_type_id_fkey(key, name_ar),
+       packages:contract_packages(sort_order, package:packages(name_ar))`,
+    )
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .neq("id", excludeContractId)
+    .order("start_date", { ascending: false });
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    contract_code: string | null;
+    start_date: string;
+    end_date: string | null;
+    status: string;
+    total_value: number | string | null;
+    package_name: string | null;
+    type: { key: string; name_ar: string } | null;
+    packages: Array<{ sort_order: number; package: { name_ar: string } | null }>;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    id: r.id,
+    contract_code: r.contract_code,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    status: r.status,
+    total_value: Number(r.total_value ?? 0),
+    type_label: r.type?.name_ar ?? null,
+    package_names:
+      r.packages.length > 0
+        ? [...r.packages]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((p) => p.package?.name_ar)
+            .filter((x): x is string => !!x)
+        : r.package_name
+          ? [r.package_name]
+          : [],
+  }));
 }
 
 export async function getContractInstallments(orgId: string, contractId: string) {
@@ -639,7 +707,7 @@ export async function getAmDashboard(employeeId: string, monthIso?: string) {
         .from("contracts")
         .select(
           `id, start_date, total_value, paid_value, status, target,
-           type:contract_types(key, name_ar),
+           type:contract_types!contracts_contract_type_id_fkey(key, name_ar),
            client:clients(id, name)`,
         )
         .eq("account_manager_id", employeeId)
@@ -701,7 +769,7 @@ async function _getCeoCommercialTiles(orgId: string, monthIso?: string) {
     .from("contracts")
     .select(
       `total_value, status,
-       type:contract_types(key)`,
+       type:contract_types!contracts_contract_type_id_fkey(key)`,
     )
     .eq("organization_id", orgId)
     .gte("start_date", first)

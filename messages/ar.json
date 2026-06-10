@@ -2313,6 +2313,24 @@
       },
       "naSourceSatisfaction": "استورد محادثات العميل من صفحة رضا العملاء",
       "analyzedClients": "{n} عميل تم تحليله"
+    },
+    "financial": {
+      "title": "الأداء المالي · هذا الشهر",
+      "full": "الصورة الكاملة ←",
+      "expected": "الدخل المتوقع",
+      "actual": "الدخل الفعلي",
+      "achievement": "نسبة الإنجاز",
+      "ofExpected": "{pct}% من المتوقع",
+      "accountTarget": "تارجت الأكونت",
+      "salesTarget": "تارجت السيلز",
+      "revenueGap": "الفجوة المتبقية",
+      "totalClients": "إجمالي العملاء",
+      "newContracts": "عقود جديدة",
+      "renewing": "تجديدات",
+      "onTarget": "على الهدف",
+      "overdue": "متأخر",
+      "expectedLabel": "متوقع",
+      "actualLabel": "فعلي"
     }
   },
   "SatisfactionPage": {

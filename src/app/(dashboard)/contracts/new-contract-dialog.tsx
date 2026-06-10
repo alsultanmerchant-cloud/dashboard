@@ -78,7 +78,9 @@ function NewContractDialog({
   const [clientId, setClientId] = useState("");
   const [amId, setAmId] = useState("");
   const [typeId, setTypeId] = useState("");
-  const [packageId, setPackageId] = useState("");
+  // Multi-package: the sheet's Package column is a comma list of services
+  // (e.g. «سوشيال, حملات») — one contract regularly bundles several.
+  const [packageIds, setPackageIds] = useState<string[]>([]);
   const today = new Date().toISOString().slice(0, 10);
   const [startDate, setStartDate] = useState(today);
   const [duration, setDuration] = useState("1");
@@ -124,7 +126,7 @@ function NewContractDialog({
         client_id: clientId,
         account_manager_id: amId || null,
         contract_type_id: typeId || null,
-        package_id: packageId || null,
+        package_ids: packageIds,
         start_date: startDate,
         duration_months: dur as number | null,
         total_value: total,
@@ -258,20 +260,39 @@ function NewContractDialog({
             </Field>
           </div>
 
-          <Field label="الباقة">
-            <select
-              value={packageId}
-              onChange={(e) => setPackageId(e.target.value)}
-              disabled={pending}
-              className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
-            >
-              <option value="">— بدون —</option>
-              {packages.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name_ar}
-                </option>
-              ))}
-            </select>
+          <Field label={`الباقات / الخدمات${packageIds.length ? ` (${packageIds.length})` : ""}`}>
+            <div className="flex max-h-32 flex-wrap content-start gap-1.5 overflow-y-auto rounded-lg border border-input bg-input p-2">
+              {packages.map((p) => {
+                const selected = packageIds.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      setPackageIds((prev) =>
+                        selected
+                          ? prev.filter((id) => id !== p.id)
+                          : [...prev, p.id],
+                      )
+                    }
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                      selected
+                        ? "border-cyan/50 bg-cyan-dim font-medium text-cyan"
+                        : "border-soft bg-card text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {selected && "✓ "}
+                    {p.name_ar}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              اختر كل الخدمات داخل العقد — الخدمات اللي تنفذ لمرة واحدة (انشاء
+              متجر، براندنج…) بتضيف أيامها تلقائيًا لمدة العقد.
+            </p>
           </Field>
 
           <div className="grid grid-cols-3 gap-2">

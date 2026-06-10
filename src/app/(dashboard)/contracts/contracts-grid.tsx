@@ -25,7 +25,8 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { GridContract } from "@/lib/data/contracts";
-import { updateContractFieldAction } from "./_actions";
+import { updateContractFieldAction, liftContractHoldAction } from "./_actions";
+import { HoldDialog } from "./hold-dialog";
 
 type TypeOption = { id: string; key: string; label: string };
 type AmOption = { id: string; full_name: string };
@@ -280,9 +281,13 @@ export function ContractsGrid({
 
   const [search, setSearch] = useState("");
   const [target, setTarget] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  // Default = active contracts only (team request): the closed/lost rows
+  // (red, renewed_status = NO) stay one chip-click away under «الكل».
+  const [status, setStatus] = useState<string | null>("active");
   const [typeKey, setTypeKey] = useState<string | null>(null);
   const [scope, setScope] = useState<"all" | "mine">("all");
+  // Hold popup — opened when the inline type dropdown picks "Hold".
+  const [holdFor, setHoldFor] = useState<GridContract | null>(null);
 
   // Shared save handler — patches the row optimistically, then calls the
   // server action. On failure we revert to the prior snapshot. Same code
@@ -336,6 +341,10 @@ export function ContractsGrid({
       if (!q) return true;
       return (
         (r.client_name ?? "").toLowerCase().includes(q) ||
+        // «C124» matches both the sheet id and our codes C124-1 / C124-2.
+        (r.contract_code ?? "").toLowerCase().includes(q) ||
+        // the importer key (C124|20260226) keeps the original sheet identity
+        (r.external_id ?? "").toLowerCase().includes(q) ||
         (r.client_external_id ?? "").toLowerCase().includes(q) ||
         (r.account_manager_name ?? "").toLowerCase().includes(q) ||
         r.package_names.some((p) => p.toLowerCase().includes(q)) ||
@@ -493,7 +502,7 @@ export function ContractsGrid({
                   >
                     <Td sticky className="text-center font-mono text-[11px]">
                       <Link href={`/contracts/${c.id}`} className="hover:underline">
-                        {c.client_external_id ?? "—"}
+                        {c.contract_code ?? c.client_external_id ?? "—"}
                       </Link>
                     </Td>
                     <Td sticky stickyOffset="64px" className="font-medium">
@@ -591,13 +600,37 @@ export function ContractsGrid({
                               "—"
                             )
                           }
-                          onCommit={(v) =>
-                            commit(
+                          onCommit={(v) => {
+                            const picked = contractTypes.find((t) => t.id === v);
+                            // Picking Hold → mandatory end-date popup instead
+                            // of a silent type change (sheet-parity + cron).
+                            if (picked?.key === "Hold") {
+                              setHoldFor(c);
+                              return Promise.resolve(true);
+                            }
+                            // Leaving Hold → dedicated lift action: restores
+                            // status, clears hold fields, logs HOLD_LIFTED
+                            // with the diff vs the ON_HOLD snapshot.
+                            if (c.status === "hold") {
+                              return liftContractHoldAction({
+                                contractId: c.id,
+                                newTypeId: v || null,
+                              }).then((res) => {
+                                if ("error" in res) {
+                                  toast.error(res.error);
+                                  return false;
+                                }
+                                toast.success("تم رفع الإيقاف ✅");
+                                router.refresh();
+                                return true;
+                              });
+                            }
+                            return commit(
                               c.id,
                               { field: "contract_type_id", value: v || null },
                               "النوع",
-                            )
-                          }
+                            );
+                          }}
                         />
                       ) : c.contract_type_key ? (
                         <SolidCell
@@ -732,7 +765,18 @@ export function ContractsGrid({
                       )}
                     </Td>
                     <Td className="text-[11px] text-muted-foreground">
-                      {c.contract_status_label ?? STATUS_LABEL[c.status] ?? c.status}
+                      {c.status === "hold" && c.hold_end_date ? (
+                        <button
+                          type="button"
+                          title="تعديل مدة الإيقاف"
+                          onClick={() => canEdit && setHoldFor(c)}
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 whitespace-nowrap"
+                        >
+                          ⏸ حتى {fmtDate(c.hold_end_date)}
+                        </button>
+                      ) : (
+                        (c.contract_status_label ?? STATUS_LABEL[c.status] ?? c.status)
+                      )}
                     </Td>
                     <Td className="text-end tabular-nums text-muted-foreground">
                       {canEdit ? (
@@ -911,6 +955,15 @@ export function ContractsGrid({
           </table>
         </div>
       </div>
+
+      {holdFor && (
+        <HoldDialog
+          contractId={holdFor.id}
+          contractLabel={`${holdFor.contract_code ?? holdFor.client_external_id ?? ""} — ${holdFor.client_name ?? ""}`}
+          currentHoldEnd={holdFor.status === "hold" ? holdFor.hold_end_date : null}
+          onClose={() => setHoldFor(null)}
+        />
+      )}
     </div>
   );
 }

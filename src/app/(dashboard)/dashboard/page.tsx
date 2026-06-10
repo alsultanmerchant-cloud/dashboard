@@ -1,13 +1,12 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { FileSignature } from "lucide-react";
 import { requireSession, getDashboardScope, type ServerSession } from "@/lib/auth-server";
 import { DepartmentDashboard } from "@/components/department/department-dashboard";
 import { AgentCockpit } from "@/components/cockpit/agent-cockpit";
 import { getTeamActivityOverview } from "@/lib/data/activity-scores";
 import { ActivityPulseBand } from "@/components/activity/activity-pulse-band";
-import { getCeoCommercialTiles } from "@/lib/data/contracts";
+import { getCeoDashboardData, currentMonthIso } from "@/lib/data/ceo-dashboard";
+import { FinancialSummary } from "@/components/executive/financial-summary";
 import { getExecutiveScores } from "@/lib/data/executive-scores";
 import {
   getHeroKpis,
@@ -26,7 +25,6 @@ import {
   getTopRevisedTasks,
 } from "@/lib/data/executive";
 import { PageHeader } from "@/components/page-header";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { ExecutiveHeroRow } from "@/components/executive/hero-row";
@@ -40,9 +38,6 @@ import { UpcomingDeadlinesSection } from "@/components/executive/upcoming-deadli
 import { WipAgingSection } from "@/components/executive/wip-aging";
 import { StageFlowMatrixSection } from "@/components/executive/stage-flow-matrix";
 import { TopRevisedTasksSection } from "@/components/executive/top-revised";
-
-const sar = (n: number) =>
-  new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 
 // ---- Sections (each streams behind its own Suspense) ---------------------
 
@@ -117,48 +112,9 @@ async function TeamCapacity({ orgId }: { orgId: string }) {
   return <TeamCapacitySection specialists={specialists} performers={performers} />;
 }
 
-async function CommercialStrip({ orgId }: { orgId: string }) {
-  const t = await getTranslations("Executive.commercial");
-  const tiles = await getCeoCommercialTiles(orgId).catch(() => ({
-    month: "",
-    byType: {} as Record<string, { count: number; value: number }>,
-    totalCount: 0,
-    totalValue: 0,
-  }));
-
-  return (
-    <section className="mb-8">
-      <Card>
-        <CardContent className="p-4">
-          <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
-            <p className="inline-flex items-center gap-2 text-sm font-semibold">
-              <FileSignature className="size-4 text-cyan" />
-              {t("title")}
-            </p>
-            <Link href="/contracts" className="text-xs text-cyan hover:underline">
-              {t("open")}
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {(["New", "Renew", "UPSELL", "WinBack", "Hold"] as const).map((k) => {
-              const agg = tiles.byType[k] ?? { count: 0, value: 0 };
-              return (
-                <div key={k} className="rounded-xl border border-border bg-card p-2.5">
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {t(`types.${k}`)}
-                  </p>
-                  <p className="mt-1 text-base font-semibold tabular-nums">{agg.count}</p>
-                  <p className="text-[10px] text-muted-foreground tabular-nums">
-                    {sar(agg.value)}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
+async function FinancialSummarySection({ orgId }: { orgId: string }) {
+  const data = await getCeoDashboardData(orgId, currentMonthIso());
+  return <FinancialSummary data={data} />;
 }
 
 // ---- Skeletons -----------------------------------------------------------
@@ -250,6 +206,10 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         <ScoresBand orgId={orgId} />
       </Suspense>
 
+      <Suspense fallback={<SectionSkeleton h={200} />}>
+        <FinancialSummarySection orgId={orgId} />
+      </Suspense>
+
       <Suspense fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />
       </Suspense>
@@ -292,10 +252,6 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
 
       <Suspense fallback={<SectionSkeleton h={300} />}>
         <TeamCapacity orgId={orgId} />
-      </Suspense>
-
-      <Suspense fallback={<SectionSkeleton h={120} />}>
-        <CommercialStrip orgId={orgId} />
       </Suspense>
     </div>
   );

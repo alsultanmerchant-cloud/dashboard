@@ -21,6 +21,7 @@ const SECTION_PATH: Record<string, string> = {
   task: "/tasks",
   project: "/projects",
   client: "/clients",
+  contract: "/contracts",
   notification: "/notifications",
   ai_event: "/ai-insights",
   mention: "/tasks",
@@ -41,6 +42,8 @@ function notificationHref(n: { entityType?: string | null; entityId?: string | n
       return "/handover";
     case "client":
       return "/clients";
+    case "contract":
+      return id ? `/contracts/${id}` : "/contracts";
     case "direct_message":
       return id ? `/messages?msg=${id}` : "/messages";
     case "employee":

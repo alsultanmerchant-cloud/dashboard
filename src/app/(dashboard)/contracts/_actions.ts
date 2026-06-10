@@ -23,21 +23,12 @@ function addDaysIso(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Add N whole months to an ISO date, clamping to month-end (e.g. Jan 31 + 1mo
-// → Feb 28/29, not Mar 3). Used to derive the expected end date from duration.
-function addMonthsIso(iso: string, months: number): string {
-  const d = new Date(`${iso}T00:00:00.000Z`);
-  const day = d.getUTCDate();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  const lastDay = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  d.setUTCDate(Math.min(day, lastDay));
-  return d.toISOString().slice(0, 10);
-}
-
 export type ContractActionState = { ok: true; id?: string } | { error: string };
+
+// Today's date in ISO (UTC) — shared by the hold/installment helpers.
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 // ---------------------------------------------------------------------------
 // recordContractEvent
@@ -561,6 +552,29 @@ export async function updateContractFieldAction(input: {
   // same value, which happens often with dropdowns.
   if (previousValue === parsed.data.value) return { ok: true, id: input.id };
 
+  // Hold transitions must go through the dedicated actions so the end-date
+  // popup, snapshot and diff logging can't be skipped (sheet-parity guard).
+  if (parsed.data.field === "contract_type_id") {
+    if (before.status === "hold") {
+      return {
+        error:
+          "العقد موقوف حاليًا — استخدمي زر «رفع الإيقاف» لتغيير النوع",
+      };
+    }
+    if (parsed.data.value) {
+      const { data: newType } = await supabaseAdmin
+        .from("contract_types")
+        .select("key")
+        .eq("id", parsed.data.value)
+        .maybeSingle();
+      if (newType?.key === "Hold") {
+        return {
+          error: "اختيار Hold يتم من نافذة الإيقاف لتحديد تاريخ نهاية الإيقاف",
+        };
+      }
+    }
+  }
+
   // Extension is an INPUT, not a derived read: editing تمديد re-bases the
   // expected end date off the original baseline (+N days out, −N in). We write
   // the new end_date; the recompute trigger then refreshes total_days and
@@ -665,7 +679,9 @@ const CreateContractSchema = z.object({
   client_id: z.string().regex(UUID_RE),
   account_manager_id: z.string().regex(UUID_RE).nullable(),
   contract_type_id: z.string().regex(UUID_RE).nullable(),
-  package_id: z.string().regex(UUID_RE).nullable(),
+  // Multi-package, like the sheet's comma-separated Package column. First
+  // entry doubles as the primary package_id for legacy reads.
+  package_ids: z.array(z.string().regex(UUID_RE)).max(15).default([]),
   start_date: z.string().regex(DATE_RE),
   duration_months: z.number().int().min(0).max(120).nullable(),
   total_value: z.number().finite().min(0).max(10_000_000),
@@ -678,7 +694,7 @@ export async function createContractAction(input: {
   client_id: string;
   account_manager_id: string | null;
   contract_type_id: string | null;
-  package_id: string | null;
+  package_ids: string[];
   start_date: string;
   duration_months: number | null;
   total_value: number;
@@ -714,25 +730,19 @@ export async function createContractAction(input: {
   const clientExt = client.external_id ?? client.id.slice(0, 8);
   const externalId = `${clientExt}|${startNoDash}`;
 
-  // Derive the expected end date from start + duration so the grid's
-  // "نهاية متوقعة" and Total Days populate immediately (and the تمديد column
-  // has a baseline to extend from). The insert trigger captures this as
-  // original_end_date.
-  const endDate =
-    parsed.data.duration_months && parsed.data.duration_months > 0
-      ? addMonthsIso(parsed.data.start_date, parsed.data.duration_months)
-      : null;
-
-  // Pre-resolve the package name + type label for the denormalized fields
-  // the grid reads when the embedded join isn't refreshed yet.
+  // Pre-resolve the package names + type label for the denormalized fields
+  // the grid reads when the embedded join isn't refreshed yet. Joined with
+  // «، » to mirror the sheet's comma-list Package column.
+  const pkgIds = parsed.data.package_ids;
   let packageName: string | null = null;
-  if (parsed.data.package_id) {
-    const { data: pkg } = await supabaseAdmin
+  if (pkgIds.length > 0) {
+    const { data: pkgs } = await supabaseAdmin
       .from("packages")
-      .select("name_ar")
-      .eq("id", parsed.data.package_id)
-      .maybeSingle();
-    packageName = pkg?.name_ar ?? null;
+      .select("id, name_ar")
+      .in("id", pkgIds);
+    const byId = new Map((pkgs ?? []).map((p) => [p.id, p.name_ar]));
+    packageName =
+      pkgIds.map((id) => byId.get(id)).filter(Boolean).join("، ") || null;
   }
   let amName: string | null = null;
   if (parsed.data.account_manager_id) {
@@ -754,10 +764,12 @@ export async function createContractAction(input: {
       account_manager_id: parsed.data.account_manager_id,
       account_manager_name: amName,
       contract_type_id: parsed.data.contract_type_id,
-      package_id: parsed.data.package_id,
+      package_id: pkgIds[0] ?? null,
       package_name: packageName,
       start_date: parsed.data.start_date,
-      end_date: endDate,
+      // end_date is computed below by the sheet-parity duration engine
+      // (recompute_contract_end_date) once the package links exist.
+      end_date: null,
       duration_months: parsed.data.duration_months,
       total_value: parsed.data.total_value,
       paid_value: parsed.data.paid_value ?? 0,
@@ -773,13 +785,28 @@ export async function createContractAction(input: {
   }
 
   // Mirror into the junction so multi-package reads stay uniform with the
-  // imported rows. Single package on create; team can add more inline.
-  if (parsed.data.package_id) {
-    await supabaseAdmin.from("contract_packages").insert({
-      contract_id: row.id,
-      package_id: parsed.data.package_id,
-      sort_order: 0,
-    });
+  // imported rows. Order preserved = the user's selection order.
+  if (pkgIds.length > 0) {
+    await supabaseAdmin.from("contract_packages").insert(
+      pkgIds.map((id, i) => ({
+        contract_id: row.id,
+        package_id: id,
+        sort_order: i,
+      })),
+    );
+  }
+
+  // Sheet-parity duration engine (migration 0158): 37 + (m−1)×30 for new
+  // clients (free first week), m×30 for renewals/win-back, 365 for 12 months,
+  // plus one-time package extra days (15/30) and monthly extras capped at 15.
+  // Must run AFTER the contract_packages insert so extras are visible.
+  const { error: endErr } = await supabaseAdmin.rpc(
+    "recompute_contract_end_date",
+    { p_contract: row.id },
+  );
+  if (endErr) {
+    // Non-fatal: the contract exists; the end date can be recomputed later.
+    console.error("recompute_contract_end_date failed", endErr.message);
   }
 
   await logAudit({
@@ -803,7 +830,7 @@ export async function createContractAction(input: {
     payload: {
       client_id: parsed.data.client_id,
       total_value: parsed.data.total_value,
-      package_id: parsed.data.package_id,
+      package_ids: pkgIds,
     },
     importance: "normal",
   });
@@ -1032,6 +1059,291 @@ export async function updateInstallmentAction(input: {
   revalidatePath(`/contracts/${inst.contract_id}`);
   revalidatePath("/contracts");
   return { ok: true, id: inst.id };
+}
+
+// ---------------------------------------------------------------------------
+// Hold flow (sheet-parity, migration 0159 + docs/CONTRACTS_GAP_ANALYSIS G2).
+//
+// In the sheet, switching Contract Type to "Hold" ran an Apps Script that
+// snapshotted the row, unlocked it, and logged ON HOLD; leaving Hold diffed
+// against the snapshot and logged HOLD LIFTED with the changes. The dashboard
+// version adds what the team asked for on top: a mandatory hold END DATE
+// (popup) that drives the expiry-notification cron, and remembering the
+// pre-hold type so lifting can restore it.
+// ---------------------------------------------------------------------------
+
+// Fields included in the hold snapshot/diff — mirrors the Apps Script's
+// takeHoldSnapshot_/buildHoldDiff_ field list.
+const HOLD_SNAPSHOT_FIELDS = [
+  "contract_type_id",
+  "target",
+  "status",
+  "start_date",
+  "end_date",
+  "actual_end_date",
+  "duration_months",
+  "total_value",
+  "paid_value",
+  "repeated_services_value",
+  "next_contract_value",
+  "renewal_paid_value",
+  "payment_status",
+  "renewed_status",
+  "notes",
+] as const;
+
+type HoldSnapshot = Record<string, unknown>;
+
+function buildHoldSnapshot(row: Record<string, unknown>): HoldSnapshot {
+  const snap: HoldSnapshot = {};
+  for (const f of HOLD_SNAPSHOT_FIELDS) snap[f] = row[f] ?? null;
+  return snap;
+}
+
+function buildHoldDiff(
+  before: HoldSnapshot,
+  after: Record<string, unknown>,
+): Array<{ field: string; from: unknown; to: unknown }> {
+  const diffs: Array<{ field: string; from: unknown; to: unknown }> = [];
+  for (const f of HOLD_SNAPSHOT_FIELDS) {
+    const a = before[f] ?? null;
+    const b = after[f] ?? null;
+    if (String(a ?? "") !== String(b ?? "")) diffs.push({ field: f, from: a, to: b });
+  }
+  return diffs;
+}
+
+const HOLD_SELECT =
+  "id, organization_id, status, contract_type_id, type_before_hold_id, " +
+  "hold_started_at, hold_end_date, target, start_date, end_date, " +
+  "actual_end_date, duration_months, total_value, paid_value, " +
+  "repeated_services_value, next_contract_value, renewal_paid_value, " +
+  "payment_status, renewed_status, notes, contract_code";
+
+const SetHoldSchema = z.object({
+  contract_id: z.string().regex(UUID_RE),
+  hold_end_date: z.string().regex(DATE_RE),
+  note: z.string().trim().max(2000).optional(),
+});
+
+export async function setContractHoldAction(input: {
+  contractId: string;
+  holdEndDate: string;
+  note?: string;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = SetHoldSchema.safeParse({
+    contract_id: input.contractId,
+    hold_end_date: input.holdEndDate,
+    note: input.note || undefined,
+  });
+  if (!parsed.success) return { error: "بيانات غير صالحة" };
+
+  const today = todayIso();
+  if (parsed.data.hold_end_date < today) {
+    return { error: "تاريخ نهاية الإيقاف لا يمكن أن يكون في الماضي" };
+  }
+
+  const { data: contractRaw } = await supabaseAdmin
+    .from("contracts")
+    .select(HOLD_SELECT)
+    .eq("id", parsed.data.contract_id)
+    .maybeSingle();
+  const contract = contractRaw as unknown as Record<string, unknown> | null;
+  if (!contract || contract.organization_id !== session.orgId) {
+    return { error: "العقد غير موجود" };
+  }
+
+  const alreadyOnHold = contract.status === "hold";
+
+  // Resolve the org's Hold contract type.
+  const { data: holdType } = await supabaseAdmin
+    .from("contract_types")
+    .select("id, key")
+    .eq("organization_id", session.orgId)
+    .eq("key", "Hold")
+    .maybeSingle();
+  if (!holdType) return { error: "نوع العقد Hold غير معرّف في النظام" };
+
+  const patch: Record<string, unknown> = {
+    status: "hold",
+    contract_type_id: holdType.id,
+    hold_end_date: parsed.data.hold_end_date,
+    // Re-arm the notification throttle so the cron re-evaluates tomorrow.
+    last_hold_notification: null,
+  };
+  if (!alreadyOnHold) {
+    patch.hold_started_at = today;
+    patch.type_before_hold_id = contract.contract_type_id ?? null;
+  }
+
+  const { error: updErr } = await supabaseAdmin
+    .from("contracts")
+    .update(patch)
+    .eq("id", contract.id as string);
+  if (updErr) return { error: updErr.message };
+
+  // Event log — the sheet's "Entered HOLD — Contract Type was: …" line,
+  // plus the full snapshot so lifting can diff against it.
+  await supabaseAdmin.from("contract_events").insert({
+    organization_id: session.orgId,
+    contract_id: contract.id,
+    event_type: alreadyOnHold ? "HOLD_UPDATED" : "ON_HOLD",
+    actor_id: session.employeeId,
+    payload: {
+      hold_end_date: parsed.data.hold_end_date,
+      hold_started_at: alreadyOnHold ? contract.hold_started_at : today,
+      type_before_hold_id: alreadyOnHold
+        ? contract.type_before_hold_id
+        : (contract.contract_type_id ?? null),
+      note: parsed.data.note ?? null,
+      snapshot: alreadyOnHold ? undefined : buildHoldSnapshot(contract),
+    },
+  });
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: alreadyOnHold ? "contract.hold_update" : "contract.hold_set",
+    entityType: "contract",
+    entityId: contract.id as string,
+    metadata: { hold_end_date: parsed.data.hold_end_date, note: parsed.data.note },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: alreadyOnHold ? "CONTRACT_HOLD_UPDATED" : "CONTRACT_HOLD_SET",
+    entityType: "contract",
+    entityId: contract.id as string,
+    payload: { hold_end_date: parsed.data.hold_end_date },
+    importance: "high",
+  });
+
+  revalidatePath("/contracts");
+  revalidatePath(`/contracts/${contract.id}`);
+  return { ok: true, id: contract.id as string };
+}
+
+const LiftHoldSchema = z.object({
+  contract_id: z.string().regex(UUID_RE),
+  new_type_id: z.string().regex(UUID_RE).nullable(),
+  note: z.string().trim().max(2000).optional(),
+});
+
+export async function liftContractHoldAction(input: {
+  contractId: string;
+  newTypeId: string | null; // null → restore the pre-hold type
+  note?: string;
+}): Promise<ContractActionState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = LiftHoldSchema.safeParse({
+    contract_id: input.contractId,
+    new_type_id: input.newTypeId,
+    note: input.note || undefined,
+  });
+  if (!parsed.success) return { error: "بيانات غير صالحة" };
+
+  const { data: contractRaw } = await supabaseAdmin
+    .from("contracts")
+    .select(HOLD_SELECT)
+    .eq("id", parsed.data.contract_id)
+    .maybeSingle();
+  const contract = contractRaw as unknown as Record<string, unknown> | null;
+  if (!contract || contract.organization_id !== session.orgId) {
+    return { error: "العقد غير موجود" };
+  }
+  if (contract.status !== "hold") {
+    return { error: "العقد ليس موقوفًا" };
+  }
+
+  const restoreTypeId =
+    parsed.data.new_type_id ?? (contract.type_before_hold_id as string | null);
+
+  // Reject restoring into Hold itself (no-op disguised as a lift).
+  if (restoreTypeId) {
+    const { data: t } = await supabaseAdmin
+      .from("contract_types")
+      .select("key")
+      .eq("id", restoreTypeId)
+      .maybeSingle();
+    if (t?.key === "Hold") {
+      return { error: "اختاري نوعًا غير Hold لرفع الإيقاف" };
+    }
+  }
+
+  // Diff against the ON_HOLD snapshot (sheet's HOLD LIFTED changes list).
+  const { data: holdEvent } = await supabaseAdmin
+    .from("contract_events")
+    .select("payload, created_at")
+    .eq("contract_id", contract.id as string)
+    .eq("event_type", "ON_HOLD")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const snapshot =
+    (holdEvent?.payload as { snapshot?: HoldSnapshot } | null)?.snapshot ?? null;
+  const changes = snapshot ? buildHoldDiff(snapshot, contract) : [];
+
+  const { error: updErr } = await supabaseAdmin
+    .from("contracts")
+    .update({
+      status: "active",
+      contract_type_id: restoreTypeId,
+      hold_started_at: null,
+      hold_end_date: null,
+      type_before_hold_id: null,
+      last_hold_notification: null,
+    })
+    .eq("id", contract.id as string);
+  if (updErr) return { error: updErr.message };
+
+  await supabaseAdmin.from("contract_events").insert({
+    organization_id: session.orgId,
+    contract_id: contract.id,
+    event_type: "HOLD_LIFTED",
+    actor_id: session.employeeId,
+    payload: {
+      restored_type_id: restoreTypeId,
+      was_on_hold_since: contract.hold_started_at,
+      hold_end_date_was: contract.hold_end_date,
+      note: parsed.data.note ?? null,
+      changes,
+    },
+  });
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "contract.hold_lift",
+    entityType: "contract",
+    entityId: contract.id as string,
+    metadata: { restored_type_id: restoreTypeId, changes_count: changes.length },
+  });
+  await logAiEvent({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    eventType: "CONTRACT_HOLD_LIFTED",
+    entityType: "contract",
+    entityId: contract.id as string,
+    payload: { restored_type_id: restoreTypeId, changes },
+    importance: "high",
+  });
+
+  revalidatePath("/contracts");
+  revalidatePath(`/contracts/${contract.id}`);
+  return { ok: true, id: contract.id as string };
 }
 
 export async function deleteInstallmentAction(input: {
