@@ -849,6 +849,402 @@
       "securityDesc": "MFA, session expiry, and sign-in logs"
     }
   },
+  "ContractsPage": {
+    "title": "Contracts",
+    "description": "The source of truth for contracts and revenue. The old sheet is archived; updates and calculations happen here.",
+    "tabs": {
+      "table": "Contracts table",
+      "dashboard": "Revenue dashboard"
+    },
+    "header": {
+      "import": "Import from Excel"
+    },
+    "empty": {
+      "listTitle": "No contracts yet",
+      "listDescription": "Start by creating a new contract from the \"+ New contract\" button.",
+      "dashboardDescription": "No data for this month yet."
+    },
+    "newDialog": {
+      "openButton": "New contract",
+      "title": "New contract",
+      "close": "Close",
+      "noResults": "No results",
+      "fields": {
+        "client": "Client",
+        "accountManager": "Account manager",
+        "type": "Type",
+        "packages": "Packages / services{count, plural, =0 {} other { ({count})}}",
+        "startDate": "Start date",
+        "duration": "Duration (months)",
+        "totalValue": "Contract value",
+        "paidValue": "Paid value",
+        "paymentStatus": "Payment",
+        "notes": "Notes"
+      },
+      "helpers": {
+        "packages": "Pick every service included in the contract. One-time services add their extra days to the contract duration automatically.",
+        "defaults": "Default values: target = Overdue, status = Active. You can edit them from the table after creation. If you choose installments, schedule them from the contract page."
+      },
+      "payment": {
+        "complete": "Complete",
+        "installments": "Installments"
+      },
+      "placeholders": {
+        "clientSearch": "Search by name or code…",
+        "searchManager": "Search by name…",
+        "none": "— None —",
+        "zero": "0",
+        "defaultZero": "Default 0",
+        "optional": "Optional"
+      },
+      "actions": {
+        "change": "Change",
+        "cancel": "Cancel",
+        "create": "Create contract"
+      },
+      "toasts": {
+        "selectClient": "Pick a client first",
+        "invalidTotal": "Invalid contract value",
+        "invalidPaid": "Invalid paid value",
+        "created": "Contract created"
+      }
+    },
+    "holdDialog": {
+      "titleCreate": "Put contract on hold",
+      "titleEdit": "Edit hold period",
+      "fields": {
+        "endDate": "Hold end date",
+        "reason": "Hold reason / note"
+      },
+      "placeholders": {
+        "reason": "Example: client asked to pause social during inventory…"
+      },
+      "helpers": {
+        "notice": "The account manager and owner will be notified automatically 5 days before this date, then daily if the contract stays on hold past it."
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "confirm": "Confirm hold"
+      },
+      "toasts": {
+        "pickEndDate": "Pick a hold end date first",
+        "pastDate": "Hold end date cannot be in the past",
+        "success": "Contract put on hold. The system will notify before the hold ends."
+      }
+    },
+    "eventForm": {
+      "openButton": "Record event",
+      "fields": {
+        "type": "Event type"
+      },
+      "placeholders": {
+        "type": "package_change",
+        "note": "Note (optional)…"
+      },
+      "actions": {
+        "save": "Save",
+        "cancel": "Cancel"
+      }
+    },
+    "installmentReceive": {
+      "openButton": "Record receipt",
+      "fields": {
+        "actualDate": "Receipt date",
+        "amount": "Amount"
+      },
+      "actions": {
+        "save": "Save",
+        "cancel": "Cancel"
+      }
+    },
+    "installments": {
+      "headers": {
+        "sequence": "#",
+        "expectedAmount": "Expected amount",
+        "expectedDate": "Expected date",
+        "actualAmount": "Received amount",
+        "actualDate": "Receipt date",
+        "status": "Status"
+      },
+      "status": {
+        "received": "Received",
+        "partial": "Partial",
+        "pending": "Pending",
+        "overdue": "Overdue",
+        "waived": "Waived"
+      },
+      "actions": {
+        "add": "Add installment",
+        "save": "Save",
+        "cancel": "Cancel"
+      },
+      "addRow": {
+        "expectedAmount": "Expected amount",
+        "expectedDate": "Expected date",
+        "amountPlaceholder": "0"
+      },
+      "tooltips": {
+        "delete": "Delete",
+        "confirmDelete": "Confirm delete",
+        "cancel": "Cancel"
+      },
+      "toasts": {
+        "saved": "Saved",
+        "deleted": "Deleted",
+        "invalidAmount": "Enter a valid amount",
+        "added": "Installment added"
+      },
+      "empty": "No installments yet.",
+      "remainder": "Remaining: {amount}"
+    },
+    "grid": {
+      "searchPlaceholder": "Search by name, code, package, or notes…",
+      "scope": {
+        "all": "All",
+        "mine": "My contracts"
+      },
+      "filters": {
+        "all": "All",
+        "target": "Target",
+        "status": "Status",
+        "type": "Type"
+      },
+      "summary": {
+        "contracts": "{count, plural, one {# contract} other {# contracts}}",
+        "totalRows": "of {count}",
+        "value": "Value",
+        "paid": "Paid"
+      },
+      "headers": {
+        "clientId": "Client ID",
+        "client": "Client",
+        "accountManager": "Account manager",
+        "startDate": "Start date",
+        "target": "Target",
+        "type": "Type",
+        "package": "Package",
+        "duration": "Duration",
+        "paid": "Paid",
+        "repeated": "Recurring",
+        "payment": "Payment",
+        "days": "Days",
+        "expectedEnd": "Expected end",
+        "status": "Status",
+        "renewalValue": "Renewal value",
+        "renewalPaid": "Renewal payment",
+        "actualEnd": "Actual end",
+        "delay": "Delay",
+        "renewed": "Renewed?",
+        "extension": "Extension",
+        "notes": "Notes"
+      },
+      "targetLabels": {
+        "overdue": "Overdue",
+        "salesDeposit": "Sales Deposit",
+        "onTarget": "On Target",
+        "closed": "Closed",
+        "lost": "Lost",
+        "renewed": "Renewed"
+      },
+      "statusLabels": {
+        "active": "Active",
+        "hold": "Hold",
+        "closed": "Closed",
+        "expired": "Expired",
+        "renewed": "Renewed",
+        "lost": "Lost"
+      },
+      "typeLabels": {
+        "new": "New",
+        "renew": "Renew",
+        "upsell": "Upsell",
+        "winBack": "Win-Back",
+        "hold": "Hold",
+        "switch": "Switch",
+        "lost": "Lost"
+      },
+      "paymentLabels": {
+        "complete": "Complete",
+        "installments": "Installments"
+      },
+      "renewedLabels": {
+        "yes": "Yes",
+        "no": "No",
+        "closed": "Closed"
+      },
+      "labels": {
+        "accountManager": "account manager",
+        "startDate": "start date",
+        "target": "target",
+        "type": "type",
+        "duration": "duration",
+        "paid": "paid value",
+        "repeated": "recurring value",
+        "payment": "payment",
+        "expectedEnd": "expected end",
+        "renewalValue": "renewal value",
+        "renewalPaid": "renewal payment",
+        "actualEnd": "actual end",
+        "delay": "delay",
+        "renewed": "renewed status",
+        "extension": "extension",
+        "notes": "notes"
+      },
+      "tooltips": {
+        "clickToEdit": "Click to edit",
+        "save": "Save (Ctrl+Enter)",
+        "cancel": "Cancel (Esc)",
+        "editHold": "Edit hold period"
+      },
+      "toasts": {
+        "saved": "Saved {label}",
+        "holdReleased": "Hold released",
+        "invalidNumber": "Invalid numeric value"
+      },
+      "holdUntil": "Hold until {date}",
+      "emptyFiltered": "No contracts match the current filters.",
+      "emptyNote": "—"
+    },
+    "detail": {
+      "hold": {
+        "active": "This contract is on hold",
+        "since": "since",
+        "until": "Hold ends on",
+        "wasHeldThisMonth": "This contract was on hold during the current month. Review the activity log below."
+      },
+      "siblings": {
+        "prefix": "This client has",
+        "count": "{count, plural, one {one other contract} other {# other contracts}}",
+        "suffix": "with us:"
+      },
+      "metrics": {
+        "total": "Total value",
+        "paid": "Paid",
+        "outstanding": "Outstanding",
+        "status": "Status"
+      },
+      "fields": {
+        "accountManager": "Account manager",
+        "startDate": "Start date",
+        "endDate": "End date",
+        "duration": "Duration (months)",
+        "target": "Target",
+        "graceDays": "Cycle grace days",
+        "project": "Linked project",
+        "notes": "Notes"
+      },
+      "projectFallback": "Project",
+      "days": "{count} days",
+      "sections": {
+        "installments": {
+          "title": "Installments schedule",
+          "description": "Expected and received installments on this contract"
+        },
+        "cycles": {
+          "title": "Monthly cycles",
+          "description": "Monthly follow-up with expected and actual meeting dates",
+          "empty": "No monthly cycles yet. They will be created automatically at the start of each month.",
+          "headers": {
+            "cycle": "Cycle",
+            "month": "Month",
+            "expectedMeeting": "Expected meeting",
+            "actualMeeting": "Actual meeting",
+            "delay": "Delay (days)",
+            "status": "Status"
+          },
+          "states": {
+            "pending": "Pending",
+            "active": "Active",
+            "done": "Done",
+            "overdue": "Overdue",
+            "skipped": "Skipped"
+          }
+        },
+        "events": {
+          "title": "Event log",
+          "description": "Contract changes and notes",
+          "empty": "No events have been recorded on this contract yet."
+        }
+      }
+    },
+    "dashboard": {
+      "month": "Month:",
+      "status": {
+        "frozen": "Frozen",
+        "frozenSheet": "Frozen (from sheet)",
+        "live": "Live and auto-updated"
+      },
+      "executive": {
+        "eyebrow": "CEO Monthly Dashboard",
+        "title": "{month} revenue command",
+        "badge": "AI client experience connected",
+        "actualIncome": "Actual income",
+        "targetSub": "Target {amount}",
+        "revenueGap": "Revenue gap",
+        "achievedSub": "{pct}% achieved",
+        "clientsInFocus": "Clients in focus",
+        "focusSub": "{risk} risk / {watch} watch",
+        "overdueExposure": "Overdue exposure",
+        "installmentsDueSub": "{count} installments due",
+        "aiRead": "AI executive read",
+        "aiBadge": "contracts + payments + satisfaction",
+        "topClient": "Top client",
+        "worstHealth": "Worst health",
+        "avgHealth": "Avg health"
+      },
+      "charts": {
+        "expectedVsActual": "Expected vs actual",
+        "expectedVsActualSub": "same source of truth as the sheet",
+        "contractMovement": "Contract movement",
+        "contractMovementSub": "monthly starts and outcomes"
+      },
+      "income": {
+        "title": "Company income for the selected month",
+        "expected": "Expected target",
+        "actual": "Actual achieved",
+        "achievement": "Achievement",
+        "expectedRenewals": "Expected renewals",
+        "expectedInstallments": "Expected installments"
+      },
+      "movements": {
+        "title": "Contract movement this month"
+      },
+      "clients": {
+        "title": "Client status overview",
+        "total": "Total clients"
+      },
+      "accountTargets": {
+        "title": "Account targets this month",
+        "empty": "No target has been computed for this month.",
+        "headers": {
+          "account": "Account",
+          "expected": "Expected",
+          "actual": "Actual",
+          "achievement": "Achievement",
+          "progress": "Progress"
+        }
+      },
+      "frozenNotice": "The client breakdown below is computed from the current state and may differ slightly from the frozen month totals above.",
+      "buckets": {
+        "onTarget": "On Target - renewable",
+        "overdue": "Overdue",
+        "renewed": "Renewed from target",
+        "lost": "Lost from target",
+        "empty": "— none —"
+      },
+      "installments": {
+        "title": "Installments due this month",
+        "count": "{count, plural, one {# installment} other {# installments}}",
+        "empty": "No installments are due this month.",
+        "headers": {
+          "client": "Client",
+          "accountManager": "Account manager",
+          "amount": "Amount",
+          "status": "Status"
+        }
+      }
+    }
+  },
   "ContractsImportPage": {
     "title": "Import contracts file",
     "description": "Upload the current Acc SHEET file and the data will flow into the dashboard automatically.",
@@ -862,7 +1258,43 @@
       "preview": "Review the preview to see client, contract, and installment counts.",
       "save": "Press \"Save\" and the data will appear in finance and contracts immediately."
     },
-    "note": "The system uses the <code>Key</code> column (for example <code>C83|20250906</code>) to identify contracts. Re-importing is <strong>safe</strong>; it updates values without duplicating rows."
+    "note": "The system uses the <code>Key</code> column (for example <code>C83|20250906</code>) to identify contracts. Re-importing is <strong>safe</strong>; it updates values without duplicating rows.",
+    "form": {
+      "toasts": {
+        "imported": "Data imported"
+      },
+      "fileLabel": "Choose Excel file",
+      "fileHint": "The system accepts the \"Clients Contracts\" and \"💲Installments Tracker\" sheets from the account file. Nothing is saved until you review and confirm the preview.",
+      "preview": "Show preview",
+      "successTitle": "Import completed",
+      "successClients": "Clients: {created} created, {updated} updated",
+      "successContracts": "Contracts imported: {count}",
+      "successInstallments": "Installments imported: {count}",
+      "warnings": "Warnings: {count} (see the list below)",
+      "skippedTitle": "Skipped items:",
+      "goFinance": "Finance dashboard",
+      "goContracts": "Contracts list",
+      "previewTitle": "Preview before saving",
+      "stats": {
+        "clients": "Clients",
+        "contracts": "Contracts",
+        "installments": "Installments",
+        "skipped": "Skipped rows"
+      },
+      "sampleTitle": "Sample of the first 5 contracts",
+      "table": {
+        "client": "Client",
+        "owner": "Owner",
+        "type": "Type",
+        "value": "Value",
+        "paid": "Paid",
+        "start": "Start",
+        "status": "Status"
+      },
+      "safeNote": "No existing data will be deleted. The import is safe to repeat and updates values instead of duplicating them.",
+      "commit": "Save {contracts} contracts and {installments} installments",
+      "cancel": "Cancel and choose another file"
+    }
   },
   "TaskTemplatesPage": {
     "title": "Task templates",

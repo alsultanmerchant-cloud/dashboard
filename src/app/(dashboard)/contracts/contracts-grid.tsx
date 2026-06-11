@@ -23,8 +23,10 @@ import Link from "next/link";
 import { Check, Loader2, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import type { GridContract } from "@/lib/data/contracts";
+import { formatShortDate } from "@/lib/utils-format";
 import { updateContractFieldAction, liftContractHoldAction } from "./_actions";
 import { HoldDialog } from "./hold-dialog";
 
@@ -163,6 +165,89 @@ const STATUS_LABEL: Record<string, string> = {
   lost: "Lost",
 };
 
+function targetLabel(t: (key: string) => string, key: string): string {
+  switch (key) {
+    case "Overdue":
+      return t("grid.targetLabels.overdue");
+    case "Sales Deposit":
+      return t("grid.targetLabels.salesDeposit");
+    case "On Target":
+      return t("grid.targetLabels.onTarget");
+    case "Closed":
+      return t("grid.targetLabels.closed");
+    case "Lost":
+      return t("grid.targetLabels.lost");
+    case "Renewed":
+      return t("grid.targetLabels.renewed");
+    default:
+      return TARGET_STYLE[key] ? key : key;
+  }
+}
+
+function statusLabel(t: (key: string) => string, key: string): string {
+  switch (key) {
+    case "active":
+      return t("grid.statusLabels.active");
+    case "hold":
+      return t("grid.statusLabels.hold");
+    case "closed":
+      return t("grid.statusLabels.closed");
+    case "expired":
+      return t("grid.statusLabels.expired");
+    case "renewed":
+      return t("grid.statusLabels.renewed");
+    case "lost":
+      return t("grid.statusLabels.lost");
+    default:
+      return STATUS_LABEL[key] ?? key;
+  }
+}
+
+function typeLabel(t: (key: string) => string, key: string): string {
+  switch (key) {
+    case "New":
+      return t("grid.typeLabels.new");
+    case "Renew":
+      return t("grid.typeLabels.renew");
+    case "UPSELL":
+      return t("grid.typeLabels.upsell");
+    case "WinBack":
+      return t("grid.typeLabels.winBack");
+    case "Hold":
+      return t("grid.typeLabels.hold");
+    case "Switch":
+      return t("grid.typeLabels.switch");
+    case "Lost":
+      return t("grid.typeLabels.lost");
+    default:
+      return TYPE_LABEL[key] ?? key;
+  }
+}
+
+function paymentLabel(t: (key: string) => string, key: string): string {
+  switch (key) {
+    case "Complete":
+      return t("grid.paymentLabels.complete");
+    case "Installments":
+      return t("grid.paymentLabels.installments");
+    default:
+      return key;
+  }
+}
+
+function renewedLabel(t: (key: string) => string, key: string): string {
+  switch (key) {
+    case "YES":
+      return t("grid.renewedLabels.yes");
+    case "NO":
+      return t("grid.renewedLabels.no");
+    case "Closed":
+      return t("grid.renewedLabels.closed");
+    default:
+      return key;
+  }
+}
+
 // 4-color row rule — matches the sheet's row fills (maroon / gold / gray /
 // none), tuned for the dark theme. On tinted rows we also brighten the plain-
 // text cells ([&_td] override) so client names / dates / numbers stay legible;
@@ -211,15 +296,11 @@ function fmtMoney(n: number | null | undefined) {
   }).format(n);
 }
 
-function fmtDate(s: string | null | undefined) {
+function fmtDate(s: string | null | undefined, locale: string) {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(d);
+  return formatShortDate(d, locale);
 }
 
 function Pill({
@@ -264,6 +345,8 @@ export function ContractsGrid({
   contractTypes,
   accountManagers,
 }: Props) {
+  const t = useTranslations("ContractsPage");
+  const locale = useLocale();
   // Optimistic mirror of the server rows. Inline edits write here
   // immediately, then the server action either confirms (revalidate
   // re-seeds from the source) or errors (we revert and toast).
@@ -310,7 +393,7 @@ export function ContractsGrid({
         toast.error(res.error);
         return false;
       }
-      toast.success(`تم حفظ ${label}`, { duration: 1200 });
+      toast.success(t("grid.toasts.saved", { label }), { duration: 1200 });
       router.refresh();
       return true;
     });
@@ -366,7 +449,7 @@ export function ContractsGrid({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث بالاسم، الكود، الباقة، الملاحظات…"
+              placeholder={t("grid.searchPlaceholder")}
               className="h-9 w-full rounded-lg border border-input bg-input ps-8 pe-3 text-sm outline-none focus:border-cyan/40"
             />
           </div>
@@ -381,7 +464,7 @@ export function ContractsGrid({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                الكل
+                {t("grid.scope.all")}
               </button>
               <button
                 onClick={() => setScope("mine")}
@@ -392,7 +475,7 @@ export function ContractsGrid({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                عقودي
+                {t("grid.scope.mine")}
               </button>
             </div>
           )}
@@ -400,55 +483,55 @@ export function ContractsGrid({
 
         <div className="flex flex-wrap gap-1.5 text-xs">
           <ChipGroup
-            label="Target"
+            label={t("grid.filters.target")}
             value={target}
             onChange={setTarget}
             options={[
-              { value: "Overdue", count: counts.target["Overdue"] ?? 0 },
-              { value: "Sales Deposit", count: counts.target["Sales Deposit"] ?? 0 },
-              { value: "On Target", count: counts.target["On Target"] ?? 0 },
-              { value: "Closed", count: counts.target["Closed"] ?? 0 },
+              { value: "Overdue", count: counts.target["Overdue"] ?? 0, label: t("grid.targetLabels.overdue") },
+              { value: "Sales Deposit", count: counts.target["Sales Deposit"] ?? 0, label: t("grid.targetLabels.salesDeposit") },
+              { value: "On Target", count: counts.target["On Target"] ?? 0, label: t("grid.targetLabels.onTarget") },
+              { value: "Closed", count: counts.target["Closed"] ?? 0, label: t("grid.targetLabels.closed") },
             ]}
           />
           <ChipGroup
-            label="Status"
+            label={t("grid.filters.status")}
             value={status}
             onChange={setStatus}
             options={[
-              { value: "active", count: counts.status["active"] ?? 0, label: "نشط" },
-              { value: "closed", count: counts.status["closed"] ?? 0, label: "Closed" },
-              { value: "expired", count: counts.status["expired"] ?? 0, label: "Expired" },
-              { value: "hold", count: counts.status["hold"] ?? 0, label: "Hold" },
+              { value: "active", count: counts.status["active"] ?? 0, label: t("grid.statusLabels.active") },
+              { value: "closed", count: counts.status["closed"] ?? 0, label: t("grid.statusLabels.closed") },
+              { value: "expired", count: counts.status["expired"] ?? 0, label: t("grid.statusLabels.expired") },
+              { value: "hold", count: counts.status["hold"] ?? 0, label: t("grid.statusLabels.hold") },
             ]}
           />
           <ChipGroup
-            label="Type"
+            label={t("grid.filters.type")}
             value={typeKey}
             onChange={setTypeKey}
             options={[
-              { value: "New", count: counts.type["New"] ?? 0, label: "جديد" },
-              { value: "Renew", count: counts.type["Renew"] ?? 0, label: "تجديد" },
-              { value: "UPSELL", count: counts.type["UPSELL"] ?? 0, label: "Upsell" },
-              { value: "Hold", count: counts.type["Hold"] ?? 0, label: "Hold" },
-              { value: "WinBack", count: counts.type["WinBack"] ?? 0, label: "Win-Back" },
+              { value: "New", count: counts.type["New"] ?? 0, label: t("grid.typeLabels.new") },
+              { value: "Renew", count: counts.type["Renew"] ?? 0, label: t("grid.typeLabels.renew") },
+              { value: "UPSELL", count: counts.type["UPSELL"] ?? 0, label: t("grid.typeLabels.upsell") },
+              { value: "Hold", count: counts.type["Hold"] ?? 0, label: t("grid.typeLabels.hold") },
+              { value: "WinBack", count: counts.type["WinBack"] ?? 0, label: t("grid.typeLabels.winBack") },
             ]}
           />
         </div>
 
         <div className="flex items-center justify-between border-t border-soft pt-2 text-xs text-muted-foreground">
           <div>
-            {filtered.length.toLocaleString("ar-SA-u-nu-latn")} عقد
+            {t("grid.summary.contracts", { count: filtered.length })}
             {filtered.length !== rows.length && (
-              <span> · أصل {rows.length.toLocaleString("ar-SA-u-nu-latn")}</span>
+              <span> · {t("grid.summary.totalRows", { count: rows.length })}</span>
             )}
           </div>
           <div className="flex items-center gap-3 tabular-nums">
             <span>
-              القيمة:{" "}
+              {t("grid.summary.value")}:{" "}
               <span className="text-foreground font-medium">{fmtMoney(totalValue)}</span>
             </span>
             <span>
-              المدفوع:{" "}
+              {t("grid.summary.paid")}:{" "}
               <span className="text-foreground font-medium">{fmtMoney(totalPaid)}</span>
             </span>
           </div>
@@ -461,34 +544,34 @@ export function ContractsGrid({
           <table className="w-full border-collapse text-right text-[12px]">
             <thead className="sticky top-0 z-20 bg-muted text-[10px] uppercase tracking-wider text-muted-foreground">
               <tr>
-                <Th sticky className="text-center min-w-[64px]">Client ID</Th>
-                <Th sticky stickyOffset="64px" className="min-w-[200px]">العميل</Th>
-                <Th>مدير الحساب</Th>
-                <Th>تاريخ البدء</Th>
-                <Th>Target</Th>
-                <Th>النوع</Th>
-                <Th className="min-w-[200px]">الباقة</Th>
-                <Th className="text-center">المدة</Th>
-                <Th className="text-end">المدفوع</Th>
-                <Th className="text-end">المتكرر</Th>
-                <Th>الدفع</Th>
-                <Th className="text-center">الأيام</Th>
-                <Th>نهاية متوقعة</Th>
-                <Th>الحالة</Th>
-                <Th className="text-end">قيمة التجديد</Th>
-                <Th className="text-end">دفعة التجديد</Th>
-                <Th>نهاية فعلية</Th>
-                <Th className="text-center">تأخير</Th>
-                <Th>تجديد؟</Th>
-                <Th className="text-center">تمديد</Th>
-                <Th className="min-w-[180px]">ملاحظات</Th>
+                <Th sticky className="text-center min-w-[64px]">{t("grid.headers.clientId")}</Th>
+                <Th sticky stickyOffset="64px" className="min-w-[200px]">{t("grid.headers.client")}</Th>
+                <Th>{t("grid.headers.accountManager")}</Th>
+                <Th>{t("grid.headers.startDate")}</Th>
+                <Th>{t("grid.headers.target")}</Th>
+                <Th>{t("grid.headers.type")}</Th>
+                <Th className="min-w-[200px]">{t("grid.headers.package")}</Th>
+                <Th className="text-center">{t("grid.headers.duration")}</Th>
+                <Th className="text-end">{t("grid.headers.paid")}</Th>
+                <Th className="text-end">{t("grid.headers.repeated")}</Th>
+                <Th>{t("grid.headers.payment")}</Th>
+                <Th className="text-center">{t("grid.headers.days")}</Th>
+                <Th>{t("grid.headers.expectedEnd")}</Th>
+                <Th>{t("grid.headers.status")}</Th>
+                <Th className="text-end">{t("grid.headers.renewalValue")}</Th>
+                <Th className="text-end">{t("grid.headers.renewalPaid")}</Th>
+                <Th>{t("grid.headers.actualEnd")}</Th>
+                <Th className="text-center">{t("grid.headers.delay")}</Th>
+                <Th>{t("grid.headers.renewed")}</Th>
+                <Th className="text-center">{t("grid.headers.extension")}</Th>
+                <Th className="min-w-[180px]">{t("grid.headers.notes")}</Th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={21} className="px-3 py-10 text-center text-muted-foreground text-sm">
-                    لا توجد عقود مطابقة للفلتر.
+                    {t("grid.emptyFiltered")}
                   </td>
                 </tr>
               ) : (
@@ -526,7 +609,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "account_manager_id", value: v || null },
-                              "مدير الحساب",
+                              t("grid.labels.accountManager"),
                             )
                           }
                         />
@@ -542,12 +625,12 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "start_date", value: v },
-                              "تاريخ البدء",
+                              t("grid.labels.startDate"),
                             )
                           }
                         />
                       ) : (
-                        fmtDate(c.start_date)
+                        fmtDate(c.start_date, locale)
                       )}
                     </Td>
                     <Td>
@@ -555,24 +638,24 @@ export function ContractsGrid({
                         <EditableSelect
                           value={c.target}
                           options={[
-                            { value: "Overdue", label: "Overdue" },
-                            { value: "Sales Deposit", label: "Sales Deposit" },
-                            { value: "On Target", label: "On Target" },
-                            { value: "Closed", label: "Closed" },
+                            { value: "Overdue", label: t("grid.targetLabels.overdue") },
+                            { value: "Sales Deposit", label: t("grid.targetLabels.salesDeposit") },
+                            { value: "On Target", label: t("grid.targetLabels.onTarget") },
+                            { value: "Closed", label: t("grid.targetLabels.closed") },
                           ]}
                           renderView={() => (
                             <SolidCell
-                              label={c.target}
+                              label={targetLabel(t, c.target)}
                               swatch={TARGET_STYLE[c.target] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                             />
                           )}
                           onCommit={(v) =>
-                            commit(c.id, { field: "target", value: v }, "Target")
+                            commit(c.id, { field: "target", value: v }, t("grid.labels.target"))
                           }
                         />
                       ) : (
                         <SolidCell
-                          label={c.target}
+                          label={targetLabel(t, c.target)}
                           swatch={TARGET_STYLE[c.target] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                         />
                       )}
@@ -593,7 +676,7 @@ export function ContractsGrid({
                           renderView={() =>
                             c.contract_type_key ? (
                               <SolidCell
-                                label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
+                                label={typeLabel(t, c.contract_type_key)}
                                 swatch={TYPE_STYLE[c.contract_type_key] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                               />
                             ) : (
@@ -620,7 +703,7 @@ export function ContractsGrid({
                                   toast.error(res.error);
                                   return false;
                                 }
-                                toast.success("تم رفع الإيقاف ✅");
+                                toast.success(t("grid.toasts.holdReleased"));
                                 router.refresh();
                                 return true;
                               });
@@ -628,13 +711,13 @@ export function ContractsGrid({
                             return commit(
                               c.id,
                               { field: "contract_type_id", value: v || null },
-                              "النوع",
+                              t("grid.labels.type"),
                             );
                           }}
                         />
                       ) : c.contract_type_key ? (
                         <SolidCell
-                          label={TYPE_LABEL[c.contract_type_key] ?? c.contract_type_key}
+                          label={typeLabel(t, c.contract_type_key)}
                           swatch={TYPE_STYLE[c.contract_type_key] ?? { bg: "#B7B7B7", fg: "#2A2A2A" }}
                         />
                       ) : (
@@ -669,7 +752,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "duration_months", value: v },
-                              "المدة",
+                              t("grid.labels.duration"),
                             )
                           }
                         />
@@ -686,7 +769,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "paid_value", value: v },
-                              "المدفوع",
+                              t("grid.labels.paid"),
                             )
                           }
                           render={() => fmtMoney(c.paid_value)}
@@ -704,7 +787,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "repeated_services_value", value: v },
-                              "المتكرر",
+                              t("grid.labels.repeated"),
                             )
                           }
                           render={() => fmtMoney(c.repeated_services_value)}
@@ -719,13 +802,13 @@ export function ContractsGrid({
                           value={c.payment_status ?? ""}
                           options={[
                             { value: "", label: "—" },
-                            { value: "Complete", label: "Complete" },
-                            { value: "Installments", label: "Installments" },
+                            { value: "Complete", label: t("grid.paymentLabels.complete") },
+                            { value: "Installments", label: t("grid.paymentLabels.installments") },
                           ]}
                           renderView={() =>
                             c.payment_status && PAYMENT_STYLE[c.payment_status] ? (
                               <SolidCell
-                                label={c.payment_status}
+                                label={paymentLabel(t, c.payment_status)}
                                 swatch={PAYMENT_STYLE[c.payment_status]}
                               />
                             ) : (
@@ -736,13 +819,13 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "payment_status", value: v || null },
-                              "الدفع",
+                              t("grid.labels.payment"),
                             )
                           }
                         />
                       ) : c.payment_status && PAYMENT_STYLE[c.payment_status] ? (
                         <SolidCell
-                          label={c.payment_status}
+                          label={paymentLabel(t, c.payment_status)}
                           swatch={PAYMENT_STYLE[c.payment_status]}
                         />
                       ) : (
@@ -757,25 +840,25 @@ export function ContractsGrid({
                         <EditableDate
                           value={c.end_date}
                           onCommit={(v) =>
-                            commit(c.id, { field: "end_date", value: v }, "نهاية متوقعة")
+                            commit(c.id, { field: "end_date", value: v }, t("grid.labels.expectedEnd"))
                           }
                         />
                       ) : (
-                        fmtDate(c.end_date)
+                        fmtDate(c.end_date, locale)
                       )}
                     </Td>
                     <Td className="text-[11px] text-muted-foreground">
                       {c.status === "hold" && c.hold_end_date ? (
                         <button
                           type="button"
-                          title="تعديل مدة الإيقاف"
+                          title={t("grid.tooltips.editHold")}
                           onClick={() => canEdit && setHoldFor(c)}
                           className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 whitespace-nowrap"
                         >
-                          ⏸ حتى {fmtDate(c.hold_end_date)}
+                          {t("grid.holdUntil", { date: fmtDate(c.hold_end_date, locale) })}
                         </button>
                       ) : (
-                        (c.contract_status_label ?? STATUS_LABEL[c.status] ?? c.status)
+                        (c.contract_status_label ?? statusLabel(t, c.status))
                       )}
                     </Td>
                     <Td className="text-end tabular-nums text-muted-foreground">
@@ -787,7 +870,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "next_contract_value", value: v },
-                              "قيمة التجديد",
+                              t("grid.labels.renewalValue"),
                             )
                           }
                           render={() => fmtMoney(c.next_contract_value)}
@@ -805,7 +888,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "renewal_paid_value", value: v },
-                              "دفعة التجديد",
+                              t("grid.labels.renewalPaid"),
                             )
                           }
                           render={() => fmtMoney(c.renewal_paid_value)}
@@ -822,12 +905,12 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "actual_end_date", value: v },
-                              "نهاية فعلية",
+                              t("grid.labels.actualEnd"),
                             )
                           }
                         />
                       ) : (
-                        fmtDate(c.actual_end_date)
+                        fmtDate(c.actual_end_date, locale)
                       )}
                     </Td>
                     <Td className="text-center tabular-nums">
@@ -851,7 +934,7 @@ export function ContractsGrid({
                             )
                           }
                           onCommit={(v) =>
-                            commit(c.id, { field: "delay_days", value: v }, "تأخير")
+                            commit(c.id, { field: "delay_days", value: v }, t("grid.labels.delay"))
                           }
                         />
                       ) : c.delay_days != null ? (
@@ -875,14 +958,14 @@ export function ContractsGrid({
                           value={c.renewed_status ?? ""}
                           options={[
                             { value: "", label: "—" },
-                            { value: "YES", label: "YES" },
-                            { value: "NO", label: "NO" },
-                            { value: "Closed", label: "Closed" },
+                            { value: "YES", label: t("grid.renewedLabels.yes") },
+                            { value: "NO", label: t("grid.renewedLabels.no") },
+                            { value: "Closed", label: t("grid.renewedLabels.closed") },
                           ]}
                           renderView={() =>
                             c.renewed_status ? (
                               <Pill
-                                label={RENEWED_LABEL[c.renewed_status]?.label ?? c.renewed_status}
+                                label={renewedLabel(t, c.renewed_status)}
                                 tone={RENEWED_LABEL[c.renewed_status]?.cls ?? "bg-zinc-500/15"}
                                 size="xs"
                               />
@@ -894,13 +977,13 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "renewed_status", value: v || null },
-                              "تجديد",
+                              t("grid.labels.renewed"),
                             )
                           }
                         />
                       ) : c.renewed_status ? (
                         <Pill
-                          label={RENEWED_LABEL[c.renewed_status]?.label ?? c.renewed_status}
+                          label={renewedLabel(t, c.renewed_status)}
                           tone={RENEWED_LABEL[c.renewed_status]?.cls ?? "bg-zinc-500/15"}
                           size="xs"
                         />
@@ -916,7 +999,7 @@ export function ContractsGrid({
                             commit(
                               c.id,
                               { field: "extension_days", value: v },
-                              "تمديد",
+                              t("grid.labels.extension"),
                             )
                           }
                         />
@@ -928,12 +1011,12 @@ export function ContractsGrid({
                       {canEdit ? (
                         <EditableText
                           value={c.notes ?? ""}
-                          placeholder="—"
+                          placeholder={t("grid.emptyNote")}
                           onCommit={(v) =>
                             commit(
                               c.id,
                               { field: "notes", value: v || null },
-                              "ملاحظات",
+                              t("grid.labels.notes"),
                             )
                           }
                         />
@@ -1043,6 +1126,7 @@ function EditableSelect({
   renderView: () => React.ReactNode;
   onCommit: (v: string) => Promise<boolean>;
 }) {
+  const t = useTranslations("ContractsPage");
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
   const [local, setLocal] = useState(value);
@@ -1060,7 +1144,7 @@ function EditableSelect({
         type="button"
         className={editShellCls}
         onClick={() => setEditing(true)}
-        title="انقر للتعديل"
+        title={t("grid.tooltips.clickToEdit")}
       >
         {renderView()}
       </button>
@@ -1110,6 +1194,7 @@ function EditableNumber({
   render?: () => React.ReactNode;
   allowDecimal?: boolean;
 }) {
+  const t = useTranslations("ContractsPage");
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(value == null ? "" : String(value));
   const [pending, start] = useTransition();
@@ -1123,7 +1208,7 @@ function EditableNumber({
     const trimmed = local.trim();
     const next = trimmed === "" ? null : Number(trimmed);
     if (next != null && !Number.isFinite(next)) {
-      toast.error("قيمة عددية غير صالحة");
+      toast.error(t("grid.toasts.invalidNumber"));
       setLocal(value == null ? "" : String(value));
       setEditing(false);
       return;
@@ -1145,7 +1230,7 @@ function EditableNumber({
         type="button"
         className={editShellCls}
         onClick={() => setEditing(true)}
-        title="انقر للتعديل"
+        title={t("grid.tooltips.clickToEdit")}
       >
         {render ? render() : value ?? "—"}
       </button>
@@ -1182,6 +1267,8 @@ function EditableDate({
   value: string | null;
   onCommit: (v: string | null) => Promise<boolean>;
 }) {
+  const t = useTranslations("ContractsPage");
+  const locale = useLocale();
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(value ?? "");
   const [pending, start] = useTransition();
@@ -1210,9 +1297,9 @@ function EditableDate({
         type="button"
         className={editShellCls}
         onClick={() => setEditing(true)}
-        title="انقر للتعديل"
+        title={t("grid.tooltips.clickToEdit")}
       >
-        {fmtDate(value)}
+        {fmtDate(value, locale)}
       </button>
     );
   }
@@ -1247,6 +1334,7 @@ function EditableText({
   placeholder: string;
   onCommit: (v: string) => Promise<boolean>;
 }) {
+  const t = useTranslations("ContractsPage");
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(value);
   const [pending, start] = useTransition();
@@ -1279,7 +1367,7 @@ function EditableText({
         type="button"
         className={cn(editShellCls, "max-w-[260px] text-start")}
         onClick={() => setEditing(true)}
-        title={value || "انقر للتعديل"}
+        title={value || t("grid.tooltips.clickToEdit")}
       >
         {value ? (
           <span className="block truncate text-[11px] text-muted-foreground">
@@ -1314,7 +1402,7 @@ function EditableText({
           type="button"
           onClick={done}
           disabled={pending}
-          title="حفظ (Ctrl+Enter)"
+          title={t("grid.tooltips.save")}
           className="rounded bg-cyan-dim p-1 text-cyan hover:bg-cyan-dim/80"
         >
           {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
@@ -1326,7 +1414,7 @@ function EditableText({
             setEditing(false);
           }}
           disabled={pending}
-          title="إلغاء (Esc)"
+          title={t("grid.tooltips.cancel")}
           className="rounded bg-soft-1 p-1 text-muted-foreground hover:bg-soft-2"
         >
           <X className="size-3" />
@@ -1418,6 +1506,7 @@ function ChipGroup<T extends string>({
   onChange: (v: T | null) => void;
   options: Array<{ value: T; count: number; label?: string }>;
 }) {
+  const t = useTranslations("ContractsPage");
   return (
     <div className="inline-flex items-center gap-1 rounded-lg border border-soft bg-soft-1 px-2 py-1">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1433,7 +1522,7 @@ function ChipGroup<T extends string>({
             : "text-muted-foreground hover:text-foreground",
         )}
       >
-        الكل
+        {t("grid.filters.all")}
       </button>
       {options.map((o) => (
         <button

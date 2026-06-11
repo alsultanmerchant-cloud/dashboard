@@ -9,6 +9,7 @@
 // importer's old rows + new manual rows compete cleanly.
 
 import { useMemo, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { ChevronDown, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -35,6 +36,7 @@ export function NewContractButton({
   contractTypes: TypeOption[];
   accountManagers: AmOption[];
 }) {
+  const t = useTranslations("ContractsPage");
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -44,7 +46,7 @@ export function NewContractButton({
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim px-3 text-xs font-medium text-cyan hover:bg-cyan-dim/80 transition-colors"
       >
         <Plus className="size-3.5" />
-        عقد جديد
+        {t("newDialog.openButton")}
       </button>
       {open && (
         <NewContractDialog
@@ -72,6 +74,7 @@ function NewContractDialog({
   accountManagers: AmOption[];
   onClose: () => void;
 }) {
+  const t = useTranslations("ContractsPage");
   const router = useRouter();
   const [pending, start] = useTransition();
   const [clientSearch, setClientSearch] = useState("");
@@ -107,17 +110,17 @@ function NewContractDialog({
 
   function submit() {
     if (!clientId) {
-      toast.error("اختر العميل أولًا");
+      toast.error(t("newDialog.toasts.selectClient"));
       return;
     }
     const total = Number(totalValue);
     if (!Number.isFinite(total) || total < 0) {
-      toast.error("قيمة العقد غير صالحة");
+      toast.error(t("newDialog.toasts.invalidTotal"));
       return;
     }
     const paid = paidValue.trim() === "" ? null : Number(paidValue);
     if (paid !== null && (!Number.isFinite(paid) || paid < 0)) {
-      toast.error("القيمة المدفوعة غير صالحة");
+      toast.error(t("newDialog.toasts.invalidPaid"));
       return;
     }
     const dur = duration.trim() === "" ? null : Number(duration);
@@ -138,7 +141,7 @@ function NewContractDialog({
         toast.error(res.error);
         return;
       }
-      toast.success("تم إنشاء العقد");
+      toast.success(t("newDialog.toasts.created"));
       onClose();
       router.refresh();
     });
@@ -157,18 +160,18 @@ function NewContractDialog({
         aria-modal="true"
       >
         <div className="flex items-center justify-between border-b border-soft px-4 py-3">
-          <h2 className="text-sm font-semibold">عقد جديد</h2>
+          <h2 className="text-sm font-semibold">{t("newDialog.title")}</h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="إغلاق"
+            aria-label={t("newDialog.close")}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="size-4" />
           </button>
         </div>
         <div className="space-y-3 p-4 text-sm">
-          <Field label="العميل" required>
+          <Field label={t("newDialog.fields.client")} required>
             {picked ? (
               <div className="flex items-center justify-between rounded-lg border border-soft bg-input px-3 py-2">
                 <div>
@@ -184,7 +187,7 @@ function NewContractDialog({
                   onClick={() => setClientId("")}
                   className="text-xs text-cyan hover:underline"
                 >
-                  تغيير
+                  {t("newDialog.actions.change")}
                 </button>
               </div>
             ) : (
@@ -192,7 +195,7 @@ function NewContractDialog({
                 <input
                   value={clientSearch}
                   onChange={(e) => setClientSearch(e.target.value)}
-                  placeholder="ابحث بالاسم أو الكود…"
+                  placeholder={t("newDialog.placeholders.clientSearch")}
                   className="h-9 w-full rounded-lg border border-input bg-input px-3 text-sm outline-none focus:border-cyan/40"
                   autoFocus
                 />
@@ -200,7 +203,7 @@ function NewContractDialog({
                   <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-soft bg-card">
                     {clientResults.length === 0 ? (
                       <div className="px-3 py-2 text-xs text-muted-foreground">
-                        لا توجد نتائج
+                        {t("newDialog.noResults")}
                       </div>
                     ) : (
                       clientResults.map((c) => (
@@ -231,7 +234,7 @@ function NewContractDialog({
           </Field>
 
           <div className="grid grid-cols-2 gap-2">
-            <Field label="مدير الحساب">
+            <Field label={t("newDialog.fields.accountManager")}>
               <SearchSelect
                 value={amId}
                 onChange={setAmId}
@@ -239,18 +242,18 @@ function NewContractDialog({
                   id: a.id,
                   label: a.full_name,
                 }))}
-                placeholder="— بدون —"
+                placeholder={t("newDialog.placeholders.none")}
                 disabled={pending}
               />
             </Field>
-            <Field label="النوع">
+            <Field label={t("newDialog.fields.type")}>
               <select
                 value={typeId}
                 onChange={(e) => setTypeId(e.target.value)}
                 disabled={pending}
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
               >
-                <option value="">— بدون —</option>
+                <option value="">{t("newDialog.placeholders.none")}</option>
                 {contractTypes.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.label}
@@ -260,7 +263,7 @@ function NewContractDialog({
             </Field>
           </div>
 
-          <Field label={`الباقات / الخدمات${packageIds.length ? ` (${packageIds.length})` : ""}`}>
+          <Field label={t("newDialog.fields.packages", { count: packageIds.length })}>
             <div className="flex max-h-32 flex-wrap content-start gap-1.5 overflow-y-auto rounded-lg border border-input bg-input p-2">
               {packages.map((p) => {
                 const selected = packageIds.includes(p.id);
@@ -290,13 +293,12 @@ function NewContractDialog({
               })}
             </div>
             <p className="text-[10px] text-muted-foreground">
-              اختر كل الخدمات داخل العقد — الخدمات اللي تنفذ لمرة واحدة (انشاء
-              متجر، براندنج…) بتضيف أيامها تلقائيًا لمدة العقد.
+              {t("newDialog.helpers.packages")}
             </p>
           </Field>
 
           <div className="grid grid-cols-3 gap-2">
-            <Field label="تاريخ البدء" required>
+            <Field label={t("newDialog.fields.startDate")} required>
               <input
                 type="date"
                 value={startDate}
@@ -306,7 +308,7 @@ function NewContractDialog({
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
               />
             </Field>
-            <Field label="المدة (شهور)">
+            <Field label={t("newDialog.fields.duration")}>
               <input
                 type="number"
                 min="0"
@@ -317,7 +319,7 @@ function NewContractDialog({
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
               />
             </Field>
-            <Field label="قيمة العقد" required>
+            <Field label={t("newDialog.fields.totalValue")} required>
               <input
                 type="number"
                 step="0.01"
@@ -326,14 +328,14 @@ function NewContractDialog({
                 onChange={(e) => setTotalValue(e.target.value)}
                 disabled={pending}
                 dir="ltr"
-                placeholder="0"
+                placeholder={t("newDialog.placeholders.zero")}
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Field label="القيمة المدفوعة">
+            <Field label={t("newDialog.fields.paidValue")}>
               <input
                 type="number"
                 step="0.01"
@@ -342,11 +344,11 @@ function NewContractDialog({
                 onChange={(e) => setPaidValue(e.target.value)}
                 disabled={pending}
                 dir="ltr"
-                placeholder="افتراضي 0"
+                placeholder={t("newDialog.placeholders.defaultZero")}
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
               />
             </Field>
-            <Field label="الدفع">
+            <Field label={t("newDialog.fields.paymentStatus")}>
               <select
                 value={paymentStatus}
                 onChange={(e) =>
@@ -355,26 +357,25 @@ function NewContractDialog({
                 disabled={pending}
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
               >
-                <option value="Complete">Complete — مكتمل</option>
-                <option value="Installments">Installments — دفعات</option>
+                <option value="Complete">{t("newDialog.payment.complete")}</option>
+                <option value="Installments">{t("newDialog.payment.installments")}</option>
               </select>
             </Field>
           </div>
 
-          <Field label="ملاحظات">
+          <Field label={t("newDialog.fields.notes")}>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={pending}
               rows={2}
               className="w-full resize-y rounded-lg border border-input bg-input p-2 text-sm"
-              placeholder="اختياري"
+              placeholder={t("newDialog.placeholders.optional")}
             />
           </Field>
 
           <p className="text-[10px] text-muted-foreground">
-            القيم الافتراضية: Target = Overdue، الحالة = نشط. يمكن تعديلها من
-            الجدول بعد الإنشاء. لو اخترت «دفعات» جدوِل الأقساط من صفحة العقد.
+            {t("newDialog.helpers.defaults")}
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
@@ -384,7 +385,7 @@ function NewContractDialog({
             disabled={pending}
             className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            إلغاء
+            {t("newDialog.actions.cancel")}
           </button>
           <button
             type="button"
@@ -393,7 +394,7 @@ function NewContractDialog({
             className="inline-flex items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim px-3 py-1.5 text-xs font-medium text-cyan hover:bg-cyan-dim/80 disabled:opacity-50"
           >
             {pending && <Loader2 className="size-3 animate-spin" />}
-            إنشاء العقد
+            {t("newDialog.actions.create")}
           </button>
         </div>
       </div>
@@ -418,6 +419,7 @@ function SearchSelect({
   placeholder: string;
   disabled?: boolean;
 }) {
+  const t = useTranslations("ContractsPage");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const picked = options.find((o) => o.id === value);
@@ -455,7 +457,7 @@ function SearchSelect({
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="ابحث بالاسم…"
+              placeholder={t("newDialog.placeholders.searchManager")}
               className="h-8 w-full border-b border-soft bg-popover px-2 text-xs outline-none"
             />
             <div className="max-h-48 overflow-y-auto py-1">
@@ -487,7 +489,7 @@ function SearchSelect({
               ))}
               {results.length === 0 && (
                 <div className="px-3 py-2 text-xs text-muted-foreground">
-                  لا توجد نتائج
+                  {t("newDialog.noResults")}
                 </div>
               )}
             </div>

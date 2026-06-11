@@ -11,7 +11,9 @@ import { useState, useTransition } from "react";
 import { Loader2, Plus, Trash2, Check, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { formatShortDate } from "@/lib/utils-format";
 import {
   addInstallmentAction,
   updateInstallmentAction,
@@ -29,22 +31,22 @@ export type InstallmentRow = {
 };
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  received: { label: "مستلمة", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
-  partial: { label: "جزئية", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
-  pending: { label: "منتظرة", cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
-  overdue: { label: "متأخرة", cls: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
-  waived: { label: "متنازَل", cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
+  received: { label: "received", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  partial: { label: "partial", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  pending: { label: "pending", cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
+  overdue: { label: "overdue", cls: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+  waived: { label: "waived", cls: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30" },
 };
 
 function fmtMoney(n: number | null | undefined) {
   if (n == null || !Number.isFinite(n)) return "—";
   return new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(n);
 }
-function fmtDate(s: string | null) {
+function fmtDate(s: string | null, locale: string) {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(d);
+  return formatShortDate(d, locale);
 }
 
 export function InstallmentsEditor({
@@ -56,6 +58,8 @@ export function InstallmentsEditor({
   rows: InstallmentRow[];
   canManage: boolean;
 }) {
+  const t = useTranslations("ContractsPage");
+  const locale = useLocale();
   const router = useRouter();
   const [rows, setRows] = useState<InstallmentRow[]>(initial);
   const [last, setLast] = useState(initial);
@@ -81,7 +85,7 @@ export function InstallmentsEditor({
         if (before) patchLocal(id, before);
         toast.error(res.error);
       } else {
-        toast.success("تم الحفظ", { duration: 1000 });
+        toast.success(t("installments.toasts.saved"), { duration: 1000 });
         router.refresh();
       }
     });
@@ -96,20 +100,20 @@ export function InstallmentsEditor({
         <table className="w-full text-right text-sm">
           <thead className="bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 text-center font-medium">#</th>
-              <th className="px-3 py-2 text-end font-medium">المبلغ المتوقَّع</th>
-              <th className="px-3 py-2 font-medium">التاريخ المتوقَّع</th>
-              <th className="px-3 py-2 text-end font-medium">المبلغ المستلَم</th>
-              <th className="px-3 py-2 font-medium">تاريخ الاستلام</th>
-              <th className="px-3 py-2 font-medium">الحالة</th>
+              <th className="px-3 py-2 text-center font-medium">{t("installments.headers.sequence")}</th>
+              <th className="px-3 py-2 text-end font-medium">{t("installments.headers.expectedAmount")}</th>
+              <th className="px-3 py-2 font-medium">{t("installments.headers.expectedDate")}</th>
+              <th className="px-3 py-2 text-end font-medium">{t("installments.headers.actualAmount")}</th>
+              <th className="px-3 py-2 font-medium">{t("installments.headers.actualDate")}</th>
+              <th className="px-3 py-2 font-medium">{t("installments.headers.status")}</th>
               {canManage && <th className="px-3 py-2" />}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={canManage ? 7 : 6} className="px-3 py-6 text-center text-muted-foreground">
-                  لا توجد دفعات بعد.
+                  <td colSpan={canManage ? 7 : 6} className="px-3 py-6 text-center text-muted-foreground">
+                  {t("installments.empty")}
                 </td>
               </tr>
             ) : (
@@ -131,7 +135,7 @@ export function InstallmentsEditor({
                     {canManage ? (
                       <EditDate value={r.expected_date} onCommit={(v) => v && commitField(r.id, "expected_date", v)} />
                     ) : (
-                      fmtDate(r.expected_date)
+                      fmtDate(r.expected_date, locale)
                     )}
                   </td>
                   <td className="px-3 py-2 text-end tabular-nums">
@@ -145,7 +149,7 @@ export function InstallmentsEditor({
                     {canManage ? (
                       <EditDate value={r.actual_date} nullable onCommit={(v) => commitField(r.id, "actual_date", v)} />
                     ) : (
-                      fmtDate(r.actual_date)
+                      fmtDate(r.actual_date, locale)
                     )}
                   </td>
                   <td className="px-3 py-2">
@@ -155,7 +159,7 @@ export function InstallmentsEditor({
                         STATUS_LABEL[r.status]?.cls ?? "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
                       )}
                     >
-                      {STATUS_LABEL[r.status]?.label ?? r.status}
+                      {t(`installments.status.${r.status}`)}
                     </span>
                   </td>
                   {canManage && (
@@ -169,7 +173,7 @@ export function InstallmentsEditor({
                               setRows(snapshot);
                               toast.error(res.error);
                             } else {
-                              toast.success("تم الحذف");
+                              toast.success(t("installments.toasts.deleted"));
                               router.refresh();
                             }
                           });
@@ -189,7 +193,7 @@ export function InstallmentsEditor({
                 <td />
                 <td className="px-3 py-2 text-end font-semibold tabular-nums text-emerald-300">{fmtMoney(received)}</td>
                 <td colSpan={canManage ? 3 : 2} className="px-3 py-2 text-muted-foreground">
-                  المتبقّي: {fmtMoney(total - received)}
+                  {t("installments.remainder", { amount: fmtMoney(total - received) })}
                 </td>
               </tr>
             </tfoot>
@@ -214,7 +218,7 @@ export function InstallmentsEditor({
             className="inline-flex items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim px-3 py-1.5 text-xs font-medium text-cyan hover:bg-cyan-dim/80"
           >
             <Plus className="size-3.5" />
-            إضافة دفعة
+            {t("installments.actions.add")}
           </button>
         )
       )}
@@ -231,6 +235,7 @@ function AddInstallmentRow({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const t = useTranslations("ContractsPage");
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState("");
@@ -239,7 +244,7 @@ function AddInstallmentRow({
   function submit() {
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) {
-      toast.error("أدخل مبلغًا صحيحًا");
+        toast.error(t("installments.toasts.invalidAmount"));
       return;
     }
     start(async () => {
@@ -252,7 +257,7 @@ function AddInstallmentRow({
         toast.error(res.error);
         return;
       }
-      toast.success("تمت الإضافة");
+      toast.success(t("installments.toasts.added"));
       onDone();
     });
   }
@@ -260,20 +265,20 @@ function AddInstallmentRow({
   return (
     <div className="flex flex-wrap items-end gap-2 rounded-lg border border-soft bg-soft-1/40 p-3">
       <div className="space-y-1">
-        <label className="block text-[10px] text-muted-foreground">المبلغ المتوقَّع</label>
+        <label className="block text-[10px] text-muted-foreground">{t("installments.addRow.expectedAmount")}</label>
         <input
           type="number"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           disabled={pending}
           dir="ltr"
-          placeholder="0"
+          placeholder={t("installments.addRow.amountPlaceholder")}
           autoFocus
           className="h-8 w-28 rounded-lg border border-input bg-input px-2 text-sm tabular-nums"
         />
       </div>
       <div className="space-y-1">
-        <label className="block text-[10px] text-muted-foreground">التاريخ المتوقَّع</label>
+        <label className="block text-[10px] text-muted-foreground">{t("installments.addRow.expectedDate")}</label>
         <input
           type="date"
           value={date}
@@ -290,7 +295,7 @@ function AddInstallmentRow({
         className="inline-flex h-8 items-center gap-1 rounded-lg bg-cyan-dim px-3 text-xs font-medium text-cyan hover:bg-cyan-dim/80 disabled:opacity-50"
       >
         {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
-        حفظ
+        {t("installments.actions.save")}
       </button>
       <button
         type="button"
@@ -298,7 +303,7 @@ function AddInstallmentRow({
         disabled={pending}
         className="inline-flex h-8 items-center rounded-lg border border-soft px-3 text-xs text-muted-foreground hover:bg-muted"
       >
-        إلغاء
+        {t("installments.actions.cancel")}
       </button>
     </div>
   );
@@ -372,6 +377,7 @@ function EditDate({
   onCommit: (v: string | null) => void;
   nullable?: boolean;
 }) {
+  const locale = useLocale();
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(value ?? "");
   const [lp, setLp] = useState(value);
@@ -391,7 +397,7 @@ function EditDate({
         onClick={() => setEditing(true)}
         className="inline-flex items-center gap-1 rounded px-1 -mx-1 hover:bg-soft-1 hover:ring-1 hover:ring-soft"
       >
-        {fmtDate(value)}
+        {fmtDate(value, locale)}
         <Pencil className="size-2.5 text-muted-foreground/50" />
       </button>
     );
@@ -417,13 +423,14 @@ function EditDate({
 }
 
 function DeleteButton({ onConfirm }: { onConfirm: () => void }) {
+  const t = useTranslations("ContractsPage");
   const [armed, setArmed] = useState(false);
   if (!armed) {
     return (
       <button
         type="button"
         onClick={() => setArmed(true)}
-        title="حذف"
+        title={t("installments.tooltips.delete")}
         className="rounded p-1.5 text-muted-foreground hover:bg-cc-red/10 hover:text-cc-red"
       >
         <Trash2 className="size-3.5" />
@@ -435,7 +442,7 @@ function DeleteButton({ onConfirm }: { onConfirm: () => void }) {
       <button
         type="button"
         onClick={onConfirm}
-        title="تأكيد الحذف"
+        title={t("installments.tooltips.confirmDelete")}
         className="rounded bg-cc-red/15 p-1 text-cc-red hover:bg-cc-red/25"
       >
         <Check className="size-3" />
@@ -443,7 +450,7 @@ function DeleteButton({ onConfirm }: { onConfirm: () => void }) {
       <button
         type="button"
         onClick={() => setArmed(false)}
-        title="إلغاء"
+        title={t("installments.tooltips.cancel")}
         className="rounded bg-soft-1 p-1 text-muted-foreground hover:bg-soft-2"
       >
         <X className="size-3" />

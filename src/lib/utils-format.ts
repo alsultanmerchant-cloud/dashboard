@@ -60,6 +60,44 @@ export function formatArabicShortDate(value: string | Date | null | undefined): 
   }).format(d);
 }
 
+export function formatShortDate(
+  value: string | Date | null | undefined,
+  locale: string,
+): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
+export function formatMonthYear(
+  value: string | Date | null | undefined,
+  locale: string,
+): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    month: "short",
+    year: "numeric",
+  }).format(d);
+}
+
+export function formatDateTime(
+  value: string | Date | null | undefined,
+  locale: string,
+): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 export function relativeTimeAr(value: string | Date | null | undefined): string {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;

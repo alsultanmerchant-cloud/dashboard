@@ -2,6 +2,7 @@
 
 import { useState, useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   Upload, Loader2, CheckCircle2, AlertTriangle, FileSpreadsheet, ArrowLeft,
 } from "lucide-react";
@@ -14,6 +15,7 @@ import {
 } from "./_actions";
 
 export function ImportForm() {
+  const t = useTranslations("ContractsImportPage");
   const router = useRouter();
   const [previewState, previewAction, previewing] = useActionState<
     ImportPreviewState | undefined, FormData
@@ -32,7 +34,7 @@ export function ImportForm() {
   useEffect(() => {
     if (commitState?.kind === "error") toast.error(commitState.error);
     if (commitState?.kind === "ok") {
-      toast.success("تم استيراد البيانات");
+      toast.success(t("form.toasts.imported"));
       // Don't auto-redirect — let user see the result + maybe navigate
     }
   }, [commitState]);
@@ -45,7 +47,7 @@ export function ImportForm() {
           <form action={previewAction} className="space-y-4">
             <div>
               <label htmlFor="file" className="block mb-2 text-sm font-medium">
-                اختر ملف Excel
+                {t("form.fileLabel")}
               </label>
               <div className="flex items-center gap-3">
                 <input
@@ -65,14 +67,13 @@ export function ImportForm() {
                 </p>
               )}
               <p className="mt-2 text-[11px] text-muted-foreground">
-                يقبل النظام أوراق &quot;Clients Contracts&quot; و &quot;💲Installments Tracker&quot; من ملف الأكاونت.
-                لن يتم حفظ شيء حتى تراجع المعاينة وتؤكدها.
+                {t("form.fileHint")}
               </p>
             </div>
 
             <Button type="submit" disabled={previewing}>
               {previewing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-              عرض المعاينة
+              {t("form.preview")}
             </Button>
           </form>
         </CardContent>
@@ -92,22 +93,21 @@ export function ImportForm() {
             <CheckCircle2 className="size-6 text-cc-green shrink-0 mt-0.5" />
             <div className="flex-1">
               <h3 className="text-base font-semibold text-cc-green">
-                تم الاستيراد بنجاح
+                {t("form.successTitle")}
               </h3>
               <ul className="mt-3 space-y-1 text-sm">
                 <li>
-                  العملاء: <strong>{r.clientsCreated}</strong> جديد ·{" "}
-                  <strong>{r.clientsUpdated}</strong> تحديث
+                  {t("form.successClients", { created: r.clientsCreated, updated: r.clientsUpdated })}
                 </li>
                 <li>
-                  العقود المستوردة: <strong>{r.contractsUpserted}</strong>
+                  {t("form.successContracts", { count: r.contractsUpserted })}
                 </li>
                 <li>
-                  الدفعات المستوردة: <strong>{r.installmentsUpserted}</strong>
+                  {t("form.successInstallments", { count: r.installmentsUpserted })}
                 </li>
                 {r.errors.length > 0 && (
                   <li className="text-amber">
-                    تحذيرات: {r.errors.length} ({r.errors.length > 0 ? "انظر القائمة أدناه" : "لا شيء"})
+                    {t("form.warnings", { count: r.errors.length })}
                   </li>
                 )}
               </ul>
@@ -115,7 +115,7 @@ export function ImportForm() {
               {r.errors.length > 0 && (
                 <div className="mt-4 rounded-lg border border-amber/30 bg-amber-dim/20 p-3">
                   <p className="text-xs font-semibold text-amber mb-1.5">
-                    عناصر تم تخطّيها:
+                    {t("form.skippedTitle")}
                   </p>
                   <ul className="text-[11px] text-amber/80 space-y-0.5 max-h-40 overflow-auto">
                     {r.errors.map((e, i) => (
@@ -128,10 +128,10 @@ export function ImportForm() {
               <div className="mt-4 flex gap-2">
                 <Button onClick={() => router.push("/finance")} className="gap-1.5">
                   <ArrowLeft className="size-4 icon-flip-rtl" />
-                  لوحة المدير المالي
+                  {t("form.goFinance")}
                 </Button>
                 <Button variant="outline" onClick={() => router.push("/contracts")}>
-                  قائمة العقود
+                  {t("form.goContracts")}
                 </Button>
               </div>
             </div>
@@ -147,13 +147,13 @@ export function ImportForm() {
         <CardContent className="p-5">
           <div className="flex items-center gap-2 mb-3">
             <FileSpreadsheet className="size-5 text-cyan" />
-            <h3 className="text-sm font-semibold">المعاينة قبل الحفظ</h3>
+            <h3 className="text-sm font-semibold">{t("form.previewTitle")}</h3>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <Stat label="عملاء" value={p.clients.length} tone="info" />
-            <Stat label="عقود" value={p.contracts.length} tone="success" />
-            <Stat label="دفعات" value={p.installments.length} tone="success" />
-            <Stat label="صفوف مُتجاهلة" value={p.stats.skippedRows} tone="muted" />
+            <Stat label={t("form.stats.clients")} value={p.clients.length} tone="info" />
+            <Stat label={t("form.stats.contracts")} value={p.contracts.length} tone="success" />
+            <Stat label={t("form.stats.installments")} value={p.installments.length} tone="success" />
+            <Stat label={t("form.stats.skipped")} value={p.stats.skippedRows} tone="muted" />
           </div>
           {p.warnings.length > 0 && (
             <div className="mt-4 rounded-lg border border-amber/30 bg-amber-dim/20 p-3">
@@ -171,18 +171,18 @@ export function ImportForm() {
       {/* Sample tables — first 5 contracts */}
       <Card>
         <CardContent className="p-5">
-          <p className="text-sm font-semibold mb-3">عينة من أول 5 عقود</p>
+          <p className="text-sm font-semibold mb-3">{t("form.sampleTitle")}</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-muted-foreground">
                 <tr className="border-b border-soft">
-                  <th className="text-start font-medium py-2 pe-3">العميل</th>
-                  <th className="text-start font-medium py-2 pe-3">المسؤول</th>
-                  <th className="text-start font-medium py-2 pe-3">النوع</th>
-                  <th className="text-start font-medium py-2 pe-3">القيمة</th>
-                  <th className="text-start font-medium py-2 pe-3">المدفوع</th>
-                  <th className="text-start font-medium py-2 pe-3">البداية</th>
-                  <th className="text-start font-medium py-2 pe-3">الحالة</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.client")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.owner")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.type")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.value")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.paid")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.start")}</th>
+                  <th className="text-start font-medium py-2 pe-3">{t("form.table.status")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.04]">
@@ -207,10 +207,7 @@ export function ImportForm() {
 
       <Card className="border-cyan/20 bg-cyan-dim/10">
         <CardContent className="p-4">
-          <p className="text-xs text-foreground/90 leading-relaxed">
-            <strong>قبل الضغط على &quot;حفظ&quot;:</strong> سيتم إضافة العملاء الجدد وتحديث الموجود.
-            لن يُحذف أي شيء. الاستيراد آمن للتكرار — تشغيله مرة ثانية سيحدِّث القيم وليس يضاعفها.
-          </p>
+          <p className="text-xs text-foreground/90 leading-relaxed">{t("form.safeNote")}</p>
         </CardContent>
       </Card>
 
@@ -218,14 +215,14 @@ export function ImportForm() {
         <input type="hidden" name="payload" value={JSON.stringify(p)} />
         <Button type="submit" disabled={committing} className="gap-1.5">
           {committing ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-          حفظ {p.contracts.length} عقد و {p.installments.length} دفعة
+          {t("form.commit", { contracts: p.contracts.length, installments: p.installments.length })}
         </Button>
         <Button
           type="button"
           variant="outline"
           onClick={() => window.location.reload()}
         >
-          إلغاء واختيار ملف آخر
+          {t("form.cancel")}
         </Button>
       </form>
     </div>

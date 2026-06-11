@@ -9,6 +9,7 @@ import {
   listDashboardMonths,
   getAmTargets,
   getMonthTargetBuckets,
+  getCeoClientInsights,
   type GridContract,
 } from "@/lib/data/contracts";
 import { listAccountManagers } from "@/lib/data/employees";
@@ -16,6 +17,7 @@ import { listClientOptions } from "@/lib/data/clients";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
+import { getTranslations } from "next-intl/server";
 import { ContractsGrid } from "./contracts-grid";
 import { NewContractButton } from "./new-contract-dialog";
 import { CeoDashboard } from "./ceo-dashboard";
@@ -33,6 +35,7 @@ export default async function ContractsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requirePagePermission("contract.view");
+  const t = await getTranslations("ContractsPage");
   const canEdit = hasPermission(session, "contract.manage");
   const sp = await searchParams;
   const view = sp.view === "dashboard" ? "dashboard" : "table";
@@ -49,7 +52,7 @@ export default async function ContractsPage({
         )}
       >
         <Table2 className="size-3.5" />
-        جدول العقود
+        {t("tabs.table")}
       </Link>
       <Link
         href="/contracts?view=dashboard"
@@ -61,7 +64,7 @@ export default async function ContractsPage({
         )}
       >
         <TrendingUp className="size-3.5" />
-        لوحة الإيرادات
+        {t("tabs.dashboard")}
       </Link>
     </div>
   );
@@ -69,8 +72,8 @@ export default async function ContractsPage({
   return (
     <div>
       <PageHeader
-        title="العقود"
-        description="المصدر الرسمي للعقود وإيراداتها. السكاي شيت مؤرشف — كل التعديلات والحسابات تتم هنا."
+        title={t("title")}
+        description={t("description")}
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -83,7 +86,7 @@ export default async function ContractsPage({
             href="/contracts/import"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-soft bg-card px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            استيراد من Excel
+            {t("header.import")}
           </Link>
         )}
       </div>
@@ -120,6 +123,7 @@ async function TableSection({
     listContractTypes(orgId),
     listAccountManagers(orgId),
   ]);
+  const t = await getTranslations("ContractsPage");
 
   const typeOptions = types.map((t) => ({ id: t.id, key: t.key, label: t.name_ar }));
   const amOptions = ams.map((a) => ({ id: a.id, full_name: a.full_name }));
@@ -128,8 +132,8 @@ async function TableSection({
     return (
       <EmptyState
         icon={<FileSignature className="size-6" />}
-        title="لا توجد عقود بعد"
-        description="ابدأ بإنشاء عقد جديد من زر «+ عقد جديد»."
+        title={t("empty.listTitle")}
+        description={t("empty.listDescription")}
       />
     );
   }
@@ -172,20 +176,22 @@ async function DashboardSection({
   orgId: string;
   month?: string;
 }) {
+  const t = await getTranslations("ContractsPage");
   const months = await listDashboardMonths(orgId);
   const selected = month ?? months[0]?.month ?? undefined;
 
-  const [dashboard, amTargets, buckets] = await Promise.all([
+  const [dashboard, amTargets, buckets, clientInsights] = await Promise.all([
     getMonthlyDashboard(orgId, selected),
     getAmTargets(orgId, selected),
     getMonthTargetBuckets(orgId, selected),
+    getCeoClientInsights(orgId, selected, 12),
   ]);
 
   if (!dashboard) {
     return (
       <div className="rounded-2xl border border-dashed border-soft-2 bg-soft-1/40 px-4 py-16 text-center">
         <TrendingUp className="mx-auto mb-3 size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">لا توجد بيانات لهذا الشهر بعد.</p>
+        <p className="text-sm text-muted-foreground">{t("empty.dashboardDescription")}</p>
       </div>
     );
   }
@@ -195,6 +201,7 @@ async function DashboardSection({
       dashboard={dashboard}
       amTargets={amTargets}
       buckets={buckets}
+      clientInsights={clientInsights}
       months={months}
       selectedMonth={selected ?? dashboard.month}
     />

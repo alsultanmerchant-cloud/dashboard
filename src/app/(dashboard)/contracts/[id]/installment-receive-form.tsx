@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,6 +16,7 @@ export function InstallmentReceiveForm({
   installmentId: string;
   expectedAmount: number;
 }) {
+  const t = useTranslations("ContractsPage");
   const [open, setOpen] = useState(false);
   const [state, formAction] = useActionState<ContractActionState | undefined, FormData>(
     recordInstallmentReceivedAction,
@@ -25,7 +27,7 @@ export function InstallmentReceiveForm({
   if (!open) {
     return (
       <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
-        تسجيل استلام
+        {t("installmentReceive.openButton")}
       </Button>
     );
   }
@@ -39,7 +41,9 @@ export function InstallmentReceiveForm({
     >
       <input type="hidden" name="installment_id" value={installmentId} />
       <div>
-        <label className="block text-[11px] text-muted-foreground mb-1">تاريخ الاستلام</label>
+        <label className="block text-[11px] text-muted-foreground mb-1">
+          {t("installmentReceive.fields.actualDate")}
+        </label>
         <Input
           name="actual_date"
           type="date"
@@ -49,7 +53,9 @@ export function InstallmentReceiveForm({
         />
       </div>
       <div>
-        <label className="block text-[11px] text-muted-foreground mb-1">المبلغ</label>
+        <label className="block text-[11px] text-muted-foreground mb-1">
+          {t("installmentReceive.fields.amount")}
+        </label>
         <Input
           name="actual_amount"
           type="number"
@@ -62,10 +68,10 @@ export function InstallmentReceiveForm({
       </div>
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={pending}>
-          حفظ
+          {t("installmentReceive.actions.save")}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
-          إلغاء
+          {t("installmentReceive.actions.cancel")}
         </Button>
       </div>
       {state && "error" in state && state.error && (

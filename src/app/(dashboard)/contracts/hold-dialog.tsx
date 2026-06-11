@@ -13,6 +13,7 @@ import { useState, useTransition } from "react";
 import { CalendarClock, Loader2, PauseCircle, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { setContractHoldAction } from "./_actions";
 
 export function HoldDialog({
@@ -27,6 +28,7 @@ export function HoldDialog({
   currentHoldEnd?: string | null;
   onClose: () => void;
 }) {
+  const t = useTranslations("ContractsPage");
   const router = useRouter();
   const [endDate, setEndDate] = useState(currentHoldEnd ?? "");
   const [note, setNote] = useState("");
@@ -35,11 +37,11 @@ export function HoldDialog({
 
   function submit() {
     if (!endDate) {
-      toast.error("حدّدي تاريخ نهاية الإيقاف أولًا");
+      toast.error(t("holdDialog.toasts.pickEndDate"));
       return;
     }
     if (endDate < today) {
-      toast.error("تاريخ نهاية الإيقاف لا يمكن أن يكون في الماضي");
+      toast.error(t("holdDialog.toasts.pastDate"));
       return;
     }
     start(async () => {
@@ -52,7 +54,7 @@ export function HoldDialog({
         toast.error(res.error);
         return;
       }
-      toast.success("تم إيقاف العقد مؤقتًا — سيتم التنبيه قبل نهاية الإيقاف بـ5 أيام");
+      toast.success(t("holdDialog.toasts.success"));
       router.refresh();
       onClose();
     });
@@ -73,7 +75,7 @@ export function HoldDialog({
             </span>
             <div>
               <h2 className="text-sm font-semibold">
-                {currentHoldEnd ? "تعديل مدة الإيقاف" : "إيقاف العقد مؤقتًا (Hold)"}
+                {currentHoldEnd ? t("holdDialog.titleEdit") : t("holdDialog.titleCreate")}
               </h2>
               <p className="text-xs text-muted-foreground">{contractLabel}</p>
             </div>
@@ -89,7 +91,7 @@ export function HoldDialog({
         </div>
 
         <label className="mb-1 block text-xs font-medium">
-          تاريخ نهاية الإيقاف <span className="text-rose-400">*</span>
+          {t("holdDialog.fields.endDate")} <span className="text-rose-400">*</span>
         </label>
         <div className="relative mb-1">
           <CalendarClock className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -103,16 +105,15 @@ export function HoldDialog({
           />
         </div>
         <p className="mb-3 text-[11px] text-muted-foreground">
-          سيتم تنبيه مدير الحساب والمالك تلقائيًا قبل هذا التاريخ بـ5 أيام،
-          ويوميًا إذا تجاوز العقد التاريخ دون رفع الإيقاف.
+          {t("holdDialog.helpers.notice")}
         </p>
 
-        <label className="mb-1 block text-xs font-medium">سبب الإيقاف / ملاحظة</label>
+        <label className="mb-1 block text-xs font-medium">{t("holdDialog.fields.reason")}</label>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
-          placeholder="مثال: العميل طلب إيقاف السوشيال خلال فترة الجرد…"
+          placeholder={t("holdDialog.placeholders.reason")}
           className="mb-4 w-full resize-y rounded-lg border border-input bg-input p-2 text-sm outline-none focus:border-cyan/40"
         />
 
@@ -123,7 +124,7 @@ export function HoldDialog({
             disabled={pending}
             className="h-9 rounded-lg border border-soft px-4 text-xs text-muted-foreground hover:text-foreground"
           >
-            إلغاء
+            {t("holdDialog.actions.cancel")}
           </button>
           <button
             type="button"
@@ -132,7 +133,7 @@ export function HoldDialog({
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-500/90 px-4 text-xs font-semibold text-amber-950 hover:bg-amber-500 disabled:opacity-60"
           >
             {pending && <Loader2 className="size-3.5 animate-spin" />}
-            تأكيد الإيقاف
+            {t("holdDialog.actions.confirm")}
           </button>
         </div>
       </div>

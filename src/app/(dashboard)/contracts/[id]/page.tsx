@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 import { FileSignature, ArrowUpLeft, Briefcase } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import {
@@ -18,8 +19,8 @@ import {
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
 import {
-  formatArabicShortDate,
-  formatArabicDateTime,
+  formatShortDate,
+  formatDateTime,
 } from "@/lib/utils-format";
 import { EventRecordForm } from "./event-record-form";
 import { InstallmentsEditor, type InstallmentRow } from "./installments-editor";
@@ -47,6 +48,48 @@ const CYCLE_STATE: Record<string, string> = {
   skipped: "متخطّاة",
 };
 
+function translateStatus(t: Awaited<ReturnType<typeof getTranslations>>, key: string) {
+  switch (key) {
+    case "active":
+    case "hold":
+    case "closed":
+    case "expired":
+    case "renewed":
+    case "lost":
+      return t(`grid.statusLabels.${key}` as const);
+    default:
+      return STATUS_LABEL[key] ?? key;
+  }
+}
+
+function translateTarget(t: Awaited<ReturnType<typeof getTranslations>>, key: string) {
+  switch (key) {
+    case "On-Target":
+      return t("grid.targetLabels.onTarget");
+    case "Overdue":
+      return t("grid.targetLabels.overdue");
+    case "Lost":
+      return t("grid.targetLabels.lost");
+    case "Renewed":
+      return t("grid.targetLabels.renewed");
+    default:
+      return TARGET_LABEL[key] ?? key;
+  }
+}
+
+function translateCycleState(t: Awaited<ReturnType<typeof getTranslations>>, key: string) {
+  switch (key) {
+    case "pending":
+    case "active":
+    case "done":
+    case "overdue":
+    case "skipped":
+      return t(`detail.sections.cycles.states.${key}` as const);
+    default:
+      return CYCLE_STATE[key] ?? key;
+  }
+}
+
 function formatCurrency(value: number) {
   if (!Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("ar-SA-u-nu-latn", { maximumFractionDigits: 0 }).format(value);
@@ -58,6 +101,8 @@ export default async function ContractDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requirePagePermission("contract.view");
+  const t = await getTranslations("ContractsPage");
+  const locale = await getLocale();
   const { id } = await params;
 
   const contract = await getContractById(session.orgId, id);
@@ -118,7 +163,7 @@ export default async function ContractDetailPage({
             className="text-xs text-cyan hover:underline inline-flex items-center gap-1"
           >
             <ArrowUpLeft className="size-3 icon-flip-rtl" />
-            كل العقود
+            {t("title")}
           </Link>
         }
       />
@@ -134,18 +179,18 @@ export default async function ContractDetailPage({
           <span className="text-base">⏸</span>
           {onHoldNow ? (
             <span>
-              العقد موقوف مؤقتًا
-              {holdStart ? ` منذ ${formatArabicShortDate(holdStart)}` : ""}
+              {t("detail.hold.active")}
+              {holdStart ? ` ${t("detail.hold.since")} ${formatShortDate(holdStart, locale)}` : ""}
               {holdEnd ? (
                 <>
                   {" — "}
-                  ينتهي الإيقاف في{" "}
-                  <strong className="font-semibold">{formatArabicShortDate(holdEnd)}</strong>
+                  {t("detail.hold.until")}{" "}
+                  <strong className="font-semibold">{formatShortDate(holdEnd, locale)}</strong>
                 </>
               ) : null}
             </span>
           ) : (
-            <span>كان هذا العقد موقوفًا خلال الشهر الحالي — راجعي سجل النشاط أدناه.</span>
+            <span>{t("detail.hold.wasHeldThisMonth")}</span>
           )}
         </div>
       )}
@@ -153,13 +198,11 @@ export default async function ContractDetailPage({
       {siblings.length > 0 && (
         <div className="mb-4 rounded-xl border border-cyan/25 bg-cyan-dim/30 px-4 py-3">
           <p className="mb-2 text-sm">
-            📑 هذا العميل لديه{" "}
+            {t("detail.siblings.prefix")}{" "}
             <strong className="font-semibold">
-              {siblings.length === 1
-                ? "عقد آخر واحد"
-                : `${siblings.length} عقود أخرى`}
+              {t("detail.siblings.count", { count: siblings.length })}
             </strong>{" "}
-            معنا:
+            {t("detail.siblings.suffix")}
           </p>
           <div className="flex flex-wrap gap-2">
             {siblings.map((s) => (
@@ -182,7 +225,7 @@ export default async function ContractDetailPage({
                         : "rounded-full bg-zinc-500/15 px-1.5 py-0.5 text-[10px] text-zinc-300"
                   }
                 >
-                  {STATUS_LABEL[s.status] ?? s.status}
+                  {translateStatus(t, s.status)}
                 </span>
               </Link>
             ))}
@@ -192,49 +235,49 @@ export default async function ContractDetailPage({
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <MetricCard
-          label="القيمة الإجمالية"
+          label={t("detail.metrics.total")}
           value={formatCurrency(total)}
           icon={<FileSignature className="size-5" />}
           tone="default"
         />
-        <MetricCard label="المدفوع" value={formatCurrency(paid)} tone="success" />
+        <MetricCard label={t("detail.metrics.paid")} value={formatCurrency(paid)} tone="success" />
         <MetricCard
-          label="المتبقّي"
+          label={t("detail.metrics.outstanding")}
           value={formatCurrency(outstanding)}
           tone={outstanding > 0 ? "warning" : "default"}
         />
         <MetricCard
-          label="الحالة"
-          value={STATUS_LABEL[contract.status] ?? contract.status}
+          label={t("detail.metrics.status")}
+          value={translateStatus(t, contract.status)}
           tone={contract.status === "active" ? "info" : "default"}
         />
       </div>
 
       <Card className="mb-6">
         <CardContent className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <DetailField label="مدير الحساب المسؤول" value={am?.full_name ?? "—"} />
+          <DetailField label={t("detail.fields.accountManager")} value={am?.full_name ?? "—"} />
           <DetailField
-            label="تاريخ البدء"
-            value={formatArabicShortDate(contract.start_date as string)}
+            label={t("detail.fields.startDate")}
+            value={formatShortDate(contract.start_date as string, locale)}
           />
           <DetailField
-            label="تاريخ الانتهاء"
-            value={formatArabicShortDate(contract.end_date as string | null)}
+            label={t("detail.fields.endDate")}
+            value={formatShortDate(contract.end_date as string | null, locale)}
           />
           <DetailField
-            label="المدة (شهر)"
+            label={t("detail.fields.duration")}
             value={String(contract.duration_months ?? "—")}
           />
           <DetailField
-            label="الهدف"
-            value={TARGET_LABEL[contract.target as string] ?? (contract.target as string)}
+            label={t("detail.fields.target")}
+            value={translateTarget(t, contract.target as string)}
           />
           <DetailField
-            label="مهلة سماح الدورة"
-            value={pkg?.grace_days != null ? `${pkg.grace_days} يوم` : "—"}
+            label={t("detail.fields.graceDays")}
+            value={pkg?.grace_days != null ? t("detail.days", { count: pkg.grace_days }) : "—"}
           />
           <DetailField
-            label="المشروع المرتبط"
+            label={t("detail.fields.project")}
             value={
               project?.id ? (
                 <Link
@@ -242,7 +285,7 @@ export default async function ContractDetailPage({
                   className="inline-flex items-center gap-1 text-cyan hover:underline"
                 >
                   <Briefcase className="size-3.5" />
-                  {project.name ?? "المشروع"}
+                  {project.name ?? t("detail.projectFallback")}
                 </Link>
               ) : (
                 "—"
@@ -250,7 +293,7 @@ export default async function ContractDetailPage({
             }
           />
           <DetailField
-            label="ملاحظات"
+            label={t("detail.fields.notes")}
             value={(contract.notes as string | null) ?? "—"}
             className="col-span-2 md:col-span-4"
             valueClassName="whitespace-pre-wrap break-words [unicode-bidi:plaintext]"
@@ -260,8 +303,8 @@ export default async function ContractDetailPage({
 
       {/* Installments timeline */}
       <SectionTitle
-        title="جدول الدفعات"
-        description="الدفعات المتوقّعة والمستلمة على هذا العقد"
+        title={t("detail.sections.installments.title")}
+        description={t("detail.sections.installments.description")}
       />
       <div className="mb-8">
         <InstallmentsEditor
@@ -283,14 +326,14 @@ export default async function ContractDetailPage({
 
       {/* Monthly cycles */}
       <SectionTitle
-        title="الدورات الشهرية"
-        description="متابعة شهرية مع تواريخ الاجتماع المتوقَّعة والفعلية"
+        title={t("detail.sections.cycles.title")}
+        description={t("detail.sections.cycles.description")}
       />
       <div className="mb-8">
         {cycles.length === 0 ? (
           <Card>
             <CardContent className="p-4 text-sm text-muted-foreground">
-              لا توجد دورات شهرية بعد. سيتم إنشاؤها تلقائيًا أول كل شهر.
+              {t("detail.sections.cycles.empty")}
             </CardContent>
           </Card>
         ) : (
@@ -298,12 +341,12 @@ export default async function ContractDetailPage({
             <DataTable>
               <DataTableHead>
                 <tr>
-                  <DataTableHeaderCell>الدورة</DataTableHeaderCell>
-                  <DataTableHeaderCell>الشهر</DataTableHeaderCell>
-                  <DataTableHeaderCell>الاجتماع المتوقَّع</DataTableHeaderCell>
-                  <DataTableHeaderCell>الاجتماع الفعلي</DataTableHeaderCell>
-                  <DataTableHeaderCell>التأخّر (يوم)</DataTableHeaderCell>
-                  <DataTableHeaderCell>الحالة</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.cycle")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.month")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.expectedMeeting")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.actualMeeting")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.delay")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("detail.sections.cycles.headers.status")}</DataTableHeaderCell>
                 </tr>
               </DataTableHead>
               <tbody>
@@ -311,19 +354,19 @@ export default async function ContractDetailPage({
                   <DataTableRow key={c.id}>
                     <DataTableCell className="tabular-nums">{c.cycle_no}</DataTableCell>
                     <DataTableCell className="text-xs">
-                      {formatArabicShortDate(c.month)}
+                      {formatShortDate(c.month, locale)}
                     </DataTableCell>
                     <DataTableCell className="text-xs">
-                      {formatArabicShortDate(c.expected_meeting_date)}
+                      {formatShortDate(c.expected_meeting_date, locale)}
                     </DataTableCell>
                     <DataTableCell className="text-xs">
-                      {formatArabicShortDate(c.actual_meeting_date)}
+                      {formatShortDate(c.actual_meeting_date, locale)}
                     </DataTableCell>
                     <DataTableCell className="tabular-nums">
                       {c.meeting_delay_days ?? "—"}
                     </DataTableCell>
                     <DataTableCell>
-                      {CYCLE_STATE[c.state] ?? c.state}
+                      {translateCycleState(t, c.state)}
                     </DataTableCell>
                   </DataTableRow>
                 ))}
@@ -335,15 +378,15 @@ export default async function ContractDetailPage({
 
       {/* Events log */}
       <SectionTitle
-        title="سجل الأحداث"
-        description="سجل التغييرات والملاحظات على العقد"
+        title={t("detail.sections.events.title")}
+        description={t("detail.sections.events.description")}
         actions={canManage ? <EventRecordForm contractId={contract.id} /> : null}
       />
       <div className="mb-4">
         {events.length === 0 ? (
           <Card>
             <CardContent className="p-4 text-sm text-muted-foreground">
-              لا توجد أحداث مسجَّلة على هذا العقد بعد.
+              {t("detail.sections.events.empty")}
             </CardContent>
           </Card>
         ) : (
@@ -366,7 +409,7 @@ export default async function ContractDetailPage({
                         </p>
                       </div>
                       <span className="text-[11px] text-muted-foreground shrink-0">
-                        {formatArabicDateTime(e.occurred_at)}
+                        {formatDateTime(e.occurred_at, locale)}
                       </span>
                     </li>
                   );

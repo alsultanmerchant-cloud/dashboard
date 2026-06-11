@@ -262,6 +262,29 @@ export type MonthBuckets = {
   installments_due: InstallmentDue[];
 };
 
+export type CeoClientInsight = {
+  client_id: string;
+  client_name: string | null;
+  client_code: string | null;
+  account_manager_name: string | null;
+  active_contracts: number;
+  total_contract_value: number;
+  month_expected: number;
+  month_collected: number;
+  overdue_installments: number;
+  renewal_value_due: number;
+  next_renewal_date: string | null;
+  satisfaction_score: number | null;
+  sentiment: string | null;
+  satisfaction_summary: string | null;
+  top_risk: string | null;
+  open_task_count: number;
+  overdue_task_count: number;
+  on_time_pct_30d: number | null;
+  health_score: number;
+  health_label: "healthy" | "watch" | "risk";
+};
+
 export async function getMonthTargetBuckets(
   orgId: string,
   monthIso?: string,
@@ -361,6 +384,60 @@ export async function getMonthTargetBuckets(
   on_target.sort(byValue);
   overdue.sort(byValue);
   return { on_target, overdue, renewed, lost, installments_due };
+}
+
+export async function getCeoClientInsights(
+  orgId: string,
+  monthIso?: string,
+  limit = 12,
+): Promise<CeoClientInsight[]> {
+  const month = monthIso ?? monthStartIso(new Date());
+  const { data, error } = await supabaseAdmin.rpc("get_ceo_client_insights", {
+    p_org: orgId,
+    p_month: month,
+    p_limit: limit,
+  });
+  if (error) throw error;
+
+  type Row = Omit<
+    CeoClientInsight,
+    | "active_contracts"
+    | "total_contract_value"
+    | "month_expected"
+    | "month_collected"
+    | "overdue_installments"
+    | "renewal_value_due"
+    | "open_task_count"
+    | "overdue_task_count"
+    | "on_time_pct_30d"
+    | "health_score"
+  > & {
+    active_contracts: number | string | null;
+    total_contract_value: number | string | null;
+    month_expected: number | string | null;
+    month_collected: number | string | null;
+    overdue_installments: number | string | null;
+    renewal_value_due: number | string | null;
+    open_task_count: number | string | null;
+    overdue_task_count: number | string | null;
+    on_time_pct_30d: number | string | null;
+    health_score: number | string | null;
+  };
+
+  return ((data ?? []) as Row[]).map((r) => ({
+    ...r,
+    active_contracts: Number(r.active_contracts ?? 0),
+    total_contract_value: Number(r.total_contract_value ?? 0),
+    month_expected: Number(r.month_expected ?? 0),
+    month_collected: Number(r.month_collected ?? 0),
+    overdue_installments: Number(r.overdue_installments ?? 0),
+    renewal_value_due: Number(r.renewal_value_due ?? 0),
+    open_task_count: Number(r.open_task_count ?? 0),
+    overdue_task_count: Number(r.overdue_task_count ?? 0),
+    on_time_pct_30d:
+      r.on_time_pct_30d == null ? null : Number(r.on_time_pct_30d),
+    health_score: Number(r.health_score ?? 0),
+  }));
 }
 
 export async function listContractTypes(orgId: string) {

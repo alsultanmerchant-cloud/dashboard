@@ -849,6 +849,402 @@
       "securityDesc": "MFA، انتهاء الجلسات، سجلات الدخول"
     }
   },
+  "ContractsPage": {
+    "title": "العقود",
+    "description": "المصدر الرسمي للعقود وإيراداتها. الشيت القديم مؤرشف، وكل التعديلات والحسابات تتم هنا.",
+    "tabs": {
+      "table": "جدول العقود",
+      "dashboard": "لوحة الإيرادات"
+    },
+    "header": {
+      "import": "استيراد من Excel"
+    },
+    "empty": {
+      "listTitle": "لا توجد عقود بعد",
+      "listDescription": "ابدأ بإنشاء عقد جديد من زر «+ عقد جديد».",
+      "dashboardDescription": "لا توجد بيانات لهذا الشهر بعد."
+    },
+    "newDialog": {
+      "openButton": "عقد جديد",
+      "title": "عقد جديد",
+      "close": "إغلاق",
+      "noResults": "لا توجد نتائج",
+      "fields": {
+        "client": "العميل",
+        "accountManager": "مدير الحساب",
+        "type": "النوع",
+        "packages": "الباقات / الخدمات{count, plural, =0 {} other { ({count})}}",
+        "startDate": "تاريخ البدء",
+        "duration": "المدة (شهور)",
+        "totalValue": "قيمة العقد",
+        "paidValue": "القيمة المدفوعة",
+        "paymentStatus": "الدفع",
+        "notes": "ملاحظات"
+      },
+      "helpers": {
+        "packages": "اختر كل الخدمات داخل العقد. الخدمات التي تُنفَّذ مرة واحدة تضيف أيامها تلقائيًا إلى مدة العقد.",
+        "defaults": "القيم الافتراضية: الهدف = متأخر، الحالة = نشط. يمكنك تعديلها من الجدول بعد الإنشاء. وإذا اخترت الدفعات فجدول الأقساط من صفحة العقد."
+      },
+      "payment": {
+        "complete": "مكتمل",
+        "installments": "دفعات"
+      },
+      "placeholders": {
+        "clientSearch": "ابحث بالاسم أو الكود…",
+        "searchManager": "ابحث بالاسم…",
+        "none": "— بدون —",
+        "zero": "0",
+        "defaultZero": "افتراضي 0",
+        "optional": "اختياري"
+      },
+      "actions": {
+        "change": "تغيير",
+        "cancel": "إلغاء",
+        "create": "إنشاء العقد"
+      },
+      "toasts": {
+        "selectClient": "اختر العميل أولًا",
+        "invalidTotal": "قيمة العقد غير صالحة",
+        "invalidPaid": "القيمة المدفوعة غير صالحة",
+        "created": "تم إنشاء العقد"
+      }
+    },
+    "holdDialog": {
+      "titleCreate": "إيقاف العقد مؤقتًا",
+      "titleEdit": "تعديل مدة الإيقاف",
+      "fields": {
+        "endDate": "تاريخ نهاية الإيقاف",
+        "reason": "سبب الإيقاف / ملاحظة"
+      },
+      "placeholders": {
+        "reason": "مثال: العميل طلب إيقاف السوشيال خلال فترة الجرد…"
+      },
+      "helpers": {
+        "notice": "سيتم تنبيه مدير الحساب والمالك تلقائيًا قبل هذا التاريخ بخمسة أيام، ثم يوميًا إذا استمر الإيقاف بعده."
+      },
+      "actions": {
+        "cancel": "إلغاء",
+        "confirm": "تأكيد الإيقاف"
+      },
+      "toasts": {
+        "pickEndDate": "حدّد تاريخ نهاية الإيقاف أولًا",
+        "pastDate": "تاريخ نهاية الإيقاف لا يمكن أن يكون في الماضي",
+        "success": "تم إيقاف العقد مؤقتًا وسيصل التنبيه قبل انتهاء الإيقاف."
+      }
+    },
+    "eventForm": {
+      "openButton": "تسجيل حدث جديد",
+      "fields": {
+        "type": "نوع الحدث"
+      },
+      "placeholders": {
+        "type": "package_change",
+        "note": "ملاحظة (اختياري)…"
+      },
+      "actions": {
+        "save": "حفظ",
+        "cancel": "إلغاء"
+      }
+    },
+    "installmentReceive": {
+      "openButton": "تسجيل استلام",
+      "fields": {
+        "actualDate": "تاريخ الاستلام",
+        "amount": "المبلغ"
+      },
+      "actions": {
+        "save": "حفظ",
+        "cancel": "إلغاء"
+      }
+    },
+    "installments": {
+      "headers": {
+        "sequence": "#",
+        "expectedAmount": "المبلغ المتوقَّع",
+        "expectedDate": "التاريخ المتوقَّع",
+        "actualAmount": "المبلغ المستلَم",
+        "actualDate": "تاريخ الاستلام",
+        "status": "الحالة"
+      },
+      "status": {
+        "received": "مستلمة",
+        "partial": "جزئية",
+        "pending": "منتظرة",
+        "overdue": "متأخرة",
+        "waived": "متنازَل عنها"
+      },
+      "actions": {
+        "add": "إضافة دفعة",
+        "save": "حفظ",
+        "cancel": "إلغاء"
+      },
+      "addRow": {
+        "expectedAmount": "المبلغ المتوقَّع",
+        "expectedDate": "التاريخ المتوقَّع",
+        "amountPlaceholder": "0"
+      },
+      "tooltips": {
+        "delete": "حذف",
+        "confirmDelete": "تأكيد الحذف",
+        "cancel": "إلغاء"
+      },
+      "toasts": {
+        "saved": "تم الحفظ",
+        "deleted": "تم الحذف",
+        "invalidAmount": "أدخل مبلغًا صحيحًا",
+        "added": "تمت الإضافة"
+      },
+      "empty": "لا توجد دفعات بعد.",
+      "remainder": "المتبقّي: {amount}"
+    },
+    "grid": {
+      "searchPlaceholder": "ابحث بالاسم أو الكود أو الباقة أو الملاحظات…",
+      "scope": {
+        "all": "الكل",
+        "mine": "عقودي"
+      },
+      "filters": {
+        "all": "الكل",
+        "target": "الهدف",
+        "status": "الحالة",
+        "type": "النوع"
+      },
+      "summary": {
+        "contracts": "{count, plural, one {# عقد} two {# عقدان} few {# عقود} many {# عقدًا} other {# عقد}}",
+        "totalRows": "أصل {count}",
+        "value": "القيمة",
+        "paid": "المدفوع"
+      },
+      "headers": {
+        "clientId": "كود العميل",
+        "client": "العميل",
+        "accountManager": "مدير الحساب",
+        "startDate": "تاريخ البدء",
+        "target": "الهدف",
+        "type": "النوع",
+        "package": "الباقة",
+        "duration": "المدة",
+        "paid": "المدفوع",
+        "repeated": "المتكرر",
+        "payment": "الدفع",
+        "days": "الأيام",
+        "expectedEnd": "نهاية متوقعة",
+        "status": "الحالة",
+        "renewalValue": "قيمة التجديد",
+        "renewalPaid": "دفعة التجديد",
+        "actualEnd": "نهاية فعلية",
+        "delay": "تأخير",
+        "renewed": "تجديد؟",
+        "extension": "تمديد",
+        "notes": "ملاحظات"
+      },
+      "targetLabels": {
+        "overdue": "متأخر",
+        "salesDeposit": "إيداع المبيعات",
+        "onTarget": "ضمن الهدف",
+        "closed": "مغلق",
+        "lost": "مفقود",
+        "renewed": "مُجدَّد"
+      },
+      "statusLabels": {
+        "active": "نشط",
+        "hold": "موقوف",
+        "closed": "مغلق",
+        "expired": "منتهي",
+        "renewed": "مُجدَّد",
+        "lost": "مفقود"
+      },
+      "typeLabels": {
+        "new": "جديد",
+        "renew": "تجديد",
+        "upsell": "Upsell",
+        "winBack": "Win-Back",
+        "hold": "Hold",
+        "switch": "تحويل",
+        "lost": "Lost"
+      },
+      "paymentLabels": {
+        "complete": "مكتمل",
+        "installments": "دفعات"
+      },
+      "renewedLabels": {
+        "yes": "نعم",
+        "no": "لا",
+        "closed": "مغلق"
+      },
+      "labels": {
+        "accountManager": "مدير الحساب",
+        "startDate": "تاريخ البدء",
+        "target": "الهدف",
+        "type": "النوع",
+        "duration": "المدة",
+        "paid": "المدفوع",
+        "repeated": "المتكرر",
+        "payment": "الدفع",
+        "expectedEnd": "النهاية المتوقعة",
+        "renewalValue": "قيمة التجديد",
+        "renewalPaid": "دفعة التجديد",
+        "actualEnd": "النهاية الفعلية",
+        "delay": "التأخير",
+        "renewed": "حالة التجديد",
+        "extension": "التمديد",
+        "notes": "الملاحظات"
+      },
+      "tooltips": {
+        "clickToEdit": "انقر للتعديل",
+        "save": "حفظ (Ctrl+Enter)",
+        "cancel": "إلغاء (Esc)",
+        "editHold": "تعديل مدة الإيقاف"
+      },
+      "toasts": {
+        "saved": "تم حفظ {label}",
+        "holdReleased": "تم رفع الإيقاف",
+        "invalidNumber": "قيمة رقمية غير صالحة"
+      },
+      "holdUntil": "⏸ حتى {date}",
+      "emptyFiltered": "لا توجد عقود مطابقة للفلتر الحالي.",
+      "emptyNote": "—"
+    },
+    "detail": {
+      "hold": {
+        "active": "العقد موقوف مؤقتًا",
+        "since": "منذ",
+        "until": "ينتهي الإيقاف في",
+        "wasHeldThisMonth": "كان هذا العقد موقوفًا خلال الشهر الحالي. راجع سجل النشاط أدناه."
+      },
+      "siblings": {
+        "prefix": "هذا العميل لديه",
+        "count": "{count, plural, one {عقد آخر واحد} two {عقدان آخران} few {# عقود أخرى} many {# عقدًا آخر} other {# عقد آخر}}",
+        "suffix": "معنا:"
+      },
+      "metrics": {
+        "total": "القيمة الإجمالية",
+        "paid": "المدفوع",
+        "outstanding": "المتبقّي",
+        "status": "الحالة"
+      },
+      "fields": {
+        "accountManager": "مدير الحساب المسؤول",
+        "startDate": "تاريخ البدء",
+        "endDate": "تاريخ الانتهاء",
+        "duration": "المدة (شهر)",
+        "target": "الهدف",
+        "graceDays": "مهلة سماح الدورة",
+        "project": "المشروع المرتبط",
+        "notes": "ملاحظات"
+      },
+      "projectFallback": "المشروع",
+      "days": "{count} يوم",
+      "sections": {
+        "installments": {
+          "title": "جدول الدفعات",
+          "description": "الدفعات المتوقعة والمستلمة على هذا العقد"
+        },
+        "cycles": {
+          "title": "الدورات الشهرية",
+          "description": "متابعة شهرية مع تواريخ الاجتماع المتوقعة والفعلية",
+          "empty": "لا توجد دورات شهرية بعد. سيتم إنشاؤها تلقائيًا أول كل شهر.",
+          "headers": {
+            "cycle": "الدورة",
+            "month": "الشهر",
+            "expectedMeeting": "الاجتماع المتوقَّع",
+            "actualMeeting": "الاجتماع الفعلي",
+            "delay": "التأخّر (يوم)",
+            "status": "الحالة"
+          },
+          "states": {
+            "pending": "قيد الانتظار",
+            "active": "جارية",
+            "done": "مكتملة",
+            "overdue": "متأخرة",
+            "skipped": "متخطّاة"
+          }
+        },
+        "events": {
+          "title": "سجل الأحداث",
+          "description": "سجل التغييرات والملاحظات على العقد",
+          "empty": "لا توجد أحداث مسجلة على هذا العقد بعد."
+        }
+      }
+    },
+    "dashboard": {
+      "month": "الشهر:",
+      "status": {
+        "frozen": "مجمّد",
+        "frozenSheet": "مجمّد (من الشيت)",
+        "live": "مباشر ويُحدَّث تلقائيًا"
+      },
+      "executive": {
+        "eyebrow": "لوحة CEO الشهرية",
+        "title": "غرفة قيادة الإيراد لشهر {month}",
+        "badge": "تحليل تجربة العميل متصل",
+        "actualIncome": "الدخل الفعلي",
+        "targetSub": "المستهدف {amount}",
+        "revenueGap": "فجوة الإيراد",
+        "achievedSub": "تم تحقيق {pct}%",
+        "clientsInFocus": "عملاء تحت المتابعة",
+        "focusSub": "{risk} خطر / {watch} مراقبة",
+        "overdueExposure": "قيمة التأخير",
+        "installmentsDueSub": "{count} دفعة مستحقة",
+        "aiRead": "قراءة تنفيذية من الذكاء الاصطناعي",
+        "aiBadge": "عقود + دفعات + رضا العملاء",
+        "topClient": "أهم عميل",
+        "worstHealth": "أضعف صحة",
+        "avgHealth": "متوسط الصحة"
+      },
+      "charts": {
+        "expectedVsActual": "المتوقع مقابل الفعلي",
+        "expectedVsActualSub": "نفس مصدر الحقيقة المستخدم في الشيت",
+        "contractMovement": "حركة العقود",
+        "contractMovementSub": "البدايات والنتائج خلال الشهر"
+      },
+      "income": {
+        "title": "دخل الشركة للشهر المحدد",
+        "expected": "التارجت المتوقع",
+        "actual": "المحقق الفعلي",
+        "achievement": "نسبة الإنجاز",
+        "expectedRenewals": "تجديدات متوقعة",
+        "expectedInstallments": "دفعات متوقعة"
+      },
+      "movements": {
+        "title": "حركة العقود هذا الشهر"
+      },
+      "clients": {
+        "title": "نظرة عامة على حالة العملاء",
+        "total": "إجمالي العملاء"
+      },
+      "accountTargets": {
+        "title": "تارجت الأكونت هذا الشهر",
+        "empty": "لا يوجد تارجت محسوب لهذا الشهر.",
+        "headers": {
+          "account": "الأكونت",
+          "expected": "المتوقع",
+          "actual": "المحقق",
+          "achievement": "الإنجاز",
+          "progress": "التقدّم"
+        }
+      },
+      "frozenNotice": "تفصيل العملاء أدناه محسوب مباشرة من الحالة الحالية وقد يختلف قليلًا عن الشهر المجمّد. الإجماليات وتارجت الأكونت أعلاه مطابقة للشيت.",
+      "buckets": {
+        "onTarget": "ضمن الهدف - قابلة للتجديد",
+        "overdue": "متأخرة",
+        "renewed": "جُدِّدت من التارجت",
+        "lost": "فُقدت من التارجت",
+        "empty": "— لا يوجد —"
+      },
+      "installments": {
+        "title": "الدفعات المستحقة هذا الشهر",
+        "count": "{count, plural, one {# دفعة} two {# دفعتان} few {# دفعات} many {# دفعة} other {# دفعة}}",
+        "empty": "لا توجد دفعات مستحقة هذا الشهر.",
+        "headers": {
+          "client": "العميل",
+          "accountManager": "مدير الحساب",
+          "amount": "المبلغ",
+          "status": "الحالة"
+        }
+      }
+    }
+  },
   "ContractsImportPage": {
     "title": "استيراد ملف العقود",
     "description": "ارفع ملف Acc SHEET الحالي وستُنقل البيانات إلى لوحة التحكم تلقائيًا.",
@@ -862,7 +1258,43 @@
       "preview": "راجع المعاينة لتظهر أعداد العملاء والعقود والدفعات.",
       "save": "اضغط \"حفظ\" وستظهر البيانات في لوحات المالية والعقود فورًا."
     },
-    "note": "يستخدم النظام عمود <code>Key</code> (مثل <code>C83|20250906</code>) لتمييز العقود. إعادة الاستيراد <strong>آمنة</strong>؛ فهي تُحدّث القيم ولا تُكرّر الصفوف."
+    "note": "يستخدم النظام عمود <code>Key</code> (مثل <code>C83|20250906</code>) لتمييز العقود. إعادة الاستيراد <strong>آمنة</strong>؛ فهي تُحدّث القيم ولا تُكرّر الصفوف.",
+    "form": {
+      "toasts": {
+        "imported": "تم استيراد البيانات"
+      },
+      "fileLabel": "اختر ملف Excel",
+      "fileHint": "يقبل النظام أوراق \"Clients Contracts\" و\"💲Installments Tracker\" من ملف الأكاونت. لن يتم حفظ شيء حتى تراجع المعاينة وتؤكدها.",
+      "preview": "عرض المعاينة",
+      "successTitle": "تم الاستيراد بنجاح",
+      "successClients": "العملاء: {created} جديد، {updated} تحديث",
+      "successContracts": "العقود المستوردة: {count}",
+      "successInstallments": "الدفعات المستوردة: {count}",
+      "warnings": "تحذيرات: {count} (انظر القائمة أدناه)",
+      "skippedTitle": "عناصر تم تخطّيها:",
+      "goFinance": "لوحة المدير المالي",
+      "goContracts": "قائمة العقود",
+      "previewTitle": "المعاينة قبل الحفظ",
+      "stats": {
+        "clients": "عملاء",
+        "contracts": "عقود",
+        "installments": "دفعات",
+        "skipped": "صفوف مُتجاهلة"
+      },
+      "sampleTitle": "عينة من أول 5 عقود",
+      "table": {
+        "client": "العميل",
+        "owner": "المسؤول",
+        "type": "النوع",
+        "value": "القيمة",
+        "paid": "المدفوع",
+        "start": "البداية",
+        "status": "الحالة"
+      },
+      "safeNote": "لن يُحذف أي شيء. الاستيراد آمن للتكرار ويحدّث القيم بدلًا من تكرارها.",
+      "commit": "حفظ {contracts} عقد و{installments} دفعة",
+      "cancel": "إلغاء واختيار ملف آخر"
+    }
   },
   "TaskTemplatesPage": {
     "title": "قوالب المهام",
