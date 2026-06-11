@@ -32,6 +32,7 @@ import {
   Target,
   MessageCircle,
   Activity,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -94,6 +95,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { labelKey: "escalations", href: "/escalations", icon: Siren, perm: "escalation.view_own" },
       { labelKey: "governance", href: "/governance", icon: Scale, perm: "governance.view" },
       { labelKey: "teamActivity", href: "/team-activity", icon: Activity, perm: "reports.view" },
+      { labelKey: "accountability", href: "/accountability", icon: ClipboardCheck, perm: "people.analytics.view" },
       { labelKey: "attendance", href: "/attendance", icon: CalendarCheck, perm: "attendance.view" },
       { labelKey: "warnings", href: "/warnings", icon: ShieldAlert, perm: "warning.view" },
       { labelKey: "targets", href: "/targets", icon: Target, perm: "target.view" },
@@ -150,6 +152,7 @@ export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: s
   "/settings/feature-flags": { titleKey: "featureFlagsTitle", subtitleKey: "featureFlagsSubtitle" },
   "/escalations": { titleKey: "escalationsTitle", subtitleKey: "escalationsSubtitle" },
   "/team-activity": { titleKey: "teamActivityTitle", subtitleKey: "teamActivitySubtitle" },
+  "/accountability": { titleKey: "accountabilityTitle", subtitleKey: "accountabilitySubtitle" },
   "/attendance": { titleKey: "attendanceTitle", subtitleKey: "attendanceSubtitle" },
   "/warnings": { titleKey: "warningsTitle", subtitleKey: "warningsSubtitle" },
   "/targets": { titleKey: "targetsTitle", subtitleKey: "targetsSubtitle" },

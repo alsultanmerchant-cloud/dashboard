@@ -534,7 +534,8 @@
     "warnings": "Warnings",
     "targets": "Targets",
     "messages": "Chats",
-    "teamActivity": "Team Pulse"
+    "teamActivity": "Team Pulse",
+    "accountability": "Accountability"
   },
   "ProjectCard": {
     "storeName": "Store Name",
@@ -1967,7 +1968,109 @@
     "targetsTitle": "Monthly Targets",
     "targetsSubtitle": "Set employee and department targets",
     "teamActivityTitle": "Team Pulse",
-    "teamActivitySubtitle": "Per-employee activity vs duties"
+    "teamActivitySubtitle": "Per-employee activity vs duties",
+    "accountabilityTitle": "Accountability Engine",
+    "accountabilitySubtitle": "Who owns each stage, where work stalls, and the evidence behind every number"
+  },
+  "AccountabilityPage": {
+    "title": "Accountability Engine",
+    "subtitle": "Who owns each stage, where work stalls, and the evidence behind every number",
+    "methodology": "Stage dwell is computed in business minutes (Sun–Thu, 09:00–17:00 Riyadh, holidays excluded) from stage history over the last 30 days. Each stage is attributed to its owner: execution to specialists, review to the team manager, sending and client changes to the account manager. A stage still open but already past its SLA counts as a breach. Tasks with no Odoo assignment show as unmeasured and are charged to no one; scores backed by fewer than 5 SLA-measured events render with low confidence.",
+    "evidenceRule": "Every number on this board opens the evidence list it was built from — click any row.",
+    "stats": {
+      "measured": "Employees on the board",
+      "medianScore": "Median score",
+      "overdueOwned": "Overdue owned tasks",
+      "lowConfidence": "Low confidence / unmeasured"
+    },
+    "search": "Search employees…",
+    "roleFilter": {
+      "all": "All"
+    },
+    "role": {
+      "agent": "Specialist",
+      "account_manager": "Account manager",
+      "team_manager": "Team manager"
+    },
+    "col": {
+      "employee": "Employee",
+      "role": "Role",
+      "score": "Score",
+      "onTime": "On-time rate",
+      "avgDwell": "Avg stage dwell",
+      "openTasks": "Open now",
+      "overdue": "Overdue",
+      "sample": "Sample",
+      "rework": "Returns (30d)"
+    },
+    "noScore": "Unmeasured",
+    "lowSample": "Small sample ({n})",
+    "lowSampleHint": "Fewer than 5 SLA-measured events back this number — treat it as an early indication, not a verdict.",
+    "showingRows": "Showing {shown} of {total}",
+    "loadMore": "Load more",
+    "emptyTitle": "No accountability data yet",
+    "emptyDescription": "Scores build up as stage history and assignments sync from Odoo. Run the sync and check back.",
+    "evidence": {
+      "title": "Evidence — {name}",
+      "notFound": "Employee not found",
+      "hint": "The stage intervals this employee's numbers are built from. Click an item to open the task.",
+      "close": "Close evidence panel",
+      "empty": "No evidence items for this employee in the current window.",
+      "inStageNow": "In stage now",
+      "overdue": "Overdue",
+      "delayDays": "{n} working days late"
+    },
+    "reviewers": {
+      "title": "Reviewer rigor",
+      "hint": "Are reviews real or rubber-stamped? Median review time, the share closed within minutes, and how often passed work bounces back within 14 days.",
+      "empty": "No review activity attributed yet — review stages need a team manager on the task.",
+      "col": {
+        "reviewer": "Reviewer",
+        "reviews": "Reviews",
+        "fastShare": "Fast reviews",
+        "pending": "Pending",
+        "medianTime": "Median review time",
+        "rework": "Rework after pass"
+      },
+      "rubberStamp": "Possible rubber-stamping",
+      "oldestPending": "oldest: {v}",
+      "reworkDetail": "{k} of {n} passes",
+      "attributedNote": "No approval-gate actions are recorded in Odoo-synced data, so reviews here are credited by team-manager assignment on the task (one manager per task), not by who actually moved it — read them as team-level attribution, not personal verdicts."
+    },
+    "coverage": {
+      "title": "Measurement coverage",
+      "hint": "Odoo assignment data is incomplete — these figures show the honest limits of what can be measured. Unassigned work is excluded, never guessed.",
+      "totalTasks": "Total tasks",
+      "withHistory": "With stage history",
+      "withAgent": "With a specialist assigned",
+      "withAm": "With an account manager",
+      "archivedExcluded": "Archived (excluded)",
+      "window": "Measurement window:",
+      "allTime": "Full history",
+      "overdueDistinct": "Overdue live tasks (distinct)"
+    },
+    "ai": {
+      "title": "AI-linked signals",
+      "badge": "AI-linked",
+      "hint": "Observations extracted automatically from client chats and system events. Always shown with the source quote — they never feed the scores above.",
+      "empty": "No AI-linked signals for this window.",
+      "sourceLabel": "Source",
+      "kind": {
+        "complaint": "Complaint",
+        "praise": "Praise",
+        "delay_mention": "Delay mention",
+        "risk": "Risk",
+        "other": "Signal"
+      },
+      "relatedWork": "Related open work",
+      "relatedWorkHint": "This client's overdue tasks — context for the conversation, not the complaint's cause."
+    },
+    "fmt": {
+      "minutes": "{n} min",
+      "hours": "{n} h",
+      "workdays": "{n} workdays"
+    },
+    "generatedAt": "Computed at"
   },
   "CustomFilter": {
     "title": "Add Custom Filter",

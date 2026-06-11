@@ -358,3 +358,66 @@ export async function getGroupsMeta(chatIds: string[]): Promise<Record<string, W
   );
   return out;
 }
+
+// ---- Outbound sends (CEO brief) ------------------------------------------
+// OpenWA send endpoints (docs/06-api-specification.md in the gateway repo):
+//   POST /api/sessions/:uuid/messages/send-text  { chatId, text }
+//   POST /api/sessions/:uuid/messages/send-image { chatId, image: { base64 }, caption? }
+// chatId for a person is `<digits>@c.us` (country code, no + or spaces).
+// Gateway rate limit: 60 req/min — callers should pace multi-image sends.
+
+export function phoneToChatId(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return `${digits}@c.us`;
+}
+
+export interface WaSendResult {
+  ok: boolean;
+  messageId: string | null;
+  error?: string;
+}
+
+function parseSendResult(ok: boolean, status: number, json: unknown): WaSendResult {
+  if (!ok) {
+    const msg = (json as { message?: unknown })?.message;
+    return { ok: false, messageId: null, error: `http ${status}: ${typeof msg === "string" ? msg : "send failed"}` };
+  }
+  const data = (json as { data?: Record<string, unknown> })?.data ?? (json as Record<string, unknown>);
+  const id = data?.messageId ?? data?.id;
+  return { ok: true, messageId: typeof id === "string" ? id : null };
+}
+
+export async function sendText(chatId: string, text: string): Promise<WaSendResult> {
+  if (!waConfigured()) return { ok: false, messageId: null, error: "gateway not configured" };
+  const uuid = await findSessionUuid();
+  if (!uuid) return { ok: false, messageId: null, error: "session not found" };
+  const { ok, status, json } = await call(`/api/sessions/${uuid}/messages/send-text`, {
+    method: "POST",
+    body: JSON.stringify({ chatId, text }),
+    timeoutMs: 30000,
+  });
+  return parseSendResult(ok, status, json);
+}
+
+// URL mode only: the gateway 413s on bodies over ~100KB (base64 PNGs) and
+// its accepted shape is a TOP-LEVEL url field — { chatId, url, caption? }.
+// An object-style { image: { url } } body fails validation with a bare 400.
+export async function sendImage(
+  chatId: string,
+  image: { url: string },
+  caption?: string,
+): Promise<WaSendResult> {
+  if (!waConfigured()) return { ok: false, messageId: null, error: "gateway not configured" };
+  const uuid = await findSessionUuid();
+  if (!uuid) return { ok: false, messageId: null, error: "session not found" };
+  const { ok, status, json } = await call(`/api/sessions/${uuid}/messages/send-image`, {
+    method: "POST",
+    body: JSON.stringify({
+      chatId,
+      url: image.url,
+      ...(caption ? { caption } : {}),
+    }),
+    timeoutMs: 90000,
+  });
+  return parseSendResult(ok, status, json);
+}
