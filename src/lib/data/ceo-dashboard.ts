@@ -141,7 +141,7 @@ export async function getCeoDashboardData(
     .from("contracts")
     .select(
       `id, client_id, status, target, total_value, paid_value, start_date, end_date,
-       type:contract_types ( key )`,
+       type:contract_types!contracts_contract_type_id_fkey ( key )`,
     )
     .eq("organization_id", orgId);
   if (cErr) throw cErr;
@@ -165,7 +165,7 @@ export async function getCeoDashboardData(
     .from("installments")
     .select(
       `expected_amount, actual_amount, expected_date, actual_date, status,
-       contract:contracts!inner ( id, target, type:contract_types ( key ) )`,
+       contract:contracts!inner ( id, target, type:contract_types!contracts_contract_type_id_fkey ( key ) )`,
     )
     .eq("organization_id", orgId);
   if (iErr) throw iErr;
