@@ -1,8 +1,9 @@
 import { z } from "zod";
 
 // Structured output for the client-satisfaction analysis. The model reads the
-// two WhatsApp transcripts (client group + technical group) and returns these
-// fields only — no free narration outside the schema.
+// WhatsApp transcripts, the client's documented brief when available, and
+// Rawasm delivery state, then returns these fields only — no free narration
+// outside the schema.
 
 export const HIGHLIGHT_TYPES = [
   "praise",
@@ -20,8 +21,8 @@ export const HIGHLIGHT_AUDIENCES = ["client", "team"] as const;
 export const SatisfactionSchema = z.object({
   // 0-100 overall satisfaction inferred from the CLIENT group tone & outcomes.
   satisfactionScore: z.number().int().min(0).max(100),
-  // 0-100 how well delivery matched the client's stated brief/requirements,
-  // judged from the TECHNICAL group. null if the technical group wasn't provided.
+  // 0-100 how well delivery matched the client's documented brief. null when
+  // the actual brief document text is not available; never infer this from chat.
   briefAdherenceScore: z.number().int().min(0).max(100).nullable(),
   sentiment: z.enum(["positive", "neutral", "negative", "mixed"]),
   // Short Arabic executive summary (2-4 sentences).

@@ -251,6 +251,8 @@ function GroupRow({
           searchPlaceholder={t("searchClient")}
           emptyMessage={t("noClients")}
           ariaLabel={t("groups.col.client")}
+          clearable
+          clearLabel={t("groups.unmapped")}
         />
       </td>
       <td className="p-3 min-w-[200px]">
@@ -262,6 +264,8 @@ function GroupRow({
           searchPlaceholder={t("groups.searchProject")}
           emptyMessage={t("groups.noProjects")}
           ariaLabel={t("groups.col.project")}
+          clearable
+          clearLabel={t("groups.unmappedProject")}
         />
       </td>
       <td className="p-3 text-center">

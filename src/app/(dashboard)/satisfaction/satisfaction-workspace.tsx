@@ -136,8 +136,25 @@ export function SatisfactionWorkspace({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId, windowKind }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "تعذر التحليل");
+    // The route returns JSON on success and on handled errors, but a platform
+    // timeout on a long full-history run ("all") replies with a plain-text page,
+    // so parse defensively — otherwise res.json() throws a cryptic
+    // "Unexpected token 'A'…" instead of a readable message.
+    const raw = await res.text();
+    let data: { error?: string } = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      /* non-JSON body (timeout / gateway error) */
+    }
+    if (!res.ok) {
+      throw new Error(
+        data.error ??
+          (res.status === 504 || res.status === 408 || res.status === 502
+            ? "استغرق التحليل الكامل وقتًا أطول من المسموح. جرّب «تحليل الأسبوع»، أو أعد المحاولة لاحقًا."
+            : `تعذر التحليل (${res.status})`),
+      );
+    }
     router.refresh();
   };
 

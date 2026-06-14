@@ -83,18 +83,16 @@ export async function analyzeClientSatisfaction(
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
 
-  // The documented brief (Google Doc from the project's documents) is the source
-  // of truth for brief-adherence when available; otherwise we fall back to
-  // inferring it from the technical group's coordination.
+  // The documented brief from project/task documents is the only source of
+  // truth for brief-adherence. If it cannot be fetched, the score stays null;
+  // the model must not infer the brief from internal team chat.
   const brief = await getClientBrief(orgId, clientId);
-
   const briefInstruction = brief
-    ? `- briefAdherenceScore (0-100): يقيس بندًا ببند فقط مدى تنفيذ ما هو مكتوب حرفيًا في "البريف" أدناه (المخرجات/المتطلبات الموثقة): أيها سُلِّم، أيها قيد التنفيذ، أيها لم يُنفّذ. الدرجة تعكس نسبة بنود البريف المُنفّذة فقط. مهم: شكاوى تشغيلية أو علاقة عامة غير واردة في البريف (مثل ضعف أداء الحملات، مشاكل التفعيل، عدم شحن الفيزا، التأخير في الدفع) لا تخفّض briefAdherenceScore — مكانها satisfactionScore وrisks، لا البريف. اربط كل تقييم ببند بريف مذكور فعلًا. null فقط إذا لم يذكر البريف بنودًا قابلة للتقييم.`
-    : `- briefAdherenceScore (0-100): مدى مطابقة التنفيذ لمتطلبات العميل كما يظهر في "مجموعة الفريق التقني". الشكاوى التشغيلية أو العامة (حملات/تفعيل/فيزا/دفع) ليست جزءًا من البريف — لا تبنِ عليها هذه الدرجة. null إن لم تتوفر متطلبات واضحة.`;
-
+    ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.`
+    : `- briefAdherenceScore: أعده null لأن نص وثيقة البريف غير متاح في مدخلات التحليل. لا تستنتج الالتزام بالبريف من مجموعة الفريق التقني أو من المحادثات.`;
   const briefBlock = brief
-    ? `\n\n=== البريف (متطلبات العميل الموثقة) ===\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
-    : "";
+    ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
+    : "\n\n=== البريف ===\n(لم يتم العثور على نص بريف قابل للقراءة من ملفات المشروع/المهام لهذا العميل)";
 
   // Real delivery state from Rawasm — the client's actually-overdue tasks and
   // the stages they're stuck in. Feeding this lets the model CORRELATE chat
@@ -102,7 +100,7 @@ export async function analyzeClientSatisfaction(
   // (the team's explicit ask: "compare the chat with the tasks in Rawasm").
   const execution = await getClientExecutionSnapshot(orgId, clientId);
   const executionBlock = execution
-    ? `\n\n=== العمل الفعلي في رواسم (المهام المتأخرة) ===\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
+    ? `\n\n=== العمل الفعلي في رواسم (المهام المتأخرة) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
         execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
       }\nتوزّع المتأخرات على المراحل: ${execution.byStage
         .map((s) => `${s.stage} (${s.count})`)
@@ -110,7 +108,7 @@ export async function analyzeClientSatisfaction(
         .map(
           (t) =>
             `- ${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
-              t.daysStuck != null ? ` — عالقة منذ ${t.daysStuck} يوم` : ""
+              t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""
             }${t.delayDays != null ? ` — متأخرة ${t.delayDays} يوم عمل` : ""}`,
         )
         .join("\n")}`
@@ -122,7 +120,7 @@ export async function analyzeClientSatisfaction(
         model: google(MODEL),
         maxRetries: 2,
         schema: SatisfactionSchema,
-        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). قيّم رضا العميل "${client.name}" وجودة التنفيذ من خلال محادثتي واتساب${brief ? " والبريف الموثق" : ""}:
+        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال محادثات واتساب، والبريف الموثق عند توفره، وبيانات العمل في رواسم:
 ${
   windowKind === "week"
     ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم رضاه بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
@@ -130,7 +128,8 @@ ${
 }
 
 1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
-2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول البريف والتنفيذ.${brief ? '\n3) "البريف" — وثيقة متطلبات العميل الأساسية المعتمدة في بداية المشروع.' : ""}
+2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول التنفيذ والتسليم، ويُستخدم كسياق فقط لاستخراج سبب التأخير أو الاحتكاك.
+3) "البريف" — وثيقة متطلبات العميل من ملفات المشروع/المهام، وهي مصدر قياس الالتزام بالبريف فقط.
 4) "العمل الفعلي في رواسم" — المهام المتأخرة الحقيقية للعميل ومراحلها (بيانات نظام، ليست محادثة).
 
 التعليمات:
@@ -138,6 +137,7 @@ ${
 ${briefInstruction}
 - sentiment, summary (عربي ٢-٤ جمل), highlights (ثناء/شكوى/طلب/تصعيد/إنجاز مع التاريخ)، sentimentTimeline (period مثل 2026-04)، risks (الأهم أولًا).
 - recommendations (توصيات قابلة للتنفيذ للفريق، الأهم أولًا، حتى ٦): اربط ما يشكو منه العميل أو يطلبه في المحادثة بالعمل الفعلي في رواسم. لكل توصية: issue = المشكلة موصولة بالواقع (مثال: «العميل يستعجل تسليم الحملة، ويوجد فعليًا في رواسم مهمتان متأخرتان عالقتان في مرحلة التصميم منذ ١٢ يومًا»)، action = الخطوة العملية التالية (مثال: «تصعيد مهمة PRJ-007-014 لقسم التصميم وتحديد موعد تسليم للعميل»). استخدم رموز/عناوين المهام من قسم رواسم عند توفرها. لا تخترع مهامًا غير مذكورة. إن لم توجد مشكلة جوهرية تستحق توصية، أعِد مصفوفة فارغة.
+- حدود استخدام بيانات رواسم: اذكر رقم «في هذه المرحلة منذ» كما ورد حرفيًا ولا تُعِد صياغته كـ«تأخّر في اعتماد العميل X أيام» أو أي مقياس آخر. لا تنسب لأي مهمة أثرًا لم يُذكر صراحةً (مثل «يعيق تقدّم الحملات» أو «يؤخّر النتائج») ما لم يقُل العميل ذلك بنفسه في «مجموعة العميل». اربط مهمة متأخرة بتوصية فقط حين يشكو العميل فعليًا في المحادثة من النقطة نفسها؛ وإلا فاذكرها كسياق تشغيلي محايد دون استنتاج تأثير.
 - لكل عنصر في highlights حدّد audience:
   • "client" = رسالة أو موقف صادر من العميل نفسه (طلب/شكوى/ثناء حقيقي من العميل).
   • "team" = تنسيق داخلي بين الفريق (مثل أن يستعجل الأكاونت مانجر العميل على الاعتماد). لا تَعُدّ رسائل الفريق الداخلية طلباتٍ للعميل.
@@ -145,8 +145,8 @@ ${briefInstruction}
 - نص كل highlight يجب أن يكون مقتبسًا فعليًا من رسالة موجودة أو تلخيصًا أمينًا لها — لا تخترع رسائل أو تفاصيل (مثل "تم اعتماد/الانتهاء") غير واردة حرفيًا.
 - ميّز بين الطلب/الاستفسار المحايد والشكوى: طلب خيارات إضافية أو استفسار عادي ليس شكوى ولا تبنِ عليه عدم رضا. لكن عدم الوفاء بوعد (وعدٌ بموعد ولم يُسلَّم)، أو تكرار المتابعة دون استجابة، أو احتكاك في العملية، إشاراتٌ سلبية حقيقية صنّفها شكوى/طلبًا واخفِض الدرجة بمقدارها — دون مبالغة في أي اتجاه.
 - درجات الرضا: 75+ تتطلب رضا واضحًا أو ثناءً صريحًا من العميل. علاقة تعاونية لكن فيها احتكاك لوجستي أو تأخيرات = محايد/متباين (55-70)، وليست "إيجابية".
-- في المشاريع الجديدة/مرحلة الإعداد التي لم تُسلَّم فيها مخرجات بعد، اجعل briefAdherenceScore متحفظًا واذكر في الملخص أن التقييم مبكّر.
-استند فقط لما ورد في المحادثات${brief ? " والبريف" : ""}.
+- في المشاريع الجديدة/مرحلة الإعداد التي لم تُسلَّم فيها مخرجات بعد، اذكر في الملخص أن التقييم مبكّر إذا كانت إشارات الرضا محدودة.
+استند فقط لما ورد في المحادثات والبريف وبيانات رواسم.
 
 === مجموعة العميل ===
 ${trim(clientBlock, budget)}
@@ -171,6 +171,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
     }
   }
   if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
+  if (!brief) result.briefAdherenceScore = null;
 
   // Latest import ids (for provenance), best-effort.
   const { data: imp } = await supabaseAdmin
@@ -241,7 +242,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
       satisfactionScore: result.satisfactionScore,
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
-      briefUsed: brief ? brief.url : null,
+      briefUsed: brief ? { source: brief.source, filename: brief.filename, url: brief.url } : null,
       windowKind,
     },
     importance: result.satisfactionScore < 50 ? "high" : "normal",

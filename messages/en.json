@@ -2814,7 +2814,7 @@
       },
       "quality": {
         "name": "Execution Quality & Satisfaction",
-        "desc": "Execution quality and understanding of client requirements",
+        "desc": "Execution quality and adherence to client requirements",
         "rework": "Rework rate",
         "rejection": "Rejection rate",
         "revisions": "Avg. revisions",
@@ -2847,6 +2847,7 @@
         "atRiskClients": "At-risk clients"
       },
       "naSourceSatisfaction": "Import client chats on the Satisfaction page",
+      "naSourceBrief": "No readable project brief has been analyzed yet",
       "analyzedClients": "{n} clients analyzed"
     },
     "financial": {
@@ -2878,7 +2879,7 @@
     "clientGroup": "Client group",
     "clientGroupHint": "Direct WhatsApp chat with the client — measures satisfaction & complaints",
     "technicalGroup": "Technical group",
-    "technicalGroupHint": "Internal team coordination chat — measures brief adherence",
+    "technicalGroupHint": "Internal team coordination chat — helps compare delivery against the brief",
     "analyze": "Analyze with AI",
     "reanalyze": "Re-analyze",
     "uploadFirst": "Link and sync at least one WhatsApp chat first",

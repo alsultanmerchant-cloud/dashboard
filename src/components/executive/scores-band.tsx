@@ -378,7 +378,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
                     label: t("quality.briefAdherence"),
                     value: t("na"),
                     tone: "na",
-                    hint: t("naSourceSatisfaction"),
+                    hint: t("naSourceBrief"),
                   }
                 : {
                     label: t("quality.briefAdherence"),

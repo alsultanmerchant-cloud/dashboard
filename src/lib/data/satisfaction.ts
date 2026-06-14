@@ -186,6 +186,12 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     r.analyzedAt = a.created_at;
   }
 
+  // Any client whose linked WhatsApp groups carry ingested messages is analyzable
+  // and must appear — even with no .txt import and no current analysis yet. Without
+  // this, groups linked live via OpenWA were invisible on the board (they only had
+  // wa_messages, never an import row) and landed nowhere. They surface in "pending".
+  for (const clientId of clientsWithMessages) ensure(clientId);
+
   return Array.from(rowByClient.values()).sort((a, b) => {
     // Analyzed first, then lowest satisfaction (most attention), then name.
     if (!!a.analyzedAt !== !!b.analyzedAt) return a.analyzedAt ? -1 : 1;

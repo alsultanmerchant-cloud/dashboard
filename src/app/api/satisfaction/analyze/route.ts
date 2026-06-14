@@ -5,7 +5,10 @@ import {
   NoRecentActivityError,
 } from "@/lib/satisfaction-analyze";
 
-export const maxDuration = 60;
+// Full-history ("all") runs build a long transcript and may retry Gemini a few
+// times — 60s was too tight and the platform returned a non-JSON timeout page.
+// 300s is the Vercel Pro ceiling; weekly runs still finish in a few seconds.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   let session;

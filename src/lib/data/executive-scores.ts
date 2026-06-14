@@ -44,7 +44,7 @@ export interface QualityScore {
   decidedCount: number;
   avgRevisions: number | null; // null = revision_count not populated
   satisfactionScore: number | null; // avg AI client-satisfaction (WhatsApp), null = none analyzed
-  briefAdherence: number | null; // avg AI brief-adherence, null = none analyzed
+  briefAdherence: number | null; // avg AI brief-adherence from documented briefs, null = none analyzed
   analyzedClients: number;
   satisfactionAvailable: boolean; // true once any client has been analyzed
 }
@@ -389,8 +389,8 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   ]);
 
   // 2. Execution Quality & Satisfaction. Operational signals (rework,
-  // rejection) plus AI-derived client satisfaction + brief adherence from
-  // imported WhatsApp chats — each only weighted when it has data.
+  // rejection) plus AI-derived client satisfaction and documented brief
+  // adherence — each only weighted when it has data.
   const qualityScore = blend([
     { w: 0.3, v: 100 * (1 - reworkRate) },
     { w: 0.15, v: 100 * (1 - rejectionRate) },

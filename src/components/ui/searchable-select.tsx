@@ -32,6 +32,10 @@ type SingleProps = {
   onCreateNew?: (query: string) => void;
   createLabel?: string;
   ariaLabel?: string;
+  /** Show an explicit "clear selection" row (e.g. "بدون مشروع") when a value
+   *  is set — single-select has no other way back to the empty state. */
+  clearable?: boolean;
+  clearLabel?: string;
 };
 
 type MultiProps = {
@@ -180,6 +184,16 @@ export function SearchableSelect(props: Props) {
             )}
           </div>
           <div className="max-h-[280px] overflow-y-auto py-1">
+            {!props.multi && props.clearable && props.value && (
+              <button
+                type="button"
+                onClick={() => handlePick("")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm text-muted-foreground transition-colors hover:bg-soft-1"
+              >
+                <X className="size-4 shrink-0 opacity-70" />
+                <span className="truncate">{props.clearLabel ?? "بدون تحديد"}</span>
+              </button>
+            )}
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-center text-xs text-muted-foreground">
                 {props.emptyMessage ?? "لا توجد نتائج"}
