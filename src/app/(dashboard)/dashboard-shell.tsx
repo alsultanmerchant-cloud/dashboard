@@ -12,6 +12,9 @@ import { RightRail } from "@/components/layout/right-rail";
 import { AuthProvider, useAuth, type AuthInitialUser } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { createClient } from "@/lib/supabase/client";
+import { NotificationPanel } from "@/components/layout/notification-panel";
+import { emojiFor } from "@/lib/notifications/registry";
+import { markAllNotificationsReadAction } from "@/app/(dashboard)/notifications/_actions";
 import type { AppNotification } from "@/types";
 
 const AIChatFAB = dynamic(
@@ -39,23 +42,14 @@ type NotificationRow = {
   created_at: string;
 };
 
-const TYPE_ICONS: Record<string, string> = {
-  HANDOVER_SUBMITTED: "📨",
-  PROJECT_CREATED: "🗂️",
-  TASK_CREATED: "📋",
-  TASK_STATUS_CHANGED: "🔄",
-  TASK_COMMENT_ADDED: "💬",
-  MENTION_CREATED: "💬",
-  TASK_OVERDUE_DETECTED: "⏰",
-  default: "🔔",
-};
-
 function rowToNotification(row: NotificationRow): AppNotification {
   return {
     id: row.id,
     type: "crud_action",
-    icon: TYPE_ICONS[row.type] ?? TYPE_ICONS.default,
+    notifType: row.type,
+    icon: emojiFor(row.type),
     message: row.body ? `${row.title} — ${row.body}` : row.title,
+    title: row.title,
     section: row.entity_type ?? "notification",
     entityType: row.entity_type,
     entityId: row.entity_id,
@@ -102,8 +96,11 @@ function DmUnreadLoader({
 
 function NotificationsLoader({
   onLoad,
+  reloadToken,
 }: {
   onLoad: (n: AppNotification[]) => void;
+  // Bumping this forces an immediate refetch (e.g. when the bell is opened).
+  reloadToken: number;
 }) {
   const { user } = useAuth();
   useEffect(() => {
@@ -134,8 +131,12 @@ function NotificationsLoader({
       timeoutId = window.setTimeout(loadNotifications, 250);
     }
 
+    // Keep the bell badge fresh — poll every 60s (same cadence as DM unread).
+    const poll = window.setInterval(loadNotifications, 60000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(poll);
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);
       }
@@ -143,7 +144,7 @@ function NotificationsLoader({
         window.cancelIdleCallback(idleId);
       }
     };
-  }, [user?.id, user?.orgId, onLoad]);
+  }, [user?.id, user?.orgId, onLoad, reloadToken]);
 
   return null;
 }
@@ -161,12 +162,18 @@ export function DashboardShell({
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
+  // Upsert by id (not append-only) so a refetch reflects updated read state —
+  // marking read/all-read changes read_at on rows we've already seen.
   const addNotifications = useCallback((next: AppNotification[]) => {
     setNotifications((prev) => {
-      const seen = new Set(prev.map((n) => n.id));
-      const fresh = next.filter((n) => !seen.has(n.id));
-      return [...fresh, ...prev];
+      const byId = new Map(prev.map((n) => [n.id, n]));
+      for (const n of next) byId.set(n.id, n);
+      return [...byId.values()].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
     });
   }, []);
 
@@ -174,6 +181,17 @@ export function DashboardShell({
     () => notifications.filter((n) => !n.isRead).length,
     [notifications],
   );
+
+  const openBell = useCallback(() => {
+    setBellOpen((o) => !o);
+    setReloadToken((t) => t + 1); // refetch on open
+  }, []);
+
+  const handleMarkAllRead = useCallback(async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    await markAllNotificationsReadAction();
+    setReloadToken((t) => t + 1);
+  }, []);
 
   const isAgentPage = pathname === "/agent";
 
@@ -183,7 +201,7 @@ export function DashboardShell({
         <TopbarProvider>
           <StackedSheetProvider>
           <CommandPaletteProvider />
-          <NotificationsLoader onLoad={addNotifications} />
+          <NotificationsLoader onLoad={addNotifications} reloadToken={reloadToken} />
           <DmUnreadLoader onChange={setDmUnreadCount} />
           <div className="min-h-screen bg-background panel-grid">
             <Sidebar
@@ -202,8 +220,17 @@ export function DashboardShell({
               <Topbar
                 unreadCount={unreadCount}
                 dmUnreadCount={dmUnreadCount}
-                onBellClick={() => router.push("/notifications")}
+                onBellClick={openBell}
                 onMenuClick={() => setSidebarOpen(true)}
+                notificationPanel={
+                  bellOpen ? (
+                    <NotificationPanel
+                      notifications={notifications}
+                      onClose={() => setBellOpen(false)}
+                      onMarkAllRead={handleMarkAllRead}
+                    />
+                  ) : null
+                }
               />
               <ModuleTabs />
               <main className="px-4 sm:px-6 pb-12 pt-4">

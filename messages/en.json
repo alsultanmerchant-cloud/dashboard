@@ -334,7 +334,14 @@
     "filterUnread": "Unread",
     "filterRead": "Read",
     "countLabel": "{count} notification",
-    "openLink": "Open"
+    "openLink": "Open",
+    "category": {
+      "delivery": "Delivery",
+      "clients": "Clients",
+      "money": "Money",
+      "mentions": "Mentions",
+      "system": "System"
+    }
   },
   "NotificationsPage": {
     "title": "Notifications",
@@ -446,6 +453,7 @@
     "title": "Notifications",
     "markAllRead": "Mark all read",
     "clearAll": "Clear all",
+    "showAll": "Show all",
     "empty": "No notifications",
     "now": "Just now",
     "minutesAgo": "{n, plural, one {1 minute ago} other {# minutes ago}}",

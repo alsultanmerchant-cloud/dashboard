@@ -334,7 +334,14 @@
     "filterUnread": "غير مقروءة",
     "filterRead": "مقروءة",
     "countLabel": "{count} تنبيه",
-    "openLink": "فتح"
+    "openLink": "فتح",
+    "category": {
+      "delivery": "التسليم",
+      "clients": "العملاء",
+      "money": "المالية",
+      "mentions": "الإشارات والرسائل",
+      "system": "النظام"
+    }
   },
   "NotificationsPage": {
     "title": "التنبيهات",
@@ -446,6 +453,7 @@
     "title": "الإشعارات",
     "markAllRead": "قراءة الكل",
     "clearAll": "مسح الكل",
+    "showAll": "عرض الكل",
     "empty": "لا توجد إشعارات",
     "now": "الآن",
     "minutesAgo": "منذ {n, plural, one {دقيقة} two {دقيقتين} few {# دقائق} many {# دقيقة} other {# دقيقة}}",

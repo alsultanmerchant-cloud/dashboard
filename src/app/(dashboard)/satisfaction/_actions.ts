@@ -483,29 +483,17 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
   return { ok: true, linked, classified, suggested, scanned: links.length };
 }
 
-// Resolve the org's owner user ids (recipients for org-level WA-linking alerts).
-async function ownerUserIds(orgId: string): Promise<string[]> {
-  const { data } = await supabaseAdmin
-    .from("user_roles")
-    .select("user_id, role:roles!inner(key)")
-    .eq("organization_id", orgId)
-    .eq("role.key", "owner");
-  const ids = new Set<string>();
-  for (const r of (data ?? []) as Array<{ user_id: string | null }>) {
-    if (r.user_id) ids.add(r.user_id);
-  }
-  return [...ids];
-}
-
 // Bell-notify owners about pending link suggestions and projects missing groups.
 // Deduped: skips a type if the owner already has an unread one of it, so a
 // repeated sync doesn't pile up duplicates — the in-page sections are the
 // always-accurate source of truth; this is just the nudge.
 async function notifyWaLinkingState(orgId: string) {
-  const [{ getWaLinkSuggestions, getProjectGroupCoverage }, owners] = await Promise.all([
-    import("@/lib/data/satisfaction"),
-    ownerUserIds(orgId),
-  ]);
+  const [{ getWaLinkSuggestions, getProjectGroupCoverage }, { getOwnerUserIds }] =
+    await Promise.all([
+      import("@/lib/data/satisfaction"),
+      import("@/lib/data/org-roles"),
+    ]);
+  const owners = await getOwnerUserIds(orgId);
   if (owners.length === 0) return;
   const [suggestions, gaps] = await Promise.all([
     getWaLinkSuggestions(orgId),

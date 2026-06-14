@@ -372,8 +372,12 @@ export interface SalesMessageRating {
 export interface AppNotification {
   id: string;
   type: "urgent_ticket" | "overdue_project" | "high_workload" | "near_complete" | "negotiating" | "crud_action";
+  /** Raw DB notification type (e.g. TASK_OVERDUE) — drives icon + routing via the registry. */
+  notifType?: string;
   icon: string;
   message: string;
+  /** Notification title without the body suffix — shown bold in the popover. */
+  title?: string;
   section: string;
   // Optional entity reference so the topbar panel can deep-link to the
   // exact entity (e.g. /tasks/{id}) instead of falling back to the list.

@@ -172,7 +172,7 @@ export function Topbar({
             )}
           </Link>
 
-          <div className="relative shrink-0">
+          <div className="relative shrink-0" data-bell-root>
             <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
               <Bell className="w-4 h-4 text-amber" />
               {unreadCount > 0 && (
