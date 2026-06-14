@@ -3,7 +3,20 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { RefreshCw, Check, Loader2, MessageSquare, Wrench, Ban, Users, Link2, History } from "lucide-react";
+import {
+  RefreshCw,
+  Check,
+  Loader2,
+  MessageSquare,
+  Wrench,
+  Ban,
+  Users,
+  Link2,
+  History,
+  X,
+  AlertTriangle,
+  FolderX,
+} from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,16 +27,31 @@ import {
   autoLinkWaProjectsAction,
   refreshWaMembersAction,
   importWaHistoryAction,
+  confirmWaSuggestionAction,
+  rejectWaSuggestionAction,
 } from "../_actions";
-import type { WaGroupLink, GroupKind } from "@/lib/data/satisfaction";
+import type {
+  WaGroupLink,
+  GroupKind,
+  WaLinkSuggestion,
+  ProjectCoverageGap,
+} from "@/lib/data/satisfaction";
 
 interface Props {
   links: WaGroupLink[];
   options: { value: string; label: string }[];
   projectOptions: { value: string; label: string }[];
+  suggestions: WaLinkSuggestion[];
+  coverageGaps: ProjectCoverageGap[];
 }
 
-export function WaGroupsWorkspace({ links, options, projectOptions }: Props) {
+export function WaGroupsWorkspace({
+  links,
+  options,
+  projectOptions,
+  suggestions,
+  coverageGaps,
+}: Props) {
   const t = useTranslations("SatisfactionPage");
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
@@ -64,7 +92,12 @@ export function WaGroupsWorkspace({ links, options, projectOptions }: Props) {
     setAutoLinking(false);
     if (res.error) setMsg(res.error);
     else {
-      setMsg(t("groups.autoLinked", { n: res.linked ?? 0, k: res.classified ?? 0 }));
+      const base = t("groups.autoLinked", { n: res.linked ?? 0, k: res.classified ?? 0 });
+      setMsg(
+        res.suggested
+          ? `${base} — ${t("groups.autoSuggested", { s: res.suggested })}`
+          : base,
+      );
       router.refresh();
     }
   };
@@ -103,6 +136,16 @@ export function WaGroupsWorkspace({ links, options, projectOptions }: Props) {
         <span className="text-xs text-muted-foreground">{t("groups.syncHint")}</span>
         {msg && <span className="text-xs text-cyan">{msg}</span>}
       </div>
+
+      {suggestions.length > 0 && (
+        <SuggestionsSection
+          suggestions={suggestions}
+          t={t}
+          onChanged={() => router.refresh()}
+        />
+      )}
+
+      {coverageGaps.length > 0 && <CoverageSection gaps={coverageGaps} t={t} />}
 
       {links.length === 0 ? (
         <Card>
@@ -326,5 +369,145 @@ function KindBtn({
     >
       {icon}
     </button>
+  );
+}
+
+// ---- Pending auto-link suggestions (confirmation queue) -------------------
+function SuggestionsSection({
+  suggestions,
+  t,
+  onChanged,
+}: {
+  suggestions: WaLinkSuggestion[];
+  t: ReturnType<typeof useTranslations>;
+  onChanged: () => void;
+}) {
+  return (
+    <Card className="border-amber/30">
+      <CardContent className="space-y-1 p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber">
+          <AlertTriangle className="size-4" />
+          {t("groups.pending.title", { n: suggestions.length })}
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">{t("groups.pending.subtitle")}</p>
+        <div className="divide-y divide-border/60">
+          {suggestions.map((s) => (
+            <SuggestionRow key={s.id} s={s} t={t} onChanged={onChanged} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SuggestionRow({
+  s,
+  t,
+  onChanged,
+}: {
+  s: WaLinkSuggestion;
+  t: ReturnType<typeof useTranslations>;
+  onChanged: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const act = (kind: "confirm" | "reject") => {
+    setError(null);
+    startTransition(async () => {
+      const res =
+        kind === "confirm"
+          ? await confirmWaSuggestionAction({ chatId: s.chatId })
+          : await rejectWaSuggestionAction({ chatId: s.chatId });
+      if (res.error) setError(res.error);
+      else onChanged();
+    });
+  };
+
+  const projectLabel = s.suggestedProjectCode
+    ? `${s.suggestedProjectCode} · ${s.suggestedProjectName ?? ""}`
+    : s.suggestedProjectName;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+      <div className="min-w-[200px] flex-1">
+        <p className="text-sm font-medium">{s.chatName ?? s.chatId}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("groups.pending.suggests")}:{" "}
+          <span className="text-foreground">{s.suggestedClientName ?? "—"}</span>
+          {projectLabel ? <span className="text-muted-foreground"> · {projectLabel}</span> : null}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {error && (
+          <span className="text-[10px] text-cc-red" title={error}>
+            {t("groups.pending.failed")}
+          </span>
+        )}
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => act("confirm")}>
+          {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+          {t("groups.pending.confirm")}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={() => act("reject")}>
+          <X className="size-3.5" />
+          {t("groups.pending.reject")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Projects missing their client/team groups ---------------------------
+function CoverageSection({
+  gaps,
+  t,
+}: {
+  gaps: ProjectCoverageGap[];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Card className="border-cc-red/25">
+      <CardContent className="space-y-1 p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-cc-red">
+          <FolderX className="size-4" />
+          {t("groups.coverage.title", { n: gaps.length })}
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">{t("groups.coverage.subtitle")}</p>
+        <div className="flex flex-col gap-2">
+          {gaps.map((g) => (
+            <div
+              key={g.projectId}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-card/40 px-3 py-2"
+            >
+              <div className="min-w-[180px]">
+                <p className="text-sm font-medium">
+                  {g.projectCode ? (
+                    <span className="font-mono text-xs text-muted-foreground">{g.projectCode} · </span>
+                  ) : null}
+                  {g.projectName}
+                </p>
+                {g.clientName && (
+                  <p className="text-xs text-muted-foreground">{g.clientName}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {!g.hasClientGroup && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-red-dim px-2 py-0.5 text-[11px] text-cc-red">
+                    <MessageSquare className="size-3" />
+                    {t("groups.coverage.missingClient")}
+                  </span>
+                )}
+                {!g.hasTechnicalGroup && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-red-dim px-2 py-0.5 text-[11px] text-cc-red">
+                    <Wrench className="size-3" />
+                    {t("groups.coverage.missingTeam")}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -211,6 +211,7 @@ export interface ClientSatisfactionDetail {
   hasMessages: boolean; // live wa_messages exist → analyzable without a .txt import
   analysis: AnalysisInfo | null; // the shown analysis (selected, else current week)
   history: AnalysisHistoryItem[]; // all stored snapshots, newest first
+  activeProjects: Array<{ id: string; name: string }>;
 }
 
 const ANALYSIS_COLUMNS =
@@ -255,7 +256,7 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, messagesRes] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -293,8 +294,16 @@ async function _getClientSatisfactionDetail(
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .eq("client_id", clientId),
+    supabaseAdmin
+      .from("projects")
+      .select("id, name")
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false }),
   ]);
   if (clientRes.error) throw clientRes.error;
+  if (projectsRes.error) throw projectsRes.error;
   if (!clientRes.data) return null;
 
   const toInfo = (r: Record<string, unknown>): ImportInfo => ({
@@ -347,6 +356,10 @@ async function _getClientSatisfactionDetail(
     hasMessages: (messagesRes.count ?? 0) > 0,
     analysis,
     history,
+    activeProjects: ((projectsRes.data ?? []) as Array<{ id: string; name: string }>).map((p) => ({
+      id: p.id,
+      name: p.name,
+    })),
   };
 }
 export const getClientSatisfactionDetail = cache(_getClientSatisfactionDetail);
@@ -639,6 +652,159 @@ export async function listProjectOptions(orgId: string) {
   if (error) throw error;
   return data ?? [];
 }
+
+// ---- Pending auto-link suggestions (the confirmation queue) ---------------
+// Low-confidence group→client matches the auto-linker parked for a human to
+// confirm/reject (see migration 0166). Only unlinked, non-dismissed rows.
+export interface WaLinkSuggestion {
+  id: string;
+  chatId: string;
+  chatName: string | null;
+  suggestedClientId: string;
+  suggestedClientName: string | null;
+  suggestedProjectId: string | null;
+  suggestedProjectName: string | null;
+  suggestedProjectCode: string | null;
+  confidence: "exact" | "high" | "low" | null;
+  groupKind: GroupKind | null;
+  suggestedAt: string | null;
+}
+
+async function _getWaLinkSuggestions(orgId: string): Promise<WaLinkSuggestion[]> {
+  const { data, error } = await supabaseAdmin
+    .from("wa_group_links")
+    .select(
+      "id, chat_id, chat_name, suggested_client_id, suggested_project_id, suggested_confidence, suggested_at, group_kind, client:clients!wa_group_links_suggested_client_id_fkey(name), project:projects!wa_group_links_suggested_project_id_fkey(name, project_code)",
+    )
+    .eq("organization_id", orgId)
+    .not("suggested_client_id", "is", null)
+    .is("client_id", null)
+    .is("suggestion_dismissed_at", null)
+    .order("suggested_at", { ascending: false, nullsFirst: false });
+  if (error || !data) return [];
+
+  type Row = {
+    id: string;
+    chat_id: string;
+    chat_name: string | null;
+    suggested_client_id: string;
+    suggested_project_id: string | null;
+    suggested_confidence: "exact" | "high" | "low" | null;
+    suggested_at: string | null;
+    group_kind: GroupKind | null;
+    client: { name: string } | { name: string }[] | null;
+    project:
+      | { name: string; project_code: string | null }
+      | { name: string; project_code: string | null }[]
+      | null;
+  };
+
+  return (data as unknown as Row[]).map((r) => {
+    const c = Array.isArray(r.client) ? r.client[0] : r.client;
+    const p = Array.isArray(r.project) ? r.project[0] : r.project;
+    return {
+      id: r.id,
+      chatId: r.chat_id,
+      chatName: r.chat_name,
+      suggestedClientId: r.suggested_client_id,
+      suggestedClientName: c?.name ?? null,
+      suggestedProjectId: r.suggested_project_id,
+      suggestedProjectName: p?.name ?? null,
+      suggestedProjectCode: p?.project_code ?? null,
+      confidence: r.suggested_confidence,
+      groupKind: r.group_kind,
+      suggestedAt: r.suggested_at,
+    };
+  });
+}
+export const getWaLinkSuggestions = cache(_getWaLinkSuggestions);
+
+// ---- Project group coverage (every project must have a client + team group)
+// The team's rule: each ACTIVE project needs BOTH a 💫 client group and a 📍
+// team group. Groups link client-centrically (client_id + optional project_id),
+// so we resolve a project's groups as: explicit project_id matches, PLUS the
+// client's project-less groups when the client has exactly one active project
+// (mirrors the matcher's own client→project resolution). The reverse (groups
+// with no project) is fine and intentionally ignored.
+export interface ProjectCoverageGap {
+  projectId: string;
+  projectName: string;
+  projectCode: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  hasClientGroup: boolean;
+  hasTechnicalGroup: boolean;
+}
+
+async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageGap[]> {
+  const [projectsRes, linksRes] = await Promise.all([
+    supabaseAdmin
+      .from("projects")
+      .select("id, name, project_code, client_id, status, client:clients(name)")
+      .eq("organization_id", orgId)
+      .neq("status", "archived"),
+    supabaseAdmin
+      .from("wa_group_links")
+      .select("client_id, project_id, group_kind, is_active")
+      .eq("organization_id", orgId)
+      .eq("is_active", true),
+  ]);
+  const projects = (projectsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    project_code: string | null;
+    client_id: string | null;
+    status: string | null;
+    client: { name: string } | { name: string }[] | null;
+  }>;
+  const links = (linksRes.data ?? []) as Array<{
+    client_id: string | null;
+    project_id: string | null;
+    group_kind: GroupKind | null;
+  }>;
+
+  // Active-project count per client → decides whether project-less client
+  // groups can be attributed to a single project unambiguously.
+  const activeByClient = new Map<string, number>();
+  for (const p of projects) {
+    if (p.status === "active" && p.client_id)
+      activeByClient.set(p.client_id, (activeByClient.get(p.client_id) ?? 0) + 1);
+  }
+
+  const gaps: ProjectCoverageGap[] = [];
+  for (const p of projects) {
+    const singleActive = !!p.client_id && activeByClient.get(p.client_id) === 1;
+    let hasClient = false;
+    let hasTech = false;
+    for (const l of links) {
+      const belongs =
+        l.project_id === p.id ||
+        (!l.project_id && singleActive && l.client_id === p.client_id);
+      if (!belongs) continue;
+      if (l.group_kind === "client") hasClient = true;
+      else if (l.group_kind === "technical") hasTech = true;
+    }
+    if (hasClient && hasTech) continue;
+    const c = Array.isArray(p.client) ? p.client[0] : p.client;
+    gaps.push({
+      projectId: p.id,
+      projectName: p.name,
+      projectCode: p.project_code,
+      clientId: p.client_id,
+      clientName: c?.name ?? null,
+      hasClientGroup: hasClient,
+      hasTechnicalGroup: hasTech,
+    });
+  }
+  // Worst first: missing both, then missing one.
+  gaps.sort(
+    (a, b) =>
+      Number(a.hasClientGroup) + Number(a.hasTechnicalGroup) -
+      (Number(b.hasClientGroup) + Number(b.hasTechnicalGroup)),
+  );
+  return gaps;
+}
+export const getProjectGroupCoverage = cache(_getProjectGroupCoverage);
 
 // ---- At-risk clients (for the Executive AI report + drill-down) ----------
 export interface AtRiskClient {

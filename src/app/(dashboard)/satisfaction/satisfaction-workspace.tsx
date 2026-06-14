@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import {
   Sparkles,
@@ -23,8 +23,16 @@ import {
   ArchiveRestore,
   Lightbulb,
   ArrowRightCircle,
+  FileQuestion,
+  Upload,
+  FileUp,
+  CheckCircle2,
 } from "lucide-react";
-import { setClientArchivedAction } from "./_actions";
+import {
+  attachClientBriefLinkAction,
+  uploadClientBriefFileAction,
+  setClientArchivedAction,
+} from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
@@ -300,6 +308,7 @@ export function SatisfactionWorkspace({
               analysis={detail.analysis}
               history={detail.history}
               clientId={selectedId}
+              activeProjects={detail.activeProjects}
               t={t}
               sentimentLabel={sentimentLabel}
             />
@@ -676,8 +685,14 @@ function OverviewTable({
                     <td className={cn("p-3 text-center font-semibold tabular-nums", tone.text)}>
                       {r.satisfactionScore ?? "—"}
                     </td>
-                    <td className="p-3 text-center tabular-nums text-muted-foreground">
-                      {r.briefAdherenceScore ?? "—"}
+                    <td className="p-3 text-center text-xs tabular-nums text-muted-foreground">
+                      {r.analyzedAt && r.briefAdherenceScore === null ? (
+                        <span className="rounded bg-amber/10 px-1.5 py-0.5 font-medium text-amber">
+                          {t("briefMissingShort")}
+                        </span>
+                      ) : (
+                        r.briefAdherenceScore ?? "—"
+                      )}
                     </td>
                     <td className="p-3 text-center text-xs text-muted-foreground">
                       {r.sentiment ? t(`sentiment.${r.sentiment}`) : "—"}
@@ -810,17 +825,20 @@ function AnalysisView({
   analysis,
   history,
   clientId,
+  activeProjects,
   t,
   sentimentLabel,
 }: {
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
   history: AnalysisHistoryItem[];
   clientId: string;
+  activeProjects: ClientSatisfactionDetail["activeProjects"];
   t: ReturnType<typeof useTranslations>;
   sentimentLabel: (s: string | null) => string;
 }) {
   const tone = scoreTone(analysis.satisfactionScore);
   const timeline = analysis.sentimentTimeline ?? [];
+  const briefMissing = analysis.briefAdherenceScore === null;
   // We're viewing a past snapshot when the shown analysis isn't the current one.
   const viewingPast = !history.some((h) => h.id === analysis.id && h.isCurrent);
   const range = (a: {
@@ -868,16 +886,33 @@ function AnalysisView({
             </div>
           </div>
           <div className="flex items-center gap-3 border-s border-border ps-6">
-            <Ring score={analysis.briefAdherenceScore} size={64} />
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              {t("briefAdherence")}
-            </p>
+            {briefMissing ? (
+              <span className="flex size-16 shrink-0 items-center justify-center rounded-full border border-dashed border-amber/50 bg-amber/10 text-amber">
+                <FileQuestion className="size-6" />
+              </span>
+            ) : (
+              <Ring score={analysis.briefAdherenceScore} size={64} />
+            )}
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                {t("briefAdherence")}
+              </p>
+              {briefMissing && (
+                <p className="mt-1 text-[11px] font-medium text-amber">
+                  {t("briefMissingShort")}
+                </p>
+              )}
+            </div>
           </div>
           <p className="min-w-[12rem] flex-1 text-sm leading-relaxed text-muted-foreground">
             {analysis.summary}
           </p>
         </CardContent>
       </Card>
+
+      {briefMissing && (
+        <MissingBriefPanel clientId={clientId} activeProjects={activeProjects} t={t} />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* sentiment timeline */}
@@ -1029,6 +1064,198 @@ function AnalysisView({
       {/* past analyses — click to view an earlier snapshot */}
       <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
+  );
+}
+
+function MissingBriefPanel({
+  clientId,
+  activeProjects,
+  t,
+}: {
+  clientId: string;
+  activeProjects: ClientSatisfactionDetail["activeProjects"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [url, setUrl] = useState("");
+  const [projectId, setProjectId] = useState(activeProjects[0]?.id ?? "");
+  const [busy, setBusy] = useState<"link" | "file" | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // After a save/upload we DON'T auto re-analyze — show a prompt instead.
+  const [saved, setSaved] = useState<string | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const router = useRouter();
+  const noProject = activeProjects.length === 0;
+
+  const saveLink = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    setBusy("link");
+    try {
+      const res = await attachClientBriefLinkAction({ clientId, projectId: projectId || undefined, url });
+      if (res.error) setError(res.error);
+      else {
+        setUrl("");
+        setSaved(t("briefLinkSaved"));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const uploadFile = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    const file = fileRef.current?.files?.[0];
+    if (!file) return;
+    setBusy("file");
+    try {
+      const fd = new FormData();
+      fd.set("clientId", clientId);
+      if (projectId) fd.set("projectId", projectId);
+      fd.set("file", file);
+      const res = await uploadClientBriefFileAction(fd);
+      if (res.error) setError(res.error);
+      else {
+        if (fileRef.current) fileRef.current.value = "";
+        setFileName(null);
+        setSaved(t("briefFileSaved", { name: res.filename ?? file.name }));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reanalyze = async () => {
+    setError(null);
+    setReanalyzing(true);
+    try {
+      const res = await fetch("/api/satisfaction/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, windowKind: "week" }),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data.error ?? t("analyzeFailed"));
+      else router.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setReanalyzing(false);
+    }
+  };
+
+  return (
+    <Card className="border-amber/30 bg-amber/5">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber">
+              <FileQuestion className="size-4" /> {t("briefMissingTitle")}
+            </p>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              {t("briefMissingDescription")}
+            </p>
+          </div>
+          {activeProjects[0] && (
+            <Link
+              href={`/projects/${activeProjects[0].id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-cyan hover:border-cyan/40"
+            >
+              {t("openProject")}
+              <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
+            </Link>
+          )}
+        </div>
+
+        {saved ? (
+          // Success prompt — explicit "re-analyze now" vs "later" (no auto run).
+          <div className="rounded-lg border border-cc-green/30 bg-green-dim/40 p-3">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-cc-green">
+              <CheckCircle2 className="size-4" /> {saved}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("briefSavedPrompt")}</p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button size="sm" onClick={reanalyze} disabled={reanalyzing}>
+                {reanalyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                {t("reanalyzeNow")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSaved(null);
+                  router.refresh();
+                }}
+                disabled={reanalyzing}
+              >
+                {t("later")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Project picker (shared by both inputs) */}
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              disabled={activeProjects.length <= 1}
+              className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors focus:border-cyan/50 md:max-w-xs"
+            >
+              {noProject ? (
+                <option value="">{t("noActiveProject")}</option>
+              ) : (
+                activeProjects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))
+              )}
+            </select>
+
+            {/* Option A — paste a Google Doc / Sheet link */}
+            <form onSubmit={saveLink} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                dir="ltr"
+                placeholder={t("briefLinkPlaceholder")}
+                className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-cyan/50"
+              />
+              <Button type="submit" disabled={busy !== null || noProject || !url.trim()}>
+                {busy === "link" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                {t("saveBriefLink")}
+              </Button>
+            </form>
+
+            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground/60">
+              <span className="h-px flex-1 bg-border" />
+              {t("or")}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+
+            {/* Option B — upload a local file (txt / csv / xlsx) */}
+            <form onSubmit={uploadFile} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".txt,.md,.csv,.tsv,.xlsx,.xls,text/plain,text/csv"
+                onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+                className="h-9 rounded-md border border-border bg-background px-2 py-1 text-sm text-muted-foreground outline-none transition-colors file:me-2 file:rounded file:border-0 file:bg-soft-2 file:px-2 file:py-1 file:text-xs file:text-foreground focus:border-cyan/50"
+              />
+              <Button type="submit" variant="outline" disabled={busy !== null || noProject || !fileName}>
+                {busy === "file" ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}
+                {t("uploadBriefFile")}
+              </Button>
+            </form>
+            <p className="text-[11px] text-muted-foreground/70">{t("briefFileHint")}</p>
+          </>
+        )}
+
+        {error && <p className="text-xs text-cc-red">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }
 

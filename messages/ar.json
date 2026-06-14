@@ -2888,6 +2888,22 @@
     "participants": "{n} مشارك",
     "satisfactionScore": "درجة الرضا",
     "briefAdherence": "الالتزام بالبريف",
+    "briefMissingShort": "غير موجود",
+    "briefMissingTitle": "لم يتم العثور على البريف",
+    "briefMissingDescription": "لم يجد التحليل بريفًا قابلًا للقراءة في ملفات المشروع/المهام، لذلك ترك درجة الالتزام بالبريف فارغة بدلًا من التخمين. الصق رابط Google Doc أو Google Sheet، أو ارفع ملف البريف من جهازك، ثم أعد التحليل.",
+    "briefLinkPlaceholder": "رابط Google Doc أو Google Sheet للبريف",
+    "saveBriefLink": "حفظ رابط البريف",
+    "briefLinkSaved": "تم حفظ رابط البريف.",
+    "uploadBriefFile": "رفع ملف",
+    "briefFileSaved": "تم رفع ملف البريف «{name}» وحفظه في مستندات المشروع.",
+    "briefFileHint": "الصيغ المقروءة: نص (txt)، CSV، Excel ‏(xlsx). لا تتم قراءة ملفات PDF أو الصور — استخدم رابط Google Doc بدلًا منها.",
+    "briefSavedPrompt": "تم حفظ البريف في مستندات المشروع. هل تريد إعادة التحليل الآن لاحتساب الالتزام بالبريف؟",
+    "reanalyzeNow": "أعد التحليل الآن",
+    "later": "لاحقًا",
+    "or": "أو",
+    "analyzeFailed": "تعذّر التحليل",
+    "openProject": "فتح المشروع",
+    "noActiveProject": "لا يوجد مشروع نشط",
     "summary": "الملخص",
     "timeline": "تطور الرضا",
     "risks": "مخاطر العلاقة",
@@ -2981,9 +2997,24 @@
       "historyImported": "تم استيراد {n} رسالة من {g} مجموعة",
       "autoLink": "ربط تلقائي بالمشاريع",
       "autoLinked": "تم ربط {n} بالمشاريع · وتصنيف {k} (💫 عميل / 📍 فريق)",
+      "autoSuggested": "و{s} ربط ضعيف الثقة بانتظار التأكيد",
       "unmappedProject": "بدون مشروع",
       "searchProject": "بحث عن مشروع…",
-      "noProjects": "لا توجد مشاريع"
+      "noProjects": "لا توجد مشاريع",
+      "pending": {
+        "title": "{n} رابط بانتظار التأكيد",
+        "subtitle": "النظام رجّح ربط هذه المجموعات بعميل لكنه غير متأكد. أكّد للربط، أو ارفض للتجاهل.",
+        "suggests": "الاقتراح",
+        "confirm": "تأكيد",
+        "reject": "رفض",
+        "failed": "تعذّر التنفيذ"
+      },
+      "coverage": {
+        "title": "{n} مشروع بدون مجموعات واتساب مكتملة",
+        "subtitle": "كل مشروع نشط يجب أن يكون له مجموعة عميل 💫 ومجموعة فريق 📍.",
+        "missingClient": "بدون مجموعة عميل",
+        "missingTeam": "بدون مجموعة فريق"
+      }
     },
     "connect": {
       "title": "ربط رقم واتساب",

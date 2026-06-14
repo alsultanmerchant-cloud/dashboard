@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { logAudit } from "@/lib/audit";
+import { logAudit, createNotification } from "@/lib/audit";
 import { parseWhatsAppChat } from "@/lib/whatsapp/parse";
 import { listGroups, waConfigured, getGroupsMeta, fetchChatHistory } from "@/lib/wa/openwa-client";
 import { matchGroups, detectGroupKind } from "@/lib/wa/match-groups";
@@ -17,11 +17,190 @@ const UploadSchema = z.object({
   content: z.string().min(20, "الملف فارغ أو غير صالح").max(5_000_000),
 });
 
+const BriefLinkSchema = z.object({
+  clientId: z.string().uuid("اختر عميلًا"),
+  projectId: z.string().uuid("اختر مشروعًا").optional(),
+  url: z
+    .string()
+    .trim()
+    .url("أدخل رابطًا صحيحًا")
+    .refine(
+      (url) =>
+        /docs\.google\.com\/document\/d\/[a-zA-Z0-9_-]+/.test(url) ||
+        /docs\.google\.com\/spreadsheets\/d\/[a-zA-Z0-9_-]+/.test(url),
+      "ارفع رابط Google Doc أو Google Sheet للبريف حتى يستطيع الذكاء الاصطناعي قراءته",
+    ),
+});
+
 export type UploadState = {
   ok?: true;
   error?: string;
   stats?: { messageCount: number; participantCount: number; range: string | null };
 };
+
+export type BriefLinkState = { ok?: true; error?: string; projectId?: string };
+export type BriefFileState = { ok?: true; error?: string; projectId?: string; filename?: string };
+
+// Keep Arabic letters, latin alphanumerics, dot, dash, underscore; replace the
+// rest with `_` so the storage object key stays safe across S3-compatible
+// backends. Mirrors the helper used by the task comment composer.
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^\p{L}\p{N}._-]+/gu, "_").slice(0, 200) || "file";
+}
+
+const MAX_BRIEF_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+// Resolve the brief's target project: the explicit one if given, else the
+// client's most recent non-archived project. Shared by the link + file actions.
+async function resolveBriefProject(
+  orgId: string,
+  clientId: string,
+  projectId?: string,
+): Promise<{ id: string; name: string } | null> {
+  const q = supabaseAdmin
+    .from("projects")
+    .select("id, name")
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .neq("status", "archived");
+  const { data } = projectId
+    ? await q.eq("id", projectId)
+    : await q.order("created_at", { ascending: false }).limit(1);
+  return (data?.[0] as { id: string; name: string } | undefined) ?? null;
+}
+
+export async function attachClientBriefLinkAction(input: {
+  clientId: string;
+  projectId?: string;
+  url: string;
+}): Promise<BriefLinkState> {
+  let session;
+  try {
+    session = await requirePermission("projects.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = BriefLinkSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+
+  const projectQuery = supabaseAdmin
+    .from("projects")
+    .select("id, name")
+    .eq("organization_id", session.orgId)
+    .eq("client_id", parsed.data.clientId)
+    .neq("status", "archived");
+
+  const { data: projects, error: projectErr } = parsed.data.projectId
+    ? await projectQuery.eq("id", parsed.data.projectId)
+    : await projectQuery.order("created_at", { ascending: false }).limit(1);
+  if (projectErr) return { error: projectErr.message };
+
+  const project = projects?.[0] as { id: string; name: string } | undefined;
+  if (!project) return { error: "لا يوجد مشروع نشط لهذا العميل لإرفاق البريف عليه" };
+
+  const externalId = `${project.id}:${parsed.data.url}`.slice(0, 240);
+  const { error } = await supabaseAdmin.from("project_attachments").upsert(
+    {
+      organization_id: session.orgId,
+      project_id: project.id,
+      filename: "البريف",
+      source_url: parsed.data.url,
+      uploaded_by: session.userId,
+      external_source: "manual_satisfaction_brief",
+      external_id: externalId,
+    },
+    { onConflict: "organization_id,external_source,external_id" },
+  );
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "client.brief_link_attached",
+    entityType: "project",
+    entityId: project.id,
+    metadata: { clientId: parsed.data.clientId, url: parsed.data.url },
+  });
+
+  revalidatePath("/satisfaction");
+  revalidatePath(`/projects/${project.id}`);
+  return { ok: true, projectId: project.id };
+}
+
+// Upload a LOCAL brief file (txt/csv/xlsx/…) into Supabase Storage and register
+// it as a project document so satisfaction analysis can read the documented
+// requirements when no shareable Google Doc/Sheet exists. Does NOT re-analyze —
+// the caller decides when (the success prompt offers "now" vs "later").
+export async function uploadClientBriefFileAction(
+  formData: FormData,
+): Promise<BriefFileState> {
+  let session;
+  try {
+    session = await requirePermission("projects.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const clientId = String(formData.get("clientId") ?? "");
+  const projectIdInput = String(formData.get("projectId") ?? "") || undefined;
+  const file = formData.get("file");
+  if (!z.string().uuid().safeParse(clientId).success) return { error: "اختر عميلًا" };
+  if (!(file instanceof File) || file.size === 0) return { error: "اختر ملفًا صالحًا" };
+  if (file.size > MAX_BRIEF_FILE_BYTES) return { error: "الملف كبير جدًا (الحد ١٥ ميجابايت)" };
+
+  const project = await resolveBriefProject(session.orgId, clientId, projectIdInput);
+  if (!project) return { error: "لا يوجد مشروع نشط لهذا العميل لإرفاق البريف عليه" };
+
+  const safeName = sanitizeFilename(file.name);
+  const storagePath = `projects/${project.id}/brief/${Date.now()}-${safeName}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  const { error: upErr } = await supabaseAdmin.storage
+    .from("attachments")
+    .upload(storagePath, bytes, {
+      cacheControl: "3600",
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    });
+  if (upErr) return { error: `تعذّر رفع الملف: ${upErr.message}` };
+
+  // Stable external_id (project + safe filename) so re-uploading the same brief
+  // updates the row in place instead of creating a duplicate document.
+  const externalId = `${project.id}:brief-file:${safeName}`.slice(0, 240);
+  const { error } = await supabaseAdmin.from("project_attachments").upsert(
+    {
+      organization_id: session.orgId,
+      project_id: project.id,
+      filename: file.name,
+      mimetype: file.type || null,
+      size_bytes: file.size,
+      storage_path: storagePath,
+      uploaded_by: session.userId,
+      external_source: "manual_satisfaction_brief",
+      external_id: externalId,
+    },
+    { onConflict: "organization_id,external_source,external_id" },
+  );
+  if (error) {
+    // Roll back the orphaned storage object so a failed insert leaves no litter.
+    await supabaseAdmin.storage.from("attachments").remove([storagePath]);
+    return { error: error.message };
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "client.brief_file_uploaded",
+    entityType: "project",
+    entityId: project.id,
+    metadata: { clientId, filename: file.name, sizeBytes: file.size },
+  });
+
+  revalidatePath("/satisfaction");
+  revalidatePath(`/projects/${project.id}`);
+  return { ok: true, projectId: project.id, filename: file.name };
+}
 
 export async function uploadChatImportAction(
   _prev: UploadState | undefined,
@@ -180,6 +359,7 @@ export type AutoLinkState = {
   error?: string;
   linked?: number;
   classified?: number;
+  suggested?: number;
   scanned?: number;
 };
 
@@ -194,7 +374,9 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
   const [linksRes, clientsRes, projectsRes] = await Promise.all([
     supabaseAdmin
       .from("wa_group_links")
-      .select("chat_id, chat_name, client_id, project_id, group_kind")
+      .select(
+        "chat_id, chat_name, client_id, project_id, group_kind, suggested_client_id, suggestion_dismissed_at",
+      )
       .eq("organization_id", session.orgId),
     supabaseAdmin.from("clients").select("id, name").eq("organization_id", session.orgId),
     supabaseAdmin
@@ -219,8 +401,9 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
   );
 
   const existing = new Map(links.map((l) => [l.chat_id, l]));
-  let linked = 0; // groups newly linked to a project
+  let linked = 0; // groups newly linked to a project (strong matches, applied)
   let classified = 0; // groups newly tagged client/technical from emoji
+  let suggested = 0; // low-confidence matches parked for confirmation
 
   for (const m of matches) {
     const row = existing.get(m.chatId);
@@ -239,6 +422,23 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     const willClassify = m.groupKind && !row.group_kind;
     if (willClassify) update.group_kind = m.groupKind;
 
+    // Low-confidence match on an UNLINKED, non-dismissed group → park it as a
+    // suggestion the operator confirms/rejects (instead of dropping it silently).
+    // Existing links and applied strong matches are left untouched.
+    const willSuggest =
+      m.confidence === "low" &&
+      !!m.clientId &&
+      !row.client_id &&
+      !willLink &&
+      !row.suggestion_dismissed_at &&
+      row.suggested_client_id !== m.clientId;
+    if (willSuggest) {
+      update.suggested_client_id = m.clientId;
+      update.suggested_project_id = m.projectId ?? null;
+      update.suggested_confidence = m.confidence;
+      update.suggested_at = new Date().toISOString();
+    }
+
     if (Object.keys(update).length === 0) continue;
     update.updated_at = new Date().toISOString();
 
@@ -250,6 +450,7 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     if (error) continue;
     if (willLink) linked += 1;
     if (willClassify) classified += 1;
+    if (willSuggest) suggested += 1;
 
     // Backfill stored messages so transcripts pick up the new client/kind.
     if (update.client_id || update.group_kind) {
@@ -270,12 +471,186 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     action: "wa_group.auto_linked_projects",
     entityType: "wa_group_link",
     entityId: session.orgId,
-    metadata: { linked, classified, scanned: links.length },
+    metadata: { linked, classified, suggested, scanned: links.length },
+  });
+
+  // Notify owners about anything that now needs a human eye: pending
+  // confirmations + active projects still missing their WhatsApp groups.
+  await notifyWaLinkingState(session.orgId);
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true, linked, classified, suggested, scanned: links.length };
+}
+
+// Resolve the org's owner user ids (recipients for org-level WA-linking alerts).
+async function ownerUserIds(orgId: string): Promise<string[]> {
+  const { data } = await supabaseAdmin
+    .from("user_roles")
+    .select("user_id, role:roles!inner(key)")
+    .eq("organization_id", orgId)
+    .eq("role.key", "owner");
+  const ids = new Set<string>();
+  for (const r of (data ?? []) as Array<{ user_id: string | null }>) {
+    if (r.user_id) ids.add(r.user_id);
+  }
+  return [...ids];
+}
+
+// Bell-notify owners about pending link suggestions and projects missing groups.
+// Deduped: skips a type if the owner already has an unread one of it, so a
+// repeated sync doesn't pile up duplicates — the in-page sections are the
+// always-accurate source of truth; this is just the nudge.
+async function notifyWaLinkingState(orgId: string) {
+  const [{ getWaLinkSuggestions, getProjectGroupCoverage }, owners] = await Promise.all([
+    import("@/lib/data/satisfaction"),
+    ownerUserIds(orgId),
+  ]);
+  if (owners.length === 0) return;
+  const [suggestions, gaps] = await Promise.all([
+    getWaLinkSuggestions(orgId),
+    getProjectGroupCoverage(orgId),
+  ]);
+
+  const plans: Array<{ type: string; title: string }> = [];
+  if (suggestions.length > 0)
+    plans.push({
+      type: "WA_LINK_SUGGESTIONS",
+      title: `${suggestions.length} رابط مجموعة واتساب بانتظار التأكيد`,
+    });
+  if (gaps.length > 0)
+    plans.push({
+      type: "WA_PROJECT_COVERAGE",
+      title: `${gaps.length} مشروع بدون مجموعات واتساب مكتملة`,
+    });
+  if (plans.length === 0) return;
+
+  for (const userId of owners) {
+    for (const plan of plans) {
+      const { data: open } = await supabaseAdmin
+        .from("notifications")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("recipient_user_id", userId)
+        .eq("type", plan.type)
+        .is("read_at", null)
+        .limit(1);
+      if (open && open.length > 0) continue; // already nudged, not yet read
+      await createNotification({
+        organizationId: orgId,
+        recipientUserId: userId,
+        type: plan.type,
+        title: plan.title,
+        entityType: "wa_group_link",
+        entityId: null,
+      });
+    }
+  }
+}
+
+// Confirm a parked suggestion → promote it to the live link.
+export async function confirmWaSuggestionAction(input: {
+  chatId: string;
+}): Promise<{ ok?: true; error?: string }> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const chatId = z.string().min(3).safeParse(input.chatId);
+  if (!chatId.success) return { error: "معرّف مجموعة غير صالح" };
+
+  const { data: row, error: rowErr } = await supabaseAdmin
+    .from("wa_group_links")
+    .select("id, chat_name, group_kind, suggested_client_id, suggested_project_id")
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId.data)
+    .maybeSingle();
+  if (rowErr) return { error: rowErr.message };
+  if (!row?.suggested_client_id) return { error: "لا يوجد اقتراح لتأكيده" };
+
+  const kind = row.group_kind ?? detectGroupKind(row.chat_name);
+  const { error } = await supabaseAdmin
+    .from("wa_group_links")
+    .update({
+      client_id: row.suggested_client_id,
+      project_id: row.suggested_project_id,
+      ...(row.group_kind ? {} : kind ? { group_kind: kind } : {}),
+      suggested_client_id: null,
+      suggested_project_id: null,
+      suggested_confidence: null,
+      suggested_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId.data);
+  if (error) return { error: error.message };
+
+  // Backfill stored messages so transcripts pick up the confirmed mapping.
+  await supabaseAdmin
+    .from("wa_messages")
+    .update({
+      client_id: row.suggested_client_id,
+      ...(row.group_kind ? {} : kind ? { group_kind: kind } : {}),
+    })
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId.data);
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.suggestion_confirmed",
+    entityType: "wa_group_link",
+    entityId: row.id,
+    metadata: { chatId: chatId.data, clientId: row.suggested_client_id, projectId: row.suggested_project_id },
   });
 
   revalidatePath("/satisfaction/groups");
   revalidatePath("/satisfaction");
-  return { ok: true, linked, classified, scanned: links.length };
+  return { ok: true };
+}
+
+// Reject a parked suggestion → dismiss it (won't be re-suggested).
+export async function rejectWaSuggestionAction(input: {
+  chatId: string;
+}): Promise<{ ok?: true; error?: string }> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const chatId = z.string().min(3).safeParse(input.chatId);
+  if (!chatId.success) return { error: "معرّف مجموعة غير صالح" };
+
+  const { data: row, error } = await supabaseAdmin
+    .from("wa_group_links")
+    .update({
+      suggested_client_id: null,
+      suggested_project_id: null,
+      suggested_confidence: null,
+      suggested_at: null,
+      suggestion_dismissed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId.data)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.suggestion_rejected",
+    entityType: "wa_group_link",
+    entityId: row?.id ?? null,
+    metadata: { chatId: chatId.data },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  return { ok: true };
 }
 
 // ---- Pull the group list from the OpenWA gateway -------------------------

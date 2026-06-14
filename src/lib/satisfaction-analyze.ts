@@ -91,7 +91,7 @@ export async function analyzeClientSatisfaction(
     ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.`
     : `- briefAdherenceScore: أعده null لأن نص وثيقة البريف غير متاح في مدخلات التحليل. لا تستنتج الالتزام بالبريف من مجموعة الفريق التقني أو من المحادثات.`;
   const briefBlock = brief
-    ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
+    ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source}, ${brief.kind})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
     : "\n\n=== البريف ===\n(لم يتم العثور على نص بريف قابل للقراءة من ملفات المشروع/المهام لهذا العميل)";
 
   // Real delivery state from Rawasm — the client's actually-overdue tasks and
@@ -242,7 +242,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
       satisfactionScore: result.satisfactionScore,
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
-      briefUsed: brief ? { source: brief.source, filename: brief.filename, url: brief.url } : null,
+      briefUsed: brief ? { source: brief.source, kind: brief.kind, filename: brief.filename, url: brief.url } : null,
       windowKind,
     },
     importance: result.satisfactionScore < 50 ? "high" : "normal",

@@ -3,7 +3,12 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { listClientOptions } from "@/lib/data/clients";
-import { getWaGroupLinks, listProjectOptions } from "@/lib/data/satisfaction";
+import {
+  getWaGroupLinks,
+  listProjectOptions,
+  getWaLinkSuggestions,
+  getProjectGroupCoverage,
+} from "@/lib/data/satisfaction";
 import { PageHeader } from "@/components/page-header";
 import { WaGroupsWorkspace } from "./groups-workspace";
 
@@ -15,10 +20,12 @@ export default async function WaGroupsPage() {
   const session = await requirePagePermission("clients.view");
   const t = await getTranslations("SatisfactionPage");
 
-  const [links, clients, projects] = await Promise.all([
+  const [links, clients, projects, suggestions, coverageGaps] = await Promise.all([
     getWaGroupLinks(session.orgId),
     listClientOptions(session.orgId),
     listProjectOptions(session.orgId),
+    getWaLinkSuggestions(session.orgId),
+    getProjectGroupCoverage(session.orgId),
   ]);
   const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
   const projectOptions = projects.map((p) => ({
@@ -36,7 +43,13 @@ export default async function WaGroupsPage() {
         <ArrowRight className="size-3.5 rtl:rotate-180" />
         {t("groups.back")}
       </Link>
-      <WaGroupsWorkspace links={links} options={options} projectOptions={projectOptions} />
+      <WaGroupsWorkspace
+        links={links}
+        options={options}
+        projectOptions={projectOptions}
+        suggestions={suggestions}
+        coverageGaps={coverageGaps}
+      />
     </div>
   );
 }

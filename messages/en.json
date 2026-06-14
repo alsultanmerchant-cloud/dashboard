@@ -2888,6 +2888,22 @@
     "participants": "{n} participants",
     "satisfactionScore": "Satisfaction",
     "briefAdherence": "Brief adherence",
+    "briefMissingShort": "Not found",
+    "briefMissingTitle": "Brief not found",
+    "briefMissingDescription": "The analysis could not find a readable brief in the project/task documents, so brief adherence was left empty instead of guessed. Paste a Google Doc or Google Sheet link, or upload a brief file from your device, then re-run the analysis.",
+    "briefLinkPlaceholder": "Google Doc or Google Sheet brief URL",
+    "saveBriefLink": "Save brief link",
+    "briefLinkSaved": "Brief link saved.",
+    "uploadBriefFile": "Upload file",
+    "briefFileSaved": "Brief file “{name}” uploaded and saved to project documents.",
+    "briefFileHint": "Readable formats: text (txt), CSV, Excel (xlsx). PDFs and images are not read — use a Google Doc link instead.",
+    "briefSavedPrompt": "The brief was saved to the project documents. Re-analyze now to score brief adherence?",
+    "reanalyzeNow": "Re-analyze now",
+    "later": "Later",
+    "or": "or",
+    "analyzeFailed": "Analysis failed",
+    "openProject": "Open project",
+    "noActiveProject": "No active project",
     "summary": "Summary",
     "timeline": "Satisfaction trend",
     "risks": "Relationship risks",
@@ -2981,9 +2997,24 @@
       "historyImported": "Imported {n} messages from {g} groups",
       "autoLink": "Auto-link projects",
       "autoLinked": "Linked {n} to projects · classified {k} (💫 client / 📍 team)",
+      "autoSuggested": "{s} low-confidence match(es) queued for confirmation",
       "unmappedProject": "No project",
       "searchProject": "Search project…",
-      "noProjects": "No projects found"
+      "noProjects": "No projects found",
+      "pending": {
+        "title": "{n} link(s) awaiting confirmation",
+        "subtitle": "The system matched these groups to a client but isn't sure. Confirm to link, or reject to dismiss.",
+        "suggests": "Suggests",
+        "confirm": "Confirm",
+        "reject": "Reject",
+        "failed": "Action failed"
+      },
+      "coverage": {
+        "title": "{n} project(s) missing WhatsApp groups",
+        "subtitle": "Every active project should have both a 💫 client group and a 📍 team group.",
+        "missingClient": "No client group",
+        "missingTeam": "No team group"
+      }
     },
     "connect": {
       "title": "Connect WhatsApp number",
