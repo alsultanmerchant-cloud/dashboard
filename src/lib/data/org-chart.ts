@@ -10,6 +10,9 @@ export type OrgEmployee = {
   position: string | null;
   department_id: string | null;
   manager_employee_id: string | null;
+  // قائد الفريق — distinct from manager_employee_id (المدير). Edited on
+  // /organization/employees. Used as the team-leader source on task cards.
+  team_leader_employee_id: string | null;
   employment_status: string;
 };
 
@@ -67,7 +70,7 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       supabaseAdmin
         .from("employee_profiles")
         .select(
-          "id, user_id, full_name, job_title, email, department_id, manager_employee_id, employment_status",
+          "id, user_id, full_name, job_title, email, department_id, manager_employee_id, team_leader_employee_id, employment_status",
         )
         .eq("organization_id", orgId),
     ]);
@@ -85,6 +88,7 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
       email: e.email ?? null,
       department_id: e.department_id ?? null,
       manager_employee_id: e.manager_employee_id ?? null,
+      team_leader_employee_id: e.team_leader_employee_id ?? null,
       employment_status: e.employment_status,
       position: e.position ?? null,
     });
@@ -120,6 +124,7 @@ export async function loadOrgChart(orgId: string): Promise<OrgChart> {
     const norm: OrgEmployee = {
       ...e,
       manager_employee_id: resolveId(e.manager_employee_id),
+      team_leader_employee_id: resolveId(e.team_leader_employee_id),
     };
     employees.push(norm);
     empById.set(norm.id, norm);

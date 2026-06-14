@@ -138,3 +138,29 @@ export async function getClientFinanceBadge(
   const map = await getClientFinanceMap(orgId);
   return map[clientId] ?? null;
 }
+
+// The /clients page lists LIVE Odoo clients keyed by odoo id — re-key the
+// finance map through clients.external_id (odoo importer, migration 0011).
+async function _getClientFinanceMapByOdooId(orgId: string): Promise<ClientFinanceMap> {
+  const [map, clientsRes] = await Promise.all([
+    getClientFinanceMap(orgId),
+    supabaseAdmin
+      .from("clients")
+      .select("id, external_id")
+      .eq("organization_id", orgId)
+      .eq("external_source", "odoo")
+      .not("external_id", "is", null),
+  ]);
+  if (clientsRes.error) {
+    console.error("[clientFinance.byOdooId]", clientsRes.error.message);
+    return {};
+  }
+  const out: ClientFinanceMap = {};
+  for (const c of clientsRes.data ?? []) {
+    const badge = map[c.id as string];
+    if (badge && c.external_id) out[String(c.external_id)] = badge;
+  }
+  return out;
+}
+
+export const getClientFinanceMapByOdooId = cache(_getClientFinanceMapByOdooId);

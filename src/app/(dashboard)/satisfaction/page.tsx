@@ -6,6 +6,7 @@ import {
   getClientSatisfactionDetail,
   getClientExecutionSnapshot,
 } from "@/lib/data/satisfaction";
+import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
 import { SatisfactionWorkspace } from "./satisfaction-workspace";
 
@@ -20,13 +21,14 @@ export default async function SatisfactionPage({
   const selectedId = sp.client ?? null;
   const selectedAnalysisId = sp.analysis ?? null;
 
-  const [clients, rows, detail, execution] = await Promise.all([
+  const [clients, rows, detail, execution, financeMap] = await Promise.all([
     listClientOptions(session.orgId),
     getSatisfactionRows(session.orgId),
     selectedId
       ? getClientSatisfactionDetail(session.orgId, selectedId, selectedAnalysisId)
       : Promise.resolve(null),
     selectedId ? getClientExecutionSnapshot(session.orgId, selectedId) : Promise.resolve(null),
+    getClientFinanceMap(session.orgId),
   ]);
 
   const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
@@ -38,6 +40,7 @@ export default async function SatisfactionPage({
         options={options}
         rows={rows}
         detail={detail}
+        financeMap={financeMap}
         execution={execution}
         selectedId={selectedId}
         selectedAnalysisId={selectedAnalysisId}

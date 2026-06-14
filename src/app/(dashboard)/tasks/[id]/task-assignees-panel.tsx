@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { AnchoredPopover } from "@/components/ui/anchored-popover";
 import { cn } from "@/lib/utils";
+import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import {
   addTaskAssigneeAction,
   removeTaskAssigneeAction,
@@ -33,6 +34,11 @@ export type AssigneeRow = {
   id: string;
   employee_id: string;
   role_type: AssigneeRoleType;
+  // Structural role from the employee's position (positions.role) — the badge
+  // shows THIS (the person's real role), not role_type (the task's stage
+  // function). Null when the employee has no position set; falls back to
+  // role_type. Source of truth: /organization/employees.
+  positionRole: string | null;
   team_manager_employee_id: string | null;
   head_of_dept_employee_id: string | null;
   employee: {
@@ -271,7 +277,11 @@ export function TaskAssigneesPanel({
                       {a.employee.full_name}
                     </span>
                     <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-[10px] font-semibold text-cyan">
-                      {roleLabels[a.role_type]}
+                      {(a.positionRole &&
+                        TASK_OWNER_ROLE_LABELS[
+                          a.positionRole as TaskOwnerRoleKey
+                        ]) ||
+                        roleLabels[a.role_type]}
                     </span>
                     {isCurrentOwner && (
                       <span

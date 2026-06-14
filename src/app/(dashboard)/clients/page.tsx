@@ -3,6 +3,8 @@ import { getTranslations } from "next-intl/server";
 import { Building2, Phone, Mail, Briefcase, ChevronLeft, Globe, Merge } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { listLiveClientsPaged } from "@/lib/odoo/live";
+import { getClientFinanceMapByOdooId } from "@/lib/data/client-finance";
+import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
@@ -24,10 +26,10 @@ export default async function ClientsPage({
   const t = await getTranslations("ClientsPage");
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
-  const { rows: clients, total, totals } = await listLiveClientsPaged({
-    page,
-    pageSize: PAGE_SIZE,
-  });
+  const [{ rows: clients, total, totals }, financeMap] = await Promise.all([
+    listLiveClientsPaged({ page, pageSize: PAGE_SIZE }),
+    getClientFinanceMapByOdooId(session.orgId),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -105,6 +107,10 @@ export default async function ClientsPage({
                     >
                       {c.name}
                     </Link>
+                    <ClientFinanceBadges
+                      badge={financeMap[String(c.odooId)]}
+                      className="mt-1 block"
+                    />
                   </DataTableCell>
                   <DataTableCell className="text-muted-foreground">
                     <div className="flex flex-col gap-1 text-xs">

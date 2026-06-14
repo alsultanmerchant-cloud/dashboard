@@ -370,6 +370,7 @@ function makeLocalEmployee(
     position: role,
     department_id: departmentId,
     manager_employee_id: null,
+    team_leader_employee_id: null,
     employment_status: "active",
   };
 }

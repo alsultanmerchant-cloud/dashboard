@@ -162,22 +162,33 @@ function GroupRow({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Re-sync with server data after router.refresh() — without this, rows kept
+  // showing (and on the next persist, WRITING BACK) values from page load,
+  // which wiped links that sync/auto-link/another tab had set in the meantime.
+  // Render-time reset (React's "adjusting state when props change" pattern).
+  const [prevLink, setPrevLink] = useState(link);
+  if (
+    prevLink.clientId !== link.clientId ||
+    prevLink.projectId !== link.projectId ||
+    prevLink.groupKind !== link.groupKind ||
+    prevLink.isActive !== link.isActive
+  ) {
+    setPrevLink(link);
+    setClientId(link.clientId ?? "");
+    setProjectId(link.projectId ?? "");
+    setKind(link.groupKind ?? "");
+    setActive(link.isActive);
+  }
+
   // Auto-save: each control change persists immediately (no Save button).
-  // We optimistically apply the change to local state and send the full
-  // current row to the action, computing the payload from state + patch so
-  // the not-yet-flushed React state doesn't get sent stale.
+  // Only the changed field is sent — the action has PATCH semantics, so an
+  // out-of-date row can never overwrite the other columns.
   const persist = (patch: {
     clientId?: string;
     projectId?: string;
     kind?: GroupKind | "";
     active?: boolean;
   }) => {
-    const next = {
-      clientId: patch.clientId ?? clientId,
-      projectId: patch.projectId ?? projectId,
-      kind: patch.kind ?? kind,
-      active: patch.active ?? active,
-    };
     if (patch.clientId !== undefined) setClientId(patch.clientId);
     if (patch.projectId !== undefined) setProjectId(patch.projectId);
     if (patch.kind !== undefined) setKind(patch.kind);
@@ -187,10 +198,10 @@ function GroupRow({
     startTransition(async () => {
       const res = await mapWaGroupAction({
         chatId: link.chatId,
-        clientId: next.clientId || null,
-        projectId: next.projectId || null,
-        groupKind: (next.kind || null) as GroupKind | null,
-        isActive: next.active,
+        ...(patch.clientId !== undefined ? { clientId: patch.clientId || null } : {}),
+        ...(patch.projectId !== undefined ? { projectId: patch.projectId || null } : {}),
+        ...(patch.kind !== undefined ? { groupKind: (patch.kind || null) as GroupKind | null } : {}),
+        ...(patch.active !== undefined ? { isActive: patch.active } : {}),
       });
       if (res.error) {
         setError(res.error);

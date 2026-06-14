@@ -23,10 +23,15 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
+import {
+  TASK_OWNER_ROLE_KEYS,
+  TASK_OWNER_ROLE_LABELS,
+} from "@/lib/labels";
+import { ClientFinanceBadges } from "@/components/client-finance-badges";
+import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type {
   AccountabilityEvidence,
   AccountabilityOverview,
-  AccountabilityRole,
   AccountabilityScorecardRow,
   AiLinkedSignal,
   ReviewerRigorRow,
@@ -34,11 +39,14 @@ import type {
 
 const NA = "—";
 const SCORECARD_PAGE_SIZE = 5;
+// Filter bucket key for employees with no position set on /organization/employees.
+const NONE_KEY = "__none__";
 
 interface Props {
   overview: AccountabilityOverview;
   evidence: AccountabilityEvidence | null;
   selectedId: string | null;
+  financeMap: ClientFinanceMap;
 }
 
 // Low-confidence rows render neutral (never red): a tiny sample must not look
@@ -64,12 +72,15 @@ function median(nums: number[]): number | null {
   return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
 }
 
-export function AccountabilityWorkspace({ overview, evidence, selectedId }: Props) {
+export function AccountabilityWorkspace({ overview, evidence, selectedId, financeMap }: Props) {
   const t = useTranslations("AccountabilityPage");
   const tStages = useTranslations("TasksBoard.stages");
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState<AccountabilityRole | "all">("all");
+  // Filter by the employee's real POSITION (positions.role), not the
+  // accountability/stage attribution — so the chips agree with the الدور
+  // column. "all" = no filter; NONE_KEY = employees with no position set.
+  const [roleFilter, setRoleFilter] = useState<string>("all");
 
   const stageLabel = (s: string) => {
     try {
@@ -89,22 +100,30 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId }: Prop
     return t("fmt.workdays", { n: Math.round((h / 8) * 10) / 10 });
   };
 
-  const roleCounts = useMemo(() => {
-    const counts: Record<AccountabilityRole | "all", number> = {
-      all: overview.rows.length,
-      agent: 0,
-      account_manager: 0,
-      team_manager: 0,
-    };
-    for (const r of overview.rows) counts[r.role] += 1;
-    return counts;
+  // Position-role filter groups, in canonical order, only those present. A
+  // trailing bucket collects employees with no position set.
+  const positionGroups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of overview.rows) {
+      const k = r.positionRole ?? NONE_KEY;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const groups: { key: string; label: string; count: number }[] = [];
+    for (const key of TASK_OWNER_ROLE_KEYS) {
+      const c = counts.get(key);
+      if (c) groups.push({ key, label: TASK_OWNER_ROLE_LABELS[key], count: c });
+    }
+    const none = counts.get(NONE_KEY);
+    if (none) groups.push({ key: NONE_KEY, label: "غير محدد", count: none });
+    return groups;
   }, [overview.rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return overview.rows
       .filter((r) => {
-        if (roleFilter !== "all" && r.role !== roleFilter) return false;
+        if (roleFilter !== "all" && (r.positionRole ?? NONE_KEY) !== roleFilter)
+          return false;
         if (q && !r.fullName.toLowerCase().includes(q)) return false;
         return true;
       })
@@ -207,22 +226,25 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId }: Prop
             className="h-9 w-full rounded-lg border border-border bg-card ps-8 pe-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/40"
           />
         </div>
-        <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-          {(["all", "agent", "account_manager", "team_manager"] as const).map((key) => (
+        <div className="inline-flex flex-wrap rounded-lg border border-border bg-card p-0.5">
+          {[
+            { key: "all", label: t("roleFilter.all"), count: overview.rows.length },
+            ...positionGroups,
+          ].map((g) => (
             <button
-              key={key}
+              key={g.key}
               type="button"
-              onClick={() => setRoleFilter(key)}
+              onClick={() => setRoleFilter(g.key)}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                roleFilter === key
+                roleFilter === g.key
                   ? "bg-soft-2 text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {key === "all" ? t("roleFilter.all") : t(`role.${key}`)}
+              {g.label}
               <span className="rounded-full bg-soft-1 px-1.5 text-[10px] tabular-nums text-muted-foreground">
-                {roleCounts[key]}
+                {g.count}
               </span>
             </button>
           ))}
@@ -250,7 +272,7 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId }: Prop
       </div>
 
       {/* Tier-B: AI-linked signals — always quoted, always labeled, never scored */}
-      <AiLinkedSection signals={overview.aiSignals} t={t} />
+      <AiLinkedSection signals={overview.aiSignals} financeMap={financeMap} t={t} />
 
       <p className="text-end text-[10px] text-muted-foreground/60">
         {t("generatedAt")}{" "}
@@ -334,7 +356,7 @@ function ScorecardTable({
                     </td>
                     <td className="px-3 py-3">
                       <span className="rounded-md border border-border/60 bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        {t(`role.${r.role}`)}
+                        {r.positionLabel ?? t(`role.${r.role}`)}
                       </span>
                     </td>
                     <td className="px-3 py-3">
@@ -749,9 +771,11 @@ const KNOWN_KINDS = new Set(["complaint", "praise", "delay_mention", "risk"]);
 
 function AiLinkedSection({
   signals,
+  financeMap,
   t,
 }: {
   signals: AiLinkedSignal[];
+  financeMap: ClientFinanceMap;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
@@ -810,6 +834,7 @@ function AiLinkedSection({
                     {s.clientName && (
                       <span className="rounded bg-soft-2 px-1.5 py-0.5">{s.clientName}</span>
                     )}
+                    {s.clientId && <ClientFinanceBadges badge={financeMap[s.clientId]} />}
                     <span className="rounded bg-soft-2 px-1.5 py-0.5">
                       {t("ai.sourceLabel")}: {s.source}
                     </span>

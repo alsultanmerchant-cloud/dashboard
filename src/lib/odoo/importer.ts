@@ -955,33 +955,23 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     });
   }
 
-  const { data: services } = await supabaseAdmin
-    .from("services")
-    .select("id, external_id, name, slug")
+  // Employee UUID → that employee's own team leader (قائد الفريق). Source of
+  // truth is /organization/employees: team_leader_employee_id ONLY. There is NO
+  // fallback to المدير (manager_employee_id) — المدير is the manager of the
+  // department heads, a higher level, not the person's team leader. The task
+  // card and accountability attribution both read
+  // task_assignees.team_manager_employee_id, so it must mirror قائد الفريق —
+  // NOT the project's specialist slot and NOT the manager.
+  const { data: leaderRows } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, team_leader_employee_id")
     .eq("organization_id", ctx.organizationId);
-  const serviceKindById = new Map<string, "social" | "media" | "seo" | null>();
-  for (const s of services ?? []) {
-    const ext = s.external_id ? Number(s.external_id) : null;
-    let kind: "social" | "media" | "seo" | null = null;
-    if (ext === 234 || ext === 158) kind = "social";
-    else if (ext === 134 || ext === 69) kind = "media";
-    else if (ext === 235 || ext === 71) kind = "seo";
-    else {
-      const haystack = `${s.name ?? ""} ${s.slug ?? ""}`.toLowerCase();
-      if (haystack.includes("social") || haystack.includes("سوشيال") || haystack.includes("التواصل")) {
-        kind = "social";
-      } else if (
-        haystack.includes("media") ||
-        haystack.includes("ممولة") ||
-        haystack.includes("إعلانات") ||
-        haystack.includes("ads")
-      ) {
-        kind = "media";
-      } else if (haystack.includes("seo") || haystack.includes("سيو") || haystack.includes("تحسين")) {
-        kind = "seo";
-      }
-    }
-    serviceKindById.set(s.id as string, kind);
+  const employeeLeaderById = new Map<string, string | null>();
+  for (const r of leaderRows ?? []) {
+    employeeLeaderById.set(
+      r.id as string,
+      (r.team_leader_employee_id as string | null) ?? null,
+    );
   }
 
   // Batch the project filter to keep each RPC well under Odoo's read timeout.
@@ -1310,36 +1300,21 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     role_type: "agent" | "account_manager";
     team_manager_employee_id: string | null;
   }[] = [];
+  // Each assignee's team leader comes from their OWN org-chart record, never
+  // the project's specialist/PM slot (which mislabelled 90% of links).
+  const leaderFor = (eid: string): string | null => {
+    const leader = employeeLeaderById.get(eid) ?? null;
+    return leader && leader !== eid ? leader : null;
+  };
   for (const [taskUuid, s] of stagedByTaskUuid) {
-    const projectRole = projectRoleById.get(s.projectUuid) ?? null;
-    const serviceId = (s.row.service_id as string | null) ?? null;
-    const serviceKind = serviceId ? (serviceKindById.get(serviceId) ?? null) : null;
     for (const eid of s.agentEmployeeIds) {
       if (s.amEmployeeId && eid === s.amEmployeeId) continue;
-      const chooseManager = (candidate: string | null): string | null => {
-        if (candidate && candidate !== eid) return candidate;
-        if (projectRole?.projectManagerId && projectRole.projectManagerId !== eid) {
-          return projectRole.projectManagerId;
-        }
-        return null;
-      };
-      const teamManagerEmployeeId =
-        serviceKind === "social"
-          ? chooseManager(projectRole?.socialManagerId ?? null)
-          : serviceKind === "media"
-            ? chooseManager(projectRole?.mediaManagerId ?? null)
-            : serviceKind === "seo"
-              ? chooseManager(projectRole?.seoManagerId ?? null)
-              : chooseManager(projectRole?.projectManagerId ?? null);
       assigneeInserts.push({
         organization_id: ctx.organizationId,
         task_id: taskUuid,
         employee_id: eid,
         role_type: "agent",
-        team_manager_employee_id:
-          teamManagerEmployeeId && teamManagerEmployeeId !== eid
-            ? teamManagerEmployeeId
-            : null,
+        team_manager_employee_id: leaderFor(eid),
       });
     }
     if (s.amEmployeeId && !existingAMSet.has(taskUuid)) {
@@ -1348,10 +1323,7 @@ async function importTasks(ctx: ImportContext): Promise<number> {
         task_id: taskUuid,
         employee_id: s.amEmployeeId,
         role_type: "account_manager",
-        team_manager_employee_id:
-          projectRole?.projectManagerId && projectRole.projectManagerId !== s.amEmployeeId
-            ? projectRole.projectManagerId
-            : null,
+        team_manager_employee_id: leaderFor(s.amEmployeeId),
       });
     }
   }

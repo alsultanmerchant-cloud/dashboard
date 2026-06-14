@@ -43,7 +43,8 @@ export async function GET(request: NextRequest) {
   if (provided !== expected) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const dry = request.nextUrl.searchParams.get("dry") === "1";
-  const to = recipients(request.nextUrl.searchParams.get("to"));
+  const overrideTo = request.nextUrl.searchParams.get("to");
+  const to = recipients(overrideTo);
   if (!dry && to.length === 0)
     return NextResponse.json({ error: "no recipients (CEO_BRIEF_RECIPIENTS empty)" }, { status: 400 });
   if (!dry && !waConfigured())
@@ -118,10 +119,12 @@ export async function GET(request: NextRequest) {
     entity_id: org.id,
     payload: {
       kind: "ceo_whatsapp_brief",
+      override_to: overrideTo,
       recipients: to,
       sent: results.length - failed.length,
       failed: failed.length,
       caption: brief.caption,
+      results,
     },
     importance: failed.length > 0 ? "high" : "normal",
   });

@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { setClientArchivedAction } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ClientFinanceBadges } from "@/components/client-finance-badges";
+import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -43,6 +45,7 @@ interface Props {
   execution: ClientExecutionSnapshot | null;
   selectedId: string | null;
   selectedAnalysisId: string | null;
+  financeMap: ClientFinanceMap;
 }
 
 function scoreTone(score: number | null) {
@@ -92,6 +95,7 @@ export function SatisfactionWorkspace({
   execution,
   selectedId,
   selectedAnalysisId,
+  financeMap,
 }: Props) {
   const t = useTranslations("SatisfactionPage");
   const tStages = useTranslations("TasksPage.stages");
@@ -193,13 +197,17 @@ export function SatisfactionWorkspace({
       </div>
 
       {!selectedId ? (
-        <SatisfactionOverview rows={rows} onSelect={select} onAnalyze={analyzeClient} t={t} />
+        <SatisfactionOverview rows={rows} financeMap={financeMap} onSelect={select} onAnalyze={analyzeClient} t={t} />
       ) : detail ? (
         <div className="space-y-6">
           {error && (
             <p className="flex items-center gap-2 rounded-lg bg-red-dim px-3 py-2 text-sm text-cc-red">
               <AlertTriangle className="size-4" /> {error}
             </p>
+          )}
+
+          {selectedId && financeMap[selectedId] && (
+            <ClientFinanceBadges badge={financeMap[selectedId]} size="md" />
           )}
 
           {/* Analyze — two windows. Current week feeds the board; all time is
@@ -309,11 +317,13 @@ function bucketOf(r: SatisfactionRow): BucketKey {
 
 function SatisfactionOverview({
   rows,
+  financeMap,
   onSelect,
   onAnalyze,
   t,
 }: {
   rows: SatisfactionRow[];
+  financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
   t: ReturnType<typeof useTranslations>;
@@ -420,9 +430,9 @@ function SatisfactionOverview({
       </div>
 
       {view === "board" ? (
-        <SatisfactionBoard rows={filtered} onSelect={onSelect} onAnalyze={onAnalyze} t={t} />
+        <SatisfactionBoard rows={filtered} financeMap={financeMap} onSelect={onSelect} onAnalyze={onAnalyze} t={t} />
       ) : (
-        <OverviewTable rows={filtered} onSelect={onSelect} t={t} />
+        <OverviewTable rows={filtered} financeMap={financeMap} onSelect={onSelect} t={t} />
       )}
     </div>
   );
@@ -431,11 +441,13 @@ function SatisfactionOverview({
 // ---- Kanban board (health buckets) ---------------------------------------
 function SatisfactionBoard({
   rows,
+  financeMap,
   onSelect,
   onAnalyze,
   t,
 }: {
   rows: SatisfactionRow[];
+  financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
   t: ReturnType<typeof useTranslations>;
@@ -483,6 +495,7 @@ function SatisfactionBoard({
                   <BoardCard
                     key={r.clientId}
                     row={r}
+                    finance={financeMap[r.clientId]}
                     accent={b.accent}
                     onSelect={onSelect}
                     onAnalyze={onAnalyze}
@@ -500,12 +513,14 @@ function SatisfactionBoard({
 
 function BoardCard({
   row,
+  finance,
   accent,
   onSelect,
   onAnalyze,
   t,
 }: {
   row: SatisfactionRow;
+  finance: ClientFinanceBadge | undefined;
   accent: string;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
@@ -556,6 +571,7 @@ function BoardCard({
             </span>
           )}
         </p>
+        <ClientFinanceBadges badge={finance} className="mt-0.5" />
         <p className={cn("text-[11px] font-medium", err ? "text-cc-red" : accent)}>
           {row.sentiment ? t(`sentiment.${row.sentiment}`) : t("board.noGroups")}
         </p>
@@ -590,10 +606,12 @@ function BoardCard({
 // ---- Overview table ------------------------------------------------------
 function OverviewTable({
   rows,
+  financeMap,
   onSelect,
   t,
 }: {
   rows: SatisfactionRow[];
+  financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -630,6 +648,7 @@ function OverviewTable({
                           </span>
                         )}
                       </span>
+                      <ClientFinanceBadges badge={financeMap[r.clientId]} className="ms-1.5" />
                     </td>
                     <td className="p-3 text-center">
                       <span className="inline-flex gap-1">

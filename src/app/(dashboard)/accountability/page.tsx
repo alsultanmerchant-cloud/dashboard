@@ -4,6 +4,7 @@ import {
   getAccountabilityOverview,
   getEmployeeAccountabilityEvidence,
 } from "@/lib/data/accountability";
+import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
 import { AccountabilityWorkspace } from "./accountability-workspace";
 
@@ -22,11 +23,12 @@ export default async function AccountabilityPage({
   const { emp } = await searchParams;
   const selectedId = emp ?? null;
 
-  const [overview, evidence] = await Promise.all([
+  const [overview, evidence, financeMap] = await Promise.all([
     getAccountabilityOverview(session.orgId),
     selectedId
       ? getEmployeeAccountabilityEvidence(session.orgId, selectedId)
       : Promise.resolve(null),
+    getClientFinanceMap(session.orgId),
   ]);
 
   return (
@@ -36,6 +38,7 @@ export default async function AccountabilityPage({
         overview={overview}
         evidence={evidence}
         selectedId={selectedId}
+        financeMap={financeMap}
       />
     </div>
   );

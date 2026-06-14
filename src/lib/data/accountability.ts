@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 
 // =========================================================================
@@ -47,6 +48,11 @@ export interface AccountabilityScorecardRow {
   employeeId: string;
   fullName: string;
   jobTitle: string | null;
+  // Structural role from the employee's position (positions.role) — what the
+  // الدور column shows. Distinct from `role` below (the accountability/stage
+  // attribution that the SCORE is scoped to). Source: /organization/employees.
+  positionRole: string | null;
+  positionLabel: string | null; // positionRole → Arabic, else jobTitle
   role: AccountabilityRole;
   openTasks: number;
   overdueOwned: number;
@@ -241,6 +247,7 @@ interface ScorecardSqlRow {
   employee_id: string;
   full_name: string;
   job_title: string | null;
+  position_role: string | null;
   role: AccountabilityRole;
   open_tasks: number;
   overdue_owned: number;
@@ -307,7 +314,7 @@ keys as (
   union
   select employee_id, role from measured
 )
-select e.id as employee_id, e.full_name, e.job_title, k.role,
+select e.id as employee_id, e.full_name, e.job_title, pp.role as position_role, k.role,
        coalesce(oc.open_tasks, 0)::int as open_tasks,
        coalesce(oc.overdue_owned, 0)::int as overdue_owned,
        m.avg_dwell,
@@ -317,6 +324,7 @@ select e.id as employee_id, e.full_name, e.job_title, k.role,
        coalesce(m.rework_30d, 0)::int as rework_30d
   from keys k
   join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
+  left join positions pp on pp.id = e.position_id
   left join open_counts oc on oc.employee_id = k.employee_id and oc.role = k.role
   left join measured m on m.employee_id = k.employee_id and m.role = k.role`;
 
@@ -330,6 +338,7 @@ select e.id as employee_id, e.full_name, e.job_title, k.role,
     {
       fullName: string;
       jobTitle: string | null;
+      positionRole: string | null;
       openTasks: number;
       overdueOwned: number;
       dwellSum: number;
@@ -347,6 +356,7 @@ select e.id as employee_id, e.full_name, e.job_title, k.role,
       agg = {
         fullName: r.full_name ?? "—",
         jobTitle: r.job_title,
+        positionRole: r.position_role,
         openTasks: 0,
         overdueOwned: 0,
         dwellSum: 0,
@@ -395,6 +405,11 @@ select e.id as employee_id, e.full_name, e.job_title, k.role,
       employeeId,
       fullName: a.fullName,
       jobTitle: a.jobTitle,
+      positionRole: a.positionRole,
+      positionLabel: a.positionRole
+        ? (TASK_OWNER_ROLE_LABELS[a.positionRole as TaskOwnerRoleKey] ??
+          a.jobTitle)
+        : a.jobTitle,
       role,
       openTasks: a.openTasks,
       overdueOwned: a.overdueOwned,

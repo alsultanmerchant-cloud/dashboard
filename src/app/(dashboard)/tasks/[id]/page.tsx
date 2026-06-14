@@ -861,6 +861,7 @@ async function TaskAssigneesSection({
         `id, employee_id, role_type, team_manager_employee_id, head_of_dept_employee_id,
          employee:employee_profiles!task_assignees_employee_id_fkey (
            id, full_name, job_title, avatar_url,
+           position:positions!employee_profiles_position_id_fkey ( role ),
            department:departments!employee_profiles_department_id_fkey ( name )
          ),
          team_manager:employee_profiles!task_assignees_team_manager_employee_id_fkey (
@@ -889,6 +890,7 @@ async function TaskAssigneesSection({
           full_name: string;
           job_title: string | null;
           avatar_url: string | null;
+          position: { role: string } | { role: string }[] | null;
           department: { name: string } | { name: string }[] | null;
         }
       | {
@@ -896,6 +898,7 @@ async function TaskAssigneesSection({
           full_name: string;
           job_title: string | null;
           avatar_url: string | null;
+          position: { role: string } | { role: string }[] | null;
           department: { name: string } | { name: string }[] | null;
         }[]
       | null;
@@ -909,35 +912,34 @@ async function TaskAssigneesSection({
       | null;
   };
 
-  // Source of truth for the assignee hierarchy:
-  //   Team leader   = employee_profiles.manager_employee_id (managed via
-  //                   /organization/employees).
-  //   Head of dept  = walk the department_id tree (parent chain) and take
-  //                   the first head_employee_id that isn't the employee
-  //                   themselves (so dept heads see their own manager, not
-  //                   their own name, in this field).
+  // Source of truth for the assignee hierarchy — mirrors the three columns on
+  // /organization/employees exactly:
+  //   Team leader  = employee_profiles.team_leader_employee_id (قائد الفريق).
+  //   Head of dept = the employee's department head (رئيس القسم), self-excluded.
+  //   المدير (manager_employee_id) is a higher level (manager of the heads) and
+  //   is intentionally NOT surfaced on the task card.
   const empById = new Map(orgChart.employees.map((e) => [e.id, e]));
 
+  // رئيس القسم = the employee's OWN department head, mirroring the
+  // /organization/employees رئيس القسم column. Excluded when it's the employee
+  // themselves (a head has no head). NO walk to a parent department and NO
+  // fallback to المدير — those are higher levels, not this person's head.
   function headOfDeptForEmp(empId: string | null): string | null {
     if (!empId) return null;
     const e = empById.get(empId);
-    let cur = e?.department_id ? orgChart.byId.get(e.department_id) : null;
-    while (cur) {
-      if (cur.head_employee_id && cur.head_employee_id !== empId) return cur.head_employee_id;
-      cur = cur.parent_department_id
-        ? (orgChart.byId.get(cur.parent_department_id) ?? null)
-        : null;
-    }
-    // No dept head found above this person (they're the top of the chain
-    // or have no department) — fall back to their direct manager so the
-    // field is still meaningful for execs / dept heads.
-    return e?.manager_employee_id ?? null;
+    const dept = e?.department_id ? orgChart.byId.get(e.department_id) : null;
+    const head = dept?.head_employee_id ?? null;
+    return head && head !== empId ? head : null;
   }
 
   const empHierarchy = new Map<string, { team_leader_id: string | null; head_of_dept_id: string | null }>();
   for (const emp of orgChart.employees) {
     empHierarchy.set(emp.id, {
-      team_leader_id: emp.manager_employee_id,
+      // قائد الفريق source of truth = team_leader_employee_id (set on
+      // /organization/employees). NO fallback to المدير (manager_employee_id):
+      // المدير is the manager of the heads — a separate, higher level. A team
+      // leader / head simply has no team leader → field stays empty.
+      team_leader_id: emp.team_leader_employee_id,
       head_of_dept_id: headOfDeptForEmp(emp.id),
     });
   }
@@ -957,6 +959,9 @@ async function TaskAssigneesSection({
       const dept = Array.isArray(emp.department)
         ? emp.department[0]
         : emp.department;
+      const pos = Array.isArray(emp.position)
+        ? emp.position[0]
+        : emp.position;
 
       // Fall back to org chart values when the stored column is null:
       //   Team leader  = employee_profiles.manager_employee_id
@@ -983,6 +988,7 @@ async function TaskAssigneesSection({
         id: row.id,
         employee_id: row.employee_id,
         role_type: row.role_type,
+        positionRole: pos?.role ?? null,
         team_manager_employee_id: resolvedLeaderId,
         head_of_dept_employee_id: resolvedHodId,
         employee: {

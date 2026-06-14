@@ -97,22 +97,26 @@ export async function uploadChatImportAction(
 }
 
 // ---- Map a WhatsApp group → client + kind (backfills existing messages) ---
+// PATCH semantics: only the fields present in the input are written. The row
+// UI auto-saves one control at a time; the old full-row overwrite let a stale
+// tab (state initialized before someone else / auto-link changed the row)
+// silently wipe or revert client/project links on every unrelated toggle.
 const MapSchema = z.object({
   chatId: z.string().min(3),
-  clientId: z.string().uuid().nullable(),
-  projectId: z.string().uuid().nullable(),
-  groupKind: z.enum(["client", "technical"]).nullable(),
-  isActive: z.boolean(),
+  clientId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
+  groupKind: z.enum(["client", "technical"]).nullable().optional(),
+  isActive: z.boolean().optional(),
 });
 
 export type MapState = { ok?: true; error?: string };
 
 export async function mapWaGroupAction(input: {
   chatId: string;
-  clientId: string | null;
-  projectId: string | null;
-  groupKind: "client" | "technical" | null;
-  isActive: boolean;
+  clientId?: string | null;
+  projectId?: string | null;
+  groupKind?: "client" | "technical" | null;
+  isActive?: boolean;
 }): Promise<MapState> {
   let session;
   try {
@@ -124,34 +128,45 @@ export async function mapWaGroupAction(input: {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
   const { chatId, clientId, projectId, groupKind, isActive } = parsed.data;
 
-  const { error } = await supabaseAdmin
+  const update: Record<string, unknown> = {};
+  if (clientId !== undefined) update.client_id = clientId;
+  if (projectId !== undefined) update.project_id = projectId;
+  if (groupKind !== undefined) update.group_kind = groupKind;
+  if (isActive !== undefined) update.is_active = isActive;
+  if (Object.keys(update).length === 0) return { ok: true };
+  update.updated_at = new Date().toISOString();
+
+  const { data: link, error } = await supabaseAdmin
     .from("wa_group_links")
-    .update({
-      client_id: clientId,
-      project_id: projectId,
-      group_kind: groupKind,
-      is_active: isActive,
-      updated_at: new Date().toISOString(),
-    })
+    .update(update)
     .eq("organization_id", session.orgId)
-    .eq("chat_id", chatId);
+    .eq("chat_id", chatId)
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
 
   // Backfill: stamp existing messages of this chat with the new mapping so
-  // they flow into the client's transcript immediately.
-  await supabaseAdmin
-    .from("wa_messages")
-    .update({ client_id: clientId, group_kind: groupKind })
-    .eq("organization_id", session.orgId)
-    .eq("chat_id", chatId);
+  // they flow into the client's transcript immediately — changed fields only.
+  if (clientId !== undefined || groupKind !== undefined) {
+    const msgUpdate: Record<string, unknown> = {};
+    if (clientId !== undefined) msgUpdate.client_id = clientId;
+    if (groupKind !== undefined) msgUpdate.group_kind = groupKind;
+    await supabaseAdmin
+      .from("wa_messages")
+      .update(msgUpdate)
+      .eq("organization_id", session.orgId)
+      .eq("chat_id", chatId);
+  }
 
+  // audit_logs.entity_id is uuid — the raw chat id ("…@g.us") used to make
+  // this insert fail silently, so mappings left no trail. Log the row uuid.
   await logAudit({
     organizationId: session.orgId,
     actorUserId: session.userId,
     action: "wa_group.mapped",
     entityType: "wa_group_link",
-    entityId: chatId,
-    metadata: { clientId, projectId, groupKind, isActive },
+    entityId: link?.id ?? null,
+    metadata: { chatId, clientId, projectId, groupKind, isActive },
   });
 
   revalidatePath("/satisfaction/groups");

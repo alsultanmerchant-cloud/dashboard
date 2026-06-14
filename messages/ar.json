@@ -3037,5 +3037,13 @@
       "viewingPast": "أنت تعرض تحليلًا سابقًا — لا يعكس الوضع الحالي للعميل",
       "backToCurrent": "العودة إلى التحليل الحالي"
     }
+  },
+  "ClientFinance": {
+    "onTarget": "ضمن التارجت",
+    "targetOverdue": "متأخر عن التارجت",
+    "salesDeposit": "عربون مبيعات",
+    "paidComplete": "سداد كامل",
+    "overduePayment": "{count, plural, one {دفعة متأخرة} other {# دفعات متأخرة}}",
+    "overdueAmount": "مبلغ متأخر غير مسدد: {amount} ريال"
   }
 }
