@@ -81,6 +81,101 @@ export async function insertKnowledge(params: {
   return (data?.id as string | undefined) ?? null;
 }
 
+// --- Management (read-all + update + delete) -------------------------------
+
+export interface KnowledgeAdminRow {
+  id: string;
+  kind: KnowledgeKind;
+  instruction: string;
+  sourceField: string | null;
+  isActive: boolean;
+  authorName: string | null;
+  createdAt: string;
+}
+
+type KnowledgeAdminRaw = {
+  id: string;
+  kind: KnowledgeKind;
+  instruction: string;
+  source_field: string | null;
+  is_active: boolean;
+  created_at: string;
+  created_by: string | null;
+};
+
+/** All lessons (active + inactive) for the management UI, newest first, with author name. */
+export async function listAllKnowledge(orgId: string): Promise<KnowledgeAdminRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("ai_company_knowledge")
+    .select("id, kind, instruction, source_field, is_active, created_at, created_by")
+    .eq("organization_id", orgId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) {
+    console.warn(`[ai-knowledge] listAll failed: ${error.message}`);
+    return [];
+  }
+  const rows = (data ?? []) as KnowledgeAdminRaw[];
+
+  // Resolve author names (employee_profiles.user_id → full_name), best-effort.
+  const userIds = [...new Set(rows.map((r) => r.created_by).filter(Boolean))] as string[];
+  const nameByUser = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("user_id, full_name")
+      .eq("organization_id", orgId)
+      .in("user_id", userIds);
+    for (const p of (profiles ?? []) as Array<{ user_id: string | null; full_name: string | null }>) {
+      if (p.user_id) nameByUser.set(p.user_id, p.full_name ?? "");
+    }
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    instruction: r.instruction,
+    sourceField: r.source_field,
+    isActive: r.is_active,
+    authorName: r.created_by ? nameByUser.get(r.created_by) ?? null : null,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function updateKnowledge(
+  id: string,
+  orgId: string,
+  patch: { instruction?: string; kind?: KnowledgeKind; isActive?: boolean },
+): Promise<boolean> {
+  const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (patch.instruction !== undefined) update.instruction = patch.instruction;
+  if (patch.kind !== undefined) update.kind = patch.kind;
+  if (patch.isActive !== undefined) update.is_active = patch.isActive;
+  const { error } = await supabaseAdmin
+    .from("ai_company_knowledge")
+    .update(update)
+    .eq("id", id)
+    .eq("organization_id", orgId);
+  if (error) {
+    console.warn(`[ai-knowledge] update failed: ${error.message}`);
+    return false;
+  }
+  return true;
+}
+
+export async function deleteKnowledge(id: string, orgId: string): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from("ai_company_knowledge")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", orgId);
+  if (error) {
+    console.warn(`[ai-knowledge] delete failed: ${error.message}`);
+    return false;
+  }
+  return true;
+}
+
 const KIND_LABEL_AR: Record<KnowledgeKind, string> = {
   correction: "تصحيح",
   fact: "حقيقة",

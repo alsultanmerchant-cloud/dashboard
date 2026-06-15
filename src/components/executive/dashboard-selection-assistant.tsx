@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isToolUIPart, getToolName } from "ai";
 import { useTranslations } from "next-intl";
@@ -43,6 +44,7 @@ export function DashboardSelectionAssistant({
   briefRunId?: string | null;
 }) {
   const t = useTranslations("Executive.assistant");
+  const pathname = usePathname();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [buttonAt, setButtonAt] = useState<Anchor | null>(null);
   const [open, setOpen] = useState(false);
@@ -75,11 +77,12 @@ export function DashboardSelectionAssistant({
             selection: sel?.text ?? null,
             field: sel?.field ?? null,
             context: sel?.context ?? null,
+            page: pathname,
           },
         },
       );
     },
-    [briefRunId, sendMessage],
+    [briefRunId, pathname, sendMessage],
   );
 
   // --- Capture selections anywhere inside the dashboard ----------------------

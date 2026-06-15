@@ -30,6 +30,7 @@ const SYSTEM_PROMPT = `أنت "مساعد لوحة القيادة" — مساع�
 
 قواعد:
 - **اطرح سؤالًا توضيحيًا واحدًا** قبل التصحيح أو الحفظ إذا كان الطلب غامضًا — هدفك فهم الشركة بدقة قبل الكتابة.
+- **ممنوع منعًا باتًا** أن تقول إنك "حفظت" أو "علّمت النظام" أو "صحّحت" دون أن تكون قد استدعيت الأداة المناسبة فعليًا (\`saveLesson\` للتعليم، \`editBriefText\` للتصحيح) في نفس الرد. الحفظ والتعديل لا يحدثان إلا عبر استدعاء الأداة — التأكيد النصّي وحده لا يحفظ شيئًا. إن قرّر المستخدم تعليمك حقيقة، استدعِ \`saveLesson\` أولًا ثم أكّد.
 - لا تخترع أرقامًا أبدًا. استخدم الأرقام الفعلية من أدوات القراءة.
 - ردود قصيرة ومباشرة بالعربية الفصحى. بعد أي استدعاء أداة، اكتب جملة تؤكد ما تم.`;
 
@@ -48,12 +49,13 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
-    const { messages, selection, field, context } = (await req.json()) as {
+    const { messages, selection, field, context, page } = (await req.json()) as {
       messages: unknown[];
       briefRunId?: string | null;
       selection?: string | null;
       field?: string | null;
       context?: string | null;
+      page?: string | null;
     };
     const orgId = session.orgId;
     const userId = session.userId;
@@ -62,7 +64,7 @@ export async function POST(req: Request) {
     const modelMessages = await convertToModelMessages(messages);
 
     const selectionContext = selection
-      ? `\n\n---\nالنص المحدّد حاليًا في اللوحة: "${selection}"${context ? `\nالقسم/العنوان: ${context}` : ""}${field ? `\nمفتاح الحقل القابل للتعديل: ${field}` : "\n(لا يوجد حقل قابل للتعديل — هذا النص خارج موجز المدير التنفيذي، فلا تستخدم editBriefText؛ اشرح أو احفظ تعليمة بدلًا من ذلك.)"}`
+      ? `\n\n---\nالنص المحدّد حاليًا في اللوحة: "${selection}"${page ? `\nالصفحة الحالية: ${page}` : ""}${context ? `\nالقسم/العنوان: ${context}` : ""}${field ? `\nمفتاح الحقل القابل للتعديل: ${field}` : "\n(لا يوجد حقل قابل للتعديل — هذا النص خارج موجز المدير التنفيذي، فلا تستخدم editBriefText؛ اشرح أو احفظ تعليمة بدلًا من ذلك.)"}`
       : "";
 
     // Shared anti-loop guard for the read tools.

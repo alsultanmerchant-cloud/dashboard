@@ -4,6 +4,7 @@ import { generateText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { requirePermission } from "@/lib/auth-server";
 import { getCEOWeeklyDigest } from "@/lib/data/reports";
+import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { logAiEvent } from "@/lib/audit";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
@@ -23,7 +24,10 @@ export async function summarizeWeekAction(): Promise<
 > {
   try {
     const session = await requirePermission("reports.view");
-    const payload = await getCEOWeeklyDigest(session.orgId);
+    const [payload, knowledge] = await Promise.all([
+      getCEOWeeklyDigest(session.orgId),
+      buildKnowledgeBlock(session.orgId),
+    ]);
 
     const prompt = `أنت محلّل عمليات داخل وكالة "Sky Light". لديك ملخّص JSON واحد لأداء الأسبوع، اكتب موجزًا تنفيذيًا قصيرًا للمدير التنفيذي:
 
@@ -32,7 +36,7 @@ export async function summarizeWeekAction(): Promise<
 - لا تُكرّر أرقامًا غير موجودة في JSON.
 
 البيانات:
-${JSON.stringify(payload, null, 2)}`;
+${JSON.stringify(payload, null, 2)}${knowledge ? `\n\n${knowledge}` : ""}`;
 
     const r = await generateText({
       model: google(GEMINI_MODEL),

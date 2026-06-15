@@ -100,6 +100,27 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      <SectionTitle title={t("ai.title")} />
+      <Card className="mb-8">
+        <CardContent className="p-5">
+          <Link
+            href="/settings/ai-knowledge"
+            className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:bg-muted/40"
+          >
+            <span className="flex items-center gap-3">
+              <Sparkles className="size-4 text-cyan" />
+              <span>
+                <span className="block text-sm font-medium">{t("ai.knowledgeTitle")}</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  {t("ai.knowledgeDescription")}
+                </span>
+              </span>
+            </span>
+            <ChevronLeft className="size-4 text-muted-foreground icon-flip-rtl" />
+          </Link>
+        </CardContent>
+      </Card>
+
       <SectionTitle title={t("account.title")} />
       <Card className="mb-8">
         <CardContent className="p-5">

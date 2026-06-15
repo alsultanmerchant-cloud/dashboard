@@ -4,6 +4,7 @@ import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { InsightsSchema, type InsightsResult, type StoredInsightRun } from "@/lib/ai-insights-schema";
 import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
+import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -612,9 +613,10 @@ export async function POST(req: Request) {
     }
 
     runId = inserted.id;
-    const { snapshotForStorage, payloadForModel } = await buildSignalPack(
-      session.orgId,
-    );
+    const [{ snapshotForStorage, payloadForModel }, knowledge] = await Promise.all([
+      buildSignalPack(session.orgId),
+      buildKnowledgeBlock(session.orgId),
+    ]);
 
     const { object } = await generateObject({
       model: google(INSIGHT_MODEL),
@@ -643,7 +645,7 @@ ${JSON.stringify(payloadForModel)}
 - **serviceHealth**: note قصيرة تشخّص الفجوة لكل خدمة.
 - **teamHotspots**: اقترح إعادة توزيع أو دعمًا محددًا.
 - **quickWins**: إجراءات قابلة للتنفيذ هذا الأسبوع، كل واحدة مربوطة بأكواد مهام.
-- **executiveSummary**: 3-4 جمل تلخّص حالة الشركة وأبرز ما يحتاج قرارًا.`,
+- **executiveSummary**: 3-4 جمل تلخّص حالة الشركة وأبرز ما يحتاج قرارًا.${knowledge ? `\n\n${knowledge}` : ""}`,
     });
 
     await supabaseAdmin

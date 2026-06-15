@@ -824,6 +824,35 @@
       "other": "Other"
     }
   },
+  "AiKnowledge": {
+    "pageTitle": "Taught knowledge",
+    "pageDescription": "Durable facts and corrections the team taught the AI. Active lessons are injected into every AI output (brief, agent, insights, satisfaction, reports).",
+    "activeCount": "{count} active",
+    "errorTitle": "Couldn't load lessons",
+    "errorDescription": "There was a problem loading taught knowledge. Try again.",
+    "emptyTitle": "Nothing taught yet",
+    "emptyDescription": "Select text anywhere on the dashboard and choose “Teach the AI” to add a durable lesson.",
+    "active": "Active",
+    "inactive": "Inactive",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirmDelete": "Delete this lesson?",
+    "confirmYes": "Delete",
+    "saved": "Lesson updated",
+    "activated": "Lesson activated",
+    "deactivated": "Lesson deactivated",
+    "deleted": "Lesson deleted",
+    "byAuthor": "Taught by {name}",
+    "byUnknown": "Taught by a team member",
+    "kind": {
+      "correction": "Correction",
+      "fact": "Fact",
+      "preference": "Preference",
+      "terminology": "Terminology"
+    }
+  },
   "SettingsPage": {
     "title": "Settings",
     "description": "Agency and current account settings. Advanced settings like integrations, AI, and communication templates will be added later.",
@@ -848,6 +877,11 @@
       "title": "Work schedule",
       "holidaysTitle": "Official holidays",
       "holidaysDescription": "Work week: Sunday to Thursday. Add holidays so they are counted in Gantt planning and delivery reminders."
+    },
+    "ai": {
+      "title": "AI",
+      "knowledgeTitle": "Taught knowledge",
+      "knowledgeDescription": "Review and manage the durable facts and corrections the team taught the AI from the dashboard."
     },
     "account": {
       "title": "Your account",

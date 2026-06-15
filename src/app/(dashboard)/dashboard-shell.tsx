@@ -31,6 +31,15 @@ const CommandPaletteProvider = dynamic(
     })),
 );
 
+// Global "select text → ask/teach the AI" overlay. Watches selections inside
+// the main content area ([data-dashboard-root]) across every dashboard route.
+const DashboardSelectionAssistant = dynamic(
+  () =>
+    import("@/components/executive/dashboard-selection-assistant").then((mod) => ({
+      default: mod.DashboardSelectionAssistant,
+    })),
+);
+
 type NotificationRow = {
   id: string;
   type: string;
@@ -233,7 +242,7 @@ export function DashboardShell({
                 }
               />
               <ModuleTabs />
-              <main className="px-4 sm:px-6 pb-12 pt-4">
+              <main className="px-4 sm:px-6 pb-12 pt-4" data-dashboard-root>
                 {children}
               </main>
             </div>
@@ -243,6 +252,7 @@ export function DashboardShell({
             {!isAgentPage && (
               <AIChatFAB onClick={() => router.push("/agent")} />
             )}
+            <DashboardSelectionAssistant />
           </div>
           </StackedSheetProvider>
         </TopbarProvider>

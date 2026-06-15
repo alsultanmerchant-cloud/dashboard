@@ -15,6 +15,7 @@ import {
   getClientContractActivity,
 } from "@/lib/data/satisfaction";
 import { getClientBrief } from "@/lib/satisfaction-brief";
+import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
@@ -151,6 +152,9 @@ export async function analyzeClientSatisfaction(
       }\nتاريخ البداية: ${contract.startDate}${contract.endDate ? ` — تاريخ الانتهاء: ${contract.endDate}` : ""}${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
+  // Org-wide lessons the team taught the AI — applied to this analysis too.
+  const knowledgeBlock = await buildKnowledgeBlock(orgId);
+
   const runOnce = async (budget: number) =>
     (
       await generateObject({
@@ -218,7 +222,7 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني 📍 ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}`,
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`,
       })
     ).object;
 
