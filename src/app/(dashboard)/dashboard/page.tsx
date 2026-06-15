@@ -45,6 +45,7 @@ import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
+import { DashboardSelectionAssistant } from "@/components/executive/dashboard-selection-assistant";
 import { getCurrentCeoBrief } from "@/lib/ceo-brief-generate";
 import { ExecutiveHeroRow } from "@/components/executive/hero-row";
 import { PulseStrip } from "@/components/executive/pulse-strip";
@@ -219,7 +220,10 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
   const t = await getTranslations("Dashboard");
 
   return (
-    <div>
+    <div data-dashboard-root>
+      {/* Select any text on the dashboard to ask, correct, or teach the AI. */}
+      <DashboardSelectionAssistant />
+
       <PageHeader
         title={t("welcome", { name: session.fullName })}
         description={t("welcomeDescription")}

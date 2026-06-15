@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileSignature, Table2, TrendingUp } from "lucide-react";
+import { FileSignature, ScrollText, Table2, TrendingUp } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import {
   listContractsGrid,
@@ -22,6 +22,8 @@ import { getTranslations } from "next-intl/server";
 import { ContractsGrid } from "./contracts-grid";
 import { NewContractButton } from "./new-contract-dialog";
 import { CeoDashboard } from "./ceo-dashboard";
+import { LogsSection } from "./logs-section";
+import { SheetSyncButton } from "./sheet-sync-button";
 
 // Contracts module — two sections on one page, switched by ?view=:
 //   • table     → the sheet-parity editable grid (default)
@@ -39,7 +41,7 @@ export default async function ContractsPage({
   const t = await getTranslations("ContractsPage");
   const canEdit = hasPermission(session, "contract.manage");
   const sp = await searchParams;
-  const view = sp.view === "dashboard" ? "dashboard" : "table";
+  const view = sp.view === "dashboard" ? "dashboard" : sp.view === "logs" ? "logs" : "table";
 
   const tabs = (
     <div className="inline-flex rounded-[var(--radius-md)] border border-border/80 bg-card/95 p-1 text-xs shadow-[var(--surface-elev)]">
@@ -67,6 +69,18 @@ export default async function ContractsPage({
         <TrendingUp className="size-3.5" />
         {t("tabs.dashboard")}
       </Link>
+      <Link
+        href="/contracts?view=logs"
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-[calc(var(--radius-md)-2px)] px-3 py-1.5 transition-colors",
+          view === "logs"
+            ? "bg-cyan-dim text-cyan font-medium"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ScrollText className="size-3.5" />
+        {t("tabs.logs")}
+      </Link>
     </div>
   );
 
@@ -82,13 +96,16 @@ export default async function ContractsPage({
         {view === "table" && canEdit && (
           <ContractsHeaderActions orgId={session.orgId} />
         )}
-        {view === "dashboard" && (
-          <Link
-            href="/contracts/import"
-            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-border/80 bg-card/95 px-3 text-xs font-semibold text-muted-foreground shadow-[var(--surface-elev)] transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {t("header.import")}
-          </Link>
+        {view === "dashboard" && canEdit && (
+          <div className="flex items-center gap-2">
+            <SheetSyncButton />
+            <Link
+              href="/contracts/import"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-border/80 bg-card/95 px-3 text-xs font-semibold text-muted-foreground shadow-[var(--surface-elev)] transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {t("header.import")}
+            </Link>
+          </div>
         )}
       </div>
 
@@ -97,6 +114,8 @@ export default async function ContractsPage({
           orgId={session.orgId}
           month={typeof sp.m === "string" ? sp.m : undefined}
         />
+      ) : view === "logs" ? (
+        <LogsSection orgId={session.orgId} searchParams={sp} />
       ) : (
         <TableSection
           orgId={session.orgId}
@@ -199,10 +218,27 @@ async function DashboardSection({
     );
   }
 
+  // For sheet-imported months, show the sheet's own "Client Status Overview"
+  // counts (parity) instead of the live Supabase roster, which counts on a
+  // different basis and disagrees with the sheet.
+  const rosterForView =
+    dashboard.source === "sheet_import"
+      ? {
+          total: dashboard.cnt_total_clients,
+          cnt_new: dashboard.cnt_roster_new,
+          cnt_renew: dashboard.cnt_roster_renew,
+          cnt_upsell: dashboard.cnt_roster_upsell,
+          cnt_winback: dashboard.cnt_roster_winback,
+          cnt_hold: dashboard.cnt_roster_hold,
+          cnt_switch: 0,
+          cnt_untyped: 0,
+        }
+      : roster;
+
   return (
     <CeoDashboard
       dashboard={dashboard}
-      roster={roster}
+      roster={rosterForView}
       amTargets={amTargets}
       buckets={buckets}
       clientInsights={clientInsights}

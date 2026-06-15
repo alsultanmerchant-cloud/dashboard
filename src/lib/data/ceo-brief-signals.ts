@@ -57,6 +57,18 @@ export interface BriefRisk {
   weight: number; // internal ranking only (not rendered)
 }
 
+export type BriefEventSource = "client_group" | "technical_group" | "system";
+export type BriefEventCategory = "complaint" | "approval" | "delay" | "internal" | "decision";
+export interface BriefEvent {
+  id: string;
+  title: string;
+  date: string | null;
+  source: BriefEventSource;
+  category: BriefEventCategory;
+  severity: "critical" | "high" | "medium" | "low";
+  href: string | null;
+}
+
 // Cross-cutting facts (beyond the top risks) that the AI turns into a broad
 // action plan — capacity, money, process, people. Prompt-context only; never
 // rendered directly, so Arabic labels here are fine.
@@ -100,6 +112,8 @@ export interface CeoBriefSignals {
   verdict: Verdict;
   changes: BriefChange[];
   risks: BriefRisk[];
+  criticalEvents: BriefEvent[];
+  timelineEvents: BriefEvent[];
   opportunities: CeoBriefOpportunities;
   context: CeoBriefContext;
 }
@@ -168,6 +182,185 @@ function computeVerdict(
   // Guard: a D/F operation can't read "improving" off one noisy week.
   if (v === "improving" && stabilityScore < 55) v = "stable";
   return v;
+}
+
+function parseEventTime(date: string | null): number {
+  if (!date) return 0;
+  const ts = new Date(date).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function eventCategoryFromHighlight(
+  type: string,
+  text: string,
+  audience: string | null,
+): BriefEventCategory {
+  const body = text.toLowerCase();
+  if (audience === "team") return "internal";
+  if (type === "complaint" || type === "escalation") return "complaint";
+  if (type === "milestone" || /اعتماد|اعتمد|وافق|موافقة|approved|approval/.test(body)) return "approval";
+  if (/تأخير|متأخر|اتأخر|تأخر|delay|late|deadline|موعد/.test(body)) return "delay";
+  if (/قرار|تقرر|قرر|decided|decision/.test(body)) return "decision";
+  return "decision";
+}
+
+function eventCategoryFromRisk(id: RiskKind): BriefEventCategory {
+  if (id === "client_churn" || id === "at_risk_client") return "complaint";
+  if (id === "idle_people" || id === "review_bottleneck" || id === "intake_bottleneck") return "internal";
+  return "delay";
+}
+
+function riskToEvent(risk: BriefRisk, index: number, date: string): BriefEvent {
+  return {
+    id: `risk-${risk.id}-${index}`,
+    title: risk.title,
+    date,
+    source: "system",
+    category: eventCategoryFromRisk(risk.id),
+    severity: risk.severity,
+    href: risk.href,
+  };
+}
+
+async function loadBriefTimelineEvents(
+  orgId: string,
+  risks: BriefRisk[],
+  runDate: string,
+): Promise<{ criticalEvents: BriefEvent[]; timelineEvents: BriefEvent[] }> {
+  const [analysisRes, tasksRes] = await Promise.all([
+    supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select("id, client_id, created_at, highlights, risks, satisfaction_score, sentiment, client:clients!inner(name)")
+      .eq("organization_id", orgId)
+      .eq("is_current", true)
+      .order("created_at", { ascending: false })
+      .limit(40),
+    supabaseAdmin
+      .from("tasks")
+      .select(
+        "id, task_code, title, delay_days, due_date, stage_entered_at, project:projects!inner(id, name, project_code, status, client:clients!inner(name))",
+      )
+      .eq("organization_id", orgId)
+      .eq("is_overdue", true)
+      .is("archived_at", null)
+      .neq("project.status", "archived")
+      .order("delay_days", { ascending: false, nullsFirst: false })
+      .limit(25),
+  ]);
+
+  const events: BriefEvent[] = [];
+
+  type Highlight = {
+    type?: string;
+    audience?: string | null;
+    text?: string;
+    date?: string | null;
+  };
+  type AnalysisRow = {
+    id: string;
+    client_id: string;
+    created_at: string;
+    highlights: Highlight[] | null;
+    risks: string[] | null;
+    satisfaction_score: number | null;
+    sentiment: string | null;
+    client: { name: string } | { name: string }[] | null;
+  };
+  for (const row of (analysisRes.data ?? []) as unknown as AnalysisRow[]) {
+    const client = Array.isArray(row.client) ? row.client[0] : row.client;
+    const clientName = client?.name ?? "—";
+    for (const [i, highlight] of (row.highlights ?? []).entries()) {
+      const text = (highlight.text ?? "").trim();
+      if (!text) continue;
+      const type = highlight.type ?? "request";
+      const audience = highlight.audience ?? "client";
+      const category = eventCategoryFromHighlight(type, text, audience);
+      const severity =
+        type === "escalation"
+          ? "critical"
+          : type === "complaint"
+            ? "high"
+            : category === "internal" || category === "delay"
+              ? "medium"
+              : "low";
+      events.push({
+        id: `sat-${row.id}-${i}`,
+        title: `${clientName}: ${text}`,
+        date: highlight.date ?? row.created_at,
+        source: audience === "team" ? "technical_group" : "client_group",
+        category,
+        severity,
+        href: `/satisfaction?client=${row.client_id}`,
+      });
+    }
+
+    if (
+      (row.sentiment === "negative" || (row.satisfaction_score ?? 100) < 55) &&
+      row.risks &&
+      row.risks.length > 0
+    ) {
+      events.push({
+        id: `sat-risk-${row.id}`,
+        title: `${clientName}: ${row.risks[0]}`,
+        date: row.created_at,
+        source: "client_group",
+        category: "complaint",
+        severity: row.sentiment === "negative" ? "high" : "medium",
+        href: `/satisfaction?client=${row.client_id}`,
+      });
+    }
+  }
+
+  type TaskRow = {
+    id: string;
+    task_code: string | null;
+    title: string | null;
+    delay_days: number | null;
+    due_date: string | null;
+    stage_entered_at: string | null;
+    project:
+      | {
+          id: string;
+          name: string;
+          project_code: string | null;
+          client: { name: string } | { name: string }[] | null;
+        }
+      | {
+          id: string;
+          name: string;
+          project_code: string | null;
+          client: { name: string } | { name: string }[] | null;
+        }[]
+      | null;
+  };
+  for (const row of (tasksRes.data ?? []) as unknown as TaskRow[]) {
+    const project = Array.isArray(row.project) ? row.project[0] : row.project;
+    const client = Array.isArray(project?.client) ? project?.client[0] : project?.client;
+    const delay = row.delay_days ?? 0;
+    const taskLabel = [row.task_code, row.title].filter(Boolean).join(" · ");
+    events.push({
+      id: `task-${row.id}`,
+      title: `${client?.name ?? "—"}: ${taskLabel || "مهمة متأخرة"}${delay > 0 ? ` (${delay} يوم)` : ""}`,
+      date: row.due_date ?? row.stage_entered_at ?? runDate,
+      source: "system",
+      category: "delay",
+      severity: delay >= 7 ? "critical" : delay >= 3 ? "high" : "medium",
+      href: `/tasks/${row.id}`,
+    });
+  }
+
+  for (const [index, risk] of risks.entries()) {
+    events.push(riskToEvent(risk, index, runDate));
+  }
+
+  const timelineEvents = events
+    .sort((a, b) => parseEventTime(b.date) - parseEventTime(a.date))
+    .slice(0, 80);
+  const criticalEvents = timelineEvents
+    .filter((event) => event.severity === "critical" || event.severity === "high")
+    .slice(0, 10);
+
+  return { criticalEvents, timelineEvents };
 }
 
 // ---- main ----------------------------------------------------------------
@@ -492,12 +685,16 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     reworkRate: scores.quality.reworkRate,
   };
 
+  const eventPack = await loadBriefTimelineEvents(orgId, risks.slice(0, 5), new Date().toISOString());
+
   return {
     statusPct,
     grade,
     verdict,
     changes: changes.slice(0, 5),
     risks: risks.slice(0, 5),
+    criticalEvents: eventPack.criticalEvents,
+    timelineEvents: eventPack.timelineEvents,
     opportunities,
     context,
   };

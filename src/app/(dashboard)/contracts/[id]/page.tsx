@@ -10,6 +10,10 @@ import {
   getContractEvents,
   getClientSiblingContracts,
 } from "@/lib/data/contracts";
+import { listEntityActivity } from "@/lib/data/entity-activity";
+import { listMentionableEmployees } from "@/lib/data/employees";
+import { EntityActivityFeed } from "@/components/activity/entity-activity-feed";
+import { EntityCommentComposer } from "@/components/activity/entity-comment-composer";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
@@ -18,11 +22,7 @@ import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
-import {
-  formatShortDate,
-  formatDateTime,
-} from "@/lib/utils-format";
-import { EventRecordForm } from "./event-record-form";
+import { formatShortDate } from "@/lib/utils-format";
 import { InstallmentsEditor, type InstallmentRow } from "./installments-editor";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -108,16 +108,19 @@ export default async function ContractDetailPage({
   const contract = await getContractById(session.orgId, id);
   if (!contract) notFound();
 
-  const [installments, cycles, events, siblings] = await Promise.all([
-    getContractInstallments(session.orgId, id),
-    getContractCycles(session.orgId, id),
-    getContractEvents(session.orgId, id, 50),
-    getClientSiblingContracts(
-      session.orgId,
-      (contract.client as { id?: string } | null)?.id ?? "",
-      id,
-    ),
-  ]);
+  const [installments, cycles, events, siblings, activity, mentionable] =
+    await Promise.all([
+      getContractInstallments(session.orgId, id),
+      getContractCycles(session.orgId, id),
+      getContractEvents(session.orgId, id, 50),
+      getClientSiblingContracts(
+        session.orgId,
+        (contract.client as { id?: string } | null)?.id ?? "",
+        id,
+      ),
+      listEntityActivity(session.orgId, { entityType: "contract", entityId: id }),
+      listMentionableEmployees(session.orgId),
+    ]);
 
   const canManage = hasPermission(session, "contract.manage");
 
@@ -376,49 +379,22 @@ export default async function ContractDetailPage({
         )}
       </div>
 
-      {/* Events log */}
+      {/* Unified activity feed (comments + sheet logs + contract events) */}
+      {/* TODO(i18n): reuses the events-section labels — a dedicated
+          `detail.sections.activity` key pair would read better here. */}
       <SectionTitle
         title={t("detail.sections.events.title")}
         description={t("detail.sections.events.description")}
-        actions={canManage ? <EventRecordForm contractId={contract.id} /> : null}
       />
       <div className="mb-4">
-        {events.length === 0 ? (
-          <Card>
-            <CardContent className="p-4 text-sm text-muted-foreground">
-              {t("detail.sections.events.empty")}
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <ul className="divide-y divide-white/[0.04]">
-                {events.map((e) => {
-                  const actor = e.actor as { full_name?: string } | null;
-                  const payload = e.payload as Record<string, unknown> | null;
-                  const note = (payload?.note as string | undefined) ?? null;
-                  return (
-                    <li key={e.id} className="px-4 py-3 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{e.event_type}</p>
-                        {note && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{note}</p>
-                        )}
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {actor?.full_name ?? "—"}
-                        </p>
-                      </div>
-                      <span className="text-[11px] text-muted-foreground shrink-0">
-                        {formatDateTime(e.occurred_at, locale)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
+        <EntityActivityFeed items={activity} />
       </div>
+      <EntityCommentComposer
+        entityType="contract"
+        entityId={contract.id}
+        mentionable={mentionable}
+        floating
+      />
     </div>
   );
 }

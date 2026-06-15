@@ -4,14 +4,14 @@ import { useState, useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
-  Upload, Loader2, CheckCircle2, AlertTriangle, FileSpreadsheet, ArrowLeft,
+  Upload, Loader2, CheckCircle2, AlertTriangle, FileSpreadsheet, ArrowLeft, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  previewImportAction, commitImportAction,
-  type ImportPreviewState, type ImportCommitState,
+  previewImportAction, commitImportAction, syncGoogleSheetAction,
+  type ImportPreviewState, type ImportCommitState, type GoogleSheetSyncState,
 } from "./_actions";
 
 export function ImportForm() {
@@ -23,6 +23,9 @@ export function ImportForm() {
   const [commitState, commitAction, committing] = useActionState<
     ImportCommitState | undefined, FormData
   >(commitImportAction, undefined);
+  const [syncState, syncAction, syncing] = useActionState<
+    GoogleSheetSyncState | undefined, FormData
+  >(syncGoogleSheetAction, undefined);
 
   // Track selected filename for the file input feedback
   const [fileName, setFileName] = useState<string | null>(null);
@@ -37,47 +40,85 @@ export function ImportForm() {
       toast.success(t("form.toasts.imported"));
       // Don't auto-redirect — let user see the result + maybe navigate
     }
-  }, [commitState]);
+  }, [commitState, t]);
+
+  useEffect(() => {
+    if (syncState?.kind === "error") toast.error(syncState.error);
+    if (syncState?.kind === "ok") toast.success(t("form.toasts.synced"));
+  }, [syncState, t]);
 
   // Step 1: file upload + preview
   if (!previewState || previewState.kind !== "preview") {
     return (
-      <Card>
-        <CardContent className="p-6">
-          <form action={previewAction} className="space-y-4">
-            <div>
-              <label htmlFor="file" className="block mb-2 text-sm font-medium">
-                {t("form.fileLabel")}
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  id="file"
-                  name="file"
-                  type="file"
-                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  required
-                  onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
-                  className="block w-full text-sm text-foreground file:mx-3 file:rounded-lg file:border-0 file:bg-cyan-dim file:px-3 file:py-2 file:text-cyan file:font-medium hover:file:bg-cyan-dim/80 file:cursor-pointer cursor-pointer"
-                />
-              </div>
-              {fileName && (
-                <p className="mt-2 text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
-                  <FileSpreadsheet className="size-3.5" />
-                  {fileName}
+      <div className="space-y-4">
+        <Card className="border-cyan/20 bg-cyan-dim/10">
+          <CardContent className="p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="size-4 text-cyan" />
+                  <h3 className="text-sm font-semibold">{t("form.google.title")}</h3>
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  {t("form.google.description")}
                 </p>
-              )}
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                {t("form.fileHint")}
-              </p>
+              </div>
+              <form action={syncAction}>
+                <Button type="submit" disabled={syncing} className="gap-1.5">
+                  {syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                  {t("form.google.sync")}
+                </Button>
+              </form>
             </div>
 
-            <Button type="submit" disabled={previewing}>
-              {previewing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-              {t("form.preview")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            {syncState?.kind === "ok" && (
+              <div className="mt-5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <Stat label={t("form.stats.clients")} value={syncState.parsedClients} tone="info" />
+                <Stat label={t("form.stats.contracts")} value={syncState.parsedContracts} tone="success" />
+                <Stat label={t("form.stats.installments")} value={syncState.parsedInstallments} tone="success" />
+                <Stat label={t("form.stats.skipped")} value={syncState.errors.length} tone="muted" />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <form action={previewAction} className="space-y-4">
+              <div>
+                <label htmlFor="file" className="block mb-2 text-sm font-medium">
+                  {t("form.fileLabel")}
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="file"
+                    name="file"
+                    type="file"
+                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    required
+                    onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+                    className="block w-full text-sm text-foreground file:mx-3 file:rounded-lg file:border-0 file:bg-cyan-dim file:px-3 file:py-2 file:text-cyan file:font-medium hover:file:bg-cyan-dim/80 file:cursor-pointer cursor-pointer"
+                  />
+                </div>
+                {fileName && (
+                  <p className="mt-2 text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
+                    <FileSpreadsheet className="size-3.5" />
+                    {fileName}
+                  </p>
+                )}
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  {t("form.fileHint")}
+                </p>
+              </div>
+
+              <Button type="submit" disabled={previewing}>
+                {previewing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                {t("form.preview")}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 

@@ -627,6 +627,27 @@ export async function updateContractFieldAction(input: {
     .eq("id", input.id);
   if (error) return { error: error.message };
 
+  // Mirror material field changes into contract_events so they surface in the
+  // unified activity feed on the contract page (alongside hold/comment rows).
+  // Only the fields the team tracks as activity; value already changed (no-op
+  // short-circuit above guarantees from !== to).
+  const ACTIVITY_EVENT_TYPE: Record<string, string> = {
+    status: "STATUS_CHANGE",
+    target: "TARGET_CHANGE",
+    contract_type_id: "TYPE_CHANGE",
+    total_value: "VALUE_CHANGE",
+  };
+  const activityEventType = ACTIVITY_EVENT_TYPE[parsed.data.field];
+  if (activityEventType) {
+    await supabaseAdmin.from("contract_events").insert({
+      organization_id: session.orgId,
+      contract_id: input.id,
+      event_type: activityEventType,
+      actor_id: session.employeeId ?? null,
+      payload: { from: previousValue, to: parsed.data.value },
+    });
+  }
+
   await logAudit({
     organizationId: session.orgId,
     actorUserId: session.userId,

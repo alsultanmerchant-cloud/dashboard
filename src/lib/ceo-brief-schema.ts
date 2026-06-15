@@ -77,6 +77,24 @@ export interface CeoBriefRecommendation {
   owner: string;
 }
 
+export type CeoBriefEventSource = "client_group" | "technical_group" | "system";
+export type CeoBriefEventCategory =
+  | "complaint"
+  | "approval"
+  | "delay"
+  | "internal"
+  | "decision";
+
+export interface CeoBriefEvent {
+  id: string;
+  title: string;
+  date: string | null;
+  source: CeoBriefEventSource;
+  category: CeoBriefEventCategory;
+  severity: "critical" | "high" | "medium" | "low";
+  href: string | null;
+}
+
 export interface CeoBriefResult {
   statusPct: number;
   grade: string;
@@ -84,6 +102,8 @@ export interface CeoBriefResult {
   headline: string;
   changes: BriefChange[];
   risks: CeoBriefRiskRendered[];
+  criticalEvents?: CeoBriefEvent[];
+  timelineEvents?: CeoBriefEvent[];
   recommendations: CeoBriefRecommendation[];
   bottomLine: string;
 }
@@ -96,4 +116,63 @@ export interface StoredCeoBrief {
   completedAt: string | null;
   errorMessage: string | null;
   result: CeoBriefResult | null;
+}
+
+// =========================================================================
+// Inline brief editing (select-text → "correct this" feature).
+//
+// A field key maps a text selection to one editable prose field of a brief.
+// Shared by the dashboard-assistant route (server write to result_json) and
+// the brief card (optimistic client re-render). Numbers/badges are never
+// editable — only the four AI-written prose surfaces.
+// =========================================================================
+
+// headline | bottomLine | rec:<index> | risk:<risk_id>
+export const BRIEF_FIELD_RE = /^(headline|bottomLine|rec:\d+|risk:[a-z_]+)$/;
+
+const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+
+export type BriefPatchOutcome =
+  | { ok: true; next: CeoBriefResult; oldValue: string }
+  | { ok: false; error: string };
+
+/**
+ * Pure: return a clone of `result` with the prose field identified by `field`
+ * replaced by `text` (collapsed to one line, like generation does). Never
+ * mutates the input. Returns an error outcome for unknown/missing fields.
+ */
+export function applyBriefPatch(
+  result: CeoBriefResult,
+  field: string,
+  text: string,
+): BriefPatchOutcome {
+  if (!BRIEF_FIELD_RE.test(field)) return { ok: false, error: "حقل غير مدعوم" };
+  const next: CeoBriefResult = structuredClone(result);
+  const value = oneLine(text);
+
+  if (field === "headline") {
+    const oldValue = next.headline;
+    next.headline = value;
+    return { ok: true, next, oldValue };
+  }
+  if (field === "bottomLine") {
+    const oldValue = next.bottomLine;
+    next.bottomLine = value;
+    return { ok: true, next, oldValue };
+  }
+  if (field.startsWith("rec:")) {
+    const i = Number(field.slice(4));
+    const rec = next.recommendations?.[i];
+    if (!rec) return { ok: false, error: "التوصية غير موجودة" };
+    const oldValue = rec.action;
+    rec.action = value;
+    return { ok: true, next, oldValue };
+  }
+  // risk:<id>
+  const id = field.slice(5);
+  const risk = next.risks?.find((r) => r.id === id);
+  if (!risk) return { ok: false, error: "الخطر غير موجود" };
+  const oldValue = risk.interpretation;
+  risk.interpretation = value;
+  return { ok: true, next, oldValue };
 }

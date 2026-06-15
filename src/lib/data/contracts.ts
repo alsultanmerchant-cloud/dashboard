@@ -32,6 +32,27 @@ export type ContractListFilters = {
   startTo?: string;
 };
 
+export type SheetLog = {
+  id: string;
+  contract_key: string;
+  contract_id: string | null;
+  client_external_id: string | null;
+  client_name: string | null;
+  account_manager: string | null;
+  log_type: string;
+  log_time: string | null;
+  notes: string | null;
+  snapshot: Record<string, unknown>;
+};
+
+export type SheetLogFilters = {
+  logTypes?: string[];
+  accountManager?: string | null;
+  search?: string | null;
+  from?: string | null;
+  to?: string | null;
+};
+
 export async function listContracts(orgId: string, filters: ContractListFilters = {}) {
   let q = supabaseAdmin
     .from("contracts")
@@ -117,6 +138,11 @@ export type MonthlyDashboard = {
   mov_closed: number;
   mov_hold: number;
   cnt_total_clients: number;
+  cnt_roster_new: number;
+  cnt_roster_renew: number;
+  cnt_roster_hold: number;
+  cnt_roster_upsell: number;
+  cnt_roster_winback: number;
   cnt_on_target: number;
   cnt_overdue: number;
   cnt_sales_deposit: number;
@@ -364,49 +390,54 @@ export async function getMonthTargetBuckets(
     .toISOString()
     .slice(0, 10);
 
-  // Contracts whose end-date falls in the month (the renewal pool + outcomes).
-  const { data: contracts, error } = await supabaseAdmin
-    .from("contracts")
-    .select(
-      `id, target, renewed_status, next_contract_value, total_value,
-       client:clients(name, external_id),
-       am:employee_profiles!contracts_account_manager_id_fkey(full_name),
-       package:packages!contracts_package_id_fkey(is_renewable)`,
-    )
-    .eq("organization_id", orgId)
-    .gte("end_date", start)
-    .lte("end_date", endDate);
-  if (error) throw error;
-
-  type CRow = {
-    id: string;
-    target: string;
-    renewed_status: string | null;
-    next_contract_value: number | string | null;
-    total_value: number | string | null;
-    client: { name: string | null; external_id: string | null } | null;
-    am: { full_name: string } | null;
-    package: { is_renewable: boolean } | null;
-  };
-
   const on_target: BucketClient[] = [];
   const overdue: BucketClient[] = [];
   const renewed: BucketClient[] = [];
   const lost: BucketClient[] = [];
 
-  for (const c of (contracts ?? []) as unknown as CRow[]) {
+  type BucketRow = {
+    bucket: string;
+    contract_id: string;
+    client_name: string | null;
+    client_code: string | null;
+    account_manager_name: string | null;
+    value: number | string | null;
+  };
+  const place = (r: BucketRow) => {
     const row: BucketClient = {
-      contract_id: c.id,
-      client_name: c.client?.name ?? null,
-      client_code: c.client?.external_id ?? null,
-      account_manager_name: c.am?.full_name ?? null,
-      value: Number(c.next_contract_value ?? c.total_value ?? 0),
+      contract_id: r.contract_id,
+      client_name: r.client_name,
+      client_code: r.client_code,
+      account_manager_name: r.account_manager_name,
+      value: Number(r.value ?? 0),
     };
-    const renewable = c.package?.is_renewable ?? true;
-    if (c.renewed_status === "YES") renewed.push(row);
-    else if (c.renewed_status === "NO") lost.push(row);
-    if (renewable && c.target === "On Target") on_target.push(row);
-    else if (renewable && c.target === "Overdue") overdue.push(row);
+    if (r.bucket === "on_target") on_target.push(row);
+    else if (r.bucket === "overdue") overdue.push(row);
+    else if (r.bucket === "renewed") renewed.push(row);
+    else if (r.bucket === "lost") lost.push(row);
+  };
+
+  // Prefer the frozen snapshot (captured at month-close, immune to end_date
+  // drift). Fall back to a live recompute via the RPC, which mirrors migration
+  // 0172's count-tile predicates so the bucket lists agree with the funnel.
+  const { data: snap, error: snapErr } = await supabaseAdmin
+    .from("monthly_target_snapshot")
+    .select(
+      "bucket, contract_id, client_name, client_code, account_manager_name, value",
+    )
+    .eq("organization_id", orgId)
+    .eq("month", month);
+  if (snapErr) throw snapErr;
+
+  if (snap && snap.length > 0) {
+    for (const r of snap as unknown as BucketRow[]) place(r);
+  } else {
+    const { data: live, error } = await supabaseAdmin.rpc(
+      "get_month_target_buckets",
+      { p_org: orgId, p_month: month },
+    );
+    if (error) throw error;
+    for (const r of (live ?? []) as unknown as BucketRow[]) place(r);
   }
 
   // Installments due in the month.
@@ -689,6 +720,47 @@ export async function listPackages(orgId: string) {
   return data ?? [];
 }
 
+export type ClientContractRow = {
+  id: string;
+  contract_code: string | null;
+  status: string;
+  target: string | null;
+  total_value: number;
+  start_date: string | null;
+  end_date: string | null;
+  type_label: string | null;
+};
+
+// All contracts for one client — powers the client detail page's contracts list.
+export async function listClientContracts(
+  orgId: string,
+  clientId: string,
+): Promise<ClientContractRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from("contracts")
+    .select(
+      "id, contract_code, status, target, total_value, start_date, end_date, type:contract_types(name_ar)",
+    )
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .order("start_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((c) => {
+    const t = (c as { type?: { name_ar?: string } | { name_ar?: string }[] | null }).type;
+    const typeObj = Array.isArray(t) ? t[0] : t;
+    return {
+      id: c.id as string,
+      contract_code: (c.contract_code as string | null) ?? null,
+      status: c.status as string,
+      target: (c.target as string | null) ?? null,
+      total_value: Number(c.total_value ?? 0),
+      start_date: (c.start_date as string | null) ?? null,
+      end_date: (c.end_date as string | null) ?? null,
+      type_label: typeObj?.name_ar ?? null,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // T7.5-finish — detail loaders + per-AM dashboard + CEO commercial tiles.
 // All read through supabaseAdmin and do an explicit org-scope check, mirroring
@@ -700,7 +772,7 @@ export async function getContractById(orgId: string, id: string) {
   const { data, error } = await supabaseAdmin
     .from("contracts")
     .select(
-      `id, organization_id, start_date, end_date, duration_months,
+      `id, organization_id, external_id, start_date, end_date, duration_months,
        total_value, paid_value, target, status, notes,
        contract_code, hold_started_at, hold_end_date, type_before_hold_id,
        project_id, account_manager_id, contract_type_id, package_id,
@@ -817,6 +889,108 @@ export async function getContractEvents(
     .limit(limit);
   if (error) throw error;
   return data ?? [];
+}
+
+function mapSheetLogRows(rows: unknown[] | null): SheetLog[] {
+  type Row = {
+    id: string;
+    contract_key: string;
+    contract_id: string | null;
+    client_external_id: string | null;
+    client_name: string | null;
+    account_manager: string | null;
+    log_type: string;
+    log_time: string | null;
+    notes: string | null;
+    snapshot: Record<string, unknown> | null;
+  };
+
+  return ((rows ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    contract_key: row.contract_key,
+    contract_id: row.contract_id,
+    client_external_id: row.client_external_id,
+    client_name: row.client_name,
+    account_manager: row.account_manager,
+    log_type: row.log_type,
+    log_time: row.log_time,
+    notes: row.notes,
+    snapshot: row.snapshot ?? {},
+  }));
+}
+
+export async function listSheetLogs(
+  orgId: string,
+  filters: SheetLogFilters = {},
+  limit = 500,
+): Promise<SheetLog[]> {
+  let q = supabaseAdmin
+    .from("contract_sheet_logs")
+    .select(
+      `id, contract_key, contract_id, client_external_id, client_name,
+       account_manager, log_type, log_time, notes, snapshot`,
+    )
+    .eq("organization_id", orgId)
+    .order("log_time", { ascending: false, nullsFirst: false })
+    .limit(limit);
+
+  if (filters.logTypes && filters.logTypes.length > 0) {
+    q = q.in("log_type", filters.logTypes);
+  }
+  if (filters.accountManager) {
+    q = q.eq("account_manager", filters.accountManager);
+  }
+  if (filters.search) {
+    const term = filters.search.trim().replace(/[,%]/g, "");
+    if (term) {
+      q = q.or(`client_name.ilike.%${term}%,contract_key.ilike.%${term}%`);
+    }
+  }
+  if (filters.from) {
+    q = q.gte("log_time", filters.from);
+  }
+  if (filters.to) {
+    q = q.lte("log_time", filters.to);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return mapSheetLogRows(data);
+}
+
+export async function listSheetLogManagers(orgId: string): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("contract_sheet_logs")
+    .select("account_manager")
+    .eq("organization_id", orgId)
+    .not("account_manager", "is", null);
+  if (error) throw error;
+
+  type Row = { account_manager: string | null };
+  return Array.from(
+    new Set(
+      ((data ?? []) as Row[])
+        .map((row) => row.account_manager?.trim())
+        .filter((value): value is string => !!value),
+    ),
+  ).sort((a, b) => a.localeCompare(b, "ar"));
+}
+
+export async function getContractSheetLogs(
+  orgId: string,
+  contractKey: string,
+): Promise<SheetLog[]> {
+  const { data, error } = await supabaseAdmin
+    .from("contract_sheet_logs")
+    .select(
+      `id, contract_key, contract_id, client_external_id, client_name,
+       account_manager, log_type, log_time, notes, snapshot`,
+    )
+    .eq("organization_id", orgId)
+    .eq("contract_key", contractKey)
+    .order("log_time", { ascending: false, nullsFirst: false });
+  if (error) throw error;
+  return mapSheetLogRows(data);
 }
 
 function monthBoundsUtc(reference: Date) {

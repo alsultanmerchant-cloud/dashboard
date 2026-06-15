@@ -3,8 +3,17 @@ import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
-import { SatisfactionSchema, type SatisfactionResult } from "@/lib/satisfaction-schema";
-import { buildClientTranscripts, getClientExecutionSnapshot } from "@/lib/data/satisfaction";
+import {
+  SatisfactionSchema,
+  type SatisfactionResult,
+  RISK_INDICATORS,
+} from "@/lib/satisfaction-schema";
+import {
+  buildClientTranscripts,
+  getClientExecutionSnapshot,
+  getClientContractContext,
+  getClientContractActivity,
+} from "@/lib/data/satisfaction";
 import { getClientBrief } from "@/lib/satisfaction-brief";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
@@ -99,20 +108,48 @@ export async function analyzeClientSatisfaction(
   // complaints with concrete delayed work and give grounded recommendations
   // (the team's explicit ask: "compare the chat with the tasks in Rawasm").
   const execution = await getClientExecutionSnapshot(orgId, clientId);
+  const bottleneckLine =
+    execution && execution.bottlenecks.length
+      ? `\nBottlenecks (تركّز التأخير): ${execution.bottlenecks
+          .map((b) => `${b.stage} ${b.pct}% (${b.count})`)
+          .join("، ")}`
+      : "";
   const executionBlock = execution
-    ? `\n\n=== العمل الفعلي في رواسم (المهام المتأخرة) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
+    ? `\n\n=== التاسكات والمشروع (مواعيد التسليم + Bottlenecks) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
         execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
-      }\nتوزّع المتأخرات على المراحل: ${execution.byStage
-        .map((s) => `${s.stage} (${s.count})`)
-        .join("، ")}\nأبرز المهام العالقة:\n${execution.topTasks
+      }${bottleneckLine}\nأبرز المهام العالقة (مع موعد التسليم إن وُجد):\n${execution.topTasks
         .map(
           (t) =>
             `- ${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
-              t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""
-            }${t.delayDays != null ? ` — متأخرة ${t.delayDays} يوم عمل` : ""}`,
+              t.dueDate ? ` — موعد التسليم: ${t.dueDate}` : ""
+            }${t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""}${
+              t.delayDays != null ? ` — متأخرة ${t.delayDays} يوم عمل` : ""
+            }`,
         )
         .join("\n")}`
-    : "\n\n=== العمل الفعلي في رواسم ===\n(لا توجد مهام متأخرة مسجّلة لهذا العميل في رواسم)";
+    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام متأخرة مسجّلة لهذا العميل في رواسم)";
+
+  // Contract status — the commercial dimension of the big picture. Lets the
+  // model weigh relationship/execution signals against contract health.
+  const contract = await getClientContractContext(orgId, clientId);
+  // Contract activity log — the trajectory (holds, edits, close/renew) that the
+  // snapshot can't show. Behavioral signal for the commercial dimension.
+  const activity = await getClientContractActivity(orgId, clientId);
+  const activityBlock = activity.length
+    ? `\nسجل نشاط العقد (الأحدث أولًا — أحداث سلوكية: ON HOLD=تجميد/احتكاك، HOLD LIFTED=رفع التجميد، Contract Close (Lost)=خسارة/إنهاء، Contract Close (Renew)=تجديد، EDIT MODE=تعديل بنود):\n${activity
+        .map(
+          (a) =>
+            `- ${a.logTime ? a.logTime.slice(0, 10) : "?"} ${a.logType}${
+              a.notes ? ` — ${a.notes.replace(/\s+/g, " ").trim().slice(0, 240)}` : ""
+            }`,
+        )
+        .join("\n")}`
+    : "";
+  const contractBlock = contract
+    ? `\n\n=== حالة العقد ===\nالوضع (target): ${contract.target} — الحالة (status): ${contract.status}\nالقيمة الإجمالية: ${contract.totalValue} — المدفوع: ${contract.paidValue} — المتبقّي: ${
+        contract.totalValue - contract.paidValue
+      }\nتاريخ البداية: ${contract.startDate}${contract.endDate ? ` — تاريخ الانتهاء: ${contract.endDate}` : ""}${activityBlock}`
+    : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
   const runOnce = async (budget: number) =>
     (
@@ -120,39 +157,68 @@ export async function analyzeClientSatisfaction(
         model: google(MODEL),
         maxRetries: 2,
         schema: SatisfactionSchema,
-        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال محادثات واتساب، والبريف الموثق عند توفره، وبيانات العمل في رواسم:
+        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
 ${
   windowKind === "week"
-    ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم رضاه بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
+    ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
     : `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
 }
+وصف المصادر:
+1) "مجموعة العميل 💫" — التواصل المباشر مع العميل (الرضا، الشكاوى، التعديلات، الاعتمادات، نبرة العميل).
+2) "مجموعة الفريق التقني 📍" — التنسيق الداخلي (المشاكل التي تمنع التنفيذ، أسباب التأخير، تقييم الفريق للحساب). سياق فقط — ليست طلبات العميل.
+3) "التاسكات والمشروع" — المهام المتأخرة الحقيقية ومراحلها ومواعيد التسليم و Bottlenecks (بيانات نظام، ليست محادثة).
+4) "حالة العقد" — وضع العقد المالي والتعاقدي (البُعد التجاري).
 
-1) "مجموعة العميل" — التواصل المباشر مع العميل (هنا يظهر الرضا، الشكاوى، التعديلات، نبرة العميل).
-2) "مجموعة الفريق التقني" — التنسيق الداخلي للفريق حول التنفيذ والتسليم، ويُستخدم كسياق فقط لاستخراج سبب التأخير أو الاحتكاك.
-3) "البريف" — وثيقة متطلبات العميل من ملفات المشروع/المهام، وهي مصدر قياس الالتزام بالبريف فقط.
-4) "العمل الفعلي في رواسم" — المهام المتأخرة الحقيقية للعميل ومراحلها (بيانات نظام، ليست محادثة).
+التعليمات حسب المخرجات:
 
-التعليمات:
-- satisfactionScore (0-100): من نبرة العميل ونتائج التعامل في "مجموعة العميل".
+— الحالة الحالية —
+- summary: ٢-٤ جمل بالعربية تلخّص الوضع الآن.
+- satisfactionScore (0-100): من نبرة العميل ونتائج التعامل في "مجموعة العميل" فقط.
 ${briefInstruction}
-- sentiment, summary (عربي ٢-٤ جمل), highlights (ثناء/شكوى/طلب/تصعيد/إنجاز مع التاريخ)، sentimentTimeline (period مثل 2026-04)، risks (الأهم أولًا).
-- recommendations (توصيات قابلة للتنفيذ للفريق، الأهم أولًا، حتى ٦): اربط ما يشكو منه العميل أو يطلبه في المحادثة بالعمل الفعلي في رواسم. لكل توصية: issue = المشكلة موصولة بالواقع (مثال: «العميل يستعجل تسليم الحملة، ويوجد فعليًا في رواسم مهمتان متأخرتان عالقتان في مرحلة التصميم منذ ١٢ يومًا»)، action = الخطوة العملية التالية (مثال: «تصعيد مهمة PRJ-007-014 لقسم التصميم وتحديد موعد تسليم للعميل»). استخدم رموز/عناوين المهام من قسم رواسم عند توفرها. لا تخترع مهامًا غير مذكورة. إن لم توجد مشكلة جوهرية تستحق توصية، أعِد مصفوفة فارغة.
-- حدود استخدام بيانات رواسم: اذكر رقم «في هذه المرحلة منذ» كما ورد حرفيًا ولا تُعِد صياغته كـ«تأخّر في اعتماد العميل X أيام» أو أي مقياس آخر. لا تنسب لأي مهمة أثرًا لم يُذكر صراحةً (مثل «يعيق تقدّم الحملات» أو «يؤخّر النتائج») ما لم يقُل العميل ذلك بنفسه في «مجموعة العميل». اربط مهمة متأخرة بتوصية فقط حين يشكو العميل فعليًا في المحادثة من النقطة نفسها؛ وإلا فاذكرها كسياق تشغيلي محايد دون استنتاج تأثير.
-- لكل عنصر في highlights حدّد audience:
-  • "client" = رسالة أو موقف صادر من العميل نفسه (طلب/شكوى/ثناء حقيقي من العميل).
-  • "team" = تنسيق داخلي بين الفريق (مثل أن يستعجل الأكاونت مانجر العميل على الاعتماد). لا تَعُدّ رسائل الفريق الداخلية طلباتٍ للعميل.
-- "إنجاز" (milestone) للمخرجات الجوهرية المعتمدة فقط (إطلاق حملة، اعتماد تصميم/تسليم، نتيجة قابلة للقياس). الخطوات اللوجستية الروتينية (إرسال دعوات وصول، جدولة اجتماع، تبادل صلاحيات) ليست إنجازًا. الاسترداد المالي أو إنهاء التعاقد أو مغادرة العميل أو فسخ الاتفاق ليست إنجازًا أبدًا — صنّفها "تصعيد" (escalation) واعكسها في خفض satisfactionScore والمخاطر.
-- نص كل highlight يجب أن يكون مقتبسًا فعليًا من رسالة موجودة أو تلخيصًا أمينًا لها — لا تخترع رسائل أو تفاصيل (مثل "تم اعتماد/الانتهاء") غير واردة حرفيًا.
-- ميّز بين الطلب/الاستفسار المحايد والشكوى: طلب خيارات إضافية أو استفسار عادي ليس شكوى ولا تبنِ عليه عدم رضا. لكن عدم الوفاء بوعد (وعدٌ بموعد ولم يُسلَّم)، أو تكرار المتابعة دون استجابة، أو احتكاك في العملية، إشاراتٌ سلبية حقيقية صنّفها شكوى/طلبًا واخفِض الدرجة بمقدارها — دون مبالغة في أي اتجاه.
-- درجات الرضا: 75+ تتطلب رضا واضحًا أو ثناءً صريحًا من العميل. علاقة تعاونية لكن فيها احتكاك لوجستي أو تأخيرات = محايد/متباين (55-70)، وليست "إيجابية".
-- في المشاريع الجديدة/مرحلة الإعداد التي لم تُسلَّم فيها مخرجات بعد، اذكر في الملخص أن التقييم مبكّر إذا كانت إشارات الرضا محدودة.
-استند فقط لما ورد في المحادثات والبريف وبيانات رواسم.
+- sentiment، sentimentTimeline (period مثل 2026-04).
 
-=== مجموعة العميل ===
+— bigPicture (الصورة الكبرى — اجمع كل مصدر) —
+- relationshipScore (0-100): من مجموعة العميل (النبرة + الاعتمادات + التعاون).
+- executionScore (0-100): من مجموعة الفريق التقني + التاسكات (التأخيرات + Bottlenecks + المهام العالقة).
+- commercialScore (0-100): من حالة العقد + سجل نشاط العقد (On-Target/مدفوعات سليمة = مرتفع، Overdue/متأخرات = منخفض). التجميد ON HOLD والتعديلات المتكررة = إشارات سلبية على الاستقرار؛ التجديد Renew = إيجابي؛ الخسارة/الإغلاق Lost = منخفض جدًا. اقرأ ملاحظات أحداث الإغلاق لمعرفة السبب وانعكسه في causes/risks عند الأهمية. أعده null إن لم يوجد عقد.
+- accountHealth: healthy / watch / at_risk / critical — حكم شامل يوازن الأبعاد الثلاثة (علاقة متوترة على عقد Overdue = critical).
+- headline: جملة واحدة تربط الأبعاد ("الخلاصة").
+
+— indicators (المؤشرات — استخرجها من المصادر، استخدم الأكواد التالية حصراً) —
+كل عنصر: { code, severity, source, evidence (اقتباس/تلخيص حقيقي), date }.
+🔴 مخاطر (severity=red): client_complained (اشتكى)، client_dissatisfied (عدم رضا)، client_threatened_cancellation (هدد بالإلغاء/التوقف)، client_compared_competitor (قارن بمنافس)، client_complained_about_person (اشتكى من شخص)، client_repeated_complaint (كرّر نفس الشكوى)، client_question_unanswered (سؤال مهم بلا رد لفترة)، major_task_delay (تأخير كبير في مهمة مؤثرة)، client_corrected_am_repeatedly (صحّح فهم الأكاونت عدة مرات)، client_vs_team_mismatch (تضارب بين طلب العميل وما نُقل للتيم)، team_reported_unclear_requirements (التيم أبلغ عن غموض المتطلبات من الأكاونت).
+🟡 تشغيلية (severity=yellow): team_reported_blocker (مشكلة تمنع التنفيذ)، missing_access (صلاحيات ناقصة)، missing_brief (بريف ناقص)، client_uncooperative (غير متعاون)، client_late_approvals (متأخر في الاعتمادات بشكل مؤثر)، conflicting_client_requests (تضارب بين طلبات العميل)، am_not_understanding (الأكاونت غير فاهم/كرّر طلب التوضيح).
+لا تخترع أكواداً خارج القائمة. أصدر المؤشر فقط عند وجود دليل صريح. source = client أو technical أو tasks بحسب أين ظهر.
+
+— clientGroupSignals (من مجموعة العميل فقط) —
+- requests: عدّ {new, edit, complaint, inquiry, approval}.
+- approvals: عدّ {approved, rejected, changesRequested, noResponse}.
+- responseSpeed: fast/medium/slow/unknown (متوسط سرعة تعاون/رد العميل).
+
+— technicalGroupSignals (من مجموعة الفريق التقني + التاسكات) —
+- blockers: المشاكل الداخلية (التصميم متأخر، المحتوى متأخر، الحملة لم تبدأ، محتاجين بيانات من العميل، مشكلة تقنية...).
+- delayCauses: [{cause, attributedTo}] حيث attributedTo = client/account_manager/team/department/unknown.
+- accountEvaluation: تقييم الفريق الداخلي (العميل غير واضح، يغيّر رأيه كثيراً، الأكاونت غير فاهم، البريف ناقص...).
+
+— causes (أسباب المشاكل) —
+[{problem, rootCause, owner}] — لكل مشكلة جوهرية سببها الجذري ومن يملكها (نفس قيم attributedTo).
+
+— recommendations (الأكشنز المقترحة، الأهم أولاً، حتى ٦) —
+اربط ما يشكو/يطلبه العميل بالعمل الفعلي في التاسكات. issue = المشكلة موصولة بالواقع، action = الخطوة العملية. استخدم رموز/عناوين المهام عند توفرها. لا تخترع مهاماً. إن لم توجد مشكلة جوهرية أعِد مصفوفة فارغة.
+
+ضوابط عامة:
+- حدود رواسم: اذكر رقم «في هذه المرحلة منذ» كما ورد ولا تُعِد صياغته كـ«تأخّر اعتماد X أيام». لا تنسب لمهمة أثراً لم يُذكر صراحةً ما لم يقُله العميل في مجموعته.
+- highlights: لكل عنصر audience: "client" (من العميل) أو "team" (تنسيق داخلي). نص كل عنصر اقتباس حقيقي أو تلخيص أمين — لا تخترع رسائل أو "تم الاعتماد/الانتهاء". milestone للمخرجات المعتمدة الجوهرية فقط؛ الاسترداد المالي/فسخ التعاقد/مغادرة العميل = escalation وليست milestone.
+- ميّز الاستفسار المحايد عن الشكوى. عدم الوفاء بوعد أو تكرار المتابعة دون رد أو احتكاك العملية = إشارات سلبية حقيقية.
+- درجات الرضا: 75+ تتطلب رضا/ثناءً صريحاً. علاقة فيها احتكاك لوجستي/تأخيرات = 55-70 (محايد/متباين) وليست إيجابية.
+- في المشاريع الجديدة بلا مخرجات مُسلَّمة، اذكر أن التقييم مبكّر إذا كانت الإشارات محدودة.
+استند فقط لما ورد في المصادر أدناه.
+
+=== مجموعة العميل 💫 ===
 ${trim(clientBlock, budget)}
 
-=== مجموعة الفريق التقني ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
+=== مجموعة الفريق التقني 📍 ===
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}`,
       })
     ).object;
 
@@ -211,6 +277,12 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
       sentiment_timeline: result.sentimentTimeline,
       risks: result.risks,
       recommendations: result.recommendations,
+      indicators: result.indicators,
+      client_group_signals: result.clientGroupSignals,
+      technical_group_signals: result.technicalGroupSignals,
+      causes: result.causes,
+      big_picture: result.bigPicture,
+      contract_context: contract ? { ...contract, recentActivity: activity } : null,
       model: MODEL,
       client_import_id: clientImportId,
       technical_import_id: technicalImportId,
@@ -242,10 +314,21 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}`,
       satisfactionScore: result.satisfactionScore,
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
+      accountHealth: result.bigPicture.accountHealth,
+      // The red (relationship-risk) indicator codes detected this run — the
+      // headline triage signals the team acts on.
+      redIndicators: result.indicators
+        .filter((i) => (RISK_INDICATORS as readonly string[]).includes(i.code))
+        .map((i) => i.code),
       briefUsed: brief ? { source: brief.source, kind: brief.kind, filename: brief.filename, url: brief.url } : null,
       windowKind,
     },
-    importance: result.satisfactionScore < 50 ? "high" : "normal",
+    importance:
+      result.satisfactionScore < 50 ||
+      result.bigPicture.accountHealth === "critical" ||
+      result.bigPicture.accountHealth === "at_risk"
+        ? "high"
+        : "normal",
   });
 
   return { analysisId: inserted.id, result };

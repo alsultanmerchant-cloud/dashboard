@@ -4,6 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 import { buildCeoBriefSignals } from "@/lib/data/ceo-brief-signals";
+import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import {
   CeoBriefAiSchema,
   type CeoBriefResult,
@@ -87,7 +88,10 @@ export async function generateAndStoreCeoBrief(
   const runId = inserted.id as string;
 
   try {
-    const signals = await buildCeoBriefSignals(orgId);
+    const [signals, knowledge] = await Promise.all([
+      buildCeoBriefSignals(orgId),
+      buildKnowledgeBlock(orgId),
+    ]);
 
     const facts = {
       verdict: signals.verdict,
@@ -130,7 +134,7 @@ ${JSON.stringify(facts)}
 - **headline**: جملة واحدة تجيب السؤال الأول وتُحدّد **أين** يتركّز التغيّر (الخدمة/المرحلة)، مستندةً إلى verdictArabic و statusPct و changes و context. مثال: "الوضع التشغيلي ${facts.verdictArabic} عند ${facts.statusPct}% — مدفوعًا بـ… وتتركّز المشكلة في…".
 - **riskNotes**: عنصر واحد لكل خطر في risks بنفس الـ id. interpretation = لماذا هذا خطر وأثره، مع **ربطه بجذر السبب من context** (مثلاً ربط التأخير بالخدمة الأضعف أو باختناق الإدخال أو بكونه مزمنًا).
 - **recommendations**: خطة عمل من ٤ إلى ٦ بنود **متنوّعة المجالات** تعالج **جذور** المشكلة من risks و context و opportunities معًا — وجّه التركيز للخدمة الأضعف، عالج اختناق الإدخال، أنقذ العملاء المعرّضين للفقد (topChurn)، أعد توزيع الحمل (overloaded/underutilized)، تابع التجديدات، عالج فريق zeroOnTimePerformers، واحمِ/استثمر ما ينجح (bestService/topPerformers/bestClients). لكل بند: category، action محدّد، owner (الدور المسؤول).
-- **bottomLine**: جملة واحدة فقط — أهم إجراء يعالج أخطر جذر سبب اليوم.`;
+- **bottomLine**: جملة واحدة فقط — أهم إجراء يعالج أخطر جذر سبب اليوم.${knowledge ? `\n\n${knowledge}` : ""}`;
 
     // Prefer the stronger brief model; fall back to the shared model if the id
     // is rejected (e.g. not yet available on this key).
@@ -163,7 +167,8 @@ ${JSON.stringify(facts)}
     const noteById = new Map(object.riskNotes.map((n) => [n.id, n]));
     const risks: CeoBriefRiskRendered[] = signals.risks.map((r) => {
       const note = noteById.get(r.id);
-      const { weight: _weight, ...rest } = r;
+      const { weight, ...rest } = r;
+      void weight;
       return { ...rest, interpretation: note?.interpretation ?? r.metric };
     });
 
@@ -175,6 +180,8 @@ ${JSON.stringify(facts)}
       headline: oneLine(object.headline),
       changes: signals.changes,
       risks,
+      criticalEvents: signals.criticalEvents,
+      timelineEvents: signals.timelineEvents,
       recommendations: object.recommendations.map((r) => ({
         category: r.category,
         action: oneLine(r.action),

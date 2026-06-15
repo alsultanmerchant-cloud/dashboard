@@ -787,25 +787,42 @@
   },
   "ClientsPage": {
     "title": "Clients",
-    "description": "Agency client base synced directly from Odoo.",
+    "description": "Centralized agency client base — contracts and delivery, in one list.",
     "stats": {
       "totalClients": "Total clients",
       "activeClients": "Active clients",
       "activeClientsHint": "Have projects",
       "totalProjects": "Total projects",
       "contactData": "Contact data",
-      "contactDataHint": "{count} missing"
+      "contactDataHint": "{count} missing",
+      "contractsClients": "Contract clients",
+      "contractsClientsHint": "Have a contract",
+      "deliveryClients": "Delivery clients",
+      "deliveryClientsHint": "Have a project"
     },
     "emptyTitle": "No clients",
-    "emptyDescription": "There are currently no client partners in Odoo.",
+    "emptyDescription": "There are currently no clients.",
     "table": {
       "client": "Client",
       "contact": "Contact",
       "location": "Website",
       "projects": "Projects",
-      "actions": "Actions"
+      "actions": "Actions",
+      "contracts": "Contracts"
     },
-    "openClient": "Open client"
+    "openClient": "Open client",
+    "filter": {
+      "all": "All",
+      "contracts": "Contracts",
+      "delivery": "Delivery",
+      "both": "Both"
+    },
+    "source": {
+      "contracts": "Contract",
+      "delivery": "Delivery",
+      "both": "Both",
+      "other": "Other"
+    }
   },
   "SettingsPage": {
     "title": "Settings",
@@ -862,7 +879,8 @@
     "description": "The source of truth for contracts and revenue. The old sheet is archived; updates and calculations happen here.",
     "tabs": {
       "table": "Contracts table",
-      "dashboard": "Revenue dashboard"
+      "dashboard": "Revenue dashboard",
+      "logs": "Activity log"
     },
     "header": {
       "import": "Import from Excel"
@@ -1126,6 +1144,39 @@
       "emptyFiltered": "No contracts match the current filters.",
       "emptyNote": "—"
     },
+    "logs": {
+      "title": "Contract activity log",
+      "description": "Hold, renewal, loss and edit events synced from the contracts sheet.",
+      "filters": {
+        "allTypes": "All types",
+        "manager": "Account manager",
+        "allManagers": "All managers",
+        "search": "Search",
+        "searchPlaceholder": "Client name or code…",
+        "from": "From",
+        "to": "To",
+        "clear": "Clear"
+      },
+      "types": {
+        "lost": "Closed (Lost)",
+        "renew": "Closed (Renewed)",
+        "hold": "On hold",
+        "holdLifted": "Hold lifted",
+        "editOn": "Edit started",
+        "editOff": "Edit finished"
+      },
+      "columns": {
+        "time": "Time",
+        "type": "Type",
+        "client": "Client",
+        "manager": "Manager",
+        "notes": "Notes"
+      },
+      "empty": "No matching activity.",
+      "note": {
+        "was": "Was"
+      }
+    },
     "detail": {
       "hold": {
         "active": "This contract is on hold",
@@ -1185,6 +1236,11 @@
           "title": "Event log",
           "description": "Contract changes and notes",
           "empty": "No events have been recorded on this contract yet."
+        },
+        "sheetLogs": {
+          "title": "Sheet change log",
+          "description": "This contract's events recorded in the contracts sheet.",
+          "empty": "No sheet activity for this contract."
         }
       }
     },
@@ -1282,7 +1338,13 @@
     "note": "The system uses the <code>Key</code> column (for example <code>C83|20250906</code>) to identify contracts. Re-importing is <strong>safe</strong>; it updates values without duplicating rows.",
     "form": {
       "toasts": {
-        "imported": "Data imported"
+        "imported": "Data imported",
+        "synced": "Google Sheet synced"
+      },
+      "google": {
+        "title": "Live Google Sheet sync",
+        "description": "Pull the latest rows directly from the connected Google Sheet. This updates existing sheet-imported clients, contracts, and installments without creating duplicates.",
+        "sync": "Sync now"
       },
       "fileLabel": "Choose Excel file",
       "fileHint": "The system accepts the \"Clients Contracts\" and \"💲Installments Tracker\" sheets from the account file. Nothing is saved until you review and confirm the preview.",
@@ -2903,6 +2965,43 @@
       "q1": "Is the company improving or declining?",
       "q2": "Where's the danger?",
       "q3": "What should I do?",
+      "aiTitle": "AI Executive Summary",
+      "criticalTitle": "Critical Events Only · Latest developments",
+      "latestFirst": "Newest first",
+      "recommendationsTitle": "Recommendations",
+      "noCriticalEvents": "No events require management intervention right now.",
+      "noTimelineEvents": "No events in this range.",
+      "noRecommendations": "No urgent recommendations in this brief.",
+      "tabs": {
+        "critical": "Critical Events Only",
+        "timeline": "Client Timeline"
+      },
+      "range": {
+        "7": "Last 7 days",
+        "30": "Last 30 days",
+        "90": "Last 90 days",
+        "all": "All history"
+      },
+      "filter": {
+        "all": "All",
+        "complaint": "Complaints only",
+        "approval": "Approvals only",
+        "delay": "Delays only",
+        "internal": "Internal issues only",
+        "decision": "Important decisions only"
+      },
+      "eventSource": {
+        "client_group": "Client group",
+        "technical_group": "Technical group",
+        "system": "System"
+      },
+      "eventCategory": {
+        "complaint": "Complaints",
+        "approval": "Approvals",
+        "delay": "Delays",
+        "internal": "Internal issues",
+        "decision": "Important decisions"
+      },
       "verdict": {
         "improving": "Improving",
         "stable": "Stable",
@@ -2940,6 +3039,26 @@
       "emptyTitle": "No brief generated yet",
       "emptyDescription": "The brief sums up company status in three practical answers, instead of reading every section.",
       "generateFirst": "Generate first brief"
+    },
+    "assistant": {
+      "askAi": "Ask AI",
+      "title": "Brief assistant",
+      "correct": "Correct this",
+      "explainMore": "Explain more",
+      "teach": "Teach the AI",
+      "placeholder": "Type a correction, or teach the AI a fact about the company…",
+      "send": "Send",
+      "selectHint": "Select text from the brief to start",
+      "thinking": "Thinking…",
+      "editing": "Editing the text…",
+      "edited": "Text updated ✅",
+      "teaching": "Saving the lesson…",
+      "taught": "Lesson saved 🧠",
+      "reading": "Fetching data…",
+      "read": "Data fetched",
+      "errorGeneric": "Couldn't reach the assistant. Try again.",
+      "you": "You",
+      "close": "Close"
     }
   },
   "SatisfactionPage": {
@@ -2981,10 +3100,144 @@
     "timeline": "Satisfaction trend",
     "risks": "Relationship risks",
     "recommendations": "Recommendations (chat ↔ Rawasm tasks)",
+    "executive": {
+      "title": "AI Executive Summary",
+      "deliveryRisk": "{n} overdue task(s) should be handled in the follow-up plan.",
+      "noMajorRisk": "No major relationship risk is visible in the latest analysis.",
+      "riskHigh": "High risk",
+      "riskMedium": "Medium risk",
+      "riskLow": "Stable",
+      "tabs": {
+        "critical": "Critical Events Only",
+        "timeline": "Client Timeline"
+      },
+      "criticalTitle": "Latest developments",
+      "latestFirst": "Newest first",
+      "recommendationsTitle": "Recommendations",
+      "timelineTitle": "Client Timeline",
+      "noCriticalEvents": "No management-level critical events right now.",
+      "noRecommendations": "No urgent recommendations in this analysis.",
+      "noTimelineEvents": "No events in this range.",
+      "source": {
+        "client": "Source: 💫 client group",
+        "technical": "Source: 📍 technical group",
+        "system": "Source: system tasks"
+      },
+      "category": {
+        "complaint": "Complaints",
+        "approval": "Approvals",
+        "delay": "Delays",
+        "internal": "Internal issues",
+        "decision": "Important decisions"
+      },
+      "range": {
+        "7": "Last 7 days",
+        "30": "Last 30 days",
+        "90": "Last 90 days",
+        "all": "All history"
+      },
+      "filter": {
+        "all": "All",
+        "complaint": "Complaints only",
+        "approval": "Approvals only",
+        "delay": "Delays only",
+        "internal": "Internal issues only",
+        "decision": "Important decisions only"
+      }
+    },
     "recPriority": {
       "high": "High",
       "medium": "Medium",
       "low": "Low"
+    },
+    "bigPicture": {
+      "title": "Big picture",
+      "relationship": "Relationship",
+      "execution": "Execution",
+      "commercial": "Commercial"
+    },
+    "accountHealth": {
+      "healthy": "Healthy",
+      "watch": "Watch",
+      "at_risk": "At risk",
+      "critical": "Critical"
+    },
+    "contractTarget": {
+      "On-Target": "On target",
+      "On Target": "On target",
+      "Overdue": "Overdue",
+      "Sales Deposit": "Sales deposit",
+      "Closed": "Closed",
+      "Lost": "Lost",
+      "Renewed": "Renewed"
+    },
+    "indicators": {
+      "title": "Indicators",
+      "risk": "Risk",
+      "operational": "Operational",
+      "none": "No indicators detected in this analysis.",
+      "noneRisk": "No risk indicators.",
+      "noneOperational": "No operational indicators."
+    },
+    "indicator": {
+      "client_complained": "Client complained",
+      "client_dissatisfied": "Client showed dissatisfaction",
+      "client_threatened_cancellation": "Threatened to cancel/stop",
+      "client_compared_competitor": "Compared us to a competitor",
+      "client_complained_about_person": "Complained about a specific person",
+      "client_repeated_complaint": "Repeated the same complaint",
+      "client_question_unanswered": "Important question left unanswered",
+      "major_task_delay": "Major delay in an impactful task",
+      "client_corrected_am_repeatedly": "Corrected the AM repeatedly",
+      "client_vs_team_mismatch": "Client request vs. what was relayed mismatch",
+      "team_reported_unclear_requirements": "Team flagged unclear requirements from AM",
+      "team_reported_blocker": "Team reported a blocker",
+      "missing_access": "Missing accesses",
+      "missing_brief": "Missing brief",
+      "client_uncooperative": "Client uncooperative",
+      "client_late_approvals": "Client late on approvals",
+      "conflicting_client_requests": "Conflicting client requests",
+      "am_not_understanding": "AM not understanding the ask"
+    },
+    "signals": {
+      "clientTitle": "Client group 💫",
+      "technicalTitle": "Technical group 📍",
+      "technicalNone": "No internal signals extracted.",
+      "requests": "Requests",
+      "approvals": "Approvals",
+      "responseSpeed": "Response speed",
+      "blockers": "Blockers",
+      "delayCauses": "Delay causes",
+      "accountEvaluation": "Internal account evaluation",
+      "req": {
+        "new": "New",
+        "edit": "Edits",
+        "complaint": "Complaints",
+        "inquiry": "Inquiries",
+        "approval": "Approvals"
+      },
+      "appr": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "changesRequested": "Changes",
+        "noResponse": "No response"
+      }
+    },
+    "responseSpeed": {
+      "fast": "Fast",
+      "medium": "Medium",
+      "slow": "Slow",
+      "unknown": "Unknown"
+    },
+    "owner": {
+      "client": "Client",
+      "account_manager": "Account manager",
+      "team": "Team",
+      "department": "Department",
+      "unknown": "Unknown"
+    },
+    "causes": {
+      "title": "Root causes"
     },
     "highlights": "Highlights",
     "emptyOverview": "No synced chats yet. Connect WhatsApp groups to get started.",
@@ -3150,5 +3403,59 @@
     "paidComplete": "Paid in full",
     "overduePayment": "{count, plural, one {Overdue payment} other {# overdue payments}}",
     "overdueAmount": "Unpaid overdue amount: {amount} SAR"
+  },
+  "Activity": {
+    "feed": {
+      "empty": "No activity yet",
+      "employeeFallback": "Team member"
+    },
+    "composer": {
+      "tabs": {
+        "message": "Message",
+        "note": "Log note"
+      },
+      "placeholders": {
+        "message": "Write a message…",
+        "note": "Log an internal note… use @ to mention"
+      },
+      "post": "Post",
+      "send": "Send",
+      "attach": "Attach",
+      "uploading": "Uploading…",
+      "shortcut": "⌘+Enter to send",
+      "attachmentsOnly": "(attachment)",
+      "mentionSuggestions": "Mention suggestions",
+      "matches": "{count} matches",
+      "forQuery": "for “{query}”",
+      "removeAttachment": "Remove",
+      "maxFiles": "Max {count} files",
+      "fileTooLarge": "{name} is too large",
+      "uploadFailed": "Upload failed",
+      "toasts": {
+        "posted": "Note posted",
+        "postedWithMentions": "Note posted · {count} mentioned"
+      }
+    },
+    "events": {
+      "ON_HOLD": "Put on hold",
+      "HOLD_LIFTED": "Hold lifted",
+      "HOLD_UPDATED": "Hold updated",
+      "STATUS_CHANGE": "Status changed",
+      "TARGET_CHANGE": "Target changed",
+      "TYPE_CHANGE": "Type changed",
+      "VALUE_CHANGE": "Value changed",
+      "default": "Event"
+    }
+  },
+  "ClientDetailPage": {
+    "back": "Clients",
+    "contractsTitle": "Contracts",
+    "activityTitle": "Activity",
+    "noContracts": "No contracts for this client yet.",
+    "metrics": {
+      "contracts": "Contracts",
+      "active": "Active",
+      "totalValue": "Total value"
+    }
   }
 }

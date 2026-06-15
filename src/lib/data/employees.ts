@@ -24,6 +24,32 @@ export async function listAccountManagers(orgId: string) {
   return data ?? [];
 }
 
+// Active employees shaped for the @mention picker in the activity composer.
+export type MentionableEmployee = {
+  id: string;
+  name: string;
+  jobTitle: string | null;
+  avatarUrl: string | null;
+};
+
+export async function listMentionableEmployees(
+  orgId: string,
+): Promise<MentionableEmployee[]> {
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, job_title, avatar_url")
+    .eq("organization_id", orgId)
+    .eq("employment_status", "active")
+    .order("full_name");
+  if (error) throw error;
+  return (data ?? []).map((e) => ({
+    id: e.id as string,
+    name: e.full_name as string,
+    jobTitle: (e.job_title as string | null) ?? null,
+    avatarUrl: (e.avatar_url as string | null) ?? null,
+  }));
+}
+
 export async function listServices(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("services")

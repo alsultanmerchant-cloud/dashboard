@@ -15,53 +15,9 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-
-// ── matcher (copied verbatim from src/lib/match/client-match.ts) ───────────
-const AR_DIAC = /[ؐ-ًؚ-ٰٟۖ-ۭ]/g;
-function normName(s: string): string {
-  let x = (s || "").trim().toLowerCase();
-  x = x.replace(AR_DIAC, "").replace(/ـ/g, "");
-  x = x.replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه");
-  x = x.replace(/\(.*?\)/g, "").replace(/\s*[-–]\s*.*$/g, "");
-  return x.replace(/[^\w\s؀-ۿ]/g, " ").replace(/\s+/g, " ").trim();
-}
-function latinTokens(s: string): Set<string> {
-  return new Set(
-    (s.match(/[A-Za-z][A-Za-z0-9 .&\-]{2,}/g) ?? []).map((t) => t.trim().toLowerCase()),
-  );
-}
-function diceRatio(a: string, b: string): number {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  const big = (s: string) => {
-    const out = new Set<string>();
-    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
-    return out;
-  };
-  const A = big(a), B = big(b);
-  let inter = 0;
-  for (const g of A) if (B.has(g)) inter++;
-  return (2 * inter) / (A.size + B.size || 1);
-}
-type MatchClient = { id: string; name: string };
-function bestClientMatch(sheet: { name: string }, odoo: MatchClient[]) {
-  const sn = normName(sheet.name);
-  const sl = latinTokens(sheet.name);
-  let best: { client: MatchClient; score: number } | null = null;
-  let second = 0;
-  for (const o of odoo) {
-    let score = diceRatio(sn, normName(o.name));
-    const ol = latinTokens(o.name);
-    for (const l of sl) if (ol.has(l)) score = Math.max(score, 0.95);
-    if (!best || score > best.score) {
-      second = best?.score ?? 0;
-      best = { client: o, score };
-    } else if (score > second) {
-      second = score;
-    }
-  }
-  return { best, secondScore: second };
-}
+// Use the SAME matcher the merge UI uses (no inlined copy → no drift). It is a
+// pure module with no server-only imports, safe to load from a script.
+import { bestClientMatch } from "../src/lib/match/client-match";
 
 // ── args ───────────────────────────────────────────────────────────────────
 const apply = process.argv.includes("--apply");
@@ -144,6 +100,20 @@ async function main() {
     const m = (res as { moved?: Record<string, number> })?.moved ?? {};
     for (const [k, v] of Object.entries(m)) moved[k] = (moved[k] ?? 0) + (v as number);
   }
+  // Traceability: the in-app action writes audit_logs; mirror that here so a
+  // headless run is just as auditable. entity_id must be a uuid → use orgId.
+  if (merged > 0) {
+    const { error: aerr } = await sb.from("audit_logs").insert({
+      organization_id: orgId,
+      actor_user_id: null,
+      action: "client.bulk_merge",
+      entity_type: "client",
+      entity_id: orgId,
+      metadata: { via: "scripts/merge-clients-bulk.ts", min_score: min, merged, moved },
+    });
+    if (aerr) console.log("  (audit write failed:", aerr.message + ")");
+  }
+
   console.log(`\nDONE. merged ${merged}/${plan.length}. moved refs:`, moved);
 }
 

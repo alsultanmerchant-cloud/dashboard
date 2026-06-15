@@ -787,25 +787,42 @@
   },
   "ClientsPage": {
     "title": "العملاء",
-    "description": "قاعدة عملاء الوكالة مباشرة من Odoo.",
+    "description": "قاعدة عملاء الوكالة الموحّدة — العقود والتنفيذ في قائمة واحدة.",
     "stats": {
       "totalClients": "إجمالي العملاء",
       "activeClients": "عملاء نشطون",
       "activeClientsHint": "لديهم مشاريع",
       "totalProjects": "إجمالي المشاريع",
-      "contactData": "بيانات تواصل",
-      "contactDataHint": "{count} بدون"
+      "contactData": "بيانات التواصل",
+      "contactDataHint": "{count} ناقصة",
+      "contractsClients": "عملاء العقود",
+      "contractsClientsHint": "لديهم عقد",
+      "deliveryClients": "عملاء التنفيذ",
+      "deliveryClientsHint": "لديهم مشروع"
     },
     "emptyTitle": "لا يوجد عملاء",
-    "emptyDescription": "لا توجد شركاء عملاء في Odoo حالياً.",
+    "emptyDescription": "لا يوجد عملاء حالياً.",
     "table": {
       "client": "العميل",
       "contact": "التواصل",
       "location": "الموقع",
       "projects": "المشاريع",
-      "actions": "إجراءات"
+      "actions": "إجراءات",
+      "contracts": "العقود"
     },
-    "openClient": "فتح العميل"
+    "openClient": "فتح العميل",
+    "filter": {
+      "all": "الكل",
+      "contracts": "العقود",
+      "delivery": "التنفيذ",
+      "both": "كلاهما"
+    },
+    "source": {
+      "contracts": "عقد",
+      "delivery": "تنفيذ",
+      "both": "كلاهما",
+      "other": "أخرى"
+    }
   },
   "SettingsPage": {
     "title": "الإعدادات",
@@ -862,7 +879,8 @@
     "description": "المصدر الرسمي للعقود وإيراداتها. الشيت القديم مؤرشف، وكل التعديلات والحسابات تتم هنا.",
     "tabs": {
       "table": "جدول العقود",
-      "dashboard": "لوحة الإيرادات"
+      "dashboard": "لوحة الإيرادات",
+      "logs": "سجل النشاط"
     },
     "header": {
       "import": "استيراد من Excel"
@@ -1126,6 +1144,39 @@
       "emptyFiltered": "لا توجد عقود مطابقة للفلتر الحالي.",
       "emptyNote": "—"
     },
+    "logs": {
+      "title": "سجل نشاط العقود",
+      "description": "أحداث التعليق والتجديد والخسارة والتعديل المُزامنة من ملف العقود.",
+      "filters": {
+        "allTypes": "كل الأنواع",
+        "manager": "مدير الحساب",
+        "allManagers": "كل المدراء",
+        "search": "بحث",
+        "searchPlaceholder": "اسم العميل أو الكود…",
+        "from": "من",
+        "to": "إلى",
+        "clear": "مسح"
+      },
+      "types": {
+        "lost": "إغلاق (خسارة)",
+        "renew": "إغلاق (تجديد)",
+        "hold": "تعليق",
+        "holdLifted": "رفع التعليق",
+        "editOn": "بدء تعديل",
+        "editOff": "انتهاء تعديل"
+      },
+      "columns": {
+        "time": "الوقت",
+        "type": "النوع",
+        "client": "العميل",
+        "manager": "المدير",
+        "notes": "ملاحظات"
+      },
+      "empty": "لا توجد سجلات مطابقة.",
+      "note": {
+        "was": "النوع السابق"
+      }
+    },
     "detail": {
       "hold": {
         "active": "العقد موقوف مؤقتًا",
@@ -1185,6 +1236,11 @@
           "title": "سجل الأحداث",
           "description": "سجل التغييرات والملاحظات على العقد",
           "empty": "لا توجد أحداث مسجلة على هذا العقد بعد."
+        },
+        "sheetLogs": {
+          "title": "سجل تغييرات الشيت",
+          "description": "أحداث هذا العقد المسجّلة في ملف العقود.",
+          "empty": "لا توجد سجلات لهذا العقد."
         }
       }
     },
@@ -1282,7 +1338,13 @@
     "note": "يستخدم النظام عمود <code>Key</code> (مثل <code>C83|20250906</code>) لتمييز العقود. إعادة الاستيراد <strong>آمنة</strong>؛ فهي تُحدّث القيم ولا تُكرّر الصفوف.",
     "form": {
       "toasts": {
-        "imported": "تم استيراد البيانات"
+        "imported": "تم استيراد البيانات",
+        "synced": "تمت مزامنة Google Sheet"
+      },
+      "google": {
+        "title": "مزامنة مباشرة من Google Sheet",
+        "description": "اسحب أحدث الصفوف مباشرة من الشيت المتصل. سيتم تحديث العملاء والعقود والدفعات المستوردة من الشيت بدون إنشاء نسخ مكررة.",
+        "sync": "مزامنة الآن"
       },
       "fileLabel": "اختر ملف Excel",
       "fileHint": "يقبل النظام أوراق \"Clients Contracts\" و\"💲Installments Tracker\" من ملف الأكاونت. لن يتم حفظ شيء حتى تراجع المعاينة وتؤكدها.",
@@ -2903,6 +2965,43 @@
       "q1": "الشركة بتتحسّن ولا بتسوء؟",
       "q2": "فين الخطر؟",
       "q3": "أعمل إيه؟",
+      "aiTitle": "AI Executive Summary",
+      "criticalTitle": "Critical Events Only · آخر التطورات",
+      "latestFirst": "الأحدث أولاً",
+      "recommendationsTitle": "Recommendations",
+      "noCriticalEvents": "لا توجد أحداث تستدعي تدخلًا إداريًا الآن.",
+      "noTimelineEvents": "لا توجد أحداث ضمن هذا النطاق.",
+      "noRecommendations": "لا توجد توصيات عاجلة في هذا الموجز.",
+      "tabs": {
+        "critical": "Critical Events Only",
+        "timeline": "Client Timeline"
+      },
+      "range": {
+        "7": "آخر 7 أيام",
+        "30": "آخر 30 يوم",
+        "90": "آخر 90 يوم",
+        "all": "كل التاريخ"
+      },
+      "filter": {
+        "all": "الكل",
+        "complaint": "شكاوى فقط",
+        "approval": "اعتمادات فقط",
+        "delay": "تأخيرات فقط",
+        "internal": "مشاكل داخلية فقط",
+        "decision": "قرارات مهمة فقط"
+      },
+      "eventSource": {
+        "client_group": "جروب العميل",
+        "technical_group": "جروب التكنكال",
+        "system": "السيستم"
+      },
+      "eventCategory": {
+        "complaint": "شكاوى",
+        "approval": "اعتمادات",
+        "delay": "تأخيرات",
+        "internal": "مشاكل داخلية",
+        "decision": "قرارات مهمة"
+      },
       "verdict": {
         "improving": "الشركة تتحسّن",
         "stable": "الوضع مستقر",
@@ -2940,6 +3039,26 @@
       "emptyTitle": "لا يوجد موجز محفوظ بعد",
       "emptyDescription": "الموجز يلخّص حالة الشركة في ثلاث إجابات عملية بدلاً من قراءة كل الأقسام.",
       "generateFirst": "توليد أول موجز"
+    },
+    "assistant": {
+      "askAi": "اسأل الذكاء",
+      "title": "مساعد الموجز",
+      "correct": "صحّح هذا",
+      "explainMore": "اشرح أكثر",
+      "teach": "علّم المساعد",
+      "placeholder": "اكتب تصحيحًا، أو علّم المساعد حقيقة عن الشركة…",
+      "send": "إرسال",
+      "selectHint": "حدّد نصًّا من الموجز ليبدأ المساعد",
+      "thinking": "يُفكّر…",
+      "editing": "جارٍ تعديل النص…",
+      "edited": "تم تحديث النص ✅",
+      "teaching": "جارٍ حفظ التعليمة…",
+      "taught": "تم حفظ التعليمة 🧠",
+      "reading": "جارٍ جلب البيانات…",
+      "read": "تم جلب البيانات",
+      "errorGeneric": "حدث خطأ في الاتصال بالمساعد. حاول مرة أخرى.",
+      "you": "أنت",
+      "close": "إغلاق"
     }
   },
   "SatisfactionPage": {
@@ -2981,10 +3100,144 @@
     "timeline": "تطور الرضا",
     "risks": "مخاطر العلاقة",
     "recommendations": "توصيات (المحادثة ↔ مهام رواسم)",
+    "executive": {
+      "title": "AI Executive Summary",
+      "deliveryRisk": "يوجد {n} مهام متأخرة يجب إدارتها ضمن خطة المتابعة.",
+      "noMajorRisk": "لا توجد مخاطر جوهرية ظاهرة في آخر تحليل.",
+      "riskHigh": "مخاطر عالية",
+      "riskMedium": "مخاطر متوسطة",
+      "riskLow": "مستقر",
+      "tabs": {
+        "critical": "Critical Events Only",
+        "timeline": "Client Timeline"
+      },
+      "criticalTitle": "آخر التطورات",
+      "latestFirst": "الأحدث أولاً",
+      "recommendationsTitle": "Recommendations",
+      "timelineTitle": "Client Timeline",
+      "noCriticalEvents": "لا توجد أحداث حرجة تستدعي تدخلًا إداريًا الآن.",
+      "noRecommendations": "لا توجد توصيات عاجلة في هذا التحليل.",
+      "noTimelineEvents": "لا توجد أحداث ضمن هذا النطاق.",
+      "source": {
+        "client": "المصدر: 💫 جروب العميل",
+        "technical": "المصدر: 📍 جروب التكنكال",
+        "system": "المصدر: التاسكات في السيستم"
+      },
+      "category": {
+        "complaint": "شكاوى",
+        "approval": "اعتمادات",
+        "delay": "تأخيرات",
+        "internal": "مشاكل داخلية",
+        "decision": "قرارات مهمة"
+      },
+      "range": {
+        "7": "آخر 7 أيام",
+        "30": "آخر 30 يوم",
+        "90": "آخر 90 يوم",
+        "all": "كل التاريخ"
+      },
+      "filter": {
+        "all": "الكل",
+        "complaint": "شكاوى فقط",
+        "approval": "اعتمادات فقط",
+        "delay": "تأخيرات فقط",
+        "internal": "مشاكل داخلية فقط",
+        "decision": "قرارات مهمة فقط"
+      }
+    },
     "recPriority": {
       "high": "عالية",
       "medium": "متوسطة",
       "low": "منخفضة"
+    },
+    "bigPicture": {
+      "title": "الصورة الكبرى",
+      "relationship": "العلاقة",
+      "execution": "التنفيذ",
+      "commercial": "التجاري"
+    },
+    "accountHealth": {
+      "healthy": "سليم",
+      "watch": "تحت المراقبة",
+      "at_risk": "في خطر",
+      "critical": "حرِج"
+    },
+    "contractTarget": {
+      "On-Target": "ضمن المستهدف",
+      "On Target": "ضمن المستهدف",
+      "Overdue": "متأخر",
+      "Sales Deposit": "عربون مبيعات",
+      "Closed": "مغلق",
+      "Lost": "خسارة",
+      "Renewed": "مُجدّد"
+    },
+    "indicators": {
+      "title": "المؤشرات",
+      "risk": "مخاطر",
+      "operational": "تشغيلية",
+      "none": "لا توجد مؤشرات في هذا التحليل.",
+      "noneRisk": "لا توجد مؤشرات مخاطر.",
+      "noneOperational": "لا توجد مؤشرات تشغيلية."
+    },
+    "indicator": {
+      "client_complained": "العميل اشتكى",
+      "client_dissatisfied": "العميل أبدى عدم رضا",
+      "client_threatened_cancellation": "هدّد بالإلغاء أو التوقف",
+      "client_compared_competitor": "قارن بينكم وبين منافس",
+      "client_complained_about_person": "اشتكى من شخص معين",
+      "client_repeated_complaint": "كرّر نفس الشكوى",
+      "client_question_unanswered": "سؤال مهم لم يُرَد عليه لفترة",
+      "major_task_delay": "تأخير كبير في مهمة مؤثرة",
+      "client_corrected_am_repeatedly": "صحّح فهم الأكاونت مانجر عدة مرات",
+      "client_vs_team_mismatch": "تضارب بين طلب العميل وما نُقل للتيم",
+      "team_reported_unclear_requirements": "التيم أبلغ عن غموض المتطلبات من الأكاونت",
+      "team_reported_blocker": "التيم أبلغ عن مشكلة تمنع التنفيذ",
+      "missing_access": "صلاحيات ناقصة",
+      "missing_brief": "بريف ناقص",
+      "client_uncooperative": "العميل غير متعاون",
+      "client_late_approvals": "العميل متأخر في الاعتمادات",
+      "conflicting_client_requests": "تضارب بين طلبات العميل",
+      "am_not_understanding": "الأكاونت مانجر غير فاهم المطلوب"
+    },
+    "signals": {
+      "clientTitle": "مجموعة العميل 💫",
+      "technicalTitle": "مجموعة الفريق التقني 📍",
+      "technicalNone": "لم تُستخرَج إشارات داخلية.",
+      "requests": "الطلبات",
+      "approvals": "الاعتمادات",
+      "responseSpeed": "سرعة الرد",
+      "blockers": "المعوّقات",
+      "delayCauses": "أسباب التأخير",
+      "accountEvaluation": "تقييم داخلي للحساب",
+      "req": {
+        "new": "جديد",
+        "edit": "تعديل",
+        "complaint": "شكوى",
+        "inquiry": "استفسار",
+        "approval": "اعتماد"
+      },
+      "appr": {
+        "approved": "اعتُمد",
+        "rejected": "رُفض",
+        "changesRequested": "طلب تعديل",
+        "noResponse": "بلا رد"
+      }
+    },
+    "responseSpeed": {
+      "fast": "سريع",
+      "medium": "متوسط",
+      "slow": "بطيء",
+      "unknown": "غير معروف"
+    },
+    "owner": {
+      "client": "العميل",
+      "account_manager": "الأكاونت مانجر",
+      "team": "التيم",
+      "department": "القسم",
+      "unknown": "غير محدد"
+    },
+    "causes": {
+      "title": "أسباب المشاكل"
     },
     "highlights": "أبرز اللحظات",
     "emptyOverview": "لا توجد محادثات مزامنة بعد. اربط مجموعات واتساب للبدء.",
@@ -3150,5 +3403,59 @@
     "paidComplete": "سداد كامل",
     "overduePayment": "{count, plural, one {دفعة متأخرة} other {# دفعات متأخرة}}",
     "overdueAmount": "مبلغ متأخر غير مسدد: {amount} ريال"
+  },
+  "Activity": {
+    "feed": {
+      "empty": "لا يوجد نشاط بعد",
+      "employeeFallback": "عضو الفريق"
+    },
+    "composer": {
+      "tabs": {
+        "message": "رسالة",
+        "note": "تدوين ملاحظة"
+      },
+      "placeholders": {
+        "message": "اكتب رسالة…",
+        "note": "دوّن ملاحظة داخلية… استخدم @ للإشارة"
+      },
+      "post": "نشر",
+      "send": "إرسال",
+      "attach": "إرفاق",
+      "uploading": "جارٍ الرفع…",
+      "shortcut": "⌘+Enter للإرسال",
+      "attachmentsOnly": "(مرفق)",
+      "mentionSuggestions": "اقتراحات الإشارة",
+      "matches": "{count} نتائج",
+      "forQuery": "عن “{query}”",
+      "removeAttachment": "إزالة",
+      "maxFiles": "حد أقصى {count} ملفات",
+      "fileTooLarge": "{name} كبير جدًا",
+      "uploadFailed": "فشل الرفع",
+      "toasts": {
+        "posted": "تم نشر الملاحظة",
+        "postedWithMentions": "تم النشر · تمت الإشارة إلى {count}"
+      }
+    },
+    "events": {
+      "ON_HOLD": "تم التعليق",
+      "HOLD_LIFTED": "رُفع التعليق",
+      "HOLD_UPDATED": "تحديث التعليق",
+      "STATUS_CHANGE": "تغيّرت الحالة",
+      "TARGET_CHANGE": "تغيّر الهدف",
+      "TYPE_CHANGE": "تغيّر النوع",
+      "VALUE_CHANGE": "تغيّرت القيمة",
+      "default": "حدث"
+    }
+  },
+  "ClientDetailPage": {
+    "back": "العملاء",
+    "contractsTitle": "العقود",
+    "activityTitle": "النشاط",
+    "noContracts": "لا توجد عقود لهذا العميل بعد.",
+    "metrics": {
+      "contracts": "العقود",
+      "active": "نشطة",
+      "totalValue": "إجمالي القيمة"
+    }
   }
 }

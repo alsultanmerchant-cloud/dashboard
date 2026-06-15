@@ -34,7 +34,8 @@ export interface ParsedContract {
   durationMonths: number | null;
   totalValue: number;
   paidValue: number;
-  target: string | null;
+  target: string | null;            // col E — current/live status
+  targetByMonth: string | null;     // col V — month-aware status (current month only)
   statusLabel: string | null;       // raw "Active"/"Expired"/"SOON TO BE Renewed"/...
   status: "active" | "hold" | "lost" | "closed" | "expired" | "renewed";
   notes: string | null;
@@ -47,6 +48,17 @@ export interface ParsedInstallment {
   expectedDate: string | null;
   actualAmount: number;
   actualDate: string | null;
+}
+
+export interface ParsedSheetLog {
+  contractKey: string;
+  clientExternalId: string | null;
+  clientName: string | null;
+  accountManager: string | null;
+  logType: string;
+  logTimeIso: string | null;
+  notes: string | null;
+  snapshot: Record<string, unknown>;
 }
 
 export interface ParseResult {
@@ -151,6 +163,75 @@ function mapStatus(raw: string | null, typeKey: string | null): ParsedContract["
   return STATUS_MAP[k] ?? "active";
 }
 
+// Normalize the contract-status label. The sheet stores 'On Target' (col E /
+// col V); a hyphen variant 'On-Target' crept in via an earlier import and made
+// the dashboard SQL undercount (see migration 0173). Collapse it here so it
+// never re-enters on sync.
+function normalizeTarget(raw: string | null): string | null {
+  if (!raw) return null;
+  const k = raw.trim();
+  if (!k) return null;
+  if (/^on[\s-]*target$/i.test(k)) return "On Target";
+  return k;
+}
+
+function parseLogTime(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (v instanceof Date && !isNaN(v.getTime())) return v.toISOString();
+
+  const str = String(v).trim();
+  if (!str) return null;
+
+  const m = str.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/,
+  );
+  if (!m) return null;
+
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+
+  const d = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return d.toISOString();
+}
+
+const LOG_SNAPSHOT_COLUMNS = [
+  "Contract Start Date",
+  "Target",
+  "Contract Type",
+  "Package",
+  "C.Duration (Months)",
+  "Actual paid value",
+  " Value of repeated services",
+  "payment status",
+  "Expected End Date",
+  "Contract Status",
+  "Next Contract Value",
+  "Actual End Date",
+  "Delays\n (working days)",
+] as const;
+
 // ── main ───────────────────────────────────────────────────────────────────
 
 export function parseAccSheet(buf: ArrayBuffer): ParseResult {
@@ -191,7 +272,12 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
     const startDate = parseDate(r["Contract Start Date"]);
     const endDate = parseDate(r["Expected End Date"]);
     const actualEndDate = parseDate(r["Actual End Date"]);
-    const target = s(r["Target"]);
+    const target = normalizeTarget(s(r["Target"]));
+    // Col V — the sheet's month-aware status, only populated for the sheet's
+    // currently-selected month (blank otherwise). Mirrored as an audit field.
+    const targetByMonth = normalizeTarget(
+      s(r["Target_ByMonth"]) ?? s(r["Target By Month"]),
+    );
     const statusLabel = s(r["Contract Status"]);
     const status = mapStatus(statusLabel, contractTypeKey);
     const totalValue = num(r["Next Contract Value"]) || num(r[" Value of repeated services"]);
@@ -217,6 +303,7 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
       totalValue,
       paidValue,
       target,
+      targetByMonth,
       statusLabel,
       status,
       notes,
@@ -314,4 +401,74 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
       skippedRows,
     },
   };
+}
+
+export function parseLogsSheet(buf: ArrayBuffer): {
+  logs: ParsedSheetLog[];
+  warnings: string[];
+} {
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const warnings: string[] = [];
+  // The real Sky Light sheet names this tab "Edits  Updates log"; older
+  // CSV-assembled workbooks named it "Logs". Accept either.
+  const logsSheet = wb.Sheets.Logs ?? wb.Sheets["Edits  Updates log"];
+
+  if (!logsSheet) {
+    return {
+      logs: [],
+      warnings: ['لم يتم العثور على ورقة "Logs"'],
+    };
+  }
+
+  type LogRow = Record<string, unknown>;
+  const rows = XLSX.utils.sheet_to_json<LogRow>(logsSheet, {
+    defval: null,
+    raw: false,
+  }) as LogRow[];
+
+  const logs: ParsedSheetLog[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const logTimeRaw = row["Log Time"];
+    const logType = s(row["Log Type"]);
+    // Skip rows where BOTH Log Time and Log Type are empty.
+    if (!s(logTimeRaw) && !logType) continue;
+
+    const clientExternalId = s(row["Client ID"]);
+    const startDate = parseDate(row["Contract Start Date"]);
+    const contractKey =
+      s(row["Key"]) ??
+      (clientExternalId
+        ? `${clientExternalId}|${(startDate ?? "").replace(/-/g, "")}`
+        : null);
+    if (!contractKey) {
+      warnings.push(`Logs row ${i + 2}: missing contract key`);
+      continue;
+    }
+    if (!logType) {
+      warnings.push(`Logs row ${i + 2}: missing log type`);
+      continue;
+    }
+
+    const snapshot: Record<string, unknown> = {};
+    for (const name of LOG_SNAPSHOT_COLUMNS) {
+      const value = row[name];
+      if (value !== null && value !== undefined && value !== "") {
+        snapshot[name] = value;
+      }
+    }
+
+    logs.push({
+      contractKey,
+      clientExternalId,
+      clientName: s(row["Client Name"]),
+      accountManager: s(row["Account manager"]),
+      logType,
+      logTimeIso: parseLogTime(logTimeRaw),
+      notes: s(row["Notes"]),
+      snapshot,
+    });
+  }
+
+  return { logs, warnings };
 }

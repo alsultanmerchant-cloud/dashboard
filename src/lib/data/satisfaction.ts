@@ -31,6 +31,9 @@ export interface AnalysisInfo extends SatisfactionResult {
   windowKind: WindowKind;
   windowStart: string | null;
   windowEnd: string | null;
+  // The contract snapshot fed to the model when the analysis ran (UI shows the
+  // pill; the model used it for the commercial dimension of the big picture).
+  contractContext: ClientContractContext | null;
 }
 
 // One row in the per-client analysis history list (stored past snapshots).
@@ -215,7 +218,27 @@ export interface ClientSatisfactionDetail {
 }
 
 const ANALYSIS_COLUMNS =
-  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, model, created_at, window_kind, window_start, window_end";
+  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, indicators, client_group_signals, technical_group_signals, causes, contract_context, big_picture, model, created_at, window_kind, window_start, window_end";
+
+// Defaults for the rich fields so rows written before migration 0178 (which
+// have NULL in the new columns) still render without per-call null checks.
+const EMPTY_BIG_PICTURE: SatisfactionResult["bigPicture"] = {
+  accountHealth: "watch",
+  headline: "",
+  relationshipScore: 50,
+  executionScore: 50,
+  commercialScore: null,
+};
+const EMPTY_CLIENT_SIGNALS: SatisfactionResult["clientGroupSignals"] = {
+  requests: { new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 },
+  approvals: { approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 },
+  responseSpeed: "unknown",
+};
+const EMPTY_TECH_SIGNALS: SatisfactionResult["technicalGroupSignals"] = {
+  blockers: [],
+  delayCauses: [],
+  accountEvaluation: [],
+};
 
 function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
   return {
@@ -224,10 +247,18 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     briefAdherenceScore: (a.brief_adherence_score as number | null) ?? null,
     sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
     summary: (a.summary as string) ?? "",
+    bigPicture: (a.big_picture as SatisfactionResult["bigPicture"]) ?? EMPTY_BIG_PICTURE,
+    indicators: (a.indicators as SatisfactionResult["indicators"]) ?? [],
+    clientGroupSignals:
+      (a.client_group_signals as SatisfactionResult["clientGroupSignals"]) ?? EMPTY_CLIENT_SIGNALS,
+    technicalGroupSignals:
+      (a.technical_group_signals as SatisfactionResult["technicalGroupSignals"]) ?? EMPTY_TECH_SIGNALS,
+    causes: (a.causes as SatisfactionResult["causes"]) ?? [],
     highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
     sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
     risks: (a.risks as string[]) ?? [],
     recommendations: (a.recommendations as SatisfactionResult["recommendations"]) ?? [],
+    contractContext: (a.contract_context as ClientContractContext | null) ?? null,
     model: (a.model as string | null) ?? null,
     createdAt: a.created_at as string,
     windowKind: ((a.window_kind as string) ?? "all") as WindowKind,
@@ -464,12 +495,18 @@ export interface ExecutionTask {
   stage: string;
   daysStuck: number | null; // whole days since entering the current stage
   delayDays: number | null; // working-days overdue, when the data exists
+  dueDate: string | null;
+  stageEnteredAt: string | null;
 }
 export interface ClientExecutionSnapshot {
   overdueCount: number;
   totalTasks: number;
   maxDaysStuck: number | null;
   byStage: Array<{ stage: string; count: number }>;
+  // Where delay concentrates: each stuck stage as a % of all overdue tasks,
+  // worst first (e.g. "70% عالق في Manager Review"). Drives the prompt's
+  // Bottlenecks line and the UI.
+  bottlenecks: Array<{ stage: string; count: number; pct: number }>;
   topTasks: ExecutionTask[]; // worst-stuck first
 }
 
@@ -480,7 +517,7 @@ async function _getClientExecutionSnapshot(
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "task_code, title, stage, delay_days, stage_entered_at, is_overdue, project:projects!inner(client_id, status)",
+      "task_code, title, stage, delay_days, due_date, stage_entered_at, is_overdue, project:projects!inner(client_id, status)",
     )
     .eq("organization_id", orgId)
     .eq("project.client_id", clientId)
@@ -492,6 +529,7 @@ async function _getClientExecutionSnapshot(
     title: string | null;
     stage: string | null;
     delay_days: number | null;
+    due_date: string | null;
     stage_entered_at: string | null;
     is_overdue: boolean | null;
   };
@@ -509,6 +547,8 @@ async function _getClientExecutionSnapshot(
     stage: r.stage ?? "new",
     daysStuck: daysSince(r.stage_entered_at),
     delayDays: r.delay_days,
+    dueDate: r.due_date,
+    stageEnteredAt: r.stage_entered_at,
   }));
 
   const stageCounts = new Map<string, number>();
@@ -517,14 +557,117 @@ async function _getClientExecutionSnapshot(
     .map(([stage, count]) => ({ stage, count }))
     .sort((a, b) => b.count - a.count);
 
+  // Bottleneck = each stuck stage as a share of all overdue tasks. Keep the
+  // stages that account for the bulk of the delay (top 3, or any ≥ 25%).
+  const bottlenecks = byStage
+    .map((s) => ({ stage: s.stage, count: s.count, pct: Math.round((s.count / overdue.length) * 100) }))
+    .filter((s, i) => i < 3 || s.pct >= 25);
+
   const topTasks = [...tasks]
     .sort((a, b) => (b.daysStuck ?? -1) - (a.daysStuck ?? -1))
     .slice(0, 8);
   const maxDaysStuck = topTasks.length ? topTasks[0].daysStuck : null;
 
-  return { overdueCount: overdue.length, totalTasks: rows.length, maxDaysStuck, byStage, topTasks };
+  return {
+    overdueCount: overdue.length,
+    totalTasks: rows.length,
+    maxDaysStuck,
+    byStage,
+    bottlenecks,
+    topTasks,
+  };
 }
 export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);
+
+// ---- Client contract context (commercial dimension of the big picture) ----
+// The client's current contract health, fed to the model so relationship +
+// execution signals get weighed against the money on the line (a tense client
+// on an Overdue contract is a very different situation than on a healthy one).
+// A contract lifecycle event from the contracts activity log (contract_sheet_logs):
+// HOLD / HOLD LIFTED / Contract Close (Lost|Renew) / EDIT MODE ON|OFF. These are
+// behavioral commercial signals (the trajectory) the chat can't show.
+export interface ContractActivityEvent {
+  logType: string; // raw, e.g. "ON HOLD", "Contract Close (Lost)"
+  logTime: string | null;
+  notes: string | null;
+  accountManager: string | null;
+}
+
+export interface ClientContractContext {
+  target: "On-Target" | "Overdue" | "Lost" | "Renewed";
+  status: "active" | "hold" | "lost" | "closed" | "renewed";
+  totalValue: number;
+  paidValue: number;
+  startDate: string;
+  endDate: string | null;
+  // Recent contract activity-log events (newest first), when available.
+  recentActivity?: ContractActivityEvent[];
+}
+
+async function _getClientContractContext(
+  orgId: string,
+  clientId: string,
+): Promise<ClientContractContext | null> {
+  // Most-recent contract for the client (a client may renew into several rows;
+  // the newest start_date is the live one).
+  const { data, error } = await supabaseAdmin
+    .from("contracts")
+    .select("target, status, total_value, paid_value, start_date, end_date")
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  const r = data as {
+    target: ClientContractContext["target"] | null;
+    status: ClientContractContext["status"] | null;
+    total_value: number | null;
+    paid_value: number | null;
+    start_date: string;
+    end_date: string | null;
+  };
+  return {
+    target: r.target ?? "On-Target",
+    status: r.status ?? "active",
+    totalValue: r.total_value ?? 0,
+    paidValue: r.paid_value ?? 0,
+    startDate: r.start_date,
+    endDate: r.end_date,
+  };
+}
+export const getClientContractContext = cache(_getClientContractContext);
+
+// Recent contract activity-log events for the client (across all their
+// contracts), newest first. Joins contract_sheet_logs → contracts on client_id.
+// ~86% of log rows carry a contract_id; rows without one are skipped (inner join).
+async function _getClientContractActivity(
+  orgId: string,
+  clientId: string,
+): Promise<ContractActivityEvent[]> {
+  const { data, error } = await supabaseAdmin
+    .from("contract_sheet_logs")
+    .select("log_type, log_time, notes, account_manager, contract:contracts!inner(client_id)")
+    .eq("organization_id", orgId)
+    .eq("contract.client_id", clientId)
+    .order("log_time", { ascending: false, nullsFirst: false })
+    .limit(15);
+  if (error || !data) return [];
+  return (
+    data as unknown as Array<{
+      log_type: string;
+      log_time: string | null;
+      notes: string | null;
+      account_manager: string | null;
+    }>
+  ).map((r) => ({
+    logType: r.log_type,
+    logTime: r.log_time,
+    notes: r.notes,
+    accountManager: r.account_manager,
+  }));
+}
+export const getClientContractActivity = cache(_getClientContractActivity);
 
 // ---- Org aggregate (feeds the Execution Quality executive index) ---------
 export interface SatisfactionAggregate {

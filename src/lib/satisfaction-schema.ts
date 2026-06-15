@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 // Structured output for the client-satisfaction analysis. The model reads the
-// WhatsApp transcripts, the client's documented brief when available, and
-// Rawasm delivery state, then returns these fields only — no free narration
-// outside the schema.
+// WhatsApp transcripts (client group + technical group, kept SEPARATE), the
+// client's documented brief when available, the client's real Rawasm delivery
+// state, and the client's contract status, then returns these fields only — no
+// free narration outside the schema.
 
 export const HIGHLIGHT_TYPES = [
   "praise",
@@ -18,6 +19,55 @@ export const HIGHLIGHT_TYPES = [
 // account manager chasing an approval — out of the client requests/complaints.
 export const HIGHLIGHT_AUDIENCES = ["client", "team"] as const;
 
+// ---------------------------------------------------------------------------
+// Indicator taxonomy — the explicit signals the operations team triages on.
+// Two tiers: 🔴 relationship risks, 🟡 operational blockers. The model may ONLY
+// emit codes from these lists so the UI/queries stay stable; Arabic labels live
+// in messages/*.json under `satisfaction.indicator.<code>`.
+// ---------------------------------------------------------------------------
+export const RISK_INDICATORS = [
+  "client_complained", // العميل اشتكى
+  "client_dissatisfied", // العميل أبدى عدم رضا
+  "client_threatened_cancellation", // هدد بالإلغاء أو التوقف
+  "client_compared_competitor", // قارن بينكم وبين منافس
+  "client_complained_about_person", // اشتكى من شخص معين
+  "client_repeated_complaint", // كرر نفس الشكوى
+  "client_question_unanswered", // سؤال مهم بلا رد لفترة
+  "major_task_delay", // تأخير كبير في مهمة مؤثرة
+  "client_corrected_am_repeatedly", // صحّح فهم الأكاونت مانجر عدة مرات
+  "client_vs_team_mismatch", // تضارب بين طلب العميل وما نُقل للتيم
+  "team_reported_unclear_requirements", // التيم أبلغ عن غموض المتطلبات من الأكاونت
+] as const;
+
+export const OPERATIONAL_INDICATORS = [
+  "team_reported_blocker", // التيم أبلغ عن مشكلة تمنع التنفيذ
+  "missing_access", // Missing Accesses
+  "missing_brief", // Missing Brief
+  "client_uncooperative", // العميل غير متعاون
+  "client_late_approvals", // العميل متأخر في الاعتمادات بشكل مؤثر
+  "conflicting_client_requests", // تضارب بين طلبات العميل
+  "am_not_understanding", // الأكاونت مانجر غير فاهم / كرر طلب التوضيح
+] as const;
+
+export const INDICATOR_CODES = [...RISK_INDICATORS, ...OPERATIONAL_INDICATORS] as const;
+export const INDICATOR_SOURCES = ["client", "technical", "tasks"] as const;
+// Who a delay / problem is attributed to.
+export const DELAY_OWNERS = ["client", "account_manager", "team", "department", "unknown"] as const;
+// The rolled-up account health label (the "big picture").
+export const ACCOUNT_HEALTH = ["healthy", "watch", "at_risk", "critical"] as const;
+export const RESPONSE_SPEEDS = ["fast", "medium", "slow", "unknown"] as const;
+
+const IndicatorSchema = z.object({
+  code: z.enum(INDICATOR_CODES),
+  // red = relationship risk, yellow = operational blocker. Derived from `code`.
+  severity: z.enum(["red", "yellow"]).catch("yellow"),
+  // Which source surfaced it.
+  source: z.enum(INDICATOR_SOURCES).catch("client"),
+  // A real quote or faithful summary — never invented.
+  evidence: z.string(),
+  date: z.string().nullable(), // YYYY-MM-DD if identifiable
+});
+
 export const SatisfactionSchema = z.object({
   // 0-100 overall satisfaction inferred from the CLIENT group tone & outcomes.
   satisfactionScore: z.number().int().min(0).max(100),
@@ -25,8 +75,93 @@ export const SatisfactionSchema = z.object({
   // the actual brief document text is not available; never infer this from chat.
   briefAdherenceScore: z.number().int().min(0).max(100).nullable(),
   sentiment: z.enum(["positive", "neutral", "negative", "mixed"]),
-  // Short Arabic executive summary (2-4 sentences).
+  // Short Arabic executive summary (2-4 sentences) — "تحليل الحالة الحالية".
   summary: z.string(),
+
+  // ---- Big picture: each source rolls UP into one account-health verdict ----
+  // This is the synthesis the team asked for — relationship (client group) +
+  // execution (technical group + tasks) + commercial (contract) combined.
+  bigPicture: z
+    .object({
+      accountHealth: z.enum(ACCOUNT_HEALTH).catch("watch"),
+      // One-line الخلاصة tying the dimensions together.
+      headline: z.string(),
+      // 0-100 per dimension so the UI can show the composition of the verdict.
+      relationshipScore: z.number().int().min(0).max(100).catch(50), // from client group
+      executionScore: z.number().int().min(0).max(100).catch(50), // from technical + tasks
+      commercialScore: z.number().int().min(0).max(100).nullable(), // from contract; null if unknown
+    })
+    .default({
+      accountHealth: "watch",
+      headline: "",
+      relationshipScore: 50,
+      executionScore: 50,
+      commercialScore: null,
+    }),
+
+  // ---- Detected indicators (the core taxonomy) -----------------------------
+  indicators: z.array(IndicatorSchema).max(24).default([]),
+
+  // ---- Per-source extraction (each group's own reading) --------------------
+  // Client group 💫: what the client asked for + how approvals went + how
+  // responsive they are.
+  clientGroupSignals: z
+    .object({
+      requests: z
+        .object({
+          new: z.number().int().min(0).catch(0),
+          edit: z.number().int().min(0).catch(0),
+          complaint: z.number().int().min(0).catch(0),
+          inquiry: z.number().int().min(0).catch(0),
+          approval: z.number().int().min(0).catch(0),
+        })
+        .default({ new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 }),
+      approvals: z
+        .object({
+          approved: z.number().int().min(0).catch(0),
+          rejected: z.number().int().min(0).catch(0),
+          changesRequested: z.number().int().min(0).catch(0),
+          noResponse: z.number().int().min(0).catch(0),
+        })
+        .default({ approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 }),
+      responseSpeed: z.enum(RESPONSE_SPEEDS).catch("unknown"),
+    })
+    .default({
+      requests: { new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 },
+      approvals: { approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 },
+      responseSpeed: "unknown",
+    }),
+
+  // Technical group 📍: internal blockers, who delays are attributed to, and
+  // the team's own evaluation of the account.
+  technicalGroupSignals: z
+    .object({
+      blockers: z.array(z.string()).max(12).default([]),
+      delayCauses: z
+        .array(
+          z.object({
+            cause: z.string(),
+            attributedTo: z.enum(DELAY_OWNERS).catch("unknown"),
+          }),
+        )
+        .max(12)
+        .default([]),
+      accountEvaluation: z.array(z.string()).max(8).default([]),
+    })
+    .default({ blockers: [], delayCauses: [], accountEvaluation: [] }),
+
+  // ---- Causes (أسباب المشاكل): problem → root cause → who owns it -----------
+  causes: z
+    .array(
+      z.object({
+        problem: z.string(),
+        rootCause: z.string(),
+        owner: z.enum(DELAY_OWNERS).catch("unknown"),
+      }),
+    )
+    .max(8)
+    .default([]),
+
   highlights: z
     .array(
       z.object({
@@ -70,3 +205,12 @@ export const SatisfactionSchema = z.object({
 export type SatisfactionResult = z.infer<typeof SatisfactionSchema>;
 export type SatisfactionHighlightType = (typeof HIGHLIGHT_TYPES)[number];
 export type SatisfactionHighlightAudience = (typeof HIGHLIGHT_AUDIENCES)[number];
+export type SatisfactionIndicatorCode = (typeof INDICATOR_CODES)[number];
+export type SatisfactionIndicatorSource = (typeof INDICATOR_SOURCES)[number];
+export type DelayOwner = (typeof DELAY_OWNERS)[number];
+export type AccountHealth = (typeof ACCOUNT_HEALTH)[number];
+
+// Which tier a code belongs to (drives severity + UI grouping).
+export function indicatorSeverity(code: SatisfactionIndicatorCode): "red" | "yellow" {
+  return (RISK_INDICATORS as readonly string[]).includes(code) ? "red" : "yellow";
+}

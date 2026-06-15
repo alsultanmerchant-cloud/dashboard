@@ -212,7 +212,7 @@ export function CeoDashboard({
       )}
       <div className="grid gap-3 lg:grid-cols-2">
         <BucketCard
-          title={copy("On Target - قابلة للتجديد", "On Target - renewable")}
+          title={copy("On Target - ضمن الهدف", "On Target")}
           accent="emerald"
           clients={buckets.on_target}
         />
@@ -316,12 +316,18 @@ function ModernSheetBoard({
   achievement: number;
   copy: (ar: string, en: string) => string;
 }) {
+  // Funnel counts mirror the sheet's "Account M. section" target overview, which
+  // counts renewed/lost FROM TARGET this month (the bucket lists), not the
+  // global Contracts-Movement tallies. Each "removing …" figure is independent
+  // off the expected base (not chained), matching the sheet.
+  const renewedFromTarget = buckets.renewed.length;
+  const lostFromTarget = buckets.lost.length;
   const expectedTargetClients = dashboard.cnt_on_target + dashboard.cnt_overdue;
   const expectedAfterRenewed = Math.max(
     0,
-    expectedTargetClients - dashboard.mov_renewed,
+    expectedTargetClients - renewedFromTarget,
   );
-  const expectedAfterLost = Math.max(0, expectedAfterRenewed - dashboard.mov_lost);
+  const expectedAfterLost = Math.max(0, expectedTargetClients - lostFromTarget);
   const riskClients = clients.filter((c) => c.health_label === "risk");
   const watchClients = clients.filter((c) => c.health_label === "watch");
   const topClient = clients[0] ?? null;
@@ -397,7 +403,7 @@ function ModernSheetBoard({
               tone="greenStrong"
             />
             <SheetCell
-              label={copy("نسبة تحقيق الإيراد", "Revenue Achievement")}
+              label={copy("إنجاز الشركة (الكلي)", "Company Achievement (total)")}
               value={`${dashboard.achievement_pct.toFixed(1)}%`}
               tone={dashboard.achievement_pct >= 70 ? "green" : "amber"}
             />
@@ -428,7 +434,7 @@ function ModernSheetBoard({
           <SectionBand title={copy("إشارات تنفيذية", "Executive Signals")} />
           <div className="grid gap-3 sm:grid-cols-2">
             <SummaryStat
-              label={copy("تحقيق الإيراد", "Revenue achievement")}
+              label={copy("إنجاز الشركة (الكلي)", "Company achievement (total)")}
               value={`${dashboard.achievement_pct.toFixed(1)}%`}
               tone={dashboard.achievement_pct >= 70 ? "green" : dashboard.achievement_pct >= 35 ? "amber" : "red"}
             />
@@ -473,7 +479,7 @@ function ModernSheetBoard({
         onTarget={dashboard.cnt_on_target}
         overdue={dashboard.cnt_overdue}
         expected={expectedTargetClients}
-        renewed={dashboard.mov_renewed}
+        renewed={renewedFromTarget}
         targetExclRenewals={expectedAfterRenewed}
         targetExclLost={expectedAfterLost}
         copy={copy}
@@ -663,7 +669,7 @@ function CurrentRosterBoard({
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-200">
           <Activity className="size-3" />
-          {copy("مباشر — غير مرتبط بالشهر", "Live — not month-bound")}
+          {copy("نظرة عامة من الشيت", "Overview from the sheet")}
         </span>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">

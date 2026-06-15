@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   Loader2,
   TrendingUp,
-  Quote,
   Link2,
   Smartphone,
   LayoutGrid,
@@ -27,6 +26,12 @@ import {
   Upload,
   FileUp,
   CheckCircle2,
+  ShieldAlert,
+  Activity,
+  Wrench,
+  MessagesSquare,
+  GitBranch,
+  FileSignature,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
@@ -299,20 +304,21 @@ export function SatisfactionWorkspace({
             </Button>
           </div>
 
-          {/* Real delivery work — delayed tasks tied to this client */}
-          {execution && <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />}
-
           {/* Results */}
           {detail.analysis && (
             <AnalysisView
               analysis={detail.analysis}
               history={detail.history}
+              execution={execution}
               clientId={selectedId}
               activeProjects={detail.activeProjects}
               t={t}
               sentimentLabel={sentimentLabel}
             />
           )}
+
+          {/* Real delivery work — delayed tasks tied to this client */}
+          {execution && <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />}
         </div>
       ) : null}
     </div>
@@ -806,14 +812,6 @@ function ExecutionPanel({
 }
 
 // ---- Analysis view -------------------------------------------------------
-const HL_TONE: Record<string, string> = {
-  praise: "text-cc-green",
-  milestone: "text-cyan",
-  request: "text-amber",
-  complaint: "text-cc-red",
-  escalation: "text-cc-red",
-};
-
 const REC_PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const REC_PRIORITY_TONE: Record<string, string> = {
   high: "bg-red-dim text-cc-red",
@@ -821,9 +819,156 @@ const REC_PRIORITY_TONE: Record<string, string> = {
   low: "bg-soft-2 text-muted-foreground",
 };
 
+type ExecutiveTab = "critical" | "timeline";
+type TimelineRange = "7" | "30" | "90" | "all";
+type EventFilter = "all" | "complaint" | "approval" | "delay" | "internal" | "decision";
+type ClientTimelineEvent = {
+  id: string;
+  title: string;
+  date: string | null;
+  source: "client" | "technical" | "system";
+  category: Exclude<EventFilter, "all">;
+  critical: boolean;
+  severity: "critical" | "high" | "medium" | "low";
+};
+
+function parseTime(date: string | null): number {
+  if (!date) return 0;
+  const ts = new Date(date).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function formatEventDate(date: string | null) {
+  if (!date) return "—";
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return date.slice(0, 10);
+  return new Intl.DateTimeFormat("ar", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(d);
+}
+
+function highlightCategory(type: string, text: string, audience: string): ClientTimelineEvent["category"] {
+  const body = text.toLowerCase();
+  if (audience === "team") return "internal";
+  if (type === "complaint" || type === "escalation") return "complaint";
+  if (type === "milestone" || /اعتماد|اعتمد|وافق|موافقة|approved|approval/.test(body)) return "approval";
+  if (/تأخير|متأخر|اتأخر|تأخر|delay|late|deadline|موعد/.test(body)) return "delay";
+  if (/قرار|تقرر|قرر|decided|decision/.test(body)) return "decision";
+  return "decision";
+}
+
+function taskEventDate(task: ClientExecutionSnapshot["topTasks"][number]) {
+  return task.dueDate ?? task.stageEnteredAt ?? null;
+}
+
+// Short label for a contract activity-log event (mirrors log-type-meta keys).
+function contractEventLabel(logType: string): string {
+  if (/Lost/i.test(logType)) return "📄 إغلاق العقد (خسارة)";
+  if (/Renew/i.test(logType)) return "📄 تجديد العقد";
+  if (/LIFTED/i.test(logType)) return "📄 رفع تجميد العقد";
+  if (/HOLD/i.test(logType)) return "📄 تجميد العقد";
+  if (/EDIT MODE ON/i.test(logType)) return "📄 بدء تعديل بنود العقد";
+  if (/EDIT MODE OFF/i.test(logType)) return "📄 انتهاء تعديل بنود العقد";
+  return `📄 ${logType}`;
+}
+
+function buildClientTimelineEvents(
+  analysis: NonNullable<ClientSatisfactionDetail["analysis"]>,
+  execution: ClientExecutionSnapshot | null,
+): ClientTimelineEvent[] {
+  const events: ClientTimelineEvent[] = [];
+
+  analysis.highlights.forEach((h, index) => {
+    const category = highlightCategory(h.type, h.text, h.audience);
+    const critical = h.type === "complaint" || h.type === "escalation";
+    events.push({
+      id: `highlight-${index}`,
+      title: h.text,
+      date: h.date ?? analysis.createdAt,
+      source: h.audience === "team" ? "technical" : "client",
+      category,
+      critical,
+      severity: h.type === "escalation" ? "critical" : critical ? "high" : "medium",
+    });
+  });
+
+  if (execution && execution.overdueCount > 0) {
+    const newestTaskDate =
+      execution.topTasks.map(taskEventDate).sort((a, b) => parseTime(b) - parseTime(a))[0] ?? null;
+    events.push({
+      id: "system-overdue-summary",
+      title: `يوجد ${execution.overdueCount} مهام متأخرة في المشروع`,
+      date: newestTaskDate ?? analysis.createdAt,
+      source: "system",
+      category: "delay",
+      critical: true,
+      severity: execution.overdueCount >= 8 ? "critical" : execution.overdueCount >= 4 ? "high" : "medium",
+    });
+
+    execution.topTasks.slice(0, 6).forEach((task, index) => {
+      events.push({
+        id: `task-delay-${index}`,
+        title: `${task.taskCode ? `${task.taskCode} · ` : ""}${task.title}`,
+        date: taskEventDate(task),
+        source: "system",
+        category: "delay",
+        critical: (task.delayDays ?? 0) >= 3 || (task.daysStuck ?? 0) >= 7,
+        severity: (task.delayDays ?? 0) >= 5 || (task.daysStuck ?? 0) >= 14 ? "high" : "medium",
+      });
+    });
+  }
+
+  // Contract activity-log events — holds/edits/close/renew as dated timeline
+  // entries. Lost/Hold are critical; Renew reads as a positive (approval) beat.
+  (analysis.contractContext?.recentActivity ?? []).slice(0, 6).forEach((ev, index) => {
+    const isLost = /Lost/i.test(ev.logType);
+    const isRenew = /Renew/i.test(ev.logType);
+    const isHold = /HOLD/i.test(ev.logType) && !/LIFTED/i.test(ev.logType);
+    const critical = isLost || isHold;
+    const note = ev.notes ? ev.notes.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+    events.push({
+      id: `contract-${index}`,
+      title: `${contractEventLabel(ev.logType)}${note ? ` — ${note}` : ""}`,
+      date: ev.logTime ?? analysis.createdAt,
+      source: "system",
+      category: isRenew ? "approval" : critical ? "complaint" : "decision",
+      critical,
+      severity: isLost ? "critical" : isHold ? "high" : "medium",
+    });
+  });
+
+  return events.sort((a, b) => parseTime(b.date) - parseTime(a.date));
+}
+
+function buildFallbackRecommendations(
+  analysis: NonNullable<ClientSatisfactionDetail["analysis"]>,
+  execution: ClientExecutionSnapshot | null,
+) {
+  const recs = [...analysis.recommendations];
+  if (execution && execution.overdueCount > 0 && recs.length < 6) {
+    const stage = execution.byStage[0]?.stage;
+    recs.push({
+      priority: execution.overdueCount >= 4 ? ("high" as const) : ("medium" as const),
+      issue: `يوجد ${execution.overdueCount} مهام متأخرة${stage ? `، أكثرها في مرحلة ${stage}` : ""}.`,
+      action: "تحديد مالك لكل مهمة متأخرة وإرسال موعد تسليم واضح للعميل خلال 48 ساعة.",
+    });
+  }
+  if (analysis.risks.length > 0 && recs.length < 6) {
+    recs.push({
+      priority: "medium" as const,
+      issue: analysis.risks[0],
+      action: "تحويل الخطر إلى قرار متابعة: من المسؤول، ما الإجراء، وما موعد الإغلاق.",
+    });
+  }
+  return recs.slice(0, 6);
+}
+
 function AnalysisView({
   analysis,
   history,
+  execution,
   clientId,
   activeProjects,
   t,
@@ -831,6 +976,7 @@ function AnalysisView({
 }: {
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
   history: AnalysisHistoryItem[];
+  execution: ClientExecutionSnapshot | null;
   clientId: string;
   activeProjects: ClientSatisfactionDetail["activeProjects"];
   t: ReturnType<typeof useTranslations>;
@@ -839,6 +985,36 @@ function AnalysisView({
   const tone = scoreTone(analysis.satisfactionScore);
   const timeline = analysis.sentimentTimeline ?? [];
   const briefMissing = analysis.briefAdherenceScore === null;
+  const [activeTab, setActiveTab] = useState<ExecutiveTab>("critical");
+  const [timelineRange, setTimelineRange] = useState<TimelineRange>("7");
+  const [eventFilter, setEventFilter] = useState<EventFilter>("all");
+  const clientEvents = useMemo(
+    () => buildClientTimelineEvents(analysis, execution),
+    [analysis, execution],
+  );
+  const criticalEvents = useMemo(
+    () => clientEvents.filter((event) => event.critical).slice(0, 8),
+    [clientEvents],
+  );
+  const recommendations = useMemo(
+    () => buildFallbackRecommendations(analysis, execution),
+    [analysis, execution],
+  );
+  const visibleTimelineEvents = useMemo(() => {
+    const anchorDate = Math.max(
+      parseTime(analysis.createdAt),
+      ...clientEvents.map((event) => parseTime(event.date)),
+    );
+    const minDate =
+      timelineRange === "all"
+        ? null
+        : anchorDate - Number(timelineRange) * 86_400_000;
+    return clientEvents.filter((event) => {
+      if (eventFilter !== "all" && event.category !== eventFilter) return false;
+      if (minDate === null) return true;
+      return parseTime(event.date) >= minDate;
+    });
+  }, [analysis.createdAt, clientEvents, eventFilter, timelineRange]);
   // We're viewing a past snapshot when the shown analysis isn't the current one.
   const viewingPast = !history.some((h) => h.id === analysis.id && h.isCurrent);
   const range = (a: {
@@ -867,8 +1043,38 @@ function AnalysisView({
       )}
 
       {/* headline */}
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-6 p-5">
+      <Card className="border-cyan/25">
+        <CardContent className="space-y-4 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="inline-flex items-center gap-2 text-sm font-semibold">
+                <Sparkles className="size-4 text-cyan" /> {t("executive.title")}
+              </p>
+              <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                {analysis.summary}
+                {execution && execution.overdueCount > 0
+                  ? ` ${t("executive.deliveryRisk", { n: execution.overdueCount })}`
+                  : ""}
+              </p>
+            </div>
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                  ? "border-cc-red/30 bg-red-dim text-cc-red"
+                  : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
+                    ? "border-amber/30 bg-amber/10 text-amber"
+                    : "border-cc-green/30 bg-green-dim text-cc-green",
+              )}
+            >
+              {analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                ? t("executive.riskHigh")
+                : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
+                  ? t("executive.riskMedium")
+                  : t("executive.riskLow")}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-6 border-t border-border pt-4">
           <div className="flex items-center gap-3">
             <Ring score={analysis.satisfactionScore} size={84} />
             <div>
@@ -905,8 +1111,9 @@ function AnalysisView({
             </div>
           </div>
           <p className="min-w-[12rem] flex-1 text-sm leading-relaxed text-muted-foreground">
-            {analysis.summary}
+            {analysis.risks[0] ?? t("executive.noMajorRisk")}
           </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -914,156 +1121,662 @@ function AnalysisView({
         <MissingBriefPanel clientId={clientId} activeProjects={activeProjects} t={t} />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* sentiment timeline */}
-        {timeline.length > 0 && (
-          <Card>
-            <CardContent className="p-4">
-              <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-                <TrendingUp className="size-4 text-cyan" /> {t("timeline")}
-              </p>
-              <div className="flex items-end gap-2" style={{ height: 100 }}>
-                {timeline.map((pt, i) => {
-                  const ptTone = scoreTone(pt.score);
-                  return (
-                    <div key={i} className="flex flex-1 flex-col items-center gap-1">
-                      <div
-                        className={cn("w-full rounded-t", ptTone.text)}
-                        style={{
-                          height: `${Math.max(4, pt.score)}%`,
-                          backgroundColor: "currentColor",
-                          minHeight: 4,
-                        }}
-                        title={`${pt.period}: ${pt.score}`}
-                      />
-                      <span className="text-[9px] text-muted-foreground">
-                        {pt.period.slice(5)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* الصورة الكبرى — each source rolled up into one account-health verdict */}
+      <BigPicturePanel bigPicture={analysis.bigPicture} contract={analysis.contractContext} t={t} />
 
-        {/* risks */}
-        {analysis.risks.length > 0 && (
-          <Card>
-            <CardContent className="p-4">
-              <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-                <AlertTriangle className="size-4 text-amber" /> {t("risks")}
-              </p>
-              <ul className="space-y-1.5">
-                {analysis.risks.map((r, i) => (
-                  <li key={i} className="flex gap-2 text-[13px] text-muted-foreground">
-                    <span className="text-amber">•</span>
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
+      {/* المؤشرات — the risk/operational taxonomy */}
+      <IndicatorsPanel indicators={analysis.indicators} t={t} />
+
+      {/* per-source signal extraction */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ClientSignalsPanel signals={analysis.clientGroupSignals} t={t} />
+        <TechnicalSignalsPanel signals={analysis.technicalGroupSignals} t={t} />
       </div>
 
-      {/* recommendations — AI advice grounded in chat + real Rawasm tasks */}
-      {analysis.recommendations.length > 0 && (
-        <Card className="border-cyan/30">
-          <CardContent className="p-4">
-            <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-              <Lightbulb className="size-4 text-cyan" /> {t("recommendations")}
-            </p>
-            <ul className="space-y-3">
-              {[...analysis.recommendations]
-                .sort(
-                  (a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority],
-                )
-                .map((rec, i) => (
-                  <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
-                    <div className="mb-1.5 flex items-start gap-2">
-                      <span
-                        className={cn(
-                          "mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
-                          REC_PRIORITY_TONE[rec.priority],
-                        )}
-                      >
-                        {t(`recPriority.${rec.priority}`)}
-                      </span>
-                      <span className="text-[13px] font-medium leading-snug">{rec.issue}</span>
-                    </div>
-                    <p className="flex items-start gap-1.5 text-[13px] text-cyan">
-                      <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
-                      {rec.action}
-                    </p>
-                  </li>
-                ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      {/* أسباب المشاكل */}
+      <CausesPanel causes={analysis.causes} t={t} />
 
-      {/* highlights */}
-      {analysis.highlights.length > 0 && (
-        <Card>
-          <CardContent className="p-4">
-            <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-              <Quote className="size-4 text-cyan" /> {t("highlights")}
-            </p>
-            <ul className="space-y-2">
-              {[...analysis.highlights]
-                // Client-facing items first; internal team items grouped after.
-                // Within each group, oldest → newest (undated items sort last).
-                .sort((a, b) => {
-                  const teamDelta =
-                    (a.audience === "team" ? 1 : 0) - (b.audience === "team" ? 1 : 0);
-                  if (teamDelta !== 0) return teamDelta;
-                  const ad = a.date || "9999-99-99";
-                  const bd = b.date || "9999-99-99";
-                  return ad.localeCompare(bd);
-                })
-                .map((h, i) => {
-                  const isTeam = h.audience === "team";
-                  return (
-                    <li
-                      key={i}
-                      className={cn(
-                        "flex items-start justify-between gap-3 text-[13px]",
-                        isTeam && "opacity-70",
-                      )}
-                    >
-                      <span className="flex items-start gap-2">
-                        <span
-                          className={cn(
-                            "mt-0.5 text-xs font-semibold",
-                            HL_TONE[h.type] ?? "text-muted-foreground",
-                          )}
-                        >
-                          {t(`highlightType.${h.type}`)}
-                        </span>
-                        {isTeam && (
-                          <span className="mt-0.5 shrink-0 rounded bg-soft-2 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-                            {t("highlightAudience.team")}
-                          </span>
-                        )}
-                        <span className="text-muted-foreground">{h.text}</span>
-                      </span>
-                      {h.date && (
-                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
-                          {h.date}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-            </ul>
-          </CardContent>
-        </Card>
+      <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+        {(["critical", "timeline"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              activeTab === tab
+                ? "bg-soft-2 text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab === "critical" ? (
+              <AlertTriangle className="size-3.5" />
+            ) : (
+              <History className="size-3.5" />
+            )}
+            {t(`executive.tabs.${tab}`)}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "critical" ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
+          <CriticalEventsPanel events={criticalEvents} t={t} />
+          <RecommendationsPanel recommendations={recommendations} t={t} />
+        </div>
+      ) : (
+        <ClientTimelinePanel
+          events={visibleTimelineEvents}
+          range={timelineRange}
+          filter={eventFilter}
+          onRangeChange={setTimelineRange}
+          onFilterChange={setEventFilter}
+          sentimentTimeline={timeline}
+          t={t}
+        />
       )}
 
       {/* past analyses — click to view an earlier snapshot */}
       <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
+  );
+}
+
+function EventSourceBadge({
+  source,
+  t,
+}: {
+  source: ClientTimelineEvent["source"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const tone =
+    source === "client"
+      ? "border-cyan/25 bg-cyan/10 text-cyan"
+      : source === "technical"
+        ? "border-amber/25 bg-amber/10 text-amber"
+        : "border-border bg-soft-2 text-muted-foreground";
+  return (
+    <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", tone)}>
+      {t(`executive.source.${source}`)}
+    </span>
+  );
+}
+
+function EventCategoryBadge({
+  category,
+  t,
+}: {
+  category: ClientTimelineEvent["category"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const tone: Record<ClientTimelineEvent["category"], string> = {
+    complaint: "bg-red-dim text-cc-red",
+    approval: "bg-green-dim text-cc-green",
+    delay: "bg-amber/10 text-amber",
+    internal: "bg-soft-2 text-muted-foreground",
+    decision: "bg-cyan/10 text-cyan",
+  };
+  return (
+    <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", tone[category])}>
+      {t(`executive.category.${category}`)}
+    </span>
+  );
+}
+
+function EventRow({
+  event,
+  t,
+}: {
+  event: ClientTimelineEvent;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <li className="rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 text-[13px] font-medium leading-snug">
+          {event.critical && <span className="me-1 text-amber">⚠️</span>}
+          {event.title}
+        </p>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          {formatEventDate(event.date)}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <EventSourceBadge source={event.source} t={t} />
+        <EventCategoryBadge category={event.category} t={t} />
+      </div>
+    </li>
+  );
+}
+
+function CriticalEventsPanel({
+  events,
+  t,
+}: {
+  events: ClientTimelineEvent[];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Card className="border-amber/25">
+      <CardContent className="p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <AlertTriangle className="size-4 text-amber" /> {t("executive.criticalTitle")}
+          </p>
+          <span className="text-[11px] text-muted-foreground">{t("executive.latestFirst")}</span>
+        </div>
+        {events.length > 0 ? (
+          <ul className="space-y-2">
+            {events.map((event) => (
+              <EventRow key={event.id} event={event} t={t} />
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
+            {t("executive.noCriticalEvents")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecommendationsPanel({
+  recommendations,
+  t,
+}: {
+  recommendations: NonNullable<ClientSatisfactionDetail["analysis"]>["recommendations"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Card className="border-cyan/30">
+      <CardContent className="p-4">
+        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+          <Lightbulb className="size-4 text-cyan" /> {t("executive.recommendationsTitle")}
+        </p>
+        {recommendations.length > 0 ? (
+          <ul className="space-y-3">
+            {[...recommendations]
+              .sort((a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority])
+              .map((rec, i) => (
+                <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
+                  <div className="mb-1.5 flex items-start gap-2">
+                    <span
+                      className={cn(
+                        "mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
+                        REC_PRIORITY_TONE[rec.priority],
+                      )}
+                    >
+                      {t(`recPriority.${rec.priority}`)}
+                    </span>
+                    <span className="text-[13px] font-medium leading-snug">{rec.issue}</span>
+                  </div>
+                  <p className="flex items-start gap-1.5 text-[13px] text-cyan">
+                    <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
+                    {rec.action}
+                  </p>
+                </li>
+              ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
+            {t("executive.noRecommendations")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- Rich analysis panels (indicators / big picture / signals / causes) ----
+
+type Analysis = NonNullable<ClientSatisfactionDetail["analysis"]>;
+
+const ACCOUNT_HEALTH_TONE: Record<string, string> = {
+  healthy: "border-cc-green/30 bg-green-dim text-cc-green",
+  watch: "border-amber/30 bg-amber/10 text-amber",
+  at_risk: "border-cc-red/30 bg-red-dim text-cc-red",
+  critical: "border-cc-red/50 bg-red-dim text-cc-red",
+};
+
+const CONTRACT_TARGET_TONE: Record<string, string> = {
+  "On-Target": "border-cc-green/30 bg-green-dim text-cc-green",
+  Renewed: "border-cyan/30 bg-cyan/10 text-cyan",
+  Overdue: "border-amber/30 bg-amber/10 text-amber",
+  Lost: "border-cc-red/30 bg-red-dim text-cc-red",
+};
+
+// The rolled-up verdict: account-health badge + the three composing dimensions.
+function BigPicturePanel({
+  bigPicture,
+  contract,
+  t,
+}: {
+  bigPicture: Analysis["bigPicture"];
+  contract: Analysis["contractContext"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const dims = [
+    { key: "relationship", score: bigPicture.relationshipScore },
+    { key: "execution", score: bigPicture.executionScore },
+    { key: "commercial", score: bigPicture.commercialScore },
+  ] as const;
+  return (
+    <Card className="border-cyan/25">
+      <CardContent className="space-y-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <Activity className="size-4 text-cyan" /> {t("bigPicture.title")}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {contract && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                  CONTRACT_TARGET_TONE[contract.target] ?? "border-border bg-soft-2 text-muted-foreground",
+                )}
+              >
+                <FileSignature className="size-3" />
+                {t(`contractTarget.${contract.target}`)}
+              </span>
+            )}
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                ACCOUNT_HEALTH_TONE[bigPicture.accountHealth] ?? ACCOUNT_HEALTH_TONE.watch,
+              )}
+            >
+              {t(`accountHealth.${bigPicture.accountHealth}`)}
+            </span>
+          </div>
+        </div>
+        {bigPicture.headline && (
+          <p className="text-sm leading-relaxed text-muted-foreground">{bigPicture.headline}</p>
+        )}
+        <div className="grid grid-cols-3 gap-3 border-t border-border pt-4">
+          {dims.map((d) => (
+            <div key={d.key} className="flex flex-col items-center gap-1.5 text-center">
+              <Ring score={d.score} size={64} />
+              <p className="text-[11px] font-medium text-muted-foreground">
+                {t(`bigPicture.${d.key}`)}
+              </p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// One tier's list of indicator chips (declared at module scope so it keeps its
+// own identity across renders).
+function IndicatorGroup({
+  items,
+  severity,
+  t,
+}: {
+  items: Analysis["indicators"];
+  severity: "red" | "yellow";
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <ul className="space-y-2">
+      {items.map((ind, i) => (
+        <li
+          key={`${ind.code}-${i}`}
+          className={cn(
+            "rounded-lg border bg-soft-1 p-2.5",
+            severity === "red" ? "border-cc-red/25" : "border-amber/25",
+          )}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[12px] font-semibold",
+                severity === "red" ? "text-cc-red" : "text-amber",
+              )}
+            >
+              <span aria-hidden>{severity === "red" ? "🔴" : "🟡"}</span>
+              {t(`indicator.${ind.code}`)}
+            </span>
+            {ind.date && (
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{ind.date}</span>
+            )}
+          </div>
+          {ind.evidence && (
+            <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{ind.evidence}</p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// The detected indicators, split into 🔴 risk and 🟡 operational groups.
+function IndicatorsPanel({
+  indicators,
+  t,
+}: {
+  indicators: Analysis["indicators"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const red = indicators.filter((i) => i.severity === "red");
+  const yellow = indicators.filter((i) => i.severity === "yellow");
+  return (
+    <Card className="border-cc-red/20">
+      <CardContent className="p-4">
+        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+          <ShieldAlert className="size-4 text-cc-red" /> {t("indicators.title")}
+        </p>
+        {indicators.length === 0 ? (
+          <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
+            {t("indicators.none")}
+          </p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-cc-red">
+                {t("indicators.risk")} {red.length > 0 && `(${red.length})`}
+              </p>
+              {red.length > 0 ? (
+                <IndicatorGroup items={red} severity="red" t={t} />
+              ) : (
+                <p className="text-[12px] text-muted-foreground">{t("indicators.noneRisk")}</p>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber">
+                {t("indicators.operational")} {yellow.length > 0 && `(${yellow.length})`}
+              </p>
+              {yellow.length > 0 ? (
+                <IndicatorGroup items={yellow} severity="yellow" t={t} />
+              ) : (
+                <p className="text-[12px] text-muted-foreground">{t("indicators.noneOperational")}</p>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Client group 💫: requests breakdown, approvals breakdown, response speed.
+function ClientSignalsPanel({
+  signals,
+  t,
+}: {
+  signals: Analysis["clientGroupSignals"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const reqKeys = ["new", "edit", "complaint", "inquiry", "approval"] as const;
+  const apprKeys = ["approved", "rejected", "changesRequested", "noResponse"] as const;
+  return (
+    <Card className="border-cyan/20">
+      <CardContent className="space-y-3 p-4">
+        <p className="inline-flex items-center gap-2 text-sm font-semibold">
+          <MessagesSquare className="size-4 text-cyan" /> {t("signals.clientTitle")}
+        </p>
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("signals.requests")}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {reqKeys.map((k) => (
+              <span
+                key={k}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px]"
+              >
+                {t(`signals.req.${k}`)}
+                <span className="font-semibold tabular-nums">{signals.requests[k]}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("signals.approvals")}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {apprKeys.map((k) => (
+              <span
+                key={k}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px]"
+              >
+                {t(`signals.appr.${k}`)}
+                <span className="font-semibold tabular-nums">{signals.approvals[k]}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+        <p className="text-[12px] text-muted-foreground">
+          {t("signals.responseSpeed")}:{" "}
+          <span className="font-semibold text-foreground">
+            {t(`responseSpeed.${signals.responseSpeed}`)}
+          </span>
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Technical group 📍: internal blockers, delay-cause attribution, account eval.
+function TechnicalSignalsPanel({
+  signals,
+  t,
+}: {
+  signals: Analysis["technicalGroupSignals"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const empty =
+    signals.blockers.length === 0 &&
+    signals.delayCauses.length === 0 &&
+    signals.accountEvaluation.length === 0;
+  return (
+    <Card className="border-amber/20">
+      <CardContent className="space-y-3 p-4">
+        <p className="inline-flex items-center gap-2 text-sm font-semibold">
+          <Wrench className="size-4 text-amber" /> {t("signals.technicalTitle")}
+        </p>
+        {empty ? (
+          <p className="rounded-lg border border-border bg-soft-1 px-3 py-4 text-center text-[12px] text-muted-foreground">
+            {t("signals.technicalNone")}
+          </p>
+        ) : (
+          <>
+            {signals.blockers.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("signals.blockers")}
+                </p>
+                <ul className="space-y-1">
+                  {signals.blockers.map((b, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+                      <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber" />
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {signals.delayCauses.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("signals.delayCauses")}
+                </p>
+                <ul className="space-y-1">
+                  {signals.delayCauses.map((d, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="text-muted-foreground">{d.cause}</span>
+                      <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
+                        {t(`owner.${d.attributedTo}`)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {signals.accountEvaluation.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("signals.accountEvaluation")}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {signals.accountEvaluation.map((e, i) => (
+                    <span
+                      key={i}
+                      className="rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px] text-muted-foreground"
+                    >
+                      {e}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// أسباب المشاكل: problem → root cause → owner.
+function CausesPanel({
+  causes,
+  t,
+}: {
+  causes: Analysis["causes"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (causes.length === 0) return null;
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4">
+        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+          <GitBranch className="size-4 text-muted-foreground" /> {t("causes.title")}
+        </p>
+        <ul className="space-y-2">
+          {causes.map((c, i) => (
+            <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <span className="text-[13px] font-medium leading-snug">{c.problem}</span>
+                <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
+                  {t(`owner.${c.owner}`)}
+                </span>
+              </div>
+              <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+                <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
+                {c.rootCause}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClientTimelinePanel({
+  events,
+  range,
+  filter,
+  onRangeChange,
+  onFilterChange,
+  sentimentTimeline,
+  t,
+}: {
+  events: ClientTimelineEvent[];
+  range: TimelineRange;
+  filter: EventFilter;
+  onRangeChange: (range: TimelineRange) => void;
+  onFilterChange: (filter: EventFilter) => void;
+  sentimentTimeline: NonNullable<ClientSatisfactionDetail["analysis"]>["sentimentTimeline"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <History className="size-4 text-cyan" /> {t("executive.timelineTitle")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+              {(["7", "30", "90", "all"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onRangeChange(value)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                    range === value ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(`executive.range.${value}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {(["all", "complaint", "approval", "delay", "internal", "decision"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onFilterChange(value)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                filter === value
+                  ? "border-cyan/35 bg-cyan/10 text-cyan"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t(`executive.filter.${value}`)}
+            </button>
+          ))}
+        </div>
+
+        {sentimentTimeline.length > 0 && (
+          <div className="rounded-lg border border-border bg-soft-1 p-3">
+            <p className="mb-3 inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+              <TrendingUp className="size-3.5 text-cyan" /> {t("timeline")}
+            </p>
+            <div className="flex items-end gap-2" style={{ height: 96 }}>
+              {sentimentTimeline.map((pt, i) => {
+                const ptTone = scoreTone(pt.score);
+                return (
+                  <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                    <div
+                      className={cn("w-full rounded-t", ptTone.text)}
+                      style={{
+                        height: `${Math.max(4, pt.score)}%`,
+                        backgroundColor: "currentColor",
+                        minHeight: 4,
+                      }}
+                      title={`${pt.period}: ${pt.score}`}
+                    />
+                    <span className="text-[9px] text-muted-foreground">{pt.period.slice(5)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {events.length > 0 ? (
+          <ul className="space-y-2">
+            {events.map((event) => (
+              <EventRow key={event.id} event={event} t={t} />
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
+            {t("executive.noTimelineEvents")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
