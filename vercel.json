@@ -7,10 +7,6 @@
     {
       "path": "/api/cron/insight-alerts",
       "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/contracts-google-sheet-sync",
-      "schedule": "*/15 * * * *"
     }
   ]
 }
