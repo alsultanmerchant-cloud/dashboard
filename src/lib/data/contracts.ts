@@ -120,6 +120,31 @@ export type MonthlyDashboard = {
   cnt_on_target: number;
   cnt_overdue: number;
   cnt_sales_deposit: number;
+  // Account department (sheet "Account M. section") — 0168
+  acc_exp_overdue_inst: number;
+  acc_exp_inst: number;
+  acc_exp_ontarget: number;
+  acc_exp_overdue_clients: number;
+  acc_expected: number;
+  acc_act_inst: number;
+  acc_act_ontarget: number;
+  acc_act_overdue_clients: number;
+  acc_act_sd_renewed: number;
+  acc_upsell: number;
+  acc_winback: number;
+  acc_actual: number;
+  acc_achievement_pct: number;
+  acc_gap: number;
+  // Sales department (sheet "Sales section") — 0168
+  sales_exp_overdue_inst: number;
+  sales_exp_inst: number;
+  sales_expected: number;
+  sales_act_inst: number;
+  sales_upsell: number;
+  sales_new_income: number;
+  sales_total_income: number;
+  sales_gap: number;
+  sales_achievement_pct: number;
   is_frozen: boolean;
   source: string;
 };
@@ -154,6 +179,44 @@ export async function getMonthlyDashboard(
     .maybeSingle();
   if (error) throw error;
   return (data as MonthlyDashboard) ?? null;
+}
+
+/**
+ * Live, month-INDEPENDENT snapshot of the current client roster by contract
+ * type. Powers the top "current client status" strip on the CEO dashboard —
+ * mirrors the sheet's general overview, which tracks the live roster, not the
+ * selected month. "Current client" = status not in ('closed','lost').
+ */
+export type ContractsRoster = {
+  total: number;
+  cnt_new: number;
+  cnt_renew: number;
+  cnt_upsell: number;
+  cnt_winback: number;
+  cnt_hold: number;
+  cnt_switch: number;
+  cnt_untyped: number;
+};
+
+export async function getContractsRoster(
+  orgId: string,
+): Promise<ContractsRoster> {
+  const { data, error } = await supabaseAdmin
+    .rpc("get_contracts_roster", { p_org: orgId })
+    .maybeSingle();
+  if (error) throw error;
+  return (
+    (data as ContractsRoster) ?? {
+      total: 0,
+      cnt_new: 0,
+      cnt_renew: 0,
+      cnt_upsell: 0,
+      cnt_winback: 0,
+      cnt_hold: 0,
+      cnt_switch: 0,
+      cnt_untyped: 0,
+    }
+  );
 }
 
 /** All months we have totals for, newest first — for the month picker. */

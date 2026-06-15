@@ -10,7 +10,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { ChevronDown, Loader2, Plus, X } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -92,7 +92,48 @@ function NewContractDialog({
   const [paymentStatus, setPaymentStatus] = useState<"Complete" | "Installments">(
     "Complete",
   );
+  // Inline installment schedule (date + amount per row). seq 1 = signing deposit.
+  const [installments, setInstallments] = useState<
+    Array<{ date: string; amount: string }>
+  >([]);
   const [notes, setNotes] = useState("");
+
+  function choosePayment(next: "Complete" | "Installments") {
+    setPaymentStatus(next);
+    // Seed one empty row the first time installments are picked so the team
+    // sees where to type immediately.
+    if (next === "Installments" && installments.length === 0) {
+      setInstallments([{ date: startDate, amount: "" }]);
+    }
+  }
+  function addInstallment() {
+    setInstallments((prev) => [...prev, { date: startDate, amount: "" }]);
+  }
+  function updateInstallment(i: number, patch: Partial<{ date: string; amount: string }>) {
+    setInstallments((prev) =>
+      prev.map((row, idx) => (idx === i ? { ...row, ...patch } : row)),
+    );
+  }
+  function removeInstallment(i: number) {
+    setInstallments((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function splitRemaining() {
+    const total = Number(totalValue) || 0;
+    const paid = Number(paidValue) || 0;
+    const n = installments.length;
+    if (n === 0) return;
+    const each = Math.max(0, Math.round(((total - paid) / n) * 100) / 100);
+    setInstallments((prev) => prev.map((row) => ({ ...row, amount: String(each) })));
+  }
+
+  const scheduledSum = installments.reduce(
+    (s, r) => s + (Number(r.amount) || 0),
+    0,
+  );
+  const unscheduled =
+    (Number(totalValue) || 0) - (Number(paidValue) || 0) - scheduledSum;
+  const fmtAmt = (n: number) =>
+    `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n)} SR`;
 
   const clientResults = useMemo(() => {
     const q = clientSearch.trim().toLowerCase();
@@ -124,6 +165,30 @@ function NewContractDialog({
       return;
     }
     const dur = duration.trim() === "" ? null : Number(duration);
+
+    // Inline installment schedule — only sent when "Installments" is chosen.
+    let installmentsPayload:
+      | Array<{ expected_date: string; expected_amount: number }>
+      | undefined;
+    if (paymentStatus === "Installments") {
+      const filled = installments.filter(
+        (r) => r.date.trim() !== "" || r.amount.trim() !== "",
+      );
+      const invalid = filled.some(
+        (r) => !r.date.trim() || !(Number(r.amount) > 0),
+      );
+      if (invalid) {
+        toast.error(t("newDialog.toasts.invalidInstallment"));
+        return;
+      }
+      if (filled.length > 0) {
+        installmentsPayload = filled.map((r) => ({
+          expected_date: r.date,
+          expected_amount: Number(r.amount),
+        }));
+      }
+    }
+
     start(async () => {
       const res = await createContractAction({
         client_id: clientId,
@@ -135,6 +200,7 @@ function NewContractDialog({
         total_value: total,
         paid_value: paid,
         payment_status: paymentStatus,
+        installments: installmentsPayload,
         notes: notes.trim() || null,
       });
       if ("error" in res) {
@@ -352,7 +418,7 @@ function NewContractDialog({
               <select
                 value={paymentStatus}
                 onChange={(e) =>
-                  setPaymentStatus(e.target.value as "Complete" | "Installments")
+                  choosePayment(e.target.value as "Complete" | "Installments")
                 }
                 disabled={pending}
                 className="h-9 w-full rounded-lg border border-input bg-input px-2 text-sm"
@@ -362,6 +428,106 @@ function NewContractDialog({
               </select>
             </Field>
           </div>
+
+          {paymentStatus === "Installments" && (
+            <div className="space-y-2 rounded-lg border border-cyan/25 bg-cyan-dim/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-foreground">
+                  {t("newDialog.installmentsForm.title")}
+                </span>
+                <div className="flex items-center gap-2">
+                  {installments.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={splitRemaining}
+                      disabled={pending}
+                      className="text-[10px] text-cyan hover:underline"
+                    >
+                      {t("newDialog.installmentsForm.split")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addInstallment}
+                    disabled={pending}
+                    className="inline-flex items-center gap-1 rounded-md border border-cyan/30 bg-card px-2 py-1 text-[10px] font-medium text-cyan hover:bg-cyan-dim/60"
+                  >
+                    <Plus className="size-3" />
+                    {t("newDialog.installmentsForm.add")}
+                  </button>
+                </div>
+              </div>
+
+              {installments.length === 0 ? (
+                <p className="py-1 text-[10px] text-muted-foreground">
+                  {t("newDialog.installmentsForm.empty")}
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {installments.map((row, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="w-5 shrink-0 text-center text-[10px] font-semibold text-muted-foreground tabular-nums">
+                        {i + 1}
+                      </span>
+                      <input
+                        type="date"
+                        value={row.date}
+                        onChange={(e) => updateInstallment(i, { date: e.target.value })}
+                        disabled={pending}
+                        dir="ltr"
+                        aria-label={t("newDialog.installmentsForm.dueDate")}
+                        className="h-8 flex-1 rounded-md border border-input bg-input px-2 text-xs"
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={row.amount}
+                        onChange={(e) => updateInstallment(i, { amount: e.target.value })}
+                        disabled={pending}
+                        dir="ltr"
+                        placeholder={t("newDialog.installmentsForm.amount")}
+                        aria-label={t("newDialog.installmentsForm.amount")}
+                        className="h-8 w-28 rounded-md border border-input bg-input px-2 text-xs tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeInstallment(i)}
+                        disabled={pending}
+                        aria-label={t("newDialog.installmentsForm.remove")}
+                        className="rounded p-1 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-500"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t border-cyan/20 pt-1.5 text-[10px] text-muted-foreground">
+                <span className="tabular-nums">
+                  {t("newDialog.installmentsForm.scheduled", {
+                    amount: fmtAmt(scheduledSum),
+                  })}
+                </span>
+                {Math.abs(unscheduled) >= 0.01 && (
+                  <span
+                    className={cn(
+                      "tabular-nums",
+                      unscheduled < 0 && "text-rose-500",
+                    )}
+                  >
+                    {t("newDialog.installmentsForm.remaining", {
+                      amount: fmtAmt(unscheduled),
+                    })}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {t("newDialog.helpers.installments")}
+              </p>
+            </div>
+          )}
 
           <Field label={t("newDialog.fields.notes")}>
             <textarea

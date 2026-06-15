@@ -687,6 +687,19 @@ const CreateContractSchema = z.object({
   total_value: z.number().finite().min(0).max(10_000_000),
   paid_value: z.number().finite().min(0).max(10_000_000).nullable(),
   payment_status: z.enum(PAYMENT_VALUES),
+  // Inline installment schedule captured at creation time (the team used to
+  // open the contract page to add these). Ignored unless payment_status =
+  // Installments. seq 1 = signing deposit (the income engine reads it as
+  // new-client income via paid_value; installment income counts seq >= 2).
+  installments: z
+    .array(
+      z.object({
+        expected_date: z.string().regex(DATE_RE),
+        expected_amount: z.coerce.number().positive().max(10_000_000),
+      }),
+    )
+    .max(24)
+    .default([]),
   notes: z.string().trim().max(4000).nullable(),
 });
 
@@ -700,6 +713,7 @@ export async function createContractAction(input: {
   total_value: number;
   paid_value: number | null;
   payment_status: "Complete" | "Installments";
+  installments?: Array<{ expected_date: string; expected_amount: number }>;
   notes: string | null;
 }): Promise<ContractActionState> {
   let session;
@@ -807,6 +821,46 @@ export async function createContractAction(input: {
   if (endErr) {
     // Non-fatal: the contract exists; the end date can be recomputed later.
     console.error("recompute_contract_end_date failed", endErr.message);
+  }
+
+  // Inline installment schedule (only when the team chose Installments). Each
+  // row carries source_type_key = the contract's type key so the income engine
+  // attributes it to the right department (Account vs Sales) — without it the
+  // payments would not show up in the dashboard's installment totals.
+  const instInput =
+    parsed.data.payment_status === "Installments" ? parsed.data.installments : [];
+  if (instInput.length > 0) {
+    let typeKey: string | null = null;
+    if (parsed.data.contract_type_id) {
+      const { data: ct } = await supabaseAdmin
+        .from("contract_types")
+        .select("key")
+        .eq("id", parsed.data.contract_type_id)
+        .maybeSingle();
+      typeKey = ct?.key ?? null;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const { error: instErr } = await supabaseAdmin.from("installments").insert(
+      instInput.map((it, i) => ({
+        organization_id: session.orgId,
+        contract_id: row.id,
+        sequence: i + 1,
+        expected_date: it.expected_date,
+        expected_amount: it.expected_amount,
+        source_type_key: typeKey,
+        status: deriveInstallmentStatus(
+          it.expected_date,
+          null,
+          it.expected_amount,
+          null,
+          today,
+        ),
+      })),
+    );
+    if (instErr) {
+      // Non-fatal: the contract exists; installments can be added from its page.
+      console.error("contract installments insert failed", instErr.message);
+    }
   }
 
   await logAudit({

@@ -44,6 +44,8 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
+import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
+import { getCurrentCeoBrief } from "@/lib/ceo-brief-generate";
 import { ExecutiveHeroRow } from "@/components/executive/hero-row";
 import { PulseStrip } from "@/components/executive/pulse-strip";
 import { ClientHealthSection } from "@/components/executive/client-health";
@@ -58,6 +60,13 @@ import { TopRevisedTasksSection } from "@/components/executive/top-revised";
 import { cn } from "@/lib/utils";
 
 // ---- Sections (each streams behind its own Suspense) ---------------------
+
+async function BriefSection({ orgId }: { orgId: string }) {
+  // Read the cached brief (daily cron + on-demand refresh keep it fresh). The
+  // card is interactive client-side; we only seed it with the current run.
+  const current = await getCurrentCeoBrief(orgId);
+  return <CeoBriefCard initialBrief={current} />;
+}
 
 async function ScoresBand({ orgId }: { orgId: string }) {
   const data = await getExecutiveScores(orgId);
@@ -215,6 +224,10 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         title={t("welcome", { name: session.fullName })}
         description={t("welcomeDescription")}
       />
+
+      <Suspense fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
+        <BriefSection orgId={orgId} />
+      </Suspense>
 
       <Suspense fallback={<StripSkeleton />}>
         <PulseBand orgId={orgId} />

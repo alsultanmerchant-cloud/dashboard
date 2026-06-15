@@ -891,11 +891,23 @@
       },
       "helpers": {
         "packages": "Pick every service included in the contract. One-time services add their extra days to the contract duration automatically.",
-        "defaults": "Default values: target = Overdue, status = Active. You can edit them from the table after creation. If you choose installments, schedule them from the contract page."
+        "defaults": "Default values: target = Overdue, status = Active. You can edit them from the table after creation.",
+        "installments": "Payment 1 is the signing deposit (also set above as Paid value). Add the remaining payments the client owes — these feed the dashboard automatically."
       },
       "payment": {
         "complete": "Complete",
         "installments": "Installments"
+      },
+      "installmentsForm": {
+        "title": "Installment schedule",
+        "add": "Add installment",
+        "amount": "Amount",
+        "dueDate": "Due date",
+        "remove": "Remove",
+        "split": "Split remaining evenly",
+        "scheduled": "Scheduled: {amount}",
+        "remaining": "Unscheduled: {amount}",
+        "empty": "No installments yet — add the payments the client will make."
       },
       "placeholders": {
         "clientSearch": "Search by name or code…",
@@ -914,6 +926,7 @@
         "selectClient": "Pick a client first",
         "invalidTotal": "Invalid contract value",
         "invalidPaid": "Invalid paid value",
+        "invalidInstallment": "Each installment needs a date and an amount greater than zero",
         "created": "Contract created"
       }
     },
@@ -2875,6 +2888,58 @@
       "overdue": "Overdue",
       "expectedLabel": "expected",
       "actualLabel": "actual"
+    },
+    "brief": {
+      "title": "Executive brief",
+      "tagline": "Three questions: are we improving, where's the danger, what to do?",
+      "analyzing": "Analyzing data…",
+      "lastUpdated": "Updated {time}",
+      "refresh": "Refresh",
+      "generate": "Generate brief",
+      "working": "Working…",
+      "force": "Force",
+      "forceTitle": "Ignore cache and generate a fresh brief",
+      "grade": "Grade {grade}",
+      "q1": "Is the company improving or declining?",
+      "q2": "Where's the danger?",
+      "q3": "What should I do?",
+      "verdict": {
+        "improving": "Improving",
+        "stable": "Stable",
+        "declining": "Declining"
+      },
+      "severity": {
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium"
+      },
+      "noRisks": "No critical risks right now — operations are within normal range.",
+      "topPriority": "Top priority today",
+      "changes": {
+        "stability": "Operational stability",
+        "delivery": "Delivery commitment",
+        "onTime": "On-time delivery",
+        "overdue": "Overdue tasks",
+        "completed": "Weekly throughput",
+        "service": "{name} performance"
+      },
+      "units": {
+        "points": "pts",
+        "tasks": "tasks"
+      },
+      "owner": "Owner",
+      "categories": {
+        "delivery": "Delivery",
+        "people": "People",
+        "clients": "Clients",
+        "money": "Money",
+        "growth": "Growth"
+      },
+      "error": "Failed to load the brief",
+      "retry": "Retry",
+      "emptyTitle": "No brief generated yet",
+      "emptyDescription": "The brief sums up company status in three practical answers, instead of reading every section.",
+      "generateFirst": "Generate first brief"
     }
   },
   "SatisfactionPage": {

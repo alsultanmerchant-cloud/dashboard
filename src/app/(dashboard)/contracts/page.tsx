@@ -6,6 +6,7 @@ import {
   listContractTypes,
   listPackages,
   getMonthlyDashboard,
+  getContractsRoster,
   listDashboardMonths,
   getAmTargets,
   getMonthTargetBuckets,
@@ -41,11 +42,11 @@ export default async function ContractsPage({
   const view = sp.view === "dashboard" ? "dashboard" : "table";
 
   const tabs = (
-    <div className="inline-flex rounded-lg border border-soft bg-card p-0.5 text-xs">
+    <div className="inline-flex rounded-[var(--radius-md)] border border-border/80 bg-card/95 p-1 text-xs shadow-[var(--surface-elev)]">
       <Link
         href="/contracts?view=table"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors",
+          "inline-flex items-center gap-1.5 rounded-[calc(var(--radius-md)-2px)] px-3 py-1.5 transition-colors",
           view === "table"
             ? "bg-cyan-dim text-cyan font-medium"
             : "text-muted-foreground hover:text-foreground",
@@ -57,7 +58,7 @@ export default async function ContractsPage({
       <Link
         href="/contracts?view=dashboard"
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors",
+          "inline-flex items-center gap-1.5 rounded-[calc(var(--radius-md)-2px)] px-3 py-1.5 transition-colors",
           view === "dashboard"
             ? "bg-cyan-dim text-cyan font-medium"
             : "text-muted-foreground hover:text-foreground",
@@ -70,7 +71,7 @@ export default async function ContractsPage({
   );
 
   return (
-    <div>
+    <div className="mx-auto max-w-[1500px]">
       <PageHeader
         title={t("title")}
         description={t("description")}
@@ -84,7 +85,7 @@ export default async function ContractsPage({
         {view === "dashboard" && (
           <Link
             href="/contracts/import"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-soft bg-card px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-border/80 bg-card/95 px-3 text-xs font-semibold text-muted-foreground shadow-[var(--surface-elev)] transition-colors hover:bg-muted hover:text-foreground"
           >
             {t("header.import")}
           </Link>
@@ -180,12 +181,14 @@ async function DashboardSection({
   const months = await listDashboardMonths(orgId);
   const selected = month ?? months[0]?.month ?? undefined;
 
-  const [dashboard, amTargets, buckets, clientInsights] = await Promise.all([
-    getMonthlyDashboard(orgId, selected),
-    getAmTargets(orgId, selected),
-    getMonthTargetBuckets(orgId, selected),
-    getCeoClientInsights(orgId, selected, 12),
-  ]);
+  const [dashboard, roster, amTargets, buckets, clientInsights] =
+    await Promise.all([
+      getMonthlyDashboard(orgId, selected),
+      getContractsRoster(orgId),
+      getAmTargets(orgId, selected),
+      getMonthTargetBuckets(orgId, selected),
+      getCeoClientInsights(orgId, selected, 12),
+    ]);
 
   if (!dashboard) {
     return (
@@ -199,6 +202,7 @@ async function DashboardSection({
   return (
     <CeoDashboard
       dashboard={dashboard}
+      roster={roster}
       amTargets={amTargets}
       buckets={buckets}
       clientInsights={clientInsights}

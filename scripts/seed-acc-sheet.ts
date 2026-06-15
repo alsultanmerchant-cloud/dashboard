@@ -52,6 +52,7 @@ function parseDate(v: unknown): string | null {
 }
 const TYPE_KEY_MAP: Record<string, string> = {
   "new": "New", "renewal": "Renew", "renew": "Renew", "renewed": "Renew",
+  "#renewal#": "Renew",
   "win-back": "WinBack", "winback": "WinBack",
   "upsell": "UPSELL", "upsell-acc": "UPSELL", "upsell - acc": "UPSELL",
   "upsell-sales": "UPSELL", "upsell - sales": "UPSELL",
@@ -101,6 +102,11 @@ interface Contract {
   durationMonths: number | null;
   totalValue: number;
   paidValue: number;
+  nextContractValue: number | null;
+  renewalPaidValue: number | null;
+  repeatedServicesValue: number | null;
+  actualEndDate: string | null;
+  renewedStatus: string | null;
   target: string | null;
   statusLabel: string | null;
   status: string;
@@ -113,6 +119,11 @@ interface Installment {
   expectedDate: string | null;
   actualAmount: number;
   actualDate: string | null;
+  lostDate: string | null;
+  // captured so we can rebuild a historical contract if the key was renewed away
+  clientExternalId: string;
+  contractTypeKey: string | null;
+  startDate: string | null;
 }
 interface Client {
   externalId: string;
@@ -143,6 +154,19 @@ for (const r of ccRows) {
     statusKey;
   const externalKey = s(r["Key"]) ?? `${cid}|${(start ?? "").replace(/-/g, "")}`;
 
+  // col T "renewed?" → YES | NO | Closed (sheet vocabulary, kept verbatim)
+  const renewedRaw = s(r["renewed?"]);
+  const renewedStatus = renewedRaw
+    ? /^yes$/i.test(renewedRaw.trim()) ? "YES"
+      : /^no$/i.test(renewedRaw.trim()) ? "NO"
+      : /^closed$/i.test(renewedRaw.trim()) ? "Closed"
+      : renewedRaw.trim()
+    : null;
+
+  const nextContractValue = num(r["Next Contract Value"]) || null;
+  const repeatedServicesValue = num(r[" Value of repeated services"]) || null;
+  const renewalPaidValue = num(r["Actual Paid for renewal"]) || null;
+
   contracts.push({
     externalKey,
     clientExternalId: cid,
@@ -153,8 +177,13 @@ for (const r of ccRows) {
     startDate: start,
     endDate: actualEnd ?? end,
     durationMonths: num(r["C.Duration (Months)"]) > 0 ? Math.round(num(r["C.Duration (Months)"])) : null,
-    totalValue: num(r["Next Contract Value"]) || num(r[" Value of repeated services"]),
-    paidValue: num(r["Actual Paid for renewal"]) || num(r["Actual paid value"]),
+    totalValue: nextContractValue ?? repeatedServicesValue ?? 0,
+    paidValue: num(r["Actual paid value"]),
+    nextContractValue,
+    renewalPaidValue,
+    repeatedServicesValue,
+    actualEndDate: actualEnd,
+    renewedStatus,
     target: s(r["Target"]),
     statusLabel,
     status,
@@ -170,13 +199,18 @@ for (const r of itRows) {
   if (!cid || !/^C\d+$/i.test(cid)) continue;
   const start = parseDate(r["تاريخ الدفعة الاولى وبداية العقد"]);
   const externalKey = s(r["Key"]) ?? `${cid}|${(start ?? "").replace(/-/g, "")}`;
+  // col R: lost date before completing payments (per-contract; applies to all rows)
+  const lostDate = parseDate(r["تاريخ الفقد قبل اكمال الدفعات"]);
+  const itTypeRaw = s(r["Contract Type"]);
+  const itTypeKey = itTypeRaw ? TYPE_KEY_MAP[itTypeRaw.toLowerCase().trim()] ?? null : null;
+  const meta = { clientExternalId: cid, contractTypeKey: itTypeKey, startDate: start };
 
   const i1 = num(r["قيمة الدفعة الأولى\n(المدفوعة في بداية العقد)"]);
   if (i1 > 0) {
     installments.push({
       contractExternalKey: externalKey, sequence: 1,
       expectedAmount: i1, expectedDate: start,
-      actualAmount: i1, actualDate: start,
+      actualAmount: i1, actualDate: start, lostDate, ...meta,
     });
   }
   const more: Array<{ seq: 2 | 3 | 4; exp: string; amt: string; act: string }> = [
@@ -192,7 +226,7 @@ for (const r of itRows) {
     installments.push({
       contractExternalKey: externalKey, sequence: c.seq,
       expectedAmount: amt, expectedDate: exp,
-      actualAmount: act ? amt : 0, actualDate: act,
+      actualAmount: act ? amt : 0, actualDate: act, lostDate, ...meta,
     });
   }
 }
@@ -282,9 +316,14 @@ for (const c of contracts) {
     contract_status_label: c.statusLabel,
     start_date: c.startDate,
     end_date: c.endDate,
+    actual_end_date: c.actualEndDate,
     duration_months: c.durationMonths,
     total_value: c.totalValue,
     paid_value: c.paidValue,
+    next_contract_value: c.nextContractValue,
+    renewal_paid_value: c.renewalPaidValue,
+    repeated_services_value: c.repeatedServicesValue,
+    renewed_status: c.renewedStatus,
     target: c.target,
     status: c.status,
     notes: c.notes,
@@ -309,6 +348,45 @@ if (contractErrors.length) {
   for (const e of contractErrors.slice(0, 10)) console.log("  -", e);
 }
 
+// ── rebuild historical contracts for installment plans whose key was renewed
+//    away (the Installments Tracker keeps the old key; the sheet still counts
+//    those payments by their own type). We create a minimal contract row,
+//    status='renewed' so it's excluded from the active roster and the
+//    On-Target/Overdue client buckets, but its installments still count.
+const orphanKeys = new Map<string, Installment>();
+for (const inst of installments) {
+  if (!contractIdByExternalKey.has(inst.contractExternalKey)) {
+    if (!orphanKeys.has(inst.contractExternalKey)) orphanKeys.set(inst.contractExternalKey, inst);
+  }
+}
+let orphanContractsCreated = 0;
+for (const [key, inst] of orphanKeys) {
+  const clientUuid = clientIdByExternal.get(inst.clientExternalId);
+  if (!clientUuid) continue;
+  const typeId = inst.contractTypeKey ? typeIdByKey.get(inst.contractTypeKey) ?? null : null;
+  const existing = existingContractMap.get(key);
+  const row = {
+    organization_id: orgId,
+    client_id: clientUuid,
+    contract_type_id: typeId,
+    start_date: inst.startDate,
+    status: "renewed",
+    contract_status_label: "Closed (renewed — installment plan retained)",
+    external_source: SOURCE,
+    external_id: key,
+  };
+  if (existing) {
+    await sb.from("contracts").update(row).eq("id", existing);
+    contractIdByExternalKey.set(key, existing);
+  } else {
+    const { data, error } = await sb.from("contracts").insert(row).select("id").single();
+    if (error) { contractErrors.push(`orphan ${key}: ${error.message}`); continue; }
+    contractIdByExternalKey.set(key, data!.id);
+  }
+  orphanContractsCreated++;
+}
+console.log(`[seed] Historical (renewed) contracts for orphan installment plans: ${orphanContractsCreated}`);
+
 // ── upsert installments ───────────────────────────────────────────────────
 let installmentsUpserted = 0;
 const installmentErrors: string[] = [];
@@ -332,6 +410,8 @@ for (const inst of installments) {
     expected_amount: inst.expectedAmount,
     actual_date: inst.actualDate,
     actual_amount: inst.actualAmount > 0 ? inst.actualAmount : null,
+    lost_date: inst.lostDate,
+    source_type_key: inst.contractTypeKey,
     status,
   };
   const { error } = await sb.from("installments").upsert(row, { onConflict: "contract_id,sequence" });

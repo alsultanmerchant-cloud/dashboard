@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { buildCeoBriefData } from "@/lib/brief/data";
+import { generateAndStoreCeoBrief } from "@/lib/ceo-brief-generate";
 import { renderAllCards } from "@/lib/brief/cards";
 import { phoneToChatId, sendImage, waConfigured } from "@/lib/wa/openwa-client";
 
@@ -56,6 +57,17 @@ export async function GET(request: NextRequest) {
     .eq("slug", "rawasm-demo")
     .single();
   if (orgError || !org) return NextResponse.json({ error: "org not found" }, { status: 500 });
+
+  // Refresh the on-dashboard CEO brief (3-question synthesis, Gemini-narrated)
+  // as part of the same daily run. Best-effort: a Gemini failure here must not
+  // block the WhatsApp card brief below. Skipped on dry test runs to save credits.
+  if (!dry) {
+    try {
+      await generateAndStoreCeoBrief(org.id, null);
+    } catch (e) {
+      console.error("[cron.ceo-brief] dashboard brief generation failed:", e);
+    }
+  }
 
   const brief = await buildCeoBriefData(org.id);
   const cards = await renderAllCards(brief);
