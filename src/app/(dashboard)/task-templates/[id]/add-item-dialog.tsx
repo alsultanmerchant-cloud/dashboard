@@ -140,7 +140,7 @@ export function AddTemplateItemDialog({
           role && positions.some((p) => p.slug === role) ? role : null,
         default_department_id: departmentId || null,
         offset_days_from_project_start: Number(offset) || 0,
-        duration_days: Math.max(1, Number(duration) || 1),
+        duration_days: Math.max(0, Number(duration) || 0),
         priority,
         // Omit entirely when untouched so the column default applies.
         stage_owner_positions: STAGES.some((s) => stageOwners[s.key])
@@ -258,7 +258,7 @@ export function AddTemplateItemDialog({
                 <Input
                   id="item_duration"
                   type="number"
-                  min={1}
+                  min={0}
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
                   disabled={pending}

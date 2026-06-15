@@ -82,7 +82,7 @@ const CreateItemSchema = z.object({
     .optional()
     .transform((v) => v ?? null),
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
-  duration_days: z.coerce.number().int().min(1).max(3650),
+  duration_days: z.coerce.number().int().min(0).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
   stage_sla_overrides: StageSlaMapSchema,
@@ -219,7 +219,7 @@ const UpdateItemSchema = z.object({
     .optional()
     .transform((v) => v ?? null),
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
-  duration_days: z.coerce.number().int().min(1).max(3650),
+  duration_days: z.coerce.number().int().min(0).max(3650),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
   stage_sla_overrides: StageSlaMapSchema,

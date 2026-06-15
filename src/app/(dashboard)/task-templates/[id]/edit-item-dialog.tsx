@@ -193,7 +193,7 @@ export function EditTemplateItemDialog({
           role && positions.some((p) => p.slug === role) ? role : null,
         default_department_id: departmentId || null,
         offset_days_from_project_start: Number(offset) || 0,
-        duration_days: Math.max(1, Number(duration) || 1),
+        duration_days: Math.max(0, Number(duration) || 0),
         priority,
         stage_owner_positions: Object.fromEntries(
           STAGES.map((s) => [s.key, stageOwners[s.key] || null]),
@@ -315,7 +315,7 @@ export function EditTemplateItemDialog({
                 <Input
                   id="edit_item_duration"
                   type="number"
-                  min={1}
+                  min={0}
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
                   disabled={pending}
