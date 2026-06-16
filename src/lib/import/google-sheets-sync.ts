@@ -182,8 +182,11 @@ async function fetchPublicWorkbook(spreadsheetId: string): Promise<ArrayBuffer> 
   return res.arrayBuffer();
 }
 
-function workbookTabAoa(buf: ArrayBuffer, name: string): Aoa {
-  const wb = XLSX.read(buf, { type: "array", raw: false });
+// Read one tab's rows from an ALREADY-PARSED workbook. The caller parses the
+// (large) workbook once and reuses it — re-running XLSX.read per tab on a
+// multi-MB export costs seconds each and pushed the sync past the serverless
+// timeout.
+function workbookTabAoa(wb: XLSX.WorkBook, name: string): Aoa {
   const ws = wb.Sheets[name];
   if (!ws) return [];
   return XLSX.utils.sheet_to_json<unknown[]>(ws, {
@@ -287,9 +290,12 @@ export async function syncContractsFromGoogleSheet({
     let target: Aoa;
     let accBreak: Aoa;
     if (publicWorkbook) {
-      ceo = workbookTabAoa(publicWorkbook, CEO_SHEET);
-      target = workbookTabAoa(publicWorkbook, TARGET_CONTRACTS_SHEET);
-      accBreak = workbookTabAoa(publicWorkbook, ACC_BREAKDOWN_SHEET);
+      // Parse the (multi-MB) workbook ONCE, then read each dashboard tab from
+      // the same object — not a fresh XLSX.read per tab.
+      const wb = XLSX.read(publicWorkbook, { type: "array", raw: false });
+      ceo = workbookTabAoa(wb, CEO_SHEET);
+      target = workbookTabAoa(wb, TARGET_CONTRACTS_SHEET);
+      accBreak = workbookTabAoa(wb, ACC_BREAKDOWN_SHEET);
     } else {
       const accessToken = await getAccessToken(config);
       [ceo, target, accBreak] = await Promise.all([

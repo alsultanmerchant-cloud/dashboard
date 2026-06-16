@@ -1081,13 +1081,16 @@
         "target": "Target",
         "status": "Status",
         "type": "Type",
-        "openStatus": "Active + Expired"
+        "openStatus": "Active + Expired",
+        "package": "Package",
+        "payment": "Payment"
       },
       "summary": {
         "contracts": "{count, plural, one {# contract} other {# contracts}}",
         "totalRows": "of {count}",
         "value": "Value",
-        "paid": "Paid"
+        "paid": "Paid",
+        "activeNote": "active only"
       },
       "headers": {
         "clientId": "Client ID",
@@ -1110,7 +1113,8 @@
         "delay": "Delay",
         "renewed": "Renewed?",
         "extension": "Extension",
-        "notes": "Notes"
+        "notes": "Notes",
+        "row": "#"
       },
       "targetLabels": {
         "overdue": "Overdue",

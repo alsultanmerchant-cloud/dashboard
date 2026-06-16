@@ -33,6 +33,11 @@ import { SheetSyncButton } from "./sheet-sync-button";
 //
 // Source of truth: dashboard. The sheet is archived; all edits happen here.
 
+// "Pull from Sheet" (syncGoogleSheetAction) runs from this route and downloads
+// + parses the whole Google workbook, which takes far longer than the 10s
+// serverless default. Raise to the Vercel-Hobby max so the action can finish.
+export const maxDuration = 60;
+
 export default async function ContractsPage({
   searchParams,
 }: {

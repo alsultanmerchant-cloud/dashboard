@@ -2,6 +2,20 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+function splitPackageNames(packageName: string | null | undefined): string[] {
+  if (!packageName) return [];
+  const seen = new Set<string>();
+  return packageName
+    .split(/[,،]/)
+    .map((p) => p.trim())
+    .filter((p) => p !== "#")
+    .filter((p) => {
+      if (!p || seen.has(p)) return false;
+      seen.add(p);
+      return true;
+    });
+}
+
 export type ContractRow = {
   id: string;
   organization_id: string;
@@ -653,6 +667,7 @@ export async function listContractsGrid(
        repeated_services_value, payment_status, target, status,
        contract_status_label, renewed_status, extension_days, delay_days,
        total_days_computed, notes, account_manager_id, account_manager_name,
+       package_name,
        client:clients(id, name, external_id),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
        type:contract_types!contracts_contract_type_id_fkey(key, name_ar),
@@ -699,6 +714,7 @@ export async function listContractsGrid(
     notes: string | null;
     account_manager_id: string | null;
     account_manager_name: string | null;
+    package_name: string | null;
     client: { id: string; name: string | null; external_id: string | null } | null;
     am: { id: string; full_name: string } | null;
     type: { key: string; name_ar: string } | null;
@@ -707,10 +723,16 @@ export async function listContractsGrid(
   };
 
   return ((data ?? []) as unknown as Row[]).map((r) => {
-    const pkgs = [...(r.packages ?? [])]
+    const linkedPackages = [...(r.packages ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((p) => p.package?.name_ar)
       .filter((x): x is string => !!x);
+    const packageNames =
+      linkedPackages.length > 0
+        ? linkedPackages
+        : r.package?.name_ar
+          ? [r.package.name_ar]
+          : splitPackageNames(r.package_name);
     return {
       id: r.id,
       external_id: r.external_id,
@@ -727,8 +749,8 @@ export async function listContractsGrid(
       account_manager_name: r.am?.full_name ?? r.account_manager_name,
       contract_type_key: r.type?.key ?? null,
       contract_type_label: r.type?.name_ar ?? null,
-      primary_package_name: r.package?.name_ar ?? null,
-      package_names: pkgs,
+      primary_package_name: r.package?.name_ar ?? packageNames[0] ?? null,
+      package_names: packageNames,
       start_date: r.start_date,
       end_date: r.end_date,
       actual_end_date: r.actual_end_date,

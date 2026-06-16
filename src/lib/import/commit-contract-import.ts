@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { logAudit } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -14,6 +15,46 @@ export type ContractImportCommitResult = {
   installmentsUpserted: number;
   errors: string[];
 };
+
+function splitPackageNames(packageName: string | null | undefined): string[] {
+  if (!packageName) return [];
+  const seen = new Set<string>();
+  return packageName
+    .split(/[,،]/)
+    .map((p) => p.trim())
+    .filter((p) => p !== "#")
+    .filter((p) => {
+      if (!p || seen.has(p)) return false;
+      seen.add(p);
+      return true;
+    });
+}
+
+function packageKeyForSheetName(name: string): string {
+  if (name === "فيديو برومو") return "promo_video";
+  return `sheet_${createHash("sha1").update(name).digest("hex").slice(0, 12)}`;
+}
+
+async function syncContractPackageLinks(contractId: string, packageIds: string[]) {
+  const { error: deleteError } = await supabaseAdmin
+    .from("contract_packages")
+    .delete()
+    .eq("contract_id", contractId);
+  if (deleteError) throw deleteError;
+
+  if (packageIds.length === 0) return;
+
+  const { error: insertError } = await supabaseAdmin
+    .from("contract_packages")
+    .insert(
+      packageIds.map((packageId, index) => ({
+        contract_id: contractId,
+        package_id: packageId,
+        sort_order: index,
+      })),
+    );
+  if (insertError) throw insertError;
+}
 
 export async function commitContractImportPayload({
   payload,
@@ -30,10 +71,49 @@ export async function commitContractImportPayload({
 
   const { data: types } = await supabaseAdmin
     .from("contract_types")
-    .select("id, key");
+    .select("id, key")
+    .eq("organization_id", orgId);
   const typeIdByKey = new Map<string, string>();
   for (const t of types ?? []) {
     typeIdByKey.set(String(t.key), t.id);
+  }
+
+  const { data: packageRows } = await supabaseAdmin
+    .from("packages")
+    .select("id, name_ar")
+    .eq("organization_id", orgId);
+  const packageIdByName = new Map<string, string>();
+  for (const p of packageRows ?? []) {
+    if (p.name_ar) packageIdByName.set(String(p.name_ar).trim(), p.id);
+  }
+
+  const missingPackageNames = new Set<string>();
+  for (const c of payload.contracts) {
+    for (const name of splitPackageNames(c.packageName)) {
+      if (!packageIdByName.has(name)) missingPackageNames.add(name);
+    }
+  }
+  if (missingPackageNames.size > 0) {
+    const { data: createdPackages, error } = await supabaseAdmin
+      .from("packages")
+      .upsert(
+        [...missingPackageNames].map((name) => ({
+          organization_id: orgId,
+          key: packageKeyForSheetName(name),
+          name_ar: name,
+          active: true,
+          grace_days: 5,
+        })),
+        { onConflict: "organization_id,key" },
+      )
+      .select("id, name_ar");
+    if (error) {
+      errors.push(`باقات جديدة من الشيت: ${error.message}`);
+    } else {
+      for (const p of createdPackages ?? []) {
+        if (p.name_ar) packageIdByName.set(String(p.name_ar).trim(), p.id);
+      }
+    }
   }
 
   const clientRows = payload.clients.map((c) => ({
@@ -108,12 +188,16 @@ export async function commitContractImportPayload({
     const typeId = c.contractTypeKey
       ? typeIdByKey.get(c.contractTypeKey) ?? null
       : null;
+    const packageIds = splitPackageNames(c.packageName)
+      .map((name) => packageIdByName.get(name))
+      .filter((id): id is string => !!id);
 
     const row = {
       organization_id: orgId,
       client_id: clientUuid,
       contract_type_id: typeId,
       account_manager_name: c.accountManagerName,
+      package_id: packageIds[0] ?? null,
       package_name: c.packageName,
       start_date: c.startDate,
       end_date: c.endDate,
@@ -148,6 +232,12 @@ export async function commitContractImportPayload({
         continue;
       }
       contractIdByExternalKey.set(c.externalKey, existingId);
+      try {
+        await syncContractPackageLinks(existingId, packageIds);
+      } catch (error) {
+        errors.push(`باقات عقد ${c.externalKey}: ${(error as Error).message}`);
+        continue;
+      }
     } else {
       const { data, error } = await supabaseAdmin
         .from("contracts")
@@ -159,6 +249,12 @@ export async function commitContractImportPayload({
         continue;
       }
       contractIdByExternalKey.set(c.externalKey, data.id);
+      try {
+        await syncContractPackageLinks(data.id, packageIds);
+      } catch (error) {
+        errors.push(`باقات عقد ${c.externalKey}: ${(error as Error).message}`);
+        continue;
+      }
     }
     contractsUpserted++;
   }

@@ -372,6 +372,10 @@ export function ContractsGrid({
   // chip-click away under «الكل».
   const [statuses, setStatuses] = useState<string[]>(["active", "expired"]);
   const [types, setTypes] = useState<string[]>([]);
+  // Service/package + payment filters. Text search alone conflated package
+  // names with client names, so a dedicated picker is more reliable.
+  const [packages, setPackages] = useState<string[]>([]);
+  const [payments, setPayments] = useState<string[]>([]);
   const [scope, setScope] = useState<"all" | "mine">("all");
   // Hold popup — opened when the inline type dropdown picks "Hold".
   const [holdFor, setHoldFor] = useState<GridContract | null>(null);
@@ -408,15 +412,33 @@ export function ContractsGrid({
     const target: Record<string, number> = {};
     const status: Record<string, number> = {};
     const type: Record<string, number> = {};
+    const pkg: Record<string, number> = {};
+    const payment: Record<string, number> = {};
     for (const r of rows) {
       target[r.target] = (target[r.target] ?? 0) + 1;
       status[r.status] = (status[r.status] ?? 0) + 1;
       if (r.contract_type_key) {
         type[r.contract_type_key] = (type[r.contract_type_key] ?? 0) + 1;
       }
+      for (const p of r.package_names) {
+        const k = p.trim();
+        if (k) pkg[k] = (pkg[k] ?? 0) + 1;
+      }
+      if (r.payment_status) {
+        payment[r.payment_status] = (payment[r.payment_status] ?? 0) + 1;
+      }
     }
-    return { target, status, type };
+    return { target, status, type, pkg, payment };
   }, [rows]);
+
+  // Distinct packages as filter chips, most-common first.
+  const packageOptions = useMemo(
+    () =>
+      Object.entries(counts.pkg)
+        .sort((a, b) => b[1] - a[1])
+        .map(([value, count]) => ({ value, count })),
+    [counts.pkg],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -425,6 +447,10 @@ export function ContractsGrid({
       if (targets.length && !targets.includes(r.target)) return false;
       if (statuses.length && !statuses.includes(r.status)) return false;
       if (types.length && (!r.contract_type_key || !types.includes(r.contract_type_key)))
+        return false;
+      if (packages.length && !r.package_names.some((p) => packages.includes(p.trim())))
+        return false;
+      if (payments.length && (!r.payment_status || !payments.includes(r.payment_status)))
         return false;
       if (!q) return true;
       return (
@@ -439,28 +465,37 @@ export function ContractsGrid({
         (r.notes ?? "").toLowerCase().includes(q)
       );
     });
-  }, [rows, search, scope, targets, statuses, types, meEmployeeId]);
+  }, [rows, search, scope, targets, statuses, types, packages, payments, meEmployeeId]);
 
-  const totalValue = filtered.reduce((s, r) => s + r.total_value, 0);
-  const totalPaid = filtered.reduce((s, r) => s + r.paid_value, 0);
+  // Totals reflect ACTIVE contracts only — the team tracks live exposure, so
+  // lost/closed rows are excluded from the value/paid sums even when visible.
+  const isInactive = (c: GridContract) =>
+    c.status === "closed" ||
+    c.status === "lost" ||
+    c.renewed_status === "Closed" ||
+    c.renewed_status === "NO";
+  const activeRows = filtered.filter((c) => !isInactive(c));
+  const totalValue = activeRows.reduce((s, r) => s + r.total_value, 0);
+  const totalPaid = activeRows.reduce((s, r) => s + r.paid_value, 0);
 
   return (
     <div className="space-y-3">
       {/* Filter bar */}
-      <div className="rounded-2xl border border-soft bg-card p-3 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[220px]">
+      <div className="rounded-xl border border-soft bg-card p-3 shadow-[var(--surface-elev)]">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("grid.searchPlaceholder")}
-              className="h-9 w-full rounded-lg border border-input bg-input ps-8 pe-3 text-sm outline-none focus:border-cyan/40"
+              className="h-9 w-full rounded-md border border-input bg-input ps-8 pe-3 text-sm outline-none transition-colors focus:border-cyan/40"
             />
           </div>
           {meEmployeeId && (
-            <div className="inline-flex rounded-lg border border-soft bg-soft-1 p-0.5 text-xs">
+            <div className="inline-flex shrink-0 rounded-md border border-soft bg-soft-1 p-0.5 text-xs">
               <button
+                type="button"
                 onClick={() => setScope("all")}
                 className={cn(
                   "rounded-md px-2.5 py-1 transition-colors",
@@ -472,6 +507,7 @@ export function ContractsGrid({
                 {t("grid.scope.all")}
               </button>
               <button
+                type="button"
                 onClick={() => setScope("mine")}
                 className={cn(
                   "rounded-md px-2.5 py-1 transition-colors",
@@ -486,7 +522,7 @@ export function ContractsGrid({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-1.5 text-xs">
+        <div className="mt-2 grid min-w-0 gap-1.5 lg:grid-cols-2 xl:grid-cols-[minmax(160px,0.9fr)_minmax(210px,1.15fr)_minmax(170px,1fr)_minmax(150px,0.75fr)_minmax(250px,1.45fr)]">
           <ChipGroup
             label={t("grid.filters.target")}
             values={targets}
@@ -524,16 +560,37 @@ export function ContractsGrid({
               { value: "WinBack", count: counts.type["WinBack"] ?? 0, label: t("grid.typeLabels.winBack") },
             ]}
           />
+          <ChipGroup
+            label={t("grid.filters.payment")}
+            values={payments}
+            onChange={setPayments}
+            options={[
+              { value: "Installments", count: counts.payment["Installments"] ?? 0, label: t("grid.paymentLabels.installments") },
+              { value: "Complete", count: counts.payment["Complete"] ?? 0, label: t("grid.paymentLabels.complete") },
+            ]}
+          />
+          {packageOptions.length > 0 && (
+            <ChipGroup
+              className="lg:col-span-2 xl:col-span-1"
+              label={t("grid.filters.package")}
+              values={packages}
+              onChange={setPackages}
+              options={packageOptions}
+            />
+          )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-soft pt-2 text-xs text-muted-foreground">
-          <div>
+        <div className="mt-2 flex flex-col gap-2 border-t border-soft pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 truncate">
             {t("grid.summary.contracts", { count: filtered.length })}
             {filtered.length !== rows.length && (
               <span> · {t("grid.summary.totalRows", { count: rows.length })}</span>
             )}
           </div>
-          <div className="flex items-center gap-3 tabular-nums">
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 tabular-nums">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              {t("grid.summary.activeNote")}
+            </span>
             <span>
               {t("grid.summary.value")}:{" "}
               <span className="text-foreground font-medium">{fmtMoney(totalValue)}</span>
@@ -547,13 +604,14 @@ export function ContractsGrid({
       </div>
 
       {/* Grid */}
-      <div className="rounded-2xl border border-soft bg-card">
-        <div className="overflow-auto max-h-[calc(100vh-260px)]">
+      <div className="rounded-xl border border-soft bg-card shadow-[var(--surface-elev)]">
+        <div className="max-h-[calc(100vh-300px)] overflow-auto">
           <table className="w-full border-collapse text-right text-[12px]">
             <thead className="sticky top-0 z-20 bg-muted text-[10px] uppercase tracking-wider text-muted-foreground">
               <tr>
-                <Th sticky className="text-center min-w-[64px]">{t("grid.headers.clientId")}</Th>
-                <Th sticky stickyOffset="64px" className="min-w-[200px]">{t("grid.headers.client")}</Th>
+                <Th sticky className="text-center w-[44px] min-w-[44px]">{t("grid.headers.row")}</Th>
+                <Th sticky stickyOffset="44px" className="text-center min-w-[64px]">{t("grid.headers.clientId")}</Th>
+                <Th sticky stickyOffset="108px" className="min-w-[200px]">{t("grid.headers.client")}</Th>
                 <Th>{t("grid.headers.accountManager")}</Th>
                 <Th>{t("grid.headers.startDate")}</Th>
                 <Th>{t("grid.headers.target")}</Th>
@@ -578,12 +636,12 @@ export function ContractsGrid({
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={21} className="px-3 py-10 text-center text-muted-foreground text-sm">
+                  <td colSpan={22} className="px-3 py-10 text-center text-muted-foreground text-sm">
                     {t("grid.emptyFiltered")}
                   </td>
                 </tr>
               ) : (
-                filtered.map((c) => (
+                filtered.map((c, i) => (
                   <tr
                     key={c.id}
                     className={cn(
@@ -591,12 +649,15 @@ export function ContractsGrid({
                       rowTone(c),
                     )}
                   >
-                    <Td sticky className="text-center font-mono text-[11px]">
+                    <Td sticky className="text-center tabular-nums text-[11px] text-muted-foreground">
+                      {i + 1}
+                    </Td>
+                    <Td sticky stickyOffset="44px" className="text-center font-mono text-[11px]">
                       <Link href={`/contracts/${c.id}`} className="hover:underline">
                         {c.contract_code ?? c.client_external_id ?? "—"}
                       </Link>
                     </Td>
-                    <Td sticky stickyOffset="64px" className="font-medium">
+                    <Td sticky stickyOffset="108px" className="font-medium">
                       <Link href={`/contracts/${c.id}`} className="hover:underline">
                         {c.client_name ?? "—"}
                       </Link>
@@ -1513,17 +1574,19 @@ function ChipGroup({
   onChange,
   options,
   presets,
+  className,
 }: {
   label: string;
   values: string[];
   onChange: (v: string[]) => void;
   options: Array<{ value: string; count: number; label?: string }>;
   presets?: Array<{ value: string; label: string; members: string[] }>;
+  className?: string;
 }) {
   const t = useTranslations("ContractsPage");
   const chipCls = (active: boolean) =>
     cn(
-      "rounded-md px-2 py-0.5 transition-colors",
+      "inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[11px] leading-none transition-colors cursor-pointer",
       active
         ? "bg-cyan-dim text-cyan font-medium"
         : "text-muted-foreground hover:text-foreground",
@@ -1534,41 +1597,49 @@ function ChipGroup({
     onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
   }
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-soft bg-soft-1 px-2 py-1">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+    <div
+      className={cn(
+        "grid min-w-0 grid-cols-[76px_minmax(0,1fr)] items-center gap-1 rounded-md border border-soft bg-soft-1 px-2 py-1 text-xs",
+        className,
+      )}
+    >
+      <span className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <button
-        type="button"
-        onClick={() => onChange([])}
-        className={chipCls(values.length === 0)}
-      >
-        {t("grid.filters.all")}
-      </button>
-      {presets?.map((p) => {
-        const active = sameSet(values, p.members);
-        return (
-          <button
-            key={p.value}
-            type="button"
-            onClick={() => onChange(active ? [] : p.members)}
-            className={chipCls(active)}
-          >
-            {p.label}
-          </button>
-        );
-      })}
-      {options.map((o) => (
+      <div className="scrollbar-hide flex min-w-0 items-center gap-1 overflow-x-auto">
         <button
-          key={o.value}
           type="button"
-          onClick={() => toggle(o.value)}
-          className={chipCls(values.includes(o.value))}
+          onClick={() => onChange([])}
+          className={chipCls(values.length === 0)}
         >
-          {o.label ?? o.value}{" "}
-          <span className="text-muted-foreground/70 tabular-nums">({o.count})</span>
+          {t("grid.filters.all")}
         </button>
-      ))}
+        {presets?.map((p) => {
+          const active = sameSet(values, p.members);
+          return (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => onChange(active ? [] : p.members)}
+              className={chipCls(active)}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => toggle(o.value)}
+            className={chipCls(values.includes(o.value))}
+            title={`${o.label ?? o.value} (${o.count})`}
+          >
+            <span className="whitespace-nowrap">{o.label ?? o.value}</span>
+            <span className="ms-1 text-muted-foreground/70 tabular-nums">({o.count})</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1081,13 +1081,16 @@
         "target": "الهدف",
         "status": "الحالة",
         "type": "النوع",
-        "openStatus": "نشط + منتهي"
+        "openStatus": "نشط + منتهي",
+        "package": "الباقة",
+        "payment": "الدفع"
       },
       "summary": {
         "contracts": "{count, plural, one {# عقد} two {# عقدان} few {# عقود} many {# عقدًا} other {# عقد}}",
         "totalRows": "أصل {count}",
         "value": "القيمة",
-        "paid": "المدفوع"
+        "paid": "المدفوع",
+        "activeNote": "نشط فقط"
       },
       "headers": {
         "clientId": "كود العميل",
@@ -1110,7 +1113,8 @@
         "delay": "تأخير",
         "renewed": "تجديد؟",
         "extension": "تمديد",
-        "notes": "ملاحظات"
+        "notes": "ملاحظات",
+        "row": "#"
       },
       "targetLabels": {
         "overdue": "متأخر",
