@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { logTypeMeta } from "@/app/(dashboard)/contracts/log-type-meta";
-import { SheetLogNote } from "@/app/(dashboard)/contracts/sheet-log-note";
+import { SheetLogNote, SheetLogSnapshot } from "@/app/(dashboard)/contracts/sheet-log-note";
 import type { EntityActivity } from "@/lib/data/entity-activity";
 
 function formatDateTime(value: string, locale: string): string {
@@ -120,6 +120,15 @@ export async function EntityActivityFeed({ items }: { items: EntityActivity[] })
                       notes={item.notes}
                       wasLabel={tc("logs.note.was")}
                       className="mt-1.5"
+                    />
+                    <SheetLogSnapshot
+                      snapshot={item.snapshot}
+                      title={
+                        locale === "ar"
+                          ? "تفاصيل العقد وقت الحدث"
+                          : "Contract details at this event"
+                      }
+                      className="mt-2"
                     />
                   </div>
                 )}

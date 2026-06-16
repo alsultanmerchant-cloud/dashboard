@@ -264,6 +264,10 @@ export type AmTargetRow = {
   expected_total: number;
   achieved_total: number;
   achievement_pct: number;
+  // Team rollup (sheet TEAM_TARGET) — set only for team leaders / dept manager.
+  team_expected: number | null;
+  team_achieved: number | null;
+  team_role: "team_lead" | "dept_manager" | null;
   breakdown: {
     expected_renewals?: number;
     expected_installments?: number;
@@ -296,7 +300,8 @@ export async function getAmTargets(
   const { data, error } = await supabaseAdmin
     .from("am_targets")
     .select(
-      `account_manager_id, expected_total, achieved_total, achievement_pct, breakdown_json,
+      `account_manager_id, expected_total, achieved_total, achievement_pct,
+       team_expected, team_achieved, team_role, breakdown_json,
        am:employee_profiles!am_targets_account_manager_id_fkey(full_name)`,
     )
     .eq("organization_id", orgId)
@@ -309,6 +314,9 @@ export async function getAmTargets(
     expected_total: number | string;
     achieved_total: number | string;
     achievement_pct: number | string;
+    team_expected: number | string | null;
+    team_achieved: number | string | null;
+    team_role: "team_lead" | "dept_manager" | null;
     breakdown_json: AmTargetRow["breakdown"];
     am: { full_name: string } | null;
   };
@@ -318,6 +326,9 @@ export async function getAmTargets(
     expected_total: Number(r.expected_total),
     achieved_total: Number(r.achieved_total),
     achievement_pct: Number(r.achievement_pct),
+    team_expected: r.team_expected == null ? null : Number(r.team_expected),
+    team_achieved: r.team_achieved == null ? null : Number(r.team_achieved),
+    team_role: r.team_role,
     breakdown: r.breakdown_json,
   }));
 }
@@ -342,6 +353,10 @@ export type InstallmentDue = {
   account_manager_name: string | null;
   expected_amount: number;
   status: string;
+  // Contract type recorded on the installment row (col D of the tracker).
+  // Drives the collecting DEPARTMENT: 'New' → Sales; Renew/WinBack/UPSELL →
+  // Account. Null on a handful of legacy rows.
+  source_type_key: string | null;
 };
 export type MonthBuckets = {
   on_target: BucketClient[];
@@ -349,6 +364,17 @@ export type MonthBuckets = {
   renewed: BucketClient[];
   lost: BucketClient[];
   installments_due: InstallmentDue[];
+  // Overdue installments per collecting department, mirrored verbatim from the
+  // sheet's "Clients with Installments" lists (TARGET_CONTRACTS). Account rows
+  // carry an amount; Sales rows are name-only (value 0).
+  acc_inst_overdue: BucketClient[];
+  sales_inst_overdue: BucketClient[];
+  // True when the per-client lists come from the frozen monthly_target_snapshot.
+  // False = a LIVE recompute (current month, or a frozen month captured before a
+  // snapshot existed). For a frozen month, false means the lists have drifted vs
+  // the sheet (contracts renewed → end_date moved) and shouldn't be trusted — the
+  // dashboard hides them and asks for a fresh sheet pull.
+  from_snapshot: boolean;
 };
 
 export type CeoClientInsight = {
@@ -394,6 +420,8 @@ export async function getMonthTargetBuckets(
   const overdue: BucketClient[] = [];
   const renewed: BucketClient[] = [];
   const lost: BucketClient[] = [];
+  const acc_inst_overdue: BucketClient[] = [];
+  const sales_inst_overdue: BucketClient[] = [];
 
   type BucketRow = {
     bucket: string;
@@ -415,6 +443,8 @@ export async function getMonthTargetBuckets(
     else if (r.bucket === "overdue") overdue.push(row);
     else if (r.bucket === "renewed") renewed.push(row);
     else if (r.bucket === "lost") lost.push(row);
+    else if (r.bucket === "acc_inst_overdue") acc_inst_overdue.push(row);
+    else if (r.bucket === "sales_inst_overdue") sales_inst_overdue.push(row);
   };
 
   // Prefer the frozen snapshot (captured at month-close, immune to end_date
@@ -429,7 +459,8 @@ export async function getMonthTargetBuckets(
     .eq("month", month);
   if (snapErr) throw snapErr;
 
-  if (snap && snap.length > 0) {
+  const from_snapshot = !!(snap && snap.length > 0);
+  if (from_snapshot) {
     for (const r of snap as unknown as BucketRow[]) place(r);
   } else {
     const { data: live, error } = await supabaseAdmin.rpc(
@@ -440,16 +471,20 @@ export async function getMonthTargetBuckets(
     for (const r of (live ?? []) as unknown as BucketRow[]) place(r);
   }
 
-  // Installments due in the month.
+  // Installments due in the month. Exclude sequence 1 — the first payment is
+  // the contract-confirmation down-payment, already counted as New-client
+  // Income (Sales) / renewal collection (Account), NOT as an installment. Every
+  // income bucket in 0172 filters sequence >= 2; the due-list now mirrors that.
   const { data: insts, error: instErr } = await supabaseAdmin
     .from("installments")
     .select(
-      `expected_amount, status,
+      `expected_amount, status, source_type_key,
        contract:contracts!inner(id, organization_id,
          client:clients(name),
          am:employee_profiles!contracts_account_manager_id_fkey(full_name))`,
     )
     .eq("contract.organization_id", orgId)
+    .gte("sequence", 2)
     .gte("expected_date", start)
     .lte("expected_date", endDate)
     .order("expected_amount", { ascending: false });
@@ -458,6 +493,7 @@ export async function getMonthTargetBuckets(
   type IRow = {
     expected_amount: number | string;
     status: string;
+    source_type_key: string | null;
     contract: {
       id: string;
       client: { name: string | null } | null;
@@ -472,12 +508,23 @@ export async function getMonthTargetBuckets(
     account_manager_name: i.contract?.am?.full_name ?? null,
     expected_amount: Number(i.expected_amount),
     status: i.status,
+    source_type_key: i.source_type_key ?? null,
   }));
 
   const byValue = (a: BucketClient, b: BucketClient) => b.value - a.value;
   on_target.sort(byValue);
   overdue.sort(byValue);
-  return { on_target, overdue, renewed, lost, installments_due };
+  acc_inst_overdue.sort(byValue);
+  return {
+    on_target,
+    overdue,
+    renewed,
+    lost,
+    installments_due,
+    acc_inst_overdue,
+    sales_inst_overdue,
+    from_snapshot,
+  };
 }
 
 export async function getCeoClientInsights(

@@ -105,7 +105,9 @@ export default async function FinancePage({
 }: {
   searchParams: Promise<{ month?: string }>;
 }) {
-  const session = await requirePagePermission("contract.view");
+  // Financial P&L (income, targets, expenses) is CEO-tier data: gate on
+  // finance.view, not contract.view (which only grants the contracts roster).
+  const session = await requirePagePermission("finance.view");
   const t = await getTranslations("FinancePage");
   const locale = await getLocale();
   const sp = await searchParams;

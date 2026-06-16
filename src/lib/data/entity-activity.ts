@@ -38,6 +38,10 @@ export type EntityActivity =
       actor: ActivityActor;
       log_type: string;
       notes: string | null;
+      // Full contract-state snapshot the sheet records on every log event.
+      // Carries the detail (target/type/dates/values) that `notes` omits —
+      // e.g. Close events have no notes, only this snapshot.
+      snapshot: Record<string, unknown>;
       contract_key: string;
       contract_id: string | null;
     }
@@ -231,7 +235,7 @@ export async function listEntityActivity(
     }
     const { data: logs } = await supabaseAdmin
       .from("contract_sheet_logs")
-      .select("id, log_type, notes, log_time, account_manager, contract_key, contract_id")
+      .select("id, log_type, notes, snapshot, log_time, account_manager, contract_key, contract_id")
       .eq("organization_id", orgId)
       .or(orParts.join(","))
       .order("log_time", { ascending: false })
@@ -240,6 +244,7 @@ export async function listEntityActivity(
       id: string;
       log_type: string;
       notes: string | null;
+      snapshot: Record<string, unknown> | null;
       log_time: string | null;
       account_manager: string | null;
       contract_key: string;
@@ -252,6 +257,7 @@ export async function listEntityActivity(
         actor: resolver.byName(l.account_manager),
         log_type: l.log_type,
         notes: l.notes,
+        snapshot: l.snapshot ?? {},
         contract_key: l.contract_key,
         contract_id: l.contract_id,
       });

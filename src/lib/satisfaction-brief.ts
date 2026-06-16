@@ -171,10 +171,11 @@ function toCand(source: "project" | "task", r: AttRow): Cand | null {
   return null;
 }
 
-export async function getClientBrief(
-  orgId: string,
-  clientId: string,
-): Promise<ClientBrief | null> {
+// Discover the client's candidate brief documents, best-ranked first (exact
+// "البريف"/"brief" filename, project-level over task-level). Shared by the text
+// fetcher (getClientBrief) and the lightweight reference lookup
+// (getClientBriefRef) so both agree on which document is "the brief".
+async function findBriefCandidates(orgId: string, clientId: string): Promise<Cand[]> {
   // The client's live (non-archived) projects.
   const { data: projects } = await supabaseAdmin
     .from("projects")
@@ -183,7 +184,7 @@ export async function getClientBrief(
     .eq("client_id", clientId)
     .neq("status", "archived");
   const projectIds = (projects ?? []).map((p) => p.id as string);
-  if (projectIds.length === 0) return null;
+  if (projectIds.length === 0) return [];
 
   const [projAtt, taskAtt] = await Promise.all([
     supabaseAdmin
@@ -209,12 +210,52 @@ export async function getClientBrief(
     const c = toCand("task", r);
     if (c) cands.push(c);
   }
-  if (cands.length === 0) return null;
+  if (cands.length === 0) return [];
 
   // Prefer an exact "البريف"/"brief" file, and project-level over task-level.
   const rank = (c: Cand) =>
     (/^\s*(البريف|brief)\s*$/i.test(c.filename) ? 2 : 0) + (c.source === "project" ? 1 : 0);
   cands.sort((a, b) => rank(b) - rank(a));
+  return cands;
+}
+
+// A reachable reference to the client's brief document — enough for the UI to
+// link/download it, WITHOUT fetching or parsing its text. For uploaded files we
+// mint a short-lived signed URL into the private `attachments` bucket; Google
+// Docs/Sheets keep their original shareable URL.
+export interface ClientBriefRef {
+  source: "project" | "task";
+  filename: string;
+  href: string; // directly openable in the browser
+  kind: "google_doc" | "google_sheet" | "file";
+}
+
+export async function getClientBriefRef(
+  orgId: string,
+  clientId: string,
+): Promise<ClientBriefRef | null> {
+  const cands = await findBriefCandidates(orgId, clientId);
+  const top = cands[0];
+  if (!top) return null;
+
+  const filename = top.filename || "البريف";
+  if (top.via === "google") {
+    return { source: top.source, filename, href: top.url, kind: top.kind };
+  }
+  // Uploaded file: sign a 1-hour URL so the operator can open/download it.
+  const { data } = await supabaseAdmin.storage
+    .from("attachments")
+    .createSignedUrl(top.storagePath, 3600);
+  if (!data?.signedUrl) return null;
+  return { source: top.source, filename, href: data.signedUrl, kind: "file" };
+}
+
+export async function getClientBrief(
+  orgId: string,
+  clientId: string,
+): Promise<ClientBrief | null> {
+  const cands = await findBriefCandidates(orgId, clientId);
+  if (cands.length === 0) return null;
 
   for (const c of cands) {
     if (c.via === "google") {

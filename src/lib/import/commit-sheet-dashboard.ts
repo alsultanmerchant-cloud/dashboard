@@ -236,6 +236,9 @@ export async function commitSheetDashboard({
             expected_total: a.expected,
             achieved_total: a.achieved,
             achievement_pct: pct(a.achieved, a.expected),
+            team_expected: a.teamExpected,
+            team_achieved: a.teamAchieved,
+            team_role: a.teamRole,
             breakdown_json: { source: "sheet_acc_breakdown" },
             updated_at: new Date().toISOString(),
           };

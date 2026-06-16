@@ -32,6 +32,8 @@ import {
   MessagesSquare,
   GitBranch,
   FileSignature,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
@@ -312,6 +314,7 @@ export function SatisfactionWorkspace({
               execution={execution}
               clientId={selectedId}
               activeProjects={detail.activeProjects}
+              brief={detail.brief}
               t={t}
               sentimentLabel={sentimentLabel}
             />
@@ -971,6 +974,7 @@ function AnalysisView({
   execution,
   clientId,
   activeProjects,
+  brief,
   t,
   sentimentLabel,
 }: {
@@ -979,6 +983,7 @@ function AnalysisView({
   execution: ClientExecutionSnapshot | null;
   clientId: string;
   activeProjects: ClientSatisfactionDetail["activeProjects"];
+  brief: ClientSatisfactionDetail["brief"];
   t: ReturnType<typeof useTranslations>;
   sentimentLabel: (s: string | null) => string;
 }) {
@@ -1103,10 +1108,12 @@ function AnalysisView({
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                 {t("briefAdherence")}
               </p>
-              {briefMissing && (
+              {briefMissing ? (
                 <p className="mt-1 text-[11px] font-medium text-amber">
                   {t("briefMissingShort")}
                 </p>
+              ) : (
+                brief && <BriefLink brief={brief} />
               )}
             </div>
           </div>
@@ -1777,6 +1784,29 @@ function ClientTimelinePanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// A reachable link to the brief the analysis was scored against — Google Doc/
+// Sheet open in a new tab, uploaded files download via a short-lived signed URL.
+function BriefLink({
+  brief,
+}: {
+  brief: NonNullable<ClientSatisfactionDetail["brief"]>;
+}) {
+  const Icon = brief.kind === "google_sheet" ? TableProperties : FileText;
+  return (
+    <a
+      href={brief.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={brief.filename}
+      className="mt-1 inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:border-cyan/40"
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="truncate">{brief.filename}</span>
+      <ExternalLink className="size-3 shrink-0 opacity-70" />
+    </a>
   );
 }
 

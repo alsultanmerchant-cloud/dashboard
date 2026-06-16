@@ -74,6 +74,12 @@ export function CeoDashboard({
   const d = dashboard;
   const achievement = Math.min(100, d.achievement_pct);
   const revenueGap = Math.max(0, d.total_expected - d.total_actual);
+  // A frozen month whose per-client lists were never snapshotted falls back to a
+  // LIVE recompute that has drifted (contracts renewed → end_date moved forward),
+  // so those lists contradict the frozen tiles. Hide them and ask for a fresh
+  // sheet pull rather than show numbers that look wrong. Current (live) months are
+  // fine — their recompute IS the source of truth.
+  const driftedLists = d.is_frozen && !buckets.from_snapshot;
 
   return (
     <div className="space-y-4 pb-8">
@@ -127,6 +133,9 @@ export function CeoDashboard({
         achievement={achievement}
         copy={copy}
       />
+
+      {/* Team-leader & department-manager rollups (sheet TEAM_TARGET) */}
+      <TeamTargetsCard amTargets={amTargets} copy={copy} />
 
       {/* Per-AM target breakdown */}
       <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
@@ -202,34 +211,45 @@ export function CeoDashboard({
       </div>
 
       {/* Per-client target breakdown (Acc_Target_Breakdown) */}
-      {d.is_frozen && (
-        <p className="text-[11px] font-medium text-amber-700 dark:text-amber-200">
-          {copy(
-            "تفصيل العملاء أدناه محسوب مباشرة من الحالة الحالية وقد يختلف قليلا عن الشهر المجمد.",
-            "The client drill-down below is live and can differ slightly from frozen month totals.",
-          )}
-        </p>
+      {driftedLists ? (
+        // Frozen month with no per-client snapshot: the live recompute has drifted
+        // and would contradict the (correct) frozen tiles above. Hide the lists.
+        <div className="rounded-[var(--radius-lg)] border border-amber-500/40 bg-amber-500/10 px-4 py-4">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+            {copy(
+              "قوائم العملاء التفصيلية غير متاحة لهذا الشهر",
+              "Per-client lists unavailable for this month",
+            )}
+          </p>
+          <p className="mt-1 text-[12px] leading-5 text-amber-700 dark:text-amber-200/90">
+            {copy(
+              "الأرقام الإجمالية بالأعلى مجمدة وصحيحة، لكن قوائم العملاء التفصيلية لهذا الشهر لم تُحفَظ بعد — والتقدير المباشر يصبح غير دقيق بعد تجديد العقود. لعرضها: اضبط الشيت على هذا الشهر ثم اضغط «سحب بيانات الشيت».",
+              "The totals above are frozen and correct, but this month's per-client lists were never saved — a live estimate becomes inaccurate after contracts renew. To show them: set the sheet to this month, then click «Pull from Sheet».",
+            )}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <BucketCard
+            title={copy("On Target - ضمن الهدف", "On Target")}
+            accent="emerald"
+            clients={buckets.on_target}
+          />
+          <BucketCard title={copy("Overdue - متأخرة", "Overdue - delayed")} accent="rose" clients={buckets.overdue} />
+          <BucketCard
+            title={copy("جددت من التارجت", "Renewed from target")}
+            accent="sky"
+            clients={buckets.renewed}
+            hideValue
+          />
+          <BucketCard
+            title={copy("فقدت من التارجت", "Lost from target")}
+            accent="zinc"
+            clients={buckets.lost}
+            hideValue
+          />
+        </div>
       )}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <BucketCard
-          title={copy("On Target - ضمن الهدف", "On Target")}
-          accent="emerald"
-          clients={buckets.on_target}
-        />
-        <BucketCard title={copy("Overdue - متأخرة", "Overdue - delayed")} accent="rose" clients={buckets.overdue} />
-        <BucketCard
-          title={copy("جددت من التارجت", "Renewed from target")}
-          accent="sky"
-          clients={buckets.renewed}
-          hideValue
-        />
-        <BucketCard
-          title={copy("فقدت من التارجت", "Lost from target")}
-          accent="zinc"
-          clients={buckets.lost}
-          hideValue
-        />
-      </div>
 
       {/* Installments due this month */}
       <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
@@ -252,6 +272,7 @@ export function CeoDashboard({
                 <tr>
                   <th className="px-3 py-2 text-start font-medium">{copy("العميل", "Client")}</th>
                   <th className="px-3 py-2 text-start font-medium">{copy("مدير الحساب", "Account manager")}</th>
+                  <th className="px-3 py-2 text-start font-medium">{copy("النوع / القسم", "Type / Dept")}</th>
                   <th className="px-3 py-2 text-end font-medium">{copy("المبلغ", "Amount")}</th>
                   <th className="px-3 py-2 font-medium">{copy("الحالة", "Status")}</th>
                 </tr>
@@ -270,6 +291,9 @@ export function CeoDashboard({
                     </td>
                     <td className="px-3 py-1.5 text-muted-foreground">
                       {i.account_manager_name ?? "—"}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <InstallmentDeptCell sourceTypeKey={i.source_type_key} copy={copy} />
                     </td>
                     <td className="px-3 py-1.5 text-end tabular-nums">
                       {fmtSR(i.expected_amount)}
@@ -295,10 +319,47 @@ export function CeoDashboard({
           </div>
         )}
       </div>
+
+      {/* Overdue installments — mirrored from the sheet's "Clients with
+          Installments" lists (TARGET_CONTRACTS), split by collecting department.
+          Account rows carry the overdue amount; Sales rows are name-only in the
+          sheet. Snapshot-only, so hidden for drifted (un-snapshotted) months —
+          and hidden when both lists are empty (e.g. before the first sheet pull
+          that captures them) rather than showing two empty cards. */}
+      {!driftedLists &&
+        buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-rose-700 dark:text-rose-200">
+              {copy("الدفعات المتأخرة", "Overdue installments")}
+            </h3>
+            <span className="text-[11px] text-muted-foreground">
+              {copy(
+                `${buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length} عميل`,
+                `${buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length} clients`,
+              )}
+            </span>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <BucketCard
+              title={copy("أقساط متأخرة — أكونت", "Overdue — Account")}
+              accent="rose"
+              clients={buckets.acc_inst_overdue}
+            />
+            <BucketCard
+              title={copy("أقساط متأخرة — سيلز", "Overdue — Sales")}
+              accent="rose"
+              clients={buckets.sales_inst_overdue}
+              hideValue
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+// ── Modern sheet-parity board ───────────────────────────────────────────────
 function ModernSheetBoard({
   dashboard,
   buckets,
@@ -328,12 +389,6 @@ function ModernSheetBoard({
     expectedTargetClients - renewedFromTarget,
   );
   const expectedAfterLost = Math.max(0, expectedTargetClients - lostFromTarget);
-  const riskClients = clients.filter((c) => c.health_label === "risk");
-  const watchClients = clients.filter((c) => c.health_label === "watch");
-  const topClient = clients[0] ?? null;
-  const avgHealth = clients.length
-    ? clients.reduce((sum, client) => sum + client.health_score, 0) / clients.length
-    : null;
   const revenueChart = [
     {
       name: copy("تجديد", "Renewals"),
@@ -373,7 +428,7 @@ function ModernSheetBoard({
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-[1.35fr_0.95fr]">
+      <div>
         <div className="rounded-[var(--radius-lg)] border border-border/80 bg-card/95 p-4 shadow-[var(--surface-elev)]">
           <SectionBand title={copy("ملخص الشهر", "Monthly Snapshot")} />
           <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
@@ -426,49 +481,6 @@ function ModernSheetBoard({
                 )}
                 style={{ width: `${achievement}%` }}
               />
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-[var(--radius-lg)] border border-border/80 bg-card/95 p-4 shadow-[var(--surface-elev)]">
-          <SectionBand title={copy("إشارات تنفيذية", "Executive Signals")} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SummaryStat
-              label={copy("إنجاز الشركة (الكلي)", "Company achievement (total)")}
-              value={`${dashboard.achievement_pct.toFixed(1)}%`}
-              tone={dashboard.achievement_pct >= 70 ? "green" : dashboard.achievement_pct >= 35 ? "amber" : "red"}
-            />
-            <SummaryStat
-              label={copy("فجوة الإيراد", "Revenue gap")}
-              value={fmtSR(revenueGap)}
-              tone={revenueGap > 0 ? "red" : "green"}
-            />
-            <SummaryStat
-              label={copy("عملاء الخطر", "Risk clients")}
-              value={riskClients.length}
-              tone={riskClients.length > 0 ? "red" : "green"}
-            />
-            <SummaryStat
-              label={copy("متوسط صحة العملاء", "Average health")}
-              value={fmtPct(avgHealth)}
-              tone={avgHealth != null && avgHealth >= 70 ? "green" : "amber"}
-            />
-          </div>
-          <div className="mt-4 rounded-[var(--radius-md)] border border-soft bg-soft-1 p-3">
-            <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-muted-foreground">
-              <span>{copy("أعلى عميل", "Top client")}</span>
-              <span className="tabular-nums">{fmtSR(topClient?.month_collected ?? 0)}</span>
-            </div>
-            <p className="mt-1 truncate text-sm font-bold">
-              {topClient?.client_name ?? "—"}
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-              <span className="rounded-full border border-amber/30 bg-amber-dim px-2 py-1 font-semibold text-amber-700 dark:text-amber-200">
-                {copy("مراقبة", "Watch")} · {watchClients.length}
-              </span>
-              <span className="rounded-full border border-cyan/25 bg-cyan-dim px-2 py-1 font-semibold text-cyan-700 dark:text-cyan">
-                {copy("دفعات مستحقة", "Due")} · {buckets.installments_due.length}
-              </span>
             </div>
           </div>
         </div>
@@ -603,33 +615,6 @@ function ModernSheetBoard({
 
       <TopClientsPanel clients={clients} copy={copy} />
     </section>
-  );
-}
-
-function SummaryStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  tone: "green" | "amber" | "red";
-}) {
-  const toneCls = {
-    green: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
-    amber: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200",
-    red: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-200",
-  }[tone];
-
-  return (
-    <div className={cn("rounded-[var(--radius-md)] border p-3", toneCls)}>
-      <div className="text-[11px] font-semibold leading-4 text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1.5 text-2xl font-black tabular-nums text-foreground">
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -1199,5 +1184,163 @@ function HealthPill({
     <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium", cls)}>
       {text} · {fmtPct(score)}
     </span>
+  );
+}
+
+// Team-leader & department-manager target rollups, sourced verbatim from the
+// sheet's Acc_Target_Breakdown TEAM_TARGET columns. A leader's team = the sum
+// of their team members' individual targets; the dept manager's = the whole
+// department. Only rows with a team_role render here.
+function TeamTargetsCard({
+  amTargets,
+  copy,
+}: {
+  amTargets: AmTargetRow[];
+  copy: (ar: string, en: string) => string;
+}) {
+  // Dept manager last (it's the grand total), leaders by team size desc.
+  const teamRows = amTargets
+    .filter((a) => a.team_role != null)
+    .sort((a, b) => {
+      if (a.team_role !== b.team_role) return a.team_role === "dept_manager" ? 1 : -1;
+      return (b.team_expected ?? 0) - (a.team_expected ?? 0);
+    });
+  if (teamRows.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
+      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+        <h3 className="text-sm font-semibold">
+          {copy("تارجت قادة الفرق والإدارة", "Team-leader & department targets")}
+        </h3>
+        <span className="text-[11px] text-muted-foreground">
+          {copy("من الشيت", "from the sheet")}
+        </span>
+      </div>
+      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+        {teamRows.map((a) => {
+          const exp = a.team_expected ?? 0;
+          const ach = a.team_achieved ?? 0;
+          const pct = exp > 0 ? (ach / exp) * 100 : 0;
+          const barPct = Math.max(0, Math.min(100, pct));
+          const palette =
+            pct >= 70
+              ? { text: "text-emerald-600 dark:text-emerald-300", bar: "bg-cc-green" }
+              : pct >= 35
+                ? { text: "text-amber-600 dark:text-amber-300", bar: "bg-amber" }
+                : { text: "text-rose-600 dark:text-rose-300", bar: "bg-cc-red" };
+          const isDept = a.team_role === "dept_manager";
+          return (
+            <div
+              key={a.account_manager_id}
+              className={cn(
+                "rounded-[var(--radius-md)] border p-4 shadow-sm",
+                isDept
+                  ? "border-cyan/30 bg-cyan-dim/40 sm:col-span-2 lg:col-span-1"
+                  : "border-border/70 bg-soft-1/40",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">
+                    {a.account_manager_name ?? "—"}
+                  </p>
+                  <span
+                    className={cn(
+                      "mt-0.5 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-semibold",
+                      isDept
+                        ? "border-cyan/30 bg-cyan-dim text-cyan"
+                        : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-200",
+                    )}
+                  >
+                    {isDept
+                      ? copy("مديرة القسم", "Dept manager")
+                      : copy("قائد فريق", "Team lead")}
+                  </span>
+                </div>
+                <div className="shrink-0 text-end">
+                  <div className={cn("text-2xl font-black tabular-nums leading-none", palette.text)}>
+                    {fmtPct(pct)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {copy("إنجاز الفريق", "Team achievement")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-soft-1">
+                <div className={cn("h-full rounded-full", palette.bar)} style={{ width: `${barPct}%` }} />
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {copy("المحقق", "Achieved")}
+                  </div>
+                  <div className="mt-0.5 font-black tabular-nums text-foreground">{fmtSR(ach)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {copy("المتوقع", "Expected")}
+                  </div>
+                  <div className="mt-0.5 font-black tabular-nums text-muted-foreground">{fmtSR(exp)}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Installment department badge. The installment's recorded contract type maps
+// to who collects it: 'New' → Sales; Renew/WinBack/UPSELL → Account. Shown so
+// the team can route each due payment to the right department (we don't yet
+// split the list per department). Legacy rows with no type render «—».
+const INSTALLMENT_ACCOUNT_TYPES = ["Renew", "WinBack", "UPSELL"];
+
+function InstallmentDeptCell({
+  sourceTypeKey,
+  copy,
+}: {
+  sourceTypeKey: string | null;
+  copy: (ar: string, en: string) => string;
+}) {
+  const dept =
+    sourceTypeKey === "New"
+      ? "sales"
+      : sourceTypeKey && INSTALLMENT_ACCOUNT_TYPES.includes(sourceTypeKey)
+        ? "account"
+        : null;
+  if (!dept) return <span className="text-muted-foreground">—</span>;
+
+  const typeText: Record<string, string> = {
+    New: copy("جديد", "New"),
+    Renew: copy("تجديد", "Renew"),
+    UPSELL: copy("ترقية", "Upsell"),
+    WinBack: copy("استرجاع", "Win-Back"),
+  };
+  const deptCls =
+    dept === "sales"
+      ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200"
+      : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-200";
+  const deptLabel =
+    dept === "sales" ? copy("مبيعات", "Sales") : copy("أكونت", "Account");
+
+  return (
+    <div className="flex items-center gap-1.5 whitespace-nowrap">
+      <span
+        className={cn(
+          "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+          deptCls,
+        )}
+      >
+        {deptLabel}
+      </span>
+      <span className="text-[11px] text-muted-foreground">
+        {typeText[sourceTypeKey as string] ?? sourceTypeKey}
+      </span>
+    </div>
   );
 }

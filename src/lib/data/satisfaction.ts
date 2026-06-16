@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
+import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
 
 // =========================================================================
 // Client-satisfaction data layer (/satisfaction + Quality executive index).
@@ -215,6 +216,7 @@ export interface ClientSatisfactionDetail {
   analysis: AnalysisInfo | null; // the shown analysis (selected, else current week)
   history: AnalysisHistoryItem[]; // all stored snapshots, newest first
   activeProjects: Array<{ id: string; name: string }>;
+  brief: ClientBriefRef | null; // the attached brief doc (reachable link/file), if any
 }
 
 const ANALYSIS_COLUMNS =
@@ -287,7 +289,7 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes, brief] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -332,6 +334,7 @@ async function _getClientSatisfactionDetail(
       .eq("client_id", clientId)
       .neq("status", "archived")
       .order("created_at", { ascending: false }),
+    getClientBriefRef(orgId, clientId),
   ]);
   if (clientRes.error) throw clientRes.error;
   if (projectsRes.error) throw projectsRes.error;
@@ -391,6 +394,7 @@ async function _getClientSatisfactionDetail(
       id: p.id,
       name: p.name,
     })),
+    brief,
   };
 }
 export const getClientSatisfactionDetail = cache(_getClientSatisfactionDetail);

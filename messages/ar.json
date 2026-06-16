@@ -1080,7 +1080,8 @@
         "all": "الكل",
         "target": "الهدف",
         "status": "الحالة",
-        "type": "النوع"
+        "type": "النوع",
+        "openStatus": "نشط + منتهي"
       },
       "summary": {
         "contracts": "{count, plural, one {# عقد} two {# عقدان} few {# عقود} many {# عقدًا} other {# عقد}}",

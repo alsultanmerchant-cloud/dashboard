@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { FileSignature, ScrollText, Table2, TrendingUp } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import {
@@ -40,8 +41,14 @@ export default async function ContractsPage({
   const session = await requirePagePermission("contract.view");
   const t = await getTranslations("ContractsPage");
   const canEdit = hasPermission(session, "contract.manage");
+  // The CEO revenue dashboard (targets, income, achievement) is financial data.
+  // The roster table + logs are operational and stay visible to contract.view.
+  const canFinance = hasPermission(session, "finance.view");
   const sp = await searchParams;
   const view = sp.view === "dashboard" ? "dashboard" : sp.view === "logs" ? "logs" : "table";
+  if (view === "dashboard" && !canFinance) {
+    redirect("/contracts?view=table");
+  }
 
   const tabs = (
     <div className="inline-flex rounded-[var(--radius-md)] border border-border/80 bg-card/95 p-1 text-xs shadow-[var(--surface-elev)]">
@@ -57,18 +64,20 @@ export default async function ContractsPage({
         <Table2 className="size-3.5" />
         {t("tabs.table")}
       </Link>
-      <Link
-        href="/contracts?view=dashboard"
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-[calc(var(--radius-md)-2px)] px-3 py-1.5 transition-colors",
-          view === "dashboard"
-            ? "bg-cyan-dim text-cyan font-medium"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <TrendingUp className="size-3.5" />
-        {t("tabs.dashboard")}
-      </Link>
+      {canFinance && (
+        <Link
+          href="/contracts?view=dashboard"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-[calc(var(--radius-md)-2px)] px-3 py-1.5 transition-colors",
+            view === "dashboard"
+              ? "bg-cyan-dim text-cyan font-medium"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <TrendingUp className="size-3.5" />
+          {t("tabs.dashboard")}
+        </Link>
+      )}
       <Link
         href="/contracts?view=logs"
         className={cn(

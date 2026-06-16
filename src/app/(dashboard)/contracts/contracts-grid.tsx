@@ -363,11 +363,15 @@ export function ContractsGrid({
   const router = useRouter();
 
   const [search, setSearch] = useState("");
-  const [target, setTarget] = useState<string | null>(null);
-  // Default = active contracts only (team request): the closed/lost rows
-  // (red, renewed_status = NO) stay one chip-click away under «الكل».
-  const [status, setStatus] = useState<string | null>("active");
-  const [typeKey, setTypeKey] = useState<string | null>(null);
+  // Multi-select filters (team request): each group holds an array of picked
+  // values; empty array = «الكل» (no constraint). A row passes when its value
+  // is in the array (OR within a group, AND across groups).
+  const [targets, setTargets] = useState<string[]>([]);
+  // Default = «نشط + منتهي»: both are contracts that haven't closed yet, so
+  // those clients still have live work with us. The closed/lost rows stay one
+  // chip-click away under «الكل».
+  const [statuses, setStatuses] = useState<string[]>(["active", "expired"]);
+  const [types, setTypes] = useState<string[]>([]);
   const [scope, setScope] = useState<"all" | "mine">("all");
   // Hold popup — opened when the inline type dropdown picks "Hold".
   const [holdFor, setHoldFor] = useState<GridContract | null>(null);
@@ -418,9 +422,10 @@ export function ContractsGrid({
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (scope === "mine" && r.account_manager_id !== meEmployeeId) return false;
-      if (target && r.target !== target) return false;
-      if (status && r.status !== status) return false;
-      if (typeKey && r.contract_type_key !== typeKey) return false;
+      if (targets.length && !targets.includes(r.target)) return false;
+      if (statuses.length && !statuses.includes(r.status)) return false;
+      if (types.length && (!r.contract_type_key || !types.includes(r.contract_type_key)))
+        return false;
       if (!q) return true;
       return (
         (r.client_name ?? "").toLowerCase().includes(q) ||
@@ -434,7 +439,7 @@ export function ContractsGrid({
         (r.notes ?? "").toLowerCase().includes(q)
       );
     });
-  }, [rows, search, scope, target, status, typeKey, meEmployeeId]);
+  }, [rows, search, scope, targets, statuses, types, meEmployeeId]);
 
   const totalValue = filtered.reduce((s, r) => s + r.total_value, 0);
   const totalPaid = filtered.reduce((s, r) => s + r.paid_value, 0);
@@ -484,8 +489,8 @@ export function ContractsGrid({
         <div className="flex flex-wrap gap-1.5 text-xs">
           <ChipGroup
             label={t("grid.filters.target")}
-            value={target}
-            onChange={setTarget}
+            values={targets}
+            onChange={setTargets}
             options={[
               { value: "Overdue", count: counts.target["Overdue"] ?? 0, label: t("grid.targetLabels.overdue") },
               { value: "Sales Deposit", count: counts.target["Sales Deposit"] ?? 0, label: t("grid.targetLabels.salesDeposit") },
@@ -495,19 +500,22 @@ export function ContractsGrid({
           />
           <ChipGroup
             label={t("grid.filters.status")}
-            value={status}
-            onChange={setStatus}
+            values={statuses}
+            onChange={setStatuses}
+            presets={[
+              { value: "open", label: t("grid.filters.openStatus"), members: ["active", "expired"] },
+            ]}
             options={[
               { value: "active", count: counts.status["active"] ?? 0, label: t("grid.statusLabels.active") },
-              { value: "closed", count: counts.status["closed"] ?? 0, label: t("grid.statusLabels.closed") },
               { value: "expired", count: counts.status["expired"] ?? 0, label: t("grid.statusLabels.expired") },
               { value: "hold", count: counts.status["hold"] ?? 0, label: t("grid.statusLabels.hold") },
+              { value: "closed", count: counts.status["closed"] ?? 0, label: t("grid.statusLabels.closed") },
             ]}
           />
           <ChipGroup
             label={t("grid.filters.type")}
-            value={typeKey}
-            onChange={setTypeKey}
+            values={types}
+            onChange={setTypes}
             options={[
               { value: "New", count: counts.type["New"] ?? 0, label: t("grid.typeLabels.new") },
               { value: "Renew", count: counts.type["Renew"] ?? 0, label: t("grid.typeLabels.renew") },
@@ -1495,18 +1503,36 @@ function applyPatch(
   return next;
 }
 
-function ChipGroup<T extends string>({
+// Multi-select chip group. `values` is the picked set (empty = «الكل»).
+// Toggling a chip adds/removes it; chips OR together within a group. An
+// optional `presets` list renders convenience chips (e.g. «نشط + منتهي»)
+// that swap the selection to an exact member set in one click.
+function ChipGroup({
   label,
-  value,
+  values,
   onChange,
   options,
+  presets,
 }: {
   label: string;
-  value: T | null;
-  onChange: (v: T | null) => void;
-  options: Array<{ value: T; count: number; label?: string }>;
+  values: string[];
+  onChange: (v: string[]) => void;
+  options: Array<{ value: string; count: number; label?: string }>;
+  presets?: Array<{ value: string; label: string; members: string[] }>;
 }) {
   const t = useTranslations("ContractsPage");
+  const chipCls = (active: boolean) =>
+    cn(
+      "rounded-md px-2 py-0.5 transition-colors",
+      active
+        ? "bg-cyan-dim text-cyan font-medium"
+        : "text-muted-foreground hover:text-foreground",
+    );
+  const sameSet = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((x) => b.includes(x));
+  function toggle(v: string) {
+    onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  }
   return (
     <div className="inline-flex items-center gap-1 rounded-lg border border-soft bg-soft-1 px-2 py-1">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1514,27 +1540,30 @@ function ChipGroup<T extends string>({
       </span>
       <button
         type="button"
-        onClick={() => onChange(null)}
-        className={cn(
-          "rounded-md px-2 py-0.5 transition-colors",
-          value === null
-            ? "bg-cyan-dim text-cyan font-medium"
-            : "text-muted-foreground hover:text-foreground",
-        )}
+        onClick={() => onChange([])}
+        className={chipCls(values.length === 0)}
       >
         {t("grid.filters.all")}
       </button>
+      {presets?.map((p) => {
+        const active = sameSet(values, p.members);
+        return (
+          <button
+            key={p.value}
+            type="button"
+            onClick={() => onChange(active ? [] : p.members)}
+            className={chipCls(active)}
+          >
+            {p.label}
+          </button>
+        );
+      })}
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
-          onClick={() => onChange(value === o.value ? null : o.value)}
-          className={cn(
-            "rounded-md px-2 py-0.5 transition-colors",
-            value === o.value
-              ? "bg-cyan-dim text-cyan font-medium"
-              : "text-muted-foreground hover:text-foreground",
-          )}
+          onClick={() => toggle(o.value)}
+          className={chipCls(values.includes(o.value))}
         >
           {o.label ?? o.value}{" "}
           <span className="text-muted-foreground/70 tabular-nums">({o.count})</span>

@@ -118,8 +118,15 @@ export type DashboardScope =
   | { kind: "agent"; employeeId: string };
 
 export const getDashboardScope = cache(async (session: ServerSession): Promise<DashboardScope> => {
-  // Owner/admin always get the executive (CEO) view.
-  if (session.isOwner || session.roleKeys.includes("admin")) {
+  // Owner/admin always get the executive (CEO) view. The department-lead role
+  // (Head of Technical / Department Manager) also gets the org-wide executive
+  // view — even when they head a department in the data — but the financial
+  // blocks on it are gated separately by the `finance.view` permission.
+  if (
+    session.isOwner ||
+    session.roleKeys.includes("admin") ||
+    session.roleKeys.includes("dept_lead")
+  ) {
     return { kind: "ceo" };
   }
 

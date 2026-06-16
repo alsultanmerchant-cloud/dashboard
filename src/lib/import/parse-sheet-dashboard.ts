@@ -67,7 +67,17 @@ export type SheetDashboardTotals = {
 };
 
 export type SheetBucketRow = {
-  bucket: "on_target" | "overdue" | "renewed" | "lost";
+  // on_target/overdue/renewed/lost = the Monthly-Target buckets (left of the tab).
+  // acc_inst_overdue/sales_inst_overdue = the "Clients with Installments" overdue
+  // lists (right of the tab), split by collecting department. Account rows carry
+  // an amount; Sales rows are name-only in the sheet (value 0).
+  bucket:
+    | "on_target"
+    | "overdue"
+    | "renewed"
+    | "lost"
+    | "acc_inst_overdue"
+    | "sales_inst_overdue";
   contractKey: string;
   clientName: string | null;
   value: number;
@@ -77,6 +87,11 @@ export type SheetAmRow = {
   name: string; // raw sheet name (with emoji/stars)
   expected: number;
   achieved: number;
+  // TEAM_TARGET rollup (right side of the tab). Present only on team-leader
+  // (🌟) and department-manager rows; null for plain account managers.
+  teamExpected: number | null;
+  teamAchieved: number | null;
+  teamRole: "team_lead" | "dept_manager" | null;
 };
 
 export type SheetDashboardParse = {
@@ -427,6 +442,36 @@ function parseTargetContracts(grid: Aoa, warnings: string[]): SheetBucketRow[] {
   take("overdue", ovCol, true);
   take("renewed", reCol, false);
   take("lost", loCol, false);
+
+  // ── "Clients with Installments" region (right side of the same tab) ──────────
+  // A super-header row (one above the bucket header) carries two banners:
+  // "Clients with Installments (FROM ACCOUNT)" and "(FROM SALES)". Under each,
+  // the bucket header row has Expected / Overdue / Actual-paid sub-columns. We
+  // surface the OVERDUE lists per department. Account overdue carries an amount
+  // (key, name, value); Sales overdue is name-only (key, name).
+  const superRow = headerRow - 1;
+  const superCols: number[] = [];
+  const superLabels = (grid[superRow] ?? []).map(normLabel);
+  for (let c = 0; c < superLabels.length; c++) {
+    if (/clients with installments/.test(superLabels[c])) superCols.push(c);
+  }
+  if (superCols.length >= 1) {
+    const accLo = superCols[0];
+    const accHi = superCols[1] ?? hdr.length;
+    const salesLo = superCols[1] ?? hdr.length;
+    const salesHi = hdr.length;
+    const findColIn = (re: RegExp, lo: number, hi: number) => {
+      for (let c = lo; c < hi; c++) if (re.test(hdr[c] ?? "")) return c;
+      return -1;
+    };
+    const accOvCol = findColIn(/overdue/, accLo, accHi);
+    const salesOvCol = findColIn(/overdue/, salesLo, salesHi);
+    take("acc_inst_overdue", accOvCol, true);
+    take("sales_inst_overdue", salesOvCol, false);
+  } else {
+    warnings.push("TARGET_CONTRACTS: installments region not found.");
+  }
+
   return rows;
 }
 
@@ -443,6 +488,10 @@ function parseAccBreakdown(grid: Aoa, warnings: string[]): SheetAmRow[] {
   const nameCol = hdr.findIndex((l) => /^account$/.test(l));
   const expCol = hdr.findIndex((l) => /total expected/.test(l));
   const achCol = hdr.findIndex((l) => /actual achieved/.test(l));
+  // TEAM_TARGET sub-headers are exactly "Expected" / "Achieved" (distinct from
+  // "Total Expected" / "Actual Achieved" on the individual side).
+  const teamExpCol = hdr.findIndex((l) => l === "expected");
+  const teamAchCol = hdr.findIndex((l) => l === "achieved");
   if (nameCol < 0 || expCol < 0) {
     warnings.push("Acc_Target_Breakdown: name/expected columns not found.");
     return [];
@@ -452,11 +501,20 @@ function parseAccBreakdown(grid: Aoa, warnings: string[]): SheetAmRow[] {
   for (let r = headerRow + 1; r < grid.length; r++) {
     const name = asText(grid[r]?.[nameCol]);
     if (!name) continue;
-    // Stop at obvious footer/aggregate rows that have no name in the name col.
+    // A non-empty TEAM_TARGET Expected cell marks a leader / dept-manager row.
+    // 🌟 in the raw name = team leader; a team row without the star = the
+    // department manager (blank individual target, whole-department rollup).
+    const teamExpRaw = teamExpCol >= 0 ? grid[r]?.[teamExpCol] : null;
+    const hasTeam =
+      teamExpRaw !== null && teamExpRaw !== undefined && String(teamExpRaw).trim() !== "";
+    const isLead = /\u{1F31F}/u.test(name);
     out.push({
       name,
       expected: num(grid[r]?.[expCol]),
       achieved: achCol >= 0 ? num(grid[r]?.[achCol]) : 0,
+      teamExpected: hasTeam ? num(teamExpRaw) : null,
+      teamAchieved: hasTeam && teamAchCol >= 0 ? num(grid[r]?.[teamAchCol]) : null,
+      teamRole: hasTeam ? (isLead ? "team_lead" : "dept_manager") : null,
     });
   }
   return out;

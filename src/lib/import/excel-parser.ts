@@ -33,7 +33,15 @@ export interface ParsedContract {
   endDate: string | null;
   durationMonths: number | null;
   totalValue: number;
-  paidValue: number;
+  paidValue: number;                // "Actual paid value"
+  repeatedServicesValue: number | null;  // " Value of repeated services"
+  nextContractValue: number | null;      // "Next Contract Value" (renewal value)
+  renewalPaidValue: number | null;        // "Actual Paid for renewal"
+  paymentStatus: string | null;            // "payment status" → Installments | Complete
+  renewedStatus: string | null;            // "renewed?" → YES | NO | Closed
+  delayDays: number | null;                // "Delays" (working days)
+  extensionDays: number | null;            // "Extention period"
+  totalDaysComputed: number | null;        // "Total Days (للمراجعة)"
   target: string | null;            // col E — current/live status
   targetByMonth: string | null;     // col V — month-aware status (current month only)
   statusLabel: string | null;       // raw "Active"/"Expired"/"SOON TO BE Renewed"/...
@@ -83,6 +91,41 @@ function num(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
   const n = Number(String(v).replace(/[, ]/g, ""));
   return Number.isFinite(n) ? n : 0;
+}
+// Like num(), but preserves the blank-vs-zero distinction the team asked for:
+// a blank sheet cell → null (renders "—"), a literal "0" → 0 (renders "0").
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const str = String(v).trim();
+  if (str === "") return null;
+  const n = Number(str.replace(/[, ]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function intOrNull(v: unknown): number | null {
+  const n = numOrNull(v);
+  return n === null ? null : Math.round(n);
+}
+
+// "payment status" — the sheet uses "Installments" / "Complete" (the grid keys
+// its color swatches off those exact strings). Map loosely so stray casing or
+// the Arabic instruction row can never leak a junk value into the column.
+function normalizePaymentStatus(raw: string | null): string | null {
+  if (!raw) return null;
+  const k = raw.toLowerCase();
+  if (k.includes("install")) return "Installments";
+  if (k.includes("complete")) return "Complete";
+  return null;
+}
+
+// "renewed?" — YES / NO / Closed (drives the grid's row tint). Normalize the
+// casing and drop anything else so the color rule stays predictable.
+function normalizeRenewedStatus(raw: string | null): string | null {
+  if (!raw) return null;
+  const k = raw.toLowerCase();
+  if (k === "yes") return "YES";
+  if (k === "no") return "NO";
+  if (k === "closed") return "Closed";
+  return null;
 }
 
 // Excel dates can come as JS Date, ISO strings, or "6 Sep 2025" / "24/9/2025".
@@ -252,6 +295,26 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
     ? (XLSX.utils.sheet_to_json<CCRow>(ccSheet, { defval: null, raw: false }) as CCRow[])
     : [];
 
+  // The TRUE full (pre-tax) contract value lives on the Installments Tracker
+  // ("قيمة العقد بالكامل (بدون ضرائب)"), keyed by the contract Key. The Clients-
+  // Contracts tab only carries the renewal amount and the actual-paid amount, so
+  // we join the tracker's full value in below to set total_value for installment
+  // contracts. Read once here and reuse for the installments loop further down.
+  type ITRow = Record<string, unknown>;
+  const itRows = itSheet
+    ? (XLSX.utils.sheet_to_json<ITRow>(itSheet, { defval: null, raw: false }) as ITRow[])
+    : [];
+  const fullContractValueByKey = new Map<string, number>();
+  for (const r of itRows) {
+    const cid = s(r["Client ID"]);
+    if (!cid || !/^C\d+$/i.test(cid)) continue;
+    const itKey =
+      s(r["Key"]) ??
+      `${cid}|${(parseDate(r["تاريخ الدفعة الاولى وبداية العقد"]) ?? "").replace(/-/g, "")}`;
+    const fv = numOrNull(r["قيمة العقد بالكامل\n(بدون ضرائب)"]);
+    if (fv != null && fv > 0) fullContractValueByKey.set(itKey, fv);
+  }
+
   const contracts: ParsedContract[] = [];
   const clientMap = new Map<string, ParsedClient>();
 
@@ -270,6 +333,7 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
     const contractTypeRaw = s(r["Contract Type"]);
     const contractTypeKey = mapContractType(contractTypeRaw);
     const startDate = parseDate(r["Contract Start Date"]);
+    const externalKey = key ?? `${clientId}|${(startDate ?? "").replace(/-/g, "")}`;
     const endDate = parseDate(r["Expected End Date"]);
     const actualEndDate = parseDate(r["Actual End Date"]);
     const target = normalizeTarget(s(r["Target"]));
@@ -280,14 +344,32 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
     );
     const statusLabel = s(r["Contract Status"]);
     const status = mapStatus(statusLabel, contractTypeKey);
-    const totalValue = num(r["Next Contract Value"]) || num(r[" Value of repeated services"]);
-    const paidValue = num(r["Actual Paid for renewal"]) || num(r["Actual paid value"]);
+    // المدفوع = the actual collected amount. (Renewal payment is its own column.)
+    const paidValue = num(r["Actual paid value"]);
+    const repeatedServicesValue = numOrNull(r[" Value of repeated services"]);
+    const nextContractValue = numOrNull(r["Next Contract Value"]);
+    const paymentStatus = normalizePaymentStatus(s(r["payment status"]));
+    // القيمة الإجمالية (total contract value):
+    //  • Complete payment  → the actual paid value IS the full contract value.
+    //  • Installments      → the full PRE-TAX value from the Installments Tracker
+    //                        ("قيمة العقد بالكامل بدون ضرائب"); the paid amount is
+    //                        only the first installment.
+    // It is NOT "Value of repeated services" / "Next Contract Value" — those are
+    // the RENEWAL amount (next_contract_value), a separate figure.
+    const itFullValue = fullContractValueByKey.get(externalKey) ?? null;
+    const totalValue =
+      paymentStatus === "Complete"
+        ? paidValue
+        : itFullValue ?? paidValue;
+    const renewalPaidValue = numOrNull(r["Actual Paid for renewal"]);
+    const renewedStatus = normalizeRenewedStatus(s(r["renewed?"]));
+    const delayDays = intOrNull(r["Delays"]);
+    const extensionDays = intOrNull(r["Extention period"]);
+    const totalDaysComputed = intOrNull(r["Total Days (للمراجعة)"]);
     const durationRaw = num(r["C.Duration (Months)"]);
     const durationMonths = durationRaw > 0 ? Math.round(durationRaw) : null;
     const packageName = s(r["Package"]);
     const notes = [s(r["Notes"]), s(r["ملاحظات"])].filter(Boolean).join(" — ") || null;
-
-    const externalKey = key ?? `${clientId}|${(startDate ?? "").replace(/-/g, "")}`;
 
     contracts.push({
       externalKey,
@@ -302,6 +384,14 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
       durationMonths,
       totalValue,
       paidValue,
+      repeatedServicesValue,
+      nextContractValue,
+      renewalPaidValue,
+      paymentStatus,
+      renewedStatus,
+      delayDays,
+      extensionDays,
+      totalDaysComputed,
       target,
       targetByMonth,
       statusLabel,
@@ -319,11 +409,7 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
   }
 
   // ── Installments Tracker ─────────────────────────────────────────────
-  type ITRow = Record<string, unknown>;
-  const itRows = itSheet
-    ? (XLSX.utils.sheet_to_json<ITRow>(itSheet, { defval: null, raw: false }) as ITRow[])
-    : [];
-
+  // itRows already read above (for the full-contract-value map).
   const installments: ParsedInstallment[] = [];
 
   for (let i = 0; i < itRows.length; i++) {

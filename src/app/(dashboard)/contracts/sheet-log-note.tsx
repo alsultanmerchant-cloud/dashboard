@@ -107,3 +107,69 @@ export function SheetLogNote({
     </div>
   );
 }
+
+// The sheet records a full contract-state snapshot on every log event. The
+// `notes` blob only covers edits/holds; Close events carry their detail solely
+// here. We render it verbatim (sheet field names, cleaned of stray whitespace)
+// as a compact label/value grid so reviewing a contract shows what the sheet
+// shows. Field order mirrors the sheet's columns; empty values are skipped.
+const SNAPSHOT_FIELDS: Array<{ keys: string[]; label: string }> = [
+  { keys: ["Contract Status"], label: "Contract Status" },
+  { keys: ["Contract Type"], label: "Contract Type" },
+  { keys: ["Target"], label: "Target" },
+  { keys: ["Package"], label: "Package" },
+  { keys: ["payment status"], label: "Payment Status" },
+  { keys: ["Contract Start Date"], label: "Start Date" },
+  { keys: ["Expected End Date"], label: "Expected End" },
+  { keys: ["Actual End Date"], label: "Actual End" },
+  { keys: ["C.Duration (Months)"], label: "Duration (months)" },
+  { keys: ["Actual paid value"], label: "Paid Value" },
+  { keys: ["Next Contract Value"], label: "Next Contract Value" },
+  { keys: ["Value of repeated services"], label: "Repeated Services" },
+  { keys: ["Delays (working days)"], label: "Delay (working days)" },
+];
+
+const cleanKey = (k: string) => k.replace(/\s+/g, " ").trim();
+
+export function SheetLogSnapshot({
+  snapshot,
+  title,
+  className = "",
+}: {
+  snapshot: Record<string, unknown> | null | undefined;
+  title: string;
+  className?: string;
+}) {
+  if (!snapshot) return null;
+  // Re-key with whitespace cleaned so messy sheet headers ("Delays\n (working
+  // days)", " Value of repeated services") match our lookup labels.
+  const norm: Record<string, string> = {};
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s) norm[cleanKey(k)] = s;
+  }
+  const rows = SNAPSHOT_FIELDS.map((f) => {
+    const key = f.keys.map(cleanKey).find((k) => norm[k] != null);
+    return key ? { label: f.label, value: norm[key] } : null;
+  }).filter((r): r is { label: string; value: string } => r !== null);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className={`rounded-md border border-soft bg-soft-1/40 p-2.5 ${className}`}>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </p>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 sm:grid-cols-3">
+        {rows.map((r) => (
+          <div key={r.label} className="min-w-0">
+            <dt className="text-[10px] text-muted-foreground">{r.label}</dt>
+            <dd className="truncate text-xs font-medium [unicode-bidi:plaintext]" title={r.value}>
+              {r.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}

@@ -1080,7 +1080,8 @@
         "all": "All",
         "target": "Target",
         "status": "Status",
-        "type": "Type"
+        "type": "Type",
+        "openStatus": "Active + Expired"
       },
       "summary": {
         "contracts": "{count, plural, one {# contract} other {# contracts}}",

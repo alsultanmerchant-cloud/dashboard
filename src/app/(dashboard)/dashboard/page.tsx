@@ -7,7 +7,7 @@ import {
   BadgeDollarSign,
   Scale,
 } from "lucide-react";
-import { requireSession, getDashboardScope, type ServerSession } from "@/lib/auth-server";
+import { requireSession, getDashboardScope, hasPermission, type ServerSession } from "@/lib/auth-server";
 import { DepartmentDashboard } from "@/components/department/department-dashboard";
 import { AgentCockpit } from "@/components/cockpit/agent-cockpit";
 import { getTeamActivityOverview } from "@/lib/data/activity-scores";
@@ -217,6 +217,10 @@ export default async function DashboardPage({
 async function ExecutiveDashboard({ session }: { session: ServerSession }) {
   const orgId = session.orgId;
   const t = await getTranslations("Dashboard");
+  // Financial / CEO-only blocks (the brief, P&L summary, and contract revenue
+  // analysis) are gated on finance.view. Roles like dept_lead get the org-wide
+  // executive view for performance, but not these money sections.
+  const canFinance = hasPermission(session, "finance.view");
 
   return (
     <div>
@@ -225,9 +229,11 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         description={t("welcomeDescription")}
       />
 
-      <Suspense fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
-        <BriefSection orgId={orgId} />
-      </Suspense>
+      {canFinance && (
+        <Suspense fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
+          <BriefSection orgId={orgId} />
+        </Suspense>
+      )}
 
       <Suspense fallback={<StripSkeleton />}>
         <PulseBand orgId={orgId} />
@@ -238,12 +244,14 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
       </Suspense>
 
       <Suspense fallback={<SectionSkeleton h={300} />}>
-        <CeoAnalysisSection orgId={orgId} />
+        <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
       </Suspense>
 
-      <Suspense fallback={<SectionSkeleton h={200} />}>
-        <FinancialSummarySection orgId={orgId} />
-      </Suspense>
+      {canFinance && (
+        <Suspense fallback={<SectionSkeleton h={200} />}>
+          <FinancialSummarySection orgId={orgId} />
+        </Suspense>
+      )}
 
       <Suspense fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />
@@ -292,19 +300,21 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
   );
 }
 
-async function CeoAnalysisSection({ orgId }: { orgId: string }) {
+async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFinance: boolean }) {
   const [accountability, contracts] = await Promise.all([
     loadAccountabilitySummary(orgId),
-    loadContractAnalysis(orgId),
+    canFinance ? loadContractAnalysis(orgId) : Promise.resolve(null),
   ]);
 
   return (
     <section className="mb-8">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">CEO analysis</h2>
+          <h2 className="text-base font-semibold">{canFinance ? "CEO analysis" : "Operational analysis"}</h2>
           <p className="text-xs text-muted-foreground">
-            Accountability signals and contract revenue movement for the current month.
+            {canFinance
+              ? "Accountability signals and contract revenue movement for the current month."
+              : "Accountability signals and operational ownership for the current month."}
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -315,19 +325,21 @@ async function CeoAnalysisSection({ orgId }: { orgId: string }) {
             Accountability
             <ArrowUpRight className="size-3" />
           </Link>
-          <Link
-            href="/contracts?view=dashboard"
-            className="inline-flex items-center gap-1 rounded-lg border border-soft bg-card px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Contracts
-            <ArrowUpRight className="size-3" />
-          </Link>
+          {canFinance && (
+            <Link
+              href="/contracts?view=dashboard"
+              className="inline-flex items-center gap-1 rounded-lg border border-soft bg-card px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Contracts
+              <ArrowUpRight className="size-3" />
+            </Link>
+          )}
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className={cn("grid gap-3", contracts && "xl:grid-cols-2")}>
         <AccountabilityAnalysisCard summary={accountability} />
-        <ContractsAnalysisCard analysis={contracts} />
+        {contracts && <ContractsAnalysisCard analysis={contracts} />}
       </div>
     </section>
   );
