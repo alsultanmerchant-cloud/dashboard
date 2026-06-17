@@ -188,6 +188,18 @@ function mapContractType(raw: string | null): string | null {
   return TYPE_KEY_MAP[k] ?? null;
 }
 
+// Sky Light writes some renewals as "#Renewal#" — an internal sheet marker that
+// drives its own accounting; it is intentionally NOT the same token as plain
+// "Renewal". We leave the marker untouched in the sheet and don't remap it
+// globally (other #Renewal# rows must stay as the sheet has them). But for these
+// specific active clients the contract IS a renewal, so without a type they drop
+// out of the Renewal filter. Force the renewal type for them only. Re-applied on
+// every sync, so a re-pull never reverts them to untyped.
+const RENEWAL_TYPE_EXCEPTION_CLIENTS = new Set(["C30", "C39"]);
+function isRenewalMarker(raw: string | null): boolean {
+  return /^#?\s*renewal\s*#?$/i.test((raw ?? "").trim());
+}
+
 const STATUS_MAP: Record<string, ParsedContract["status"]> = {
   "active":             "active",
   "hold":               "hold",
@@ -200,7 +212,16 @@ const STATUS_MAP: Record<string, ParsedContract["status"]> = {
 };
 function mapStatus(raw: string | null, typeKey: string | null): ParsedContract["status"] {
   if (typeKey === "Lost") return "lost";
-  if (typeKey === "Hold") return "hold";
+  if (typeKey === "Hold") {
+    // A Hold contract whose Contract Status (col N) reads Closed/Lost is a LOST
+    // client, not an active pause. Sky Light: held clients routinely churn to
+    // lost, and the sheet records that as Type=Hold + Status=Closed (the payment
+    // may still be chased, so the payments tab isn't marked lost yet). Only a
+    // hold that is still open counts as a live paused contract.
+    const hk = raw?.toLowerCase().trim();
+    if (hk === "closed" || hk === "lost") return "lost";
+    return "hold";
+  }
   if (!raw) return "active";
   const k = raw.toLowerCase().trim();
   return STATUS_MAP[k] ?? "active";
@@ -331,7 +352,17 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
 
     const accountManagerName = s(r["Account manager"]);
     const contractTypeRaw = s(r["Contract Type"]);
-    const contractTypeKey = mapContractType(contractTypeRaw);
+    let contractTypeKey = mapContractType(contractTypeRaw);
+    // Per-client exception: treat "#Renewal#" as a renewal type so the filter
+    // catches it (see RENEWAL_TYPE_EXCEPTION_CLIENTS). Only fills an otherwise
+    // untyped renewal-marker row; never overrides an already-mapped type.
+    if (
+      !contractTypeKey &&
+      isRenewalMarker(contractTypeRaw) &&
+      RENEWAL_TYPE_EXCEPTION_CLIENTS.has(clientId.toUpperCase())
+    ) {
+      contractTypeKey = "Renew";
+    }
     const startDate = parseDate(r["Contract Start Date"]);
     const externalKey = key ?? `${clientId}|${(startDate ?? "").replace(/-/g, "")}`;
     const endDate = parseDate(r["Expected End Date"]);

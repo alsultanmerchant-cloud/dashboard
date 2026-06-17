@@ -29,7 +29,6 @@ import {
   Heart,
   KeyRound,
   ShieldAlert,
-  Target,
   MessageCircle,
   Activity,
   ClipboardCheck,
@@ -98,7 +97,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { labelKey: "accountability", href: "/accountability", icon: ClipboardCheck, perm: "people.analytics.view" },
       { labelKey: "attendance", href: "/attendance", icon: CalendarCheck, perm: "attendance.view" },
       { labelKey: "warnings", href: "/warnings", icon: ShieldAlert, perm: "warning.view" },
-      { labelKey: "targets", href: "/targets", icon: Target, perm: "target.view" },
+      // Targets (الأهداف الشهرية) hidden 2026-06-17 per client: numbers are
+      // unreliable and everything it shows already lives — correctly — under
+      // العقود. Restore this line once the targets figures are reconciled.
+      // { labelKey: "targets", href: "/targets", icon: Target, perm: "target.view" },
       { labelKey: "satisfaction", href: "/satisfaction", icon: Heart, perm: "clients.view" },
       { labelKey: "reports", href: "/reports", icon: BarChart3, perm: "reports.view" },
     ],

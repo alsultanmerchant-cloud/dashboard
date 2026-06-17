@@ -44,10 +44,18 @@ export function GroupedAmTargetsTable({
   });
 
   const renderRow = (a: AmTargetRow, isLeader = false) => {
-    const exp = isLeader ? (a.team_expected ?? 0) : a.expected_total;
-    const ach = isLeader ? (a.team_achieved ?? 0) : a.achieved_total;
+    // Everyone here — leaders included — is shown by their PERSONAL
+    // account-manager target. A team leader's own client portfolio is separate
+    // from, and never folded into, her team rollup (that rollup lives in the
+    // "تارجت قادة الفرق" cards above). So a leader appears "as an account
+    // manager only", exactly like the sheet's Total Expected column.
+    const exp = a.expected_total;
+    const ach = a.achieved_total;
     const pct = exp > 0 ? (ach / exp) * 100 : 0;
-    
+    // A leader may carry no personal clients this month (Total Expected = 0).
+    // Show a dash instead of a misleading 0% "failing" badge.
+    const hasPersonal = exp > 0 || ach > 0;
+
     return (
       <tr
         key={a.account_manager_id}
@@ -70,30 +78,36 @@ export function GroupedAmTargetsTable({
           {fmtSR(ach)}
         </td>
         <td className="px-3 py-2 text-center tabular-nums">
-          <span
-            className={cn(
-              "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold",
-              pct >= 80
-                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200"
-                : pct >= 40
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-200"
-                  : "bg-rose-500/15 text-rose-700 dark:text-rose-200",
-            )}
-          >
-            {pct >= 100 && <ArrowUpRight className="size-3" />}
-            {pct.toFixed(0)}%
-          </span>
+          {hasPersonal ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold",
+                pct >= 80
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200"
+                  : pct >= 40
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-200"
+                    : "bg-rose-500/15 text-rose-700 dark:text-rose-200",
+              )}
+            >
+              {pct >= 100 && <ArrowUpRight className="size-3" />}
+              {pct.toFixed(0)}%
+            </span>
+          ) : (
+            <span className="text-soft-1">—</span>
+          )}
         </td>
         <td className="px-3 py-2 w-[180px]">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-soft-1">
-            <div
-              className={cn(
-                "h-full rounded-full",
-                pct >= 80 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-500",
-              )}
-              style={{ width: Math.min(100, pct) + "%" }}
-            />
-          </div>
+          {hasPersonal && (
+            <div className="h-2 w-full overflow-hidden rounded-full bg-soft-1">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  pct >= 80 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-500",
+                )}
+                style={{ width: Math.min(100, pct) + "%" }}
+              />
+            </div>
+          )}
         </td>
       </tr>
     );

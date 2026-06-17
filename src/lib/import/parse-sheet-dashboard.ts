@@ -68,16 +68,18 @@ export type SheetDashboardTotals = {
 
 export type SheetBucketRow = {
   // on_target/overdue/renewed/lost = the Monthly-Target buckets (left of the tab).
-  // acc_inst_overdue/sales_inst_overdue = the "Clients with Installments" overdue
-  // lists (right of the tab), split by collecting department. Account rows carry
-  // an amount; Sales rows are name-only in the sheet (value 0).
+  // acc_inst_*/sales_inst_* = the "Clients with Installments" lists (right of the
+  // tab), split by collecting department. *_overdue = the Overdue sub-column;
+  // *_expected = the Expected (due-this-month) sub-column. Both carry the amount.
   bucket:
     | "on_target"
     | "overdue"
     | "renewed"
     | "lost"
     | "acc_inst_overdue"
-    | "sales_inst_overdue";
+    | "sales_inst_overdue"
+    | "acc_inst_expected"
+    | "sales_inst_expected";
   contractKey: string;
   clientName: string | null;
   value: number;
@@ -468,6 +470,12 @@ function parseTargetContracts(grid: Aoa, warnings: string[]): SheetBucketRow[] {
     const salesOvCol = findColIn(/overdue/, salesLo, salesHi);
     take("acc_inst_overdue", accOvCol, true);
     take("sales_inst_overdue", salesOvCol, false);
+    // Expected (due-this-month) sub-column, same region. Both departments carry
+    // an amount here, so capture the value for each.
+    const accExpCol = findColIn(/expected/, accLo, accHi);
+    const salesExpCol = findColIn(/expected/, salesLo, salesHi);
+    take("acc_inst_expected", accExpCol, true);
+    take("sales_inst_expected", salesExpCol, true);
   } else {
     warnings.push("TARGET_CONTRACTS: installments region not found.");
   }

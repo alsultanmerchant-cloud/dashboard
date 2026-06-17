@@ -388,6 +388,14 @@ export type MonthBuckets = {
   // on the live path; in the UI the Sales card hides its value.
   acc_inst_overdue: BucketClient[];
   sales_inst_overdue: BucketClient[];
+  // Installments EXPECTED this month per collecting department — the "due this
+  // month" lists. From a snapshot month these mirror the sheet's "Clients with
+  // Installments" → Expected sub-column (captured alongside the overdue lists);
+  // on the live path they're derived from this-month installment rows summed per
+  // contract and split by source_type_key. Same shape/semantics as the overdue
+  // lists, one month closer (this-month rows instead of carried-over ones).
+  acc_inst_expected: BucketClient[];
+  sales_inst_expected: BucketClient[];
   // True when the per-client lists come from the frozen monthly_target_snapshot.
   // False = a LIVE recompute (current month, or a frozen month captured before a
   // snapshot existed). For a frozen month, false means the lists have drifted vs
@@ -417,11 +425,16 @@ export type CeoClientInsight = {
   on_time_pct_30d: number | null;
   health_score: number;
   health_label: "healthy" | "watch" | "risk";
-  // Selected-month renewal-pipeline membership (migrations 0172/0174 predicates):
-  // 'overdue' = a not-yet-renewed contract ended before the month; 'on_target' =
-  // ends within the month; null = not in this month's renewal pipeline (future
-  // renewal or no renewal due). Drives the panel's renewal-pipeline toggle.
+  // Renewal-pipeline membership, following the sheet's `target` column (0191):
+  // 'overdue' = an open contract the sheet marks Overdue; 'on_target' = marked On
+  // Target; null = not in the renewal pipeline (Sales Deposit / Closed / none).
+  // Held & new-deposit clients are NOT forced overdue by a passed end_date.
+  // Drives the panel's renewal-pipeline toggle.
   renewal_status: "on_target" | "overdue" | null;
+  // Collections signal, SEPARATE from renewal (0191): 'overdue' = money past due,
+  // 'due' = an installment falls in the selected month and isn't collected yet,
+  // null = nothing owed. Lets the UI tell "late renewal" apart from "late payment".
+  payment_status: "overdue" | "due" | null;
 };
 
 export async function getMonthTargetBuckets(
@@ -446,6 +459,8 @@ export async function getMonthTargetBuckets(
   const lost: BucketClient[] = [];
   const acc_inst_overdue: BucketClient[] = [];
   const sales_inst_overdue: BucketClient[] = [];
+  const acc_inst_expected: BucketClient[] = [];
+  const sales_inst_expected: BucketClient[] = [];
 
   type BucketRow = {
     bucket: string;
@@ -469,6 +484,8 @@ export async function getMonthTargetBuckets(
     else if (r.bucket === "lost") lost.push(row);
     else if (r.bucket === "acc_inst_overdue") acc_inst_overdue.push(row);
     else if (r.bucket === "sales_inst_overdue") sales_inst_overdue.push(row);
+    else if (r.bucket === "acc_inst_expected") acc_inst_expected.push(row);
+    else if (r.bucket === "sales_inst_expected") sales_inst_expected.push(row);
   };
 
   // Prefer the frozen snapshot (captured at month-close, immune to end_date
@@ -516,6 +533,10 @@ export async function getMonthTargetBuckets(
     )
     .eq("contract.organization_id", orgId)
     .eq("contract.sheet_present", true)
+    // Exclude clients already lost/closed before the month: the sheet drops them
+    // from its installment lists, so a contract lost months ago with unpaid
+    // installments must not resurface here (was leaking into the due list).
+    .not("contract.status", "in", "(lost,closed)")
     .gte("sequence", 2)
     .lte("expected_date", endDate)
     .or(`expected_date.gte.${start},status.not.in.("received","waived")`)
@@ -589,11 +610,53 @@ export async function getMonthTargetBuckets(
     sales_inst_overdue.push(...salesMap.values());
   }
 
+  // Live fallback for the per-department EXPECTED-this-month lists, symmetric to
+  // the overdue block above. Snapshot months get these from the sheet's "Clients
+  // with Installments" → Expected sub-column; for a live month derive them from
+  // this-month installment rows (expected_date within the month, any status —
+  // an expected payment counts whether or not it's been collected yet), summed
+  // per contract and split by collecting department. Lost/closed contracts are
+  // already excluded by the installments query above.
+  if (acc_inst_expected.length === 0 && sales_inst_expected.length === 0) {
+    const ACCOUNT_TYPES = new Set(["Renew", "WinBack", "UPSELL"]);
+    const accMap = new Map<string, BucketClient>();
+    const salesMap = new Map<string, BucketClient>();
+    for (const i of instRows) {
+      if (i.expected_date < start) continue; // only this-month rows are "due"
+      const cid = i.contract?.id;
+      if (!cid) continue;
+      const target =
+        i.source_type_key === "New"
+          ? salesMap
+          : i.source_type_key && ACCOUNT_TYPES.has(i.source_type_key)
+            ? accMap
+            : null; // null/legacy type can't be routed to a department
+      if (!target) continue;
+      const amount = Number(i.expected_amount);
+      const existing = target.get(cid);
+      if (existing) {
+        existing.value += amount;
+      } else {
+        target.set(cid, {
+          contract_id: cid,
+          client_name: i.contract?.client?.name ?? null,
+          client_code: null,
+          account_manager_name: i.contract?.am?.full_name ?? null,
+          value: amount,
+        });
+      }
+    }
+    acc_inst_expected.push(...accMap.values());
+    sales_inst_expected.push(...salesMap.values());
+  }
+
   const byValue = (a: BucketClient, b: BucketClient) => b.value - a.value;
   on_target.sort(byValue);
   overdue.sort(byValue);
   acc_inst_overdue.sort(byValue);
   sales_inst_overdue.sort(byValue);
+  acc_inst_expected.sort(byValue);
+  sales_inst_expected.sort(byValue);
   return {
     on_target,
     overdue,
@@ -602,6 +665,8 @@ export async function getMonthTargetBuckets(
     installments_due,
     acc_inst_overdue,
     sales_inst_overdue,
+    acc_inst_expected,
+    sales_inst_expected,
     from_snapshot,
   };
 }

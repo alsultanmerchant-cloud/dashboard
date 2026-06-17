@@ -104,7 +104,10 @@ function toTotalsRow(orgId: string, month: string, t: SheetDashboardTotals) {
     sales_new_income: t.sales_new_income,
     sales_total_income: t.sales_total_income,
     sales_gap: t.sales_gap,
-    sales_achievement_pct: pct(t.sales_total_income, t.sales_expected),
+    // Installments Achievement %: actual installments / expected installments.
+    // Sales has a collection target independent of new-client income, so the
+    // headline % must not fold in sales_new_income (matches the sheet).
+    sales_achievement_pct: pct(t.sales_act_inst, t.sales_expected),
     is_frozen: true,
     source: "sheet_import",
     frozen_at: new Date().toISOString(),

@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   Brain,
   Lock,
+  Wallet,
 } from "lucide-react";
 import {
   Bar,
@@ -198,78 +199,47 @@ export function CeoDashboard({
         </div>
       )}
 
-      {/* Installments due this month */}
-      <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
-        <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
-          <h3 className="flex items-center gap-1 text-sm font-semibold">
-            {copy("الدفعات المستحقة هذا الشهر", "Installments due this month")}
-            <MetricInfo
-              text={t("metricTooltips.contracts_installmentsDue")}
-              label={copy("الدفعات المستحقة هذا الشهر", "Installments due this month")}
-            />
-          </h3>
-          <span className="text-[11px] text-muted-foreground">
-            {copy(`${buckets.installments_due.length} دفعة`, `${buckets.installments_due.length} installments`)}
-          </span>
-        </div>
-        {buckets.installments_due.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            {copy("لا توجد دفعات مستحقة هذا الشهر.", "No installments due this month.")}
-          </p>
-        ) : (
-          <div className="max-h-72 overflow-y-auto">
-            <table className="w-full text-right text-[12px]">
-              <thead className="sticky top-0 bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-start font-medium">{copy("العميل", "Client")}</th>
-                  <th className="px-3 py-2 text-start font-medium">{copy("مدير الحساب", "Account manager")}</th>
-                  <th className="px-3 py-2 text-start font-medium">{copy("النوع / القسم", "Type / Dept")}</th>
-                  <th className="px-3 py-2 text-end font-medium">{copy("المبلغ", "Amount")}</th>
-                  <th className="px-3 py-2 font-medium">{copy("الحالة", "Status")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {buckets.installments_due.map((i, idx) => (
-                  <tr key={`${i.contract_id}-${idx}`} className="border-t border-soft/60">
-                    <td className="px-3 py-1.5">
-                      {i.contract_id ? (
-                        <Link href={`/contracts/${i.contract_id}`} className="hover:underline">
-                          {i.client_name ?? "—"}
-                        </Link>
-                      ) : (
-                        i.client_name ?? "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5 text-muted-foreground">
-                      {i.account_manager_name ?? "—"}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <InstallmentDeptCell sourceTypeKey={i.source_type_key} copy={copy} />
-                    </td>
-                    <td className="px-3 py-1.5 text-end tabular-nums">
-                      {fmtSR(i.expected_amount)}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                          i.status === "received"
-                            ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-200"
-                            : i.status === "overdue"
-                              ? "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-200"
-                              : "bg-zinc-500/15 text-zinc-700 border-zinc-500/30 dark:text-zinc-200",
-                        )}
-                      >
-                        {t(`installments.status.${i.status}` as const)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Installments expected (due) this month, split by collecting department —
+          the same two-card shape as the overdue section below. From a snapshot
+          month these mirror the sheet's "Clients with Installments" → Expected
+          sub-column; on the live month they're derived from this-month installment
+          rows (getMonthTargetBuckets). Hidden for a drifted frozen month, and when
+          both lists are empty rather than showing two empty cards. */}
+      {!driftedLists &&
+        buckets.acc_inst_expected.length + buckets.sales_inst_expected.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-1 text-sm font-semibold">
+              {copy("الدفعات المتوقعة هذا الشهر", "Installments due this month")}
+              <MetricInfo
+                text={t("metricTooltips.contracts_installmentsDue")}
+                label={copy("الدفعات المتوقعة هذا الشهر", "Installments due this month")}
+              />
+            </h3>
+            <span className="text-[11px] text-muted-foreground">
+              {copy(
+                `${buckets.acc_inst_expected.length + buckets.sales_inst_expected.length} عميل`,
+                `${buckets.acc_inst_expected.length + buckets.sales_inst_expected.length} clients`,
+              )}
+            </span>
           </div>
-        )}
-      </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <BucketCard
+              title={copy("أقساط مستحقة — أكونت", "Due — Account")}
+              accent="sky"
+              clients={buckets.acc_inst_expected}
+              info={t("metricTooltips.contracts_bucketAccInstOverdue")}
+            />
+            <BucketCard
+              title={copy("أقساط مستحقة — سيلز", "Due — Sales")}
+              accent="sky"
+              clients={buckets.sales_inst_expected}
+              hideValue
+              info={t("metricTooltips.contracts_bucketSalesInstOverdue")}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Overdue installments, split by collecting department. From a snapshot
           month these mirror the sheet's "Clients with Installments" lists
@@ -511,7 +481,7 @@ function ModernSheetBoard({
           actual={dashboard.sales_total_income}
           achievementPct={
             dashboard.sales_expected > 0
-              ? (dashboard.sales_total_income / dashboard.sales_expected) * 100
+              ? (dashboard.sales_act_inst / dashboard.sales_expected) * 100
               : null
           }
           gap={dashboard.sales_gap}
@@ -1041,10 +1011,11 @@ function BucketCard({
   );
 }
 
-// Renewal-pipeline badge for the selected month (renewal_status from
-// get_ceo_client_insights): Overdue = renewal date passed, not renewed yet
-// (chase first); On-Target = renewal due this month; null = not in this month's
-// pipeline (shown only in the "All" view).
+// Renewal-pipeline badge — follows the sheet's `target` column (0191), NOT a
+// passed end_date. Overdue = sheet marks the renewal overdue (chase it);
+// On Target = renewal on track; null = not in the renewal pipeline (e.g. a new
+// Sales-Deposit client, or a held contract). Kept SEPARATE from PaymentStatusBadge
+// so a client can read "On target" on renewal while still owing a late payment.
 function RenewalStatusBadge({
   status,
   copy,
@@ -1061,12 +1032,41 @@ function RenewalStatusBadge({
         "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
         status === "overdue"
           ? "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-200"
-          : "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-200",
+          : "bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-200",
       )}
     >
       {status === "overdue"
         ? copy("متأخر التجديد", "Overdue renewal")
-        : copy("تجديد هذا الشهر", "Due this month")}
+        : copy("في التارجت", "On target")}
+    </span>
+  );
+}
+
+// Collections badge — a SEPARATE dimension from renewal (0191). 'overdue' = a
+// payment is past due; 'due' = a payment falls in the selected month and isn't
+// collected yet. This is what made ركن المحرك look like an «overdue renewal»
+// when it was really an overdue PAYMENT on an on-target (held) contract.
+function PaymentStatusBadge({
+  status,
+  copy,
+}: {
+  status: "overdue" | "due" | null;
+  copy: (ar: string, en: string) => string;
+}) {
+  if (status == null) return null;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        status === "overdue"
+          ? "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-200"
+          : "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-200",
+      )}
+    >
+      <Wallet className="size-3" />
+      {status === "overdue"
+        ? copy("دفعة متأخرة", "Overdue payment")
+        : copy("دفعة مستحقة", "Payment due")}
     </span>
   );
 }
@@ -1159,7 +1159,7 @@ function TopClientsPanel({
                   </span>
                 </th>
                 <th className="px-3 py-2 text-start font-medium">
-                  {copy("التجديد", "Renewal")}
+                  {copy("التجديد / الدفعات", "Renewal / Payment")}
                 </th>
                 <th className="px-3 py-2 text-end font-medium">
                   <span className="inline-flex items-center gap-1">
@@ -1200,7 +1200,10 @@ function TopClientsPanel({
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <RenewalStatusBadge status={c.renewal_status} copy={copy} />
+                    <div className="flex flex-col items-start gap-1">
+                      <RenewalStatusBadge status={c.renewal_status} copy={copy} />
+                      <PaymentStatusBadge status={c.payment_status} copy={copy} />
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-end tabular-nums">{fmtSR(c.month_collected)}</td>
                   <td className="px-3 py-2 text-end tabular-nums text-muted-foreground">
@@ -1413,53 +1416,3 @@ function TeamTargetsCard({
   );
 }
 
-// Installment department badge. The installment's recorded contract type maps
-// to who collects it: 'New' → Sales; Renew/WinBack/UPSELL → Account. Shown so
-// the team can route each due payment to the right department (we don't yet
-// split the list per department). Legacy rows with no type render «—».
-const INSTALLMENT_ACCOUNT_TYPES = ["Renew", "WinBack", "UPSELL"];
-
-function InstallmentDeptCell({
-  sourceTypeKey,
-  copy,
-}: {
-  sourceTypeKey: string | null;
-  copy: (ar: string, en: string) => string;
-}) {
-  const dept =
-    sourceTypeKey === "New"
-      ? "sales"
-      : sourceTypeKey && INSTALLMENT_ACCOUNT_TYPES.includes(sourceTypeKey)
-        ? "account"
-        : null;
-  if (!dept) return <span className="text-muted-foreground">—</span>;
-
-  const typeText: Record<string, string> = {
-    New: copy("جديد", "New"),
-    Renew: copy("تجديد", "Renew"),
-    UPSELL: copy("ترقية", "Upsell"),
-    WinBack: copy("استرجاع", "Win-Back"),
-  };
-  const deptCls =
-    dept === "sales"
-      ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200"
-      : "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-200";
-  const deptLabel =
-    dept === "sales" ? copy("مبيعات", "Sales") : copy("أكونت", "Account");
-
-  return (
-    <div className="flex items-center gap-1.5 whitespace-nowrap">
-      <span
-        className={cn(
-          "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-          deptCls,
-        )}
-      >
-        {deptLabel}
-      </span>
-      <span className="text-[11px] text-muted-foreground">
-        {typeText[sourceTypeKey as string] ?? sourceTypeKey}
-      </span>
-    </div>
-  );
-}
