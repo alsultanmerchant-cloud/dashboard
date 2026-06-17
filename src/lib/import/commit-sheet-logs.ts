@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { ParsedSheetLog } from "@/lib/import/excel-parser";
 import { ACC_SHEET_SOURCE } from "./commit-contract-import";
+import { mapWithConcurrency } from "@/lib/import/concurrency";
 
 // `ClientID|YYYYMMDD` → days-since-epoch, for nearest-cycle matching. Returns
 // null for keys we can't parse (no `|`, non-8-digit date).
@@ -157,9 +158,9 @@ export async function commitSheetLogs({
   // cycles still at 0/null, so the current cycle's real figures are never
   // clobbered. total_value falls back to paid for these closed cycles (their
   // Installments-tracker value isn't carried in the renewal log).
-  for (const [contractId, v] of backfill) {
+  await mapWithConcurrency([...backfill], 10, async ([contractId, v]) => {
     const c = contractById.get(contractId);
-    if (!c) continue;
+    if (!c) return;
     const patch: Record<string, number> = { paid_value: v.paid };
     if (c.total_value == null || c.total_value === 0) patch.total_value = v.paid;
     if ((c.repeated_services_value == null || c.repeated_services_value === 0) && v.repeated != null)
@@ -171,7 +172,7 @@ export async function commitSheetLogs({
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", contractId);
     if (upErr) errors.push(`backfill ${contractId}: ${upErr.message}`);
-  }
+  });
 
   revalidatePath("/contracts");
 

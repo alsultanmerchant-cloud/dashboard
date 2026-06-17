@@ -3,6 +3,7 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
+import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 
 // =========================================================================
 // Client-satisfaction data layer (/satisfaction + Quality executive index).
@@ -61,10 +62,16 @@ export interface SatisfactionRow {
   briefAdherenceScore: number | null;
   sentiment: string | null;
   analyzedAt: string | null;
+  // True when this client's current analysis predates the org's latest taught
+  // instruction (migration 0197) — i.e. it was scored on outdated guidance and
+  // should be re-analyzed. Too many clients to regenerate eagerly, so the board
+  // flags it and the daily cron / per-client re-analyze refreshes it.
+  stale: boolean;
 }
 
 // ---- Hub overview: every client that has an import or analysis -----------
 async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
+  const knowledgeStamp = await getKnowledgeStamp(orgId);
   const [importsRes, analysesRes, clientsRes, projectsRes, linksRes] = await Promise.all([
     supabaseAdmin
       .from("client_chat_imports")
@@ -165,6 +172,7 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
         briefAdherenceScore: null,
         sentiment: null,
         analyzedAt: null,
+        stale: false,
       };
       rowByClient.set(clientId, r);
     }
@@ -188,6 +196,7 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     r.briefAdherenceScore = a.brief_adherence_score;
     r.sentiment = a.sentiment;
     r.analyzedAt = a.created_at;
+    r.stale = isStaleAgainstKnowledge(a.created_at, knowledgeStamp);
   }
 
   // Any client whose linked WhatsApp groups carry ingested messages is analyzable

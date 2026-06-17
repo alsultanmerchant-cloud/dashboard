@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Sparkles,
   RefreshCw,
@@ -179,6 +179,16 @@ export function AiAnalysisPanel({
       setLoading(false);
     }
   }, []);
+
+  // A freshly-taught instruction marks the stored run stale (migration 0197).
+  // Regenerate once on mount so the new lesson is reflected without a click.
+  const staleHandled = useRef(false);
+  useEffect(() => {
+    if (initialInsight?.stale && !staleHandled.current) {
+      staleHandled.current = true;
+      fetchInsights(false);
+    }
+  }, [initialInsight?.stale, fetchInsights]);
 
   const health = data ? HEALTH_CONFIG[data.overallHealth] : null;
 

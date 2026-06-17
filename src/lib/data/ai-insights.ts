@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { InsightsResult, StoredInsightRun } from "@/lib/ai-insights-schema";
+import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 
 export type ProjectHealth = {
   id: string;
@@ -84,6 +85,7 @@ export async function getCurrentStoredInsight(orgId: string): Promise<StoredInsi
   const row = data as InsightRunRow | null;
   if (!row) return null;
 
+  const stamp = await getKnowledgeStamp(orgId);
   return {
     id: row.id,
     status: row.status,
@@ -92,6 +94,7 @@ export async function getCurrentStoredInsight(orgId: string): Promise<StoredInsi
     completedAt: row.completed_at,
     errorMessage: row.error_message,
     result: row.result_json,
+    stale: isStaleAgainstKnowledge(row.completed_at, stamp),
   };
 }
 

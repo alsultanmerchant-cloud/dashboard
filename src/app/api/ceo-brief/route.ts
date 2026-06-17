@@ -34,7 +34,9 @@ export async function POST(req: Request) {
     const force = new URL(req.url).searchParams.get("force") === "1";
     if (!force) {
       const cached = await getCurrentCeoBrief(session.orgId);
-      if (cached?.completedAt) {
+      // Serve the cache only while fresh AND built on the current instructions;
+      // a newly-taught lesson (stale) forces a regenerate even within the TTL.
+      if (cached?.completedAt && !cached.stale) {
         const age = Date.now() - new Date(cached.completedAt).getTime();
         if (age < CEO_BRIEF_TTL_MS) {
           return Response.json({ current: cached, cached: true });

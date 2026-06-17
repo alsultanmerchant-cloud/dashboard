@@ -1,5 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+// Sentinel for the "clear to NULL" update bucket (Map keys can't be null).
+const NULL_KEY = "__null__";
+
 type ServiceKind = "social" | "media" | "seo" | null;
 type RoleType = "agent" | "account_manager" | "manager" | "specialist";
 type ProjectRoleContext = {
@@ -83,20 +86,19 @@ function resolveLegacyTeamManagerEmployeeId(input: {
   return preferManager(projectManager);
 }
 
+// قائد الفريق source of truth = employee_profiles.team_leader_employee_id.
+// `team_manager_employee_id` MUST mirror it (self-excluded), NOT المدير
+// (manager_employee_id) — المدير is the manager-of-heads (e.g. احمد حبيب, مدير
+// التقني), a higher level that is NOT a team leader. Empty team_leader → none.
+// The legacy project-slot resolver below is kept ONLY to recognise previously
+// system-set values that are safe to overwrite (see shouldUpdate), never as a
+// fallback for the desired value.
 function resolveTeamManagerEmployeeId(input: {
-  roleType: RoleType;
   assigneeEmployeeId: string;
-  assigneeManagerEmployeeId: string | null;
-  serviceKind: ServiceKind;
-  project: ProjectRoleContext;
+  assigneeTeamLeaderEmployeeId: string | null;
 }): string | null {
-  if (
-    input.assigneeManagerEmployeeId &&
-    input.assigneeManagerEmployeeId !== input.assigneeEmployeeId
-  ) {
-    return input.assigneeManagerEmployeeId;
-  }
-  return resolveLegacyTeamManagerEmployeeId(input);
+  const tl = input.assigneeTeamLeaderEmployeeId;
+  return tl && tl !== input.assigneeEmployeeId ? tl : null;
 }
 
 async function cleanupAccountManagerAgentDuplicates(
@@ -192,13 +194,13 @@ export async function syncTaskAssigneeManagers(
 
   const { data: employees, error: employeesErr } = await supabaseAdmin
     .from("employee_profiles")
-    .select("id, manager_employee_id")
+    .select("id, team_leader_employee_id")
     .eq("organization_id", orgId);
   if (employeesErr) throw employeesErr;
-  const employeeManagerById = new Map(
+  const employeeTeamLeaderById = new Map(
     (employees ?? []).map((row) => [
       row.id as string,
-      (row.manager_employee_id as string | null) ?? null,
+      (row.team_leader_employee_id as string | null) ?? null,
     ]),
   );
 
@@ -279,41 +281,41 @@ export async function syncTaskAssigneeManagers(
         media_manager_id: (project.media_manager_id as string | null) ?? null,
         seo_manager_id: (project.seo_manager_id as string | null) ?? null,
       };
+      // The previously system-set value (manager fallback + project slots) —
+      // used only to decide whether the stored value is safe to overwrite, so
+      // a manually-set team leader on the task is preserved.
       const legacyManagerId = resolveLegacyTeamManagerEmployeeId({
         roleType: row.role_type,
         assigneeEmployeeId: row.employee_id,
         serviceKind: task.service_id ? (serviceKindById.get(task.service_id) ?? null) : null,
         project: projectContext,
       });
+      // Desired value = the employee's قائد الفريق (team_leader_employee_id),
+      // self-excluded. May legitimately be null (no team leader → none).
       const managerId = resolveTeamManagerEmployeeId({
-        roleType: row.role_type,
         assigneeEmployeeId: row.employee_id,
-        assigneeManagerEmployeeId: employeeManagerById.get(row.employee_id) ?? null,
-        serviceKind: task.service_id ? (serviceKindById.get(task.service_id) ?? null) : null,
-        project: projectContext,
+        assigneeTeamLeaderEmployeeId: employeeTeamLeaderById.get(row.employee_id) ?? null,
       });
       const currentManagerId = row.team_manager_employee_id ?? null;
-      const shouldUpdate =
-        Boolean(managerId) &&
-        managerId !== row.employee_id &&
-        (
-          currentManagerId === null ||
-          currentManagerId === legacyManagerId
-        ) &&
-        currentManagerId !== managerId;
-      if (!shouldUpdate || !managerId) {
+      const overwritable =
+        currentManagerId === null || currentManagerId === legacyManagerId;
+      if (!overwritable || currentManagerId === managerId) {
         skipped++;
         continue;
       }
 
-      const arr = updatesByManager.get(managerId) ?? [];
+      // managerId === null clears a stale system value (e.g. an injected
+      // المدير) back to "no team leader".
+      const key = managerId ?? NULL_KEY;
+      const arr = updatesByManager.get(key) ?? [];
       arr.push(row.id);
-      updatesByManager.set(managerId, arr);
+      updatesByManager.set(key, arr);
     }
 
     if (updatesByManager.size > 0) {
       const BATCH = 500;
-      for (const [managerId, rowIds] of updatesByManager) {
+      for (const [key, rowIds] of updatesByManager) {
+        const managerId = key === NULL_KEY ? null : key;
         for (let i = 0; i < rowIds.length; i += BATCH) {
           const slice = rowIds.slice(i, i + BATCH);
           const { error: updateErr } = await supabaseAdmin
@@ -321,7 +323,7 @@ export async function syncTaskAssigneeManagers(
             .update({ team_manager_employee_id: managerId })
             .in("id", slice);
           if (updateErr) {
-            if (log) console.warn(`[task-assignee-managers] batch ${managerId}:${i}: ${updateErr.message}`);
+            if (log) console.warn(`[task-assignee-managers] batch ${key}:${i}: ${updateErr.message}`);
             skipped += slice.length;
           } else {
             updated += slice.length;

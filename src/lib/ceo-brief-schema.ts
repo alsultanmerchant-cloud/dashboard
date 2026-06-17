@@ -115,6 +115,9 @@ export interface StoredCeoBrief {
   completedAt: string | null;
   errorMessage: string | null;
   result: CeoBriefResult | null;
+  // True when this run predates the org's latest taught instruction (migration
+  // 0197) — the client auto-regenerates so the new lesson takes effect.
+  stale?: boolean;
 }
 
 const INTAKE_STAGE_NOISE_RE =

@@ -4,7 +4,11 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 import { buildCeoBriefSignals } from "@/lib/data/ceo-brief-signals";
-import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
+import {
+  buildKnowledgeBlock,
+  getKnowledgeStamp,
+  isStaleAgainstKnowledge,
+} from "@/lib/data/ai-knowledge";
 import {
   CeoBriefAiSchema,
   sanitizeCeoBriefResult,
@@ -63,7 +67,9 @@ export async function getCurrentCeoBrief(orgId: string): Promise<StoredCeoBrief 
     .limit(1)
     .maybeSingle();
   const row = data as BriefRunRow | null;
-  return row ? rowToStored(row) : null;
+  if (!row) return null;
+  const stamp = await getKnowledgeStamp(orgId);
+  return { ...rowToStored(row), stale: isStaleAgainstKnowledge(row.completed_at, stamp) };
 }
 
 // Build the deterministic facts, ask Gemini to narrate them, merge, and store

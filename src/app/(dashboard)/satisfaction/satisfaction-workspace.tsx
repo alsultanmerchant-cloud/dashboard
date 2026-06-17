@@ -635,18 +635,26 @@ function BoardCard({
               {row.analyzedAt.slice(0, 10)}
             </span>
           )}
+          {row.stale && (
+            <span
+              title={t("board.staleHint")}
+              className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400"
+            >
+              {t("board.staleBadge")}
+            </span>
+          )}
         </div>
       </div>
-      {!analyzed && hasImport ? (
+      {(!analyzed || row.stale) && hasImport ? (
         <button
           type="button"
           onClick={runAnalyze}
           disabled={busy}
-          title={t("board.analyze")}
+          title={row.stale ? t("board.staleHint") : t("board.analyze")}
           className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-soft-2 px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:bg-cyan/10 disabled:opacity-60"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-          {t("board.analyze")}
+          {row.stale ? t("board.reanalyze") : t("board.analyze")}
         </button>
       ) : (
         <ChevronLeft className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-cyan ltr:rotate-180 rtl:rotate-0" />

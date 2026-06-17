@@ -448,6 +448,16 @@ function buildStageReviewerSql(
     opts.attribution === "team_manager"
       ? "ta.team_manager_employee_id is not null"
       : "ta.role_type = 'agent' and ta.employee_id is not null";
+  // Specialist Review is review WORK, so it must be credited to the المتخصص
+  // (positions.role = 'specialist') — not to every agent assignee. The
+  // executing المنفّذ (and assignees with no position) are NOT reviewers and
+  // were wrongly surfaced here. Manager Review keys off team_manager and needs
+  // no such join.
+  const actorRoleJoin =
+    opts.attribution === "agent"
+      ? `join employee_profiles ae on ae.id = ta.employee_id
+         join positions ap on ap.id = ae.position_id and ap.role = 'specialist'`
+      : "";
   return `
 with hist as (
   select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
@@ -461,6 +471,7 @@ tm as (
     from (
       select ta.task_id, ta.${actorCol} as employee_id, count(*) as n
         from task_assignees ta
+         ${actorRoleJoin}
        where ta.organization_id = '${org}'
          and ${actorFilter}
        group by 1, 2

@@ -160,4 +160,7 @@ export type StoredInsightRun = {
   completedAt: string | null;
   errorMessage: string | null;
   result: InsightsResult | null;
+  // True when this run predates the org's latest taught instruction (migration
+  // 0197) — the client auto-regenerates so the new lesson takes effect.
+  stale?: boolean;
 };

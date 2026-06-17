@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { ParseResult } from "@/lib/import/excel-parser";
 import { normName, diceRatio } from "@/lib/match/client-match";
+import { mapWithConcurrency } from "@/lib/import/concurrency";
 
 export const ACC_SHEET_SOURCE = "excel-acc-sheet";
 
@@ -154,7 +155,7 @@ export async function commitContractImportPayload({
     if (r.external_id) existingClientMap.set(String(r.external_id), r.id);
   }
 
-  for (const row of clientRows) {
+  await mapWithConcurrency(clientRows, 10, async (row) => {
     const existingId = existingClientMap.get(row.external_id);
     if (existingId) {
       const { error } = await supabaseAdmin
@@ -163,7 +164,7 @@ export async function commitContractImportPayload({
         .eq("id", existingId);
       if (error) {
         errors.push(`عميل ${row.external_id}: ${error.message}`);
-        continue;
+        return;
       }
       clientIdByExternal.set(row.external_id, existingId);
       clientsUpdated++;
@@ -175,12 +176,12 @@ export async function commitContractImportPayload({
         .single();
       if (error || !data) {
         errors.push(`عميل ${row.external_id}: ${error?.message ?? "insert failed"}`);
-        continue;
+        return;
       }
       clientIdByExternal.set(row.external_id, data.id);
       clientsCreated++;
     }
-  }
+  });
 
   let contractsUpserted = 0;
   const contractIdByExternalKey = new Map<string, string>();
@@ -239,11 +240,11 @@ export async function commitContractImportPayload({
   };
   const amUnmatched = new Set<string>();
 
-  for (const c of payload.contracts) {
+  await mapWithConcurrency(payload.contracts, 10, async (c) => {
     const clientUuid = clientIdByExternal.get(c.clientExternalId);
     if (!clientUuid) {
       errors.push(`عقد ${c.externalKey}: عميل مفقود`);
-      continue;
+      return;
     }
     const typeId = c.contractTypeKey
       ? typeIdByKey.get(c.contractTypeKey) ?? null
@@ -304,20 +305,20 @@ export async function commitContractImportPayload({
         .eq("id", existingId);
       if (error) {
         errors.push(`عقد ${c.externalKey}: ${error.message}`);
-        continue;
+        return;
       }
       contractIdByExternalKey.set(c.externalKey, existingId);
       try {
         await restoreSheetParityFields(existingId, c);
       } catch (error) {
         errors.push(`حقول الشيت لعقد ${c.externalKey}: ${(error as Error).message}`);
-        continue;
+        return;
       }
       try {
         await syncContractPackageLinks(existingId, packageIds);
       } catch (error) {
         errors.push(`باقات عقد ${c.externalKey}: ${(error as Error).message}`);
-        continue;
+        return;
       }
     } else {
       const { data, error } = await supabaseAdmin
@@ -327,24 +328,24 @@ export async function commitContractImportPayload({
         .single();
       if (error || !data) {
         errors.push(`عقد ${c.externalKey}: ${error?.message ?? "insert failed"}`);
-        continue;
+        return;
       }
       contractIdByExternalKey.set(c.externalKey, data.id);
       try {
         await restoreSheetParityFields(data.id, c);
       } catch (error) {
         errors.push(`حقول الشيت لعقد ${c.externalKey}: ${(error as Error).message}`);
-        continue;
+        return;
       }
       try {
         await syncContractPackageLinks(data.id, packageIds);
       } catch (error) {
         errors.push(`باقات عقد ${c.externalKey}: ${(error as Error).message}`);
-        continue;
+        return;
       }
     }
     contractsUpserted++;
-  }
+  });
 
   if (amUnmatched.size > 0) {
     errors.push(
@@ -370,7 +371,12 @@ export async function commitContractImportPayload({
   }
 
   let installmentsUpserted = 0;
+  const today = new Date().toISOString().slice(0, 10);
 
+  // Build every installment row first, then write them in one bulk upsert. The
+  // unique (contract_id, sequence) constraint makes a single round-trip safe and
+  // replaces what was up to ~5 sequential upserts per contract.
+  const installmentRows = [];
   for (const inst of payload.installments) {
     const contractUuid = contractIdByExternalKey.get(inst.contractExternalKey);
     if (!contractUuid) {
@@ -381,30 +387,32 @@ export async function commitContractImportPayload({
     const status =
       inst.actualAmount > 0
         ? inst.actualAmount >= inst.expectedAmount ? "received" : "partial"
-        : inst.expectedDate && inst.expectedDate < new Date().toISOString().slice(0, 10)
+        : inst.expectedDate && inst.expectedDate < today
           ? "overdue"
           : "pending";
 
-    const row = {
+    installmentRows.push({
       organization_id: orgId,
       contract_id: contractUuid,
       sequence: inst.sequence,
-      expected_date: inst.expectedDate ?? new Date().toISOString().slice(0, 10),
+      expected_date: inst.expectedDate ?? today,
       expected_amount: inst.expectedAmount,
       actual_date: inst.actualDate,
       actual_amount: inst.actualAmount > 0 ? inst.actualAmount : null,
       source_type_key: typeKeyByExternalKey.get(inst.contractExternalKey) ?? null,
       status,
-    };
+    });
+  }
 
+  if (installmentRows.length > 0) {
     const { error } = await supabaseAdmin
       .from("installments")
-      .upsert(row, { onConflict: "contract_id,sequence" });
+      .upsert(installmentRows, { onConflict: "contract_id,sequence" });
     if (error) {
-      errors.push(`دفعة ${inst.contractExternalKey}#${inst.sequence}: ${error.message}`);
-      continue;
+      errors.push(`الدفعات: ${error.message}`);
+    } else {
+      installmentsUpserted = installmentRows.length;
     }
-    installmentsUpserted++;
   }
 
   await logAudit({

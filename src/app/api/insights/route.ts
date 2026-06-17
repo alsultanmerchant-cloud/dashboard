@@ -589,7 +589,9 @@ export async function POST(req: Request) {
     const force = url.searchParams.get("force") === "1";
     if (!force) {
       const cached = await getCurrentStoredInsight(session.orgId);
-      if (cached?.completedAt) {
+      // Serve the cache only while fresh AND built on the current instructions;
+      // a newly-taught lesson (stale) forces a regenerate even within the TTL.
+      if (cached?.completedAt && !cached.stale) {
         const age = Date.now() - new Date(cached.completedAt).getTime();
         if (age < CACHE_TTL_MS) {
           return Response.json({ current: cached, cached: true });

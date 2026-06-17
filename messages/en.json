@@ -3553,7 +3553,10 @@
       "pendingHint": "Chats imported but no AI analysis yet",
       "emptyColumn": "No clients here",
       "noGroups": "No synced chats",
-      "analyze": "Analyze"
+      "analyze": "Analyze",
+      "staleBadge": "Instructions updated",
+      "staleHint": "AI instructions changed after this analysis — re-analyze to apply the new guidance.",
+      "reanalyze": "Re-analyze"
     },
     "sentiment": {
       "positive": "Positive",

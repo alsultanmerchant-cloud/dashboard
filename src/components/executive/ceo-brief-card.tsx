@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -327,6 +327,16 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
       setLoading(false);
     }
   }, [t]);
+
+  // A freshly-taught instruction marks the stored brief stale (migration 0197).
+  // Regenerate once on mount so the new lesson is reflected without a click.
+  const staleHandled = useRef(false);
+  useEffect(() => {
+    if (initialBrief?.stale && !staleHandled.current) {
+      staleHandled.current = true;
+      refresh(false);
+    }
+  }, [initialBrief?.stale, refresh]);
 
   const timeFmt = lastUpdated
     ? new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {

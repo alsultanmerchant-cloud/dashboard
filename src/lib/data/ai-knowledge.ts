@@ -30,6 +30,32 @@ type KnowledgeRow = {
   created_at: string;
 };
 
+// The moment this org's AI instructions last changed (migration 0197 keeps it
+// fresh via a trigger on any ai_company_knowledge insert/update/delete). Cached
+// AI analyses (CEO brief, insights, client satisfaction) compare their own run
+// time to this stamp and regenerate when older, so a freshly-taught lesson
+// takes effect across every AI surface without a manual rebuild.
+export async function getKnowledgeStamp(orgId: string): Promise<number | null> {
+  const { data, error } = await supabaseAdmin
+    .from("organizations")
+    .select("ai_knowledge_updated_at")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (error || !data?.ai_knowledge_updated_at) return null;
+  return new Date(data.ai_knowledge_updated_at as string).getTime();
+}
+
+// True when a cached analysis produced at `runIso` predates the org's latest
+// instruction change — i.e. it was built on now-outdated guidance.
+export function isStaleAgainstKnowledge(
+  runIso: string | null | undefined,
+  stampMs: number | null,
+): boolean {
+  if (!stampMs || !runIso) return false;
+  const runMs = new Date(runIso).getTime();
+  return Number.isFinite(runMs) && runMs < stampMs;
+}
+
 export async function listActiveKnowledge(orgId: string): Promise<CompanyKnowledge[]> {
   const { data, error } = await supabaseAdmin
     .from("ai_company_knowledge")
