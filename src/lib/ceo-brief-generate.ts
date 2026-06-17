@@ -124,7 +124,6 @@ ${JSON.stringify(facts)}
 
 استخدم **context** لتحديد جذور المشكلة وربط النقاط (وليس فقط سردها):
 - worstServices/bestService = أين يتركّز التراجع وأين القوة (مثال: الخدمة الأضعف التزامًا).
-- intake = اختناق بدء العمل (مهام في «جديدة» لا تبدأ) — غالبًا السبب الأعلى للتأخير.
 - wip = هل التأخير مزمن (chronicOverdue ٣١-٩٠ يومًا) أم طارئ (freshOverdue)؟
 - satisfaction = الرضا والعملاء المعرّضون للفقد (topChurn) — البُعد التجاري/السمعة.
 - zeroOnTimePerformers/topPerformers/bestClients = أين الخلل البشري وما الذي ينجح.
@@ -132,8 +131,8 @@ ${JSON.stringify(facts)}
 
 التعليمات:
 - **headline**: جملة واحدة تجيب السؤال الأول وتُحدّد **أين** يتركّز التغيّر (الخدمة/المرحلة)، مستندةً إلى verdictArabic و statusPct و changes و context. مثال: "الوضع التشغيلي ${facts.verdictArabic} عند ${facts.statusPct}% — مدفوعًا بـ… وتتركّز المشكلة في…".
-- **riskNotes**: عنصر واحد لكل خطر في risks بنفس الـ id. interpretation = لماذا هذا خطر وأثره، مع **ربطه بجذر السبب من context** (مثلاً ربط التأخير بالخدمة الأضعف أو باختناق الإدخال أو بكونه مزمنًا).
-- **recommendations**: خطة عمل من ٤ إلى ٦ بنود **متنوّعة المجالات** تعالج **جذور** المشكلة من risks و context و opportunities معًا — وجّه التركيز للخدمة الأضعف، عالج اختناق الإدخال، أنقذ العملاء المعرّضين للفقد (topChurn)، أعد توزيع الحمل (overloaded/underutilized)، تابع التجديدات، عالج فريق zeroOnTimePerformers، واحمِ/استثمر ما ينجح (bestService/topPerformers/bestClients). لكل بند: category، action محدّد، owner (الدور المسؤول).
+- **riskNotes**: عنصر واحد لكل خطر في risks بنفس الـ id. interpretation = لماذا هذا خطر وأثره، مع **ربطه بجذر السبب من context** (مثلاً ربط التأخير بالخدمة الأضعف أو بكونه مزمنًا).
+- **recommendations**: خطة عمل من ٤ إلى ٦ بنود **متنوّعة المجالات** تعالج **جذور** المشكلة من risks و context و opportunities معًا — وجّه التركيز للخدمة الأضعف، أنقذ العملاء المعرّضين للفقد (topChurn)، أعد توزيع الحمل (overloaded/underutilized)، تابع التجديدات، عالج فريق zeroOnTimePerformers، واحمِ/استثمر ما ينجح (bestService/topPerformers/bestClients). لكل بند: category، action محدّد، owner (الدور المسؤول).
 - **bottomLine**: جملة واحدة فقط — أهم إجراء يعالج أخطر جذر سبب اليوم.${knowledge ? `\n\n${knowledge}` : ""}`;
 
     // Prefer the stronger brief model; fall back to the shared model if the id

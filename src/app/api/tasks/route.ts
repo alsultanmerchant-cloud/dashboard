@@ -5,6 +5,7 @@ import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
 import {
+  BALANCEABLE_PARTITIONS,
   GLOBAL_BOARD_LIMIT,
   LIST_LIMIT,
   PROJECT_BOARD_LIMIT,
@@ -93,12 +94,30 @@ export async function GET(request: NextRequest) {
   const fallbackLimit = mode === "board"
     ? (resolvedProjectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT)
     : LIST_LIMIT;
-  const limit = clampPositiveInt(sp.get("limit"), fallbackLimit, 500);
+  // Board "load more" in balanced mode grows the per-bucket cap, so allow a
+  // larger ceiling than the flat 500.
+  const limit = clampPositiveInt(sp.get("limit"), fallbackLimit, mode === "board" ? 2000 : 500);
 
   if (mode === "board") {
+    // Balanced kanban: client passes the whitelisted partition field + a growing
+    // per-bucket cap; we re-fetch the newest N per column and the client replaces
+    // its board with the result. Reject unknown fields (defends the RPC whitelist).
+    const partitionField = sp.get("partitionBy");
+    const partitionCfg =
+      partitionField && BALANCEABLE_PARTITIONS[partitionField]
+        ? {
+            by: BALANCEABLE_PARTITIONS[partitionField].field,
+            limit: clampPositiveInt(
+              sp.get("partitionLimit"),
+              BALANCEABLE_PARTITIONS[partitionField].perBucket,
+              500,
+            ),
+          }
+        : null;
     const bundle = await loadTaskBoardPageForGlobalView(session.orgId, filters, {
       limit,
       offset,
+      partition: partitionCfg,
     });
     return NextResponse.json({
       items: bundle.rows,

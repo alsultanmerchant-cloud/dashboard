@@ -28,6 +28,7 @@ import {
   TASK_OWNER_ROLE_LABELS,
 } from "@/lib/labels";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
+import { Explained, MetricInfo } from "@/components/metric-info";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type {
   AccountabilityEvidence,
@@ -127,14 +128,17 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
         if (q && !r.fullName.toLowerCase().includes(q)) return false;
         return true;
       })
-      // Worst measurable first; low-confidence and unmeasured sink to the end
-      // so a 2-event sample never headlines the board.
+      // Ordered by on-time commitment (الالتزام بالمواعيد) ascending — worst
+      // first — per the team's request: the composite score's makeup wasn't
+      // obvious, whereas on-time % is the single metric they steer by. Rows with
+      // no/low-confidence SLA sample still sink to the end so a 2-event sample
+      // never headlines the board.
       .sort((a, b) => {
         const rank = (r: AccountabilityScorecardRow) =>
-          r.score === null ? 2 : r.confidence === "low" ? 1 : 0;
+          r.onTimeRate === null ? 2 : r.confidence === "low" ? 1 : 0;
         const d = rank(a) - rank(b);
         if (d !== 0) return d;
-        return (a.score ?? 999) - (b.score ?? 999);
+        return (a.onTimeRate ?? 999) - (b.onTimeRate ?? 999);
       });
   }, [overview.rows, query, roleFilter]);
 
@@ -322,8 +326,18 @@ function ScorecardTable({
               <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 text-start font-semibold">{t("col.employee")}</th>
                 <th className="px-3 py-3 text-start font-semibold">{t("col.role")}</th>
-                <th className="px-3 py-3 text-start font-semibold text-foreground">{t("col.score")}</th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.onTime")}</th>
+                <th className="px-3 py-3 text-start font-semibold text-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.score")}
+                    <MetricInfo text={t("help.score")} label={t("col.score")} />
+                  </span>
+                </th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.onTime")}
+                    <MetricInfo text={t("help.onTime")} label={t("col.onTime")} />
+                  </span>
+                </th>
                 <th className="px-3 py-3 text-center font-semibold">{t("col.avgDwell")}</th>
                 <th className="px-3 py-3 text-center font-semibold">{t("col.rework")}</th>
                 <th className="px-3 py-3 text-center font-semibold">{t("col.openTasks")}</th>
@@ -334,6 +348,17 @@ function ScorecardTable({
             <tbody className="divide-y divide-border/60">
               {visibleRows.map((r) => {
                 const low = r.confidence === "low";
+                // Per-employee breakdown of how the composite score was formed,
+                // so hovering the badge shows the actual makeup (not just the formula).
+                const nonOverdue =
+                  r.openTasks > 0
+                    ? Math.round(100 * (1 - r.overdueOwned / r.openTasks))
+                    : null;
+                const otStr = r.onTimeRate === null ? NA : `${r.onTimeRate}%`;
+                const scoreBreakdown =
+                  nonOverdue === null
+                    ? t("help.scoreBreakdownNoOpen", { onTime: otStr })
+                    : t("help.scoreBreakdown", { onTime: otStr, nonOverdue: `${nonOverdue}%` });
                 return (
                   <tr
                     key={r.employeeId}
@@ -361,15 +386,29 @@ function ScorecardTable({
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-sm font-bold tabular-nums",
-                            scoreBadgeTone(r.score, low),
-                          )}
-                          dir="ltr"
-                        >
-                          {r.score === null ? NA : `${r.score}%`}
-                        </span>
+                        {r.score === null ? (
+                          <span
+                            className={cn(
+                              "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-sm font-bold tabular-nums",
+                              scoreBadgeTone(r.score, low),
+                            )}
+                            dir="ltr"
+                          >
+                            {NA}
+                          </span>
+                        ) : (
+                          <Explained text={scoreBreakdown}>
+                            <span
+                              className={cn(
+                                "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-sm font-bold tabular-nums",
+                                scoreBadgeTone(r.score, low),
+                              )}
+                              dir="ltr"
+                            >
+                              {`${r.score}%`}
+                            </span>
+                          </Explained>
+                        )}
                         {r.score === null ? (
                           <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[9px] text-muted-foreground">
                             {t("noScore")}

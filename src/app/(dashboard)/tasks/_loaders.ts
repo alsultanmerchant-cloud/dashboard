@@ -268,10 +268,17 @@ export async function loadTaskBoardForGlobalView(
 export async function loadTaskBoardPageForGlobalView(
   orgId: string,
   filters: TaskFilters,
-  opts: { limit?: number; offset?: number } = {},
-): Promise<{ rows: BoardTask[]; totalCount: number }> {
+  opts: {
+    limit?: number;
+    offset?: number;
+    partition?: { by: string; limit: number } | null;
+  } = {},
+): Promise<{ rows: BoardTask[]; totalCount: number; groupRows: BoardTask[] }> {
   const bundle = await listBoardTasksPage(orgId, filters, opts);
   return {
+    // Slim grouping rows for the FULL filtered set — carry only the fields the
+    // board's bucketTasksBy reads, so they're cast to BoardTask for counting.
+    groupRows: bundle.groupRows as BoardTask[],
     rows: bundle.rows.map((t) => ({
       id: t.id,
       title: t.title,

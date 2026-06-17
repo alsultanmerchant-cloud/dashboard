@@ -172,11 +172,20 @@ type TaskBundleRow = {
   }>;
 };
 
-type TaskBundleResult = { rows: TaskBundleRow[]; total_count?: number | null };
+type TaskBundleResult = {
+  rows: TaskBundleRow[];
+  total_count?: number | null;
+  // Lightweight grouping keys for EVERY task in the filtered set (migration
+  // 0191) — the kanban buckets these with the same client-side logic as the
+  // loaded cards to show true per-column totals for any group-by, not just the
+  // currently-loaded page. Shape mirrors a BoardTask subset.
+  group_rows?: unknown[] | null;
+};
 
 type TaskBundlePage = {
   rows: TaskBundleRow[];
   totalCount: number;
+  groupRows: unknown[];
 };
 
 /**
@@ -187,11 +196,37 @@ type TaskBundlePage = {
  * correctness bug because a matching task outside the first `limit` rows
  * would silently disappear.
  */
+/**
+ * Group-by dimensions the bundle RPC can balance server-side (single-valued and
+ * SQL-expressible). When the global kanban groups by one of these, we load the
+ * newest `perBucket` cards PER column instead of the global newest-N, so every
+ * column is populated up front. Multi-valued (assignee/tags) and client-timezone
+ * date group-bys are intentionally absent — they fall back to a flat load.
+ * High-cardinality dimensions use a smaller per-bucket cap to bound the payload.
+ */
+export const BALANCEABLE_PARTITIONS: Record<
+  string,
+  { field: string; perBucket: number }
+> = {
+  stage: { field: "stage", perBucket: 40 },
+  priority: { field: "priority", perBucket: 40 },
+  status: { field: "status", perBucket: 40 },
+  progress: { field: "progress", perBucket: 40 },
+  service: { field: "service", perBucket: 15 },
+  project: { field: "project", perBucket: 12 },
+  customer: { field: "customer", perBucket: 12 },
+};
+
+// Overall ceiling for a balanced board load (caps total cards across all buckets
+// so high-cardinality group-bys stay light).
+export const BALANCED_BOARD_LIMIT = 600;
+
 async function fetchTaskBundle(
   orgId: string,
   filters: TaskFilters,
   limit: number,
   offset = 0,
+  partition?: { by: string; limit: number } | null,
 ): Promise<TaskBundlePage> {
   const search = filters.search?.trim();
   const sanitizedSearch = search ? search.replace(/[%,()]/g, " ").trim() : "";
@@ -230,12 +265,15 @@ async function fetchTaskBundle(
       filters.customFilterTaskIds != null
         ? filters.customFilterTaskIds
         : null,
+    p_partition_by: partition?.by ?? null,
+    p_partition_limit: partition?.limit ?? 40,
   });
   if (error) throw error;
   const bundle = (data ?? { rows: [] }) as TaskBundleResult;
   return {
     rows: bundle.rows ?? [],
     totalCount: Math.max(0, Number(bundle.total_count ?? 0)),
+    groupRows: bundle.group_rows ?? [],
   };
 }
 
@@ -322,13 +360,17 @@ export async function listBoardTasks(
 export async function listBoardTasksPage(
   orgId: string,
   filters: TaskFilters = {},
-  opts: { limit?: number; offset?: number } = {},
+  opts: {
+    limit?: number;
+    offset?: number;
+    partition?: { by: string; limit: number } | null;
+  } = {},
 ) {
   const limit = opts.limit ?? (filters.projectId ? PROJECT_BOARD_LIMIT : GLOBAL_BOARD_LIMIT);
   const offset = opts.offset ?? 0;
-  const bundle = await fetchTaskBundle(orgId, filters, limit, offset);
+  const bundle = await fetchTaskBundle(orgId, filters, limit, offset, opts.partition);
   const rows = await listBoardTasksFromRows(bundle.rows);
-  return { rows, totalCount: bundle.totalCount };
+  return { rows, totalCount: bundle.totalCount, groupRows: bundle.groupRows };
 }
 
 async function listBoardTasksFromRows(data: TaskBundleRow[]): Promise<BoardTaskData[]> {

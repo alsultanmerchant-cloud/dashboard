@@ -56,6 +56,21 @@ async function syncContractPackageLinks(contractId: string, packageIds: string[]
   if (insertError) throw insertError;
 }
 
+async function restoreSheetParityFields(
+  contractId: string,
+  c: ParseResult["contracts"][number],
+) {
+  const { error } = await supabaseAdmin
+    .from("contracts")
+    .update({
+      delay_days: c.delayDays,
+      extension_days: c.extensionDays,
+      total_days_computed: c.totalDaysComputed,
+    })
+    .eq("id", contractId);
+  if (error) throw error;
+}
+
 export async function commitContractImportPayload({
   payload,
   orgId,
@@ -195,6 +210,7 @@ export async function commitContractImportPayload({
     const row = {
       organization_id: orgId,
       client_id: clientUuid,
+      sheet_client_name: c.clientName,
       contract_type_id: typeId,
       account_manager_name: c.accountManagerName,
       package_id: packageIds[0] ?? null,
@@ -219,6 +235,9 @@ export async function commitContractImportPayload({
       notes: c.notes,
       external_source: ACC_SHEET_SOURCE,
       external_id: c.externalKey,
+      // Every row in this pull is, by definition, present in the sheet. Stale
+      // rows (no longer in the sheet) are flipped to false after the loop.
+      sheet_present: true,
     };
 
     const existingId = existingContractMap.get(c.externalKey);
@@ -232,6 +251,12 @@ export async function commitContractImportPayload({
         continue;
       }
       contractIdByExternalKey.set(c.externalKey, existingId);
+      try {
+        await restoreSheetParityFields(existingId, c);
+      } catch (error) {
+        errors.push(`حقول الشيت لعقد ${c.externalKey}: ${(error as Error).message}`);
+        continue;
+      }
       try {
         await syncContractPackageLinks(existingId, packageIds);
       } catch (error) {
@@ -250,6 +275,12 @@ export async function commitContractImportPayload({
       }
       contractIdByExternalKey.set(c.externalKey, data.id);
       try {
+        await restoreSheetParityFields(data.id, c);
+      } catch (error) {
+        errors.push(`حقول الشيت لعقد ${c.externalKey}: ${(error as Error).message}`);
+        continue;
+      }
+      try {
         await syncContractPackageLinks(data.id, packageIds);
       } catch (error) {
         errors.push(`باقات عقد ${c.externalKey}: ${(error as Error).message}`);
@@ -257,6 +288,23 @@ export async function commitContractImportPayload({
       }
     }
     contractsUpserted++;
+  }
+
+  // Reconcile sheet membership. Contracts previously synced from the sheet but
+  // absent from this pull (e.g. a pre-renewal version whose Client ID|start_date
+  // key was overwritten when the client renewed) are flagged sheet_present=false
+  // so the sheet-parity grid hides them. They stay in the DB for history.
+  const staleKeys = [...existingContractMap.keys()].filter(
+    (k) => !contractIdByExternalKey.has(k),
+  );
+  if (staleKeys.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("contracts")
+      .update({ sheet_present: false })
+      .eq("organization_id", orgId)
+      .eq("external_source", ACC_SHEET_SOURCE)
+      .in("external_id", staleKeys);
+    if (error) errors.push(`أرشفة العقود غير الموجودة بالشيت: ${error.message}`);
   }
 
   let installmentsUpserted = 0;

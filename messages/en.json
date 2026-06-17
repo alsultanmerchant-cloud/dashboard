@@ -1116,6 +1116,10 @@
         "notes": "Notes",
         "row": "#"
       },
+      "help": {
+        "target": "Month-aware delivery status: it compares each contract's end date against the month you've selected (not today). On Target = still within the period; Overdue = the renewal is past due for that month; Sales Deposit / Closed / Lost / Renewed come straight from the contract's stage. Switch the month to see how the same client stood in the past.",
+        "status": "The contract's lifecycle state from the sheet: Active (running), Hold (paused — also stored as the contract type), Renewal Soon (nearing end), Expired, Renewed, Closed or Lost. This is the raw state; the Target column is the month-by-month judgement on top of it."
+      },
       "targetLabels": {
         "overdue": "Overdue",
         "salesDeposit": "Sales Deposit",
@@ -1129,6 +1133,7 @@
         "hold": "Hold",
         "closed": "Closed",
         "expired": "Expired",
+        "soonRenew": "Renewal Soon",
         "renewed": "Renewed",
         "lost": "Lost"
       },
@@ -2560,6 +2565,12 @@
     "noScore": "Unmeasured",
     "lowSample": "Small sample ({n})",
     "lowSampleHint": "Fewer than 5 SLA-measured events back this number — treat it as an early indication, not a verdict.",
+    "help": {
+      "score": "Score = 60% on-time commitment + 40% of open tasks that aren't overdue, blended over the last 30 days of stage history. It's a formula, not a guess — any component with no data drops out and the rest is reweighted.",
+      "onTime": "On-time % = stage steps finished within their SLA ÷ steps that had an SLA rule, over the last 30 days. Small samples (under 5) show neutral, never red.",
+      "scoreBreakdown": "This score = on-time {onTime} × 60% + non-overdue {nonOverdue} × 40%.",
+      "scoreBreakdownNoOpen": "This score = on-time {onTime} (no open tasks to weigh overdue against)."
+    },
     "showingRows": "Showing {shown} of {total}",
     "loadMore": "Load more",
     "emptyTitle": "No accountability data yet",
@@ -3051,6 +3062,7 @@
         "high": "High",
         "medium": "Medium"
       },
+      "riskHelp": "How this is flagged: the brief scans live delivery, finance and satisfaction data against fixed thresholds and ranks whatever crossed a line. The numbers above are the actual trigger — AI only phrases the explanation. Severity reflects how far past the threshold it went.",
       "noRisks": "No critical risks right now — operations are within normal range.",
       "topPriority": "Top priority today",
       "changes": {
@@ -3093,6 +3105,8 @@
       "edited": "Text updated ✅",
       "teaching": "Saving the lesson…",
       "taught": "Lesson saved 🧠",
+      "dismissing": "Removing the alert…",
+      "dismissed": "Alert removed 🗑️",
       "reading": "Fetching data…",
       "read": "Data fetched",
       "errorGeneric": "Couldn't reach the assistant. Try again.",
@@ -3334,6 +3348,11 @@
       "brief": "Brief",
       "sentiment": "Sentiment",
       "analyzed": "Analyzed"
+    },
+    "help": {
+      "satisfaction": "AI-read score (0–100). Gemini reads the client's WhatsApp group conversations and rates how satisfied they sound. Below 55 = at risk, 55–69 = watch, 70+ = healthy.",
+      "brief": "AI-read score (0–100) of how closely the work matches the client's agreed brief, judged by Gemini from the chats. Blank when no brief document is attached to compare against.",
+      "sentiment": "Overall tone of the client's recent messages as read by AI (positive / neutral / negative) — a fast read of the relationship, separate from the numeric score."
     },
     "groups": {
       "title": "Link WhatsApp groups",

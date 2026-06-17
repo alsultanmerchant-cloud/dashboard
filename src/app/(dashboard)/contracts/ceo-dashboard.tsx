@@ -25,6 +25,7 @@ import {
   YAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { Explained } from "@/components/metric-info";
 import { formatMonthYear } from "@/lib/utils-format";
 import type {
   MonthlyDashboard,
@@ -1065,12 +1066,12 @@ function TopClientsPanel({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold">
-            {copy("أهم العملاء: الإيراد وتجربة العميل", "Top clients: revenue and experience")}
+            {copy("عملاء يحتاجون انتباهك", "Clients needing attention")}
           </h3>
           <p className="text-[11px] text-muted-foreground">
             {copy(
-              "مرتبة حسب التحصيل، قيمة العقود، والمخاطر المفتوحة",
-              "ranked by collected revenue, active value, and open exposure",
+              "مخاطر مفتوحة، دفعات متأخرة، تقييم منخفض، أو تجديد قريب — مرتبة حسب الأولوية",
+              "open risk, overdue installments, low satisfaction, or renewal due soon — ordered by urgency",
             )}
           </p>
         </div>
@@ -1081,8 +1082,8 @@ function TopClientsPanel({
       {top.length === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
           {copy(
-            "لا توجد إيرادات عملاء متصلة لهذا الشهر.",
-            "No connected client revenue yet for this month.",
+            "لا يوجد عملاء يحتاجون انتباهًا خاصًا هذا الشهر.",
+            "No clients need special attention this month.",
           )}
         </p>
       ) : (
@@ -1127,7 +1128,11 @@ function TopClientsPanel({
                     {fmtSR(c.month_expected)}
                   </td>
                   <td className="px-3 py-2 text-center">
-                    <HealthPill label={c.health_label} score={c.health_score} />
+                    <ExperiencePill
+                      score={c.satisfaction_score}
+                      sentiment={c.sentiment}
+                      copy={copy}
+                    />
                   </td>
                   <td className="max-w-[280px] px-3 py-2 text-[12px] text-muted-foreground">
                     <span className="line-clamp-2">
@@ -1156,34 +1161,62 @@ function TopClientsPanel({
   );
 }
 
-function HealthPill({
-  label,
+// Experience pill — reads the AI satisfaction score/sentiment and renders the
+// SAME tiers and wording as the رضا العملاء page (satisfaction-workspace
+// bucketOf): negative sentiment or score < 55 = at risk, < 70 = needs
+// attention, ≥ 70 = healthy, no analysis = not analyzed. Keeping it identical
+// is the whole point — the CEO table and the satisfaction board must never
+// disagree on a client's standing (e.g. روعة المنزل = 60 / يحتاج متابعة, not a
+// separately-derived health number).
+function ExperiencePill({
   score,
+  sentiment,
+  copy,
 }: {
-  label: CeoClientInsight["health_label"];
-  score: number;
+  score: number | null;
+  sentiment: string | null;
+  copy: (ar: string, en: string) => string;
 }) {
-  const locale = useLocale();
+  const help = copy(
+    "يطابق مستويات «رضا العملاء»: يقرأ الذكاء الاصطناعي محادثات واتساب الخاصة بالعميل. أقل من ٥٥ أو نبرة سلبية = في خطر، ٥٥–٦٩ = يحتاج متابعة، ٧٠ فأكثر = ممتاز.",
+    "Mirrors the رضا العملاء satisfaction tiers — AI reads the client's WhatsApp chats. Below 55 or a negative tone = At risk; 55–69 = Needs attention; 70+ = Healthy.",
+  );
+  if (score == null) {
+    return (
+      <Explained
+        text={copy(
+          "لا يوجد تحليل واتساب لهذا العميل بعد.",
+          "No WhatsApp analysis for this client yet.",
+        )}
+      >
+        <span className="inline-flex rounded-full border border-border bg-soft-1 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {copy("لم يُحلَّل", "Not analyzed")}
+        </span>
+      </Explained>
+    );
+  }
+  const tier =
+    sentiment === "negative" || score < 55
+      ? "risk"
+      : score < 70
+        ? "watch"
+        : "healthy";
   const cls = {
     healthy: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
     watch: "border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-200",
     risk: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-200",
-  }[label];
-  const text = locale.startsWith("ar")
-    ? {
-        healthy: "صحي",
-        watch: "مراقبة",
-        risk: "خطر",
-      }[label]
-    : {
-        healthy: "Healthy",
-        watch: "Watch",
-        risk: "Risk",
-      }[label];
+  }[tier];
+  const label = {
+    healthy: copy("ممتاز", "Healthy"),
+    watch: copy("يحتاج متابعة", "Needs attention"),
+    risk: copy("في خطر", "At risk"),
+  }[tier];
   return (
-    <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium", cls)}>
-      {text} · {fmtPct(score)}
-    </span>
+    <Explained text={help}>
+      <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium", cls)}>
+        {label} · {score}
+      </span>
+    </Explained>
   );
 }
 

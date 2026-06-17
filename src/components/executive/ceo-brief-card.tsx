@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { MetricInfo } from "@/components/metric-info";
 import type { BriefChange } from "@/lib/data/ceo-brief-signals";
 import {
   applyBriefPatch,
@@ -29,7 +30,10 @@ import {
   type CeoBriefResult,
   type StoredCeoBrief,
 } from "@/lib/ceo-brief-schema";
-import { BRIEF_PATCHED_EVENT } from "@/components/executive/dashboard-selection-assistant";
+import {
+  BRIEF_PATCHED_EVENT,
+  RISK_DISMISSED_EVENT,
+} from "@/components/executive/dashboard-selection-assistant";
 
 const VERDICT = {
   improving: { icon: TrendingUp, accent: "text-cc-green", ring: "ring-cc-green/35", chip: "bg-green-dim text-cc-green" },
@@ -423,6 +427,7 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
                       <span className={cn("text-[10px] font-medium", sev.text)}>
                         {t(`severity.${r.severity}`)}
                       </span>
+                      <MetricInfo text={t("riskHelp")} label={t(`severity.${r.severity}`)} />
                     </div>
                     <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{r.metric}</p>
                     <p className="mt-1.5 text-xs leading-relaxed text-foreground/85" data-brief-field={`risk:${r.id}`}>
@@ -498,8 +503,26 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
         return patch.ok ? patch.next : prev;
       });
     };
+    const onDismissed = (e: Event) => {
+      const { riskId } = (e as CustomEvent<{ riskId: string }>).detail ?? {};
+      if (!riskId) return;
+      setData((prev) => {
+        if (!prev) return prev;
+        const dropEvent = (id: string) => id.startsWith(`risk-${riskId}-`);
+        return {
+          ...prev,
+          risks: (prev.risks ?? []).filter((r) => r.id !== riskId),
+          criticalEvents: (prev.criticalEvents ?? []).filter((ev) => !dropEvent(ev.id)),
+          timelineEvents: (prev.timelineEvents ?? []).filter((ev) => !dropEvent(ev.id)),
+        };
+      });
+    };
     window.addEventListener(BRIEF_PATCHED_EVENT, onPatched);
-    return () => window.removeEventListener(BRIEF_PATCHED_EVENT, onPatched);
+    window.addEventListener(RISK_DISMISSED_EVENT, onDismissed);
+    return () => {
+      window.removeEventListener(BRIEF_PATCHED_EVENT, onPatched);
+      window.removeEventListener(RISK_DISMISSED_EVENT, onDismissed);
+    };
   }, []);
 
   const refresh = useCallback(async (force = false) => {

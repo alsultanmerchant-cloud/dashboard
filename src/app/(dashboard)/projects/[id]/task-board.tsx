@@ -243,12 +243,23 @@ function TaskCard({
   onAdvance,
   onRetreat,
   advancing = false,
+  stretch = false,
 }: {
   task: BoardTask;
   dragging?: boolean;
   onAdvance?: (next: TaskStage) => void;
   onRetreat?: (prev: TaskStage) => void;
   advancing?: boolean;
+  /**
+   * When true the title link is stretched (`::before` overlay) so a click
+   * anywhere on the card navigates to the task. Used by the list/bucket/nested
+   * views that previously wrapped the whole card in an outer <Link> — nesting
+   * that anchor inside TaskCard's own links was invalid HTML and broke
+   * hydration ("<a> cannot be a descendant of <a>"). The inner project link is
+   * lifted above the overlay (`relative z-10`) so it stays independently
+   * clickable.
+   */
+  stretch?: boolean;
 }) {
   const t = useTranslations("TasksBoard");
   const locale = useLocale();
@@ -314,7 +325,7 @@ function TaskCard({
         <Link
           href={`/projects/${task.project.id}`}
           onClick={(e) => e.stopPropagation()}
-          className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary"
+          className="relative z-10 mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary"
           title={task.project.name}
         >
           <Briefcase className="size-3 shrink-0" />
@@ -330,7 +341,13 @@ function TaskCard({
       {/* ── Title ── */}
       <Link
         href={`/tasks/${task.id}`}
-        className="block break-words text-[13px] font-bold leading-snug text-foreground transition-colors hover:text-primary"
+        className={cn(
+          "block break-words text-[13px] font-bold leading-snug text-foreground transition-colors hover:text-primary",
+          // Stretched-link overlay: the whole card becomes the task click
+          // target without wrapping the card in an outer <a> (which would nest
+          // anchors and break hydration).
+          stretch && "before:absolute before:inset-0 before:content-['']",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {task.title}
@@ -578,6 +595,7 @@ function VisibleTaskList({
 function StageColumn({
   stage,
   tasks,
+  total,
   isMoving,
   onAdvance,
   onRetreat,
@@ -587,6 +605,12 @@ function StageColumn({
 }: {
   stage: TaskStage;
   tasks: BoardTask[];
+  /**
+   * True total for this stage across the full filtered set. May exceed the
+   * number of loaded cards (`tasks.length`) when the board is paginated. Falls
+   * back to the loaded count when undefined or not greater than what's loaded.
+   */
+  total?: number;
   isMoving: boolean;
   onAdvance?: (taskId: string, next: TaskStage) => void;
   onRetreat?: (taskId: string, prev: TaskStage) => void;
@@ -595,6 +619,10 @@ function StageColumn({
   /** Optional: enables the Rwasem "+ add task" footer per column. */
   onQuickCreate?: (stage: TaskStage, title: string) => Promise<void> | void;
 }) {
+  // Prefer the true filtered total; only when it actually exceeds the loaded
+  // count (otherwise DnD live-updates to tasks.length stay accurate).
+  const headerCount =
+    typeof total === "number" && total > tasks.length ? total : tasks.length;
   const t = useTranslations("TasksBoard");
   const locale = useLocale();
   // Stable wrapper for dnd-kit — always a <div> so the droppable ref doesn't
@@ -642,7 +670,7 @@ function StageColumn({
               TASK_STAGE_TONES[stage],
             )}
           >
-            {tasks.length}
+            {headerCount}
           </span>
           <span
             className="text-xs font-semibold text-foreground/70 group-hover:text-foreground"
@@ -661,7 +689,7 @@ function StageColumn({
           >
             <span className="flex items-center gap-1.5">
               {stageLabel(stage, locale)}
-              <span className="tabular-nums opacity-80">({tasks.length})</span>
+              <span className="tabular-nums opacity-80">({headerCount})</span>
             </span>
             <button
               type="button"
@@ -723,12 +751,17 @@ function ProjectColumn({
   projectName,
   clientName,
   tasks,
+  total,
 }: {
   projectId: string;
   projectName: string;
   clientName: string | null;
   tasks: BoardTask[];
+  /** True total for this bucket across the full filtered set (see StageColumn). */
+  total?: number;
 }) {
+  const headerCount =
+    typeof total === "number" && total > tasks.length ? total : tasks.length;
   return (
     <div className="flex w-72 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
       <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
@@ -746,21 +779,13 @@ function ProjectColumn({
           )}
         </div>
         <span className="tabular-nums text-xs text-foreground/70">
-          {tasks.length}
+          {headerCount}
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 min-h-24">
         <VisibleTaskList
           tasks={tasks}
-          renderTask={(t) => (
-            <Link
-              key={t.id}
-              href={`/tasks/${t.id}`}
-              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
-            >
-              <TaskCard task={t} />
-            </Link>
-          )}
+          renderTask={(t) => <TaskCard key={t.id} task={t} stretch />}
         />
         {tasks.length === 0 && (
           <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-foreground/70">
@@ -775,30 +800,27 @@ function ProjectColumn({
 function BucketColumn({
   title,
   tasks,
+  total,
 }: {
   title: string;
   tasks: BoardTask[];
+  /** True total for this bucket across the full filtered set (see StageColumn). */
+  total?: number;
 }) {
+  const headerCount =
+    typeof total === "number" && total > tasks.length ? total : tasks.length;
   return (
     <div className="flex w-72 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
       <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
         <div className="line-clamp-1 text-xs font-semibold">{title}</div>
         <span className="tabular-nums text-xs text-foreground/70">
-          {tasks.length}
+          {headerCount}
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 min-h-24">
         <VisibleTaskList
           tasks={tasks}
-          renderTask={(t) => (
-            <Link
-              key={t.id}
-              href={`/tasks/${t.id}`}
-              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded-xl"
-            >
-              <TaskCard task={t} />
-            </Link>
-          )}
+          renderTask={(t) => <TaskCard key={t.id} task={t} stretch />}
         />
         {tasks.length === 0 && (
           <div className="rounded-lg border border-dashed border-soft px-3 py-4 text-center text-[11px] text-foreground/70">
@@ -817,18 +839,27 @@ function NestedColumn({
   title,
   tasks,
   innerKey,
+  total,
 }: {
   title: string;
   tasks: BoardTask[];
   innerKey: TaskGroupKey;
+  /**
+   * True total for this OUTER bucket across the full filtered set (see
+   * StageColumn). Inner sub-section counts stay loaded-based, since the slim
+   * grouping rows aren't re-bucketed per inner key.
+   */
+  total?: number;
 }) {
   const inner = bucketTasksBy(tasks, innerKey);
+  const headerCount =
+    typeof total === "number" && total > tasks.length ? total : tasks.length;
   return (
     <div className="flex w-80 shrink-0 flex-col rounded-2xl border border-soft bg-soft-1">
       <div className="flex items-start justify-between gap-2 rounded-t-2xl border-b border-soft px-3 py-2">
         <div className="line-clamp-1 text-xs font-semibold">{title}</div>
         <span className="tabular-nums text-xs text-foreground/70">
-          {tasks.length}
+          {headerCount}
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 min-h-24">
@@ -871,15 +902,7 @@ function NestedSubsection({
         <div className="flex flex-col gap-1.5 p-1.5">
           <VisibleTaskList
             tasks={tasks}
-            renderTask={(t) => (
-              <Link
-                key={t.id}
-                href={`/tasks/${t.id}`}
-                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40"
-              >
-                <TaskCard task={t} />
-              </Link>
-            )}
+            renderTask={(t) => <TaskCard key={t.id} task={t} stretch />}
           />
         </div>
       )}
@@ -1138,6 +1161,7 @@ export function TaskBoard({
   tasks: initialTasks,
   groupBy = "stage",
   projectId,
+  groupingRows,
 }: {
   tasks: BoardTask[];
   /**
@@ -1147,6 +1171,16 @@ export function TaskBoard({
   groupBy?: TaskGroupKey | TaskGroupKey[];
   /** Optional: when set, each non-folded column shows a Rwasem-style quick-add input. */
   projectId?: string;
+  /**
+   * Slim grouping rows for the FULL filtered set (migration 0191). On the global
+   * /tasks board only ~120 cards load at a time, so a column's loaded count
+   * understates reality. When present, every column header shows the true total
+   * for its bucket — computed by running `bucketTasksBy` over these rows with
+   * the SAME logic as the loaded cards, so it works for any group-by. Carries
+   * only the fields bucketTasksBy reads (cast to BoardTask). Omitted on the
+   * project board, where all cards load and the loaded count is already true.
+   */
+  groupingRows?: BoardTask[];
 }) {
   const groupKeys: TaskGroupKey[] = Array.isArray(groupBy)
     ? groupBy.filter(Boolean)
@@ -1194,6 +1228,17 @@ export function TaskBoard({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
+
+  // True per-bucket totals for the active outer group-by, over the FULL filtered
+  // set (`groupingRows`) when available, else the loaded set. Column headers read
+  // this so they show every matching task, not just loaded cards. Uses the SAME
+  // bucketTasksBy as the columns, so bucket ids line up exactly for every mode.
+  const bucketTotals = useMemo(() => {
+    const src = groupingRows && groupingRows.length > 0 ? groupingRows : tasks;
+    const totals: Record<string, number> = {};
+    for (const col of bucketTasksBy(src, outerKey)) totals[col.id] = col.tasks.length;
+    return totals;
+  }, [groupingRows, tasks, outerKey]);
 
   const grouped = useMemo(() => {
     const map: Record<TaskStage, BoardTask[]> = {
@@ -1459,6 +1504,7 @@ export function TaskBoard({
             title={col.name}
             tasks={col.tasks}
             innerKey={innerKey}
+            total={bucketTotals[col.id]}
           />
         ))}
         {outerCols.length === 0 && (
@@ -1480,6 +1526,7 @@ export function TaskBoard({
             projectName={col.name}
             clientName={col.client_name}
             tasks={col.tasks}
+            total={bucketTotals[col.id]}
           />
         ))}
         {projectColumns.length === 0 && (
@@ -1496,7 +1543,12 @@ export function TaskBoard({
     return (
       <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {cols.map((col) => (
-          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+          <BucketColumn
+            key={col.id}
+            title={col.name}
+            tasks={col.tasks}
+            total={bucketTotals[col.id]}
+          />
         ))}
         {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
@@ -1516,7 +1568,12 @@ export function TaskBoard({
     return (
       <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {customColumns.map((col) => (
-          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+          <BucketColumn
+            key={col.id}
+            title={col.name}
+            tasks={col.tasks}
+            total={bucketTotals[col.id]}
+          />
         ))}
         {customColumns.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
@@ -1538,7 +1595,12 @@ export function TaskBoard({
     return (
       <div className="flex items-start gap-3 overflow-x-auto pb-2">
         {cols.map((col) => (
-          <BucketColumn key={col.id} title={col.name} tasks={col.tasks} />
+          <BucketColumn
+            key={col.id}
+            title={col.name}
+            tasks={col.tasks}
+            total={bucketTotals[col.id]}
+          />
         ))}
         {cols.length === 0 && (
           <div className="w-full rounded-2xl border border-dashed border-soft bg-card/30 p-12 text-center text-sm text-foreground/70">
@@ -1568,6 +1630,7 @@ export function TaskBoard({
               key={s}
               stage={s}
               tasks={grouped[s]}
+              total={bucketTotals[s]}
               isMoving={pending}
               onAdvance={moveTask}
               folded={folded.has(s)}

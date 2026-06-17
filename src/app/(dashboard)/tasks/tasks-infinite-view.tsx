@@ -29,6 +29,19 @@ type Props = {
   initialBoardTasks: BoardTask[];
   initialListTasks: ListTaskRow[];
   totalCount: number;
+  /**
+   * Lightweight grouping rows for the FULL filtered set — the board buckets
+   * these to show true per-column totals (kanban column headers) for any
+   * group-by, independent of how many cards are currently loaded.
+   */
+  groupingRows?: BoardTask[];
+  /**
+   * When the global kanban groups by a server-partitionable dimension, the
+   * initial load is balanced (newest `perBucket` per column). "Load more" then
+   * grows the per-bucket cap and replaces the board, instead of flat offset
+   * paging (which would skip/duplicate in balanced mode). Null = flat paging.
+   */
+  boardPartition?: { key: string; perBucket: number } | null;
   pageSize: number;
 };
 
@@ -47,6 +60,8 @@ export function TasksInfiniteView({
   initialBoardTasks,
   initialListTasks,
   totalCount: initialTotalCount,
+  groupingRows,
+  boardPartition,
   pageSize,
 }: Props) {
   const [boardTasks, setBoardTasks] = useState(initialBoardTasks);
@@ -54,15 +69,20 @@ export function TasksInfiniteView({
   const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Current per-bucket cap for a balanced board load; grown by "load more".
+  const [partitionLimit, setPartitionLimit] = useState(
+    boardPartition?.perBucket ?? 0,
+  );
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setBoardTasks(initialBoardTasks);
     setListTasks(initialListTasks);
     setTotalCount(initialTotalCount);
+    setPartitionLimit(boardPartition?.perBucket ?? 0);
     setLoading(false);
     setError(null);
-  }, [initialBoardTasks, initialListTasks, initialTotalCount, queryString, view]);
+  }, [initialBoardTasks, initialListTasks, initialTotalCount, queryString, view, boardPartition?.perBucket]);
 
   const loadedCount = view === "kanban" ? boardTasks.length : listTasks.length;
   const hasMore = loadedCount < totalCount;
@@ -78,11 +98,25 @@ export function TasksInfiniteView({
     if (loading || !hasMore) return;
     setLoading(true);
     setError(null);
+    // Balanced board "load more": grow the per-bucket cap and REPLACE the board
+    // (flat offset paging would skip/duplicate, since the loaded set isn't a
+    // flat newest-prefix). Every column gains its next slice of newest cards.
+    const balanced = mode === "board" && boardPartition;
+    const nextPartitionLimit = balanced
+      ? partitionLimit + boardPartition.perBucket
+      : partitionLimit;
     try {
       const params = new URLSearchParams(queryString);
       params.set("mode", mode);
-      params.set("offset", String(loadedCount));
-      params.set("limit", String(pageSize));
+      if (balanced) {
+        params.set("offset", "0");
+        params.set("limit", "2000");
+        params.set("partitionBy", boardPartition.key);
+        params.set("partitionLimit", String(nextPartitionLimit));
+      } else {
+        params.set("offset", String(loadedCount));
+        params.set("limit", String(pageSize));
+      }
       const res = await fetch(`/api/tasks?${params.toString()}`, {
         credentials: "same-origin",
         cache: "no-store",
@@ -92,7 +126,17 @@ export function TasksInfiniteView({
       }
       if (mode === "board") {
         const json = await res.json() as TasksApiResponse<BoardTask>;
-        setBoardTasks((curr) => [...curr, ...json.items]);
+        if (balanced) {
+          setBoardTasks(json.items);
+          setPartitionLimit(nextPartitionLimit);
+        } else {
+          // Flat (non-partitionable group-by) load-more appends; dedupe by id
+          // as a safety net against any overlap.
+          setBoardTasks((curr) => {
+            const seen = new Set(curr.map((t) => t.id));
+            return [...curr, ...json.items.filter((t) => !seen.has(t.id))];
+          });
+        }
         setTotalCount(json.totalCount);
       } else {
         const json = await res.json() as TasksApiResponse<ListTaskRow>;
@@ -104,7 +148,7 @@ export function TasksInfiniteView({
     } finally {
       setLoading(false);
     }
-  }, [hasMore, loadedCount, loading, mode, pageSize, queryString]);
+  }, [hasMore, loadedCount, loading, mode, pageSize, queryString, boardPartition, partitionLimit]);
 
   useEffect(() => {
     if (view === "kanban" || !hasMore || loading) return;
@@ -134,7 +178,7 @@ export function TasksInfiniteView({
       <RecordPaginationListTap kind="tasks" ids={paginationIds} hrefPattern="/tasks/{id}" />
       {view === "list" && <TasksListView tasks={listTasks} />}
       {view === "kanban" && (
-        <TaskBoard tasks={boardTasks} groupBy={groupBy} />
+        <TaskBoard tasks={boardTasks} groupBy={groupBy} groupingRows={groupingRows} />
       )}
       {view === "calendar" && <TasksCalendarView tasks={listTasks} />}
       {view === "pivot" && <TasksPivotView tasks={listTasks} />}

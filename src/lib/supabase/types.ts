@@ -778,6 +778,8 @@ export type Database = {
           renewal_paid_value: number | null
           renewed_status: string | null
           repeated_services_value: number | null
+          sheet_client_name: string | null
+          sheet_present: boolean
           start_date: string
           status: string
           target: string
@@ -813,6 +815,8 @@ export type Database = {
           renewal_paid_value?: number | null
           renewed_status?: string | null
           repeated_services_value?: number | null
+          sheet_client_name?: string | null
+          sheet_present?: boolean
           start_date: string
           status?: string
           target?: string
@@ -848,6 +852,8 @@ export type Database = {
           renewal_paid_value?: number | null
           renewed_status?: string | null
           repeated_services_value?: number | null
+          sheet_client_name?: string | null
+          sheet_present?: boolean
           start_date?: string
           status?: string
           target?: string

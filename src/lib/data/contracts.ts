@@ -485,22 +485,31 @@ export async function getMonthTargetBuckets(
     for (const r of (live ?? []) as unknown as BucketRow[]) place(r);
   }
 
-  // Installments due in the month. Exclude sequence 1 — the first payment is
-  // the contract-confirmation down-payment, already counted as New-client
-  // Income (Sales) / renewal collection (Account), NOT as an installment. Every
-  // income bucket in 0172 filters sequence >= 2; the due-list now mirrors that.
+  // Installments due in the month + still-owed overdue carryover from prior
+  // months (what the team expects: "expected this month + المتأخرة"). Exclude
+  // sequence 1 — the first payment is the contract-confirmation down-payment,
+  // already counted as New-client Income (Sales) / renewal collection (Account),
+  // NOT as an installment. Every income bucket in 0172 filters sequence >= 2;
+  // the due-list mirrors that. Predicate: expected_date <= month-end AND
+  // (expected_date >= month-start  ← this-month rows, any status
+  //  OR status NOT IN (received, waived)  ← prior-month rows still owed).
+  // Prior-month rows already paid are excluded. Only sheet-present contracts
+  // (archived/renewed-away contracts shouldn't appear), per the rest of the
+  // dashboard.
   const { data: insts, error: instErr } = await supabaseAdmin
     .from("installments")
     .select(
-      `expected_amount, status, source_type_key,
-       contract:contracts!inner(id, organization_id,
+      `expected_amount, expected_date, status, source_type_key,
+       contract:contracts!inner(id, organization_id, sheet_present,
          client:clients(name),
          am:employee_profiles!contracts_account_manager_id_fkey(full_name))`,
     )
     .eq("contract.organization_id", orgId)
+    .eq("contract.sheet_present", true)
     .gte("sequence", 2)
-    .gte("expected_date", start)
     .lte("expected_date", endDate)
+    .or(`expected_date.gte.${start},status.not.in.("received","waived")`)
+    .order("expected_date", { ascending: true })
     .order("expected_amount", { ascending: false });
   if (instErr) throw instErr;
 
@@ -667,7 +676,7 @@ export async function listContractsGrid(
        repeated_services_value, payment_status, target, status,
        contract_status_label, renewed_status, extension_days, delay_days,
        total_days_computed, notes, account_manager_id, account_manager_name,
-       package_name,
+       package_name, sheet_client_name,
        client:clients(id, name, external_id),
        am:employee_profiles!contracts_account_manager_id_fkey(id, full_name),
        type:contract_types!contracts_contract_type_id_fkey(key, name_ar),
@@ -675,6 +684,11 @@ export async function listContractsGrid(
        packages:contract_packages(sort_order, package:packages(name_ar))`,
     )
     .eq("organization_id", orgId)
+    // Sheet-parity: show only contracts still present in the source sheet.
+    // Rows the sync no longer sees (e.g. pre-renewal versions whose
+    // Client ID|start_date key was overwritten) are kept in the DB for the
+    // detail page but hidden here so the grid count matches the sheet.
+    .eq("sheet_present", true)
     .order("start_date", { ascending: false })
     .limit(1000);
 
@@ -715,6 +729,7 @@ export async function listContractsGrid(
     account_manager_id: string | null;
     account_manager_name: string | null;
     package_name: string | null;
+    sheet_client_name: string | null;
     client: { id: string; name: string | null; external_id: string | null } | null;
     am: { id: string; full_name: string } | null;
     type: { key: string; name_ar: string } | null;
@@ -741,7 +756,7 @@ export async function listContractsGrid(
       hold_end_date: r.hold_end_date,
       type_before_hold_id: r.type_before_hold_id,
       client_id: r.client?.id ?? "",
-      client_name: r.client?.name ?? null,
+      client_name: r.sheet_client_name ?? r.client?.name ?? null,
       client_external_id: r.client?.external_id ?? null,
       account_manager_id: r.account_manager_id,
       // Prefer the resolved employee name; fall back to the raw string when

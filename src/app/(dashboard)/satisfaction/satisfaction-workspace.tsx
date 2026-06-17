@@ -42,6 +42,7 @@ import {
 } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
+import { MetricInfo } from "@/components/metric-info";
 import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -659,9 +660,24 @@ function OverviewTable({
               <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="p-3 text-start font-medium">{t("col.client")}</th>
                 <th className="p-3 text-center font-medium">{t("col.groups")}</th>
-                <th className="p-3 text-center font-medium">{t("col.satisfaction")}</th>
-                <th className="p-3 text-center font-medium">{t("col.brief")}</th>
-                <th className="p-3 text-center font-medium">{t("col.sentiment")}</th>
+                <th className="p-3 text-center font-medium">
+                  <span className="inline-flex items-center justify-center gap-1">
+                    {t("col.satisfaction")}
+                    <MetricInfo text={t("help.satisfaction")} label={t("col.satisfaction")} />
+                  </span>
+                </th>
+                <th className="p-3 text-center font-medium">
+                  <span className="inline-flex items-center justify-center gap-1">
+                    {t("col.brief")}
+                    <MetricInfo text={t("help.brief")} label={t("col.brief")} />
+                  </span>
+                </th>
+                <th className="p-3 text-center font-medium">
+                  <span className="inline-flex items-center justify-center gap-1">
+                    {t("col.sentiment")}
+                    <MetricInfo text={t("help.sentiment")} label={t("col.sentiment")} />
+                  </span>
+                </th>
                 <th className="p-3 text-center font-medium">{t("col.analyzed")}</th>
               </tr>
             </thead>

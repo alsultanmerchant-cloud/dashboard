@@ -14,6 +14,7 @@ import {
   loadTaskBoardPageForGlobalView,
   loadTasksPageForGlobalView,
 } from "./_loaders";
+import { BALANCEABLE_PARTITIONS, BALANCED_BOARD_LIMIT } from "@/lib/data/tasks";
 import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
@@ -210,13 +211,21 @@ async function TasksBoardSection({
   const customFilterTaskIds = await customFilterPromise;
   const effectiveFilters = { ...taskFilters, customFilterTaskIds };
 
+  // Balanced kanban load: when grouping by a server-partitionable dimension,
+  // fetch the newest N per column so every column is populated up front instead
+  // of the newest tasks all piling into one bucket. Non-partitionable group-bys
+  // (assignee/tags/date) and the list view keep the flat paged load.
+  const boardPartition = BALANCEABLE_PARTITIONS[groupBy[0]] ?? null;
   const [boardBundle, listBundle] = await Promise.all([
     view === "kanban"
       ? loadTaskBoardPageForGlobalView(orgId, effectiveFilters, {
-          limit: pageSize,
+          limit: boardPartition ? BALANCED_BOARD_LIMIT : pageSize,
           offset: 0,
+          partition: boardPartition
+            ? { by: boardPartition.field, limit: boardPartition.perBucket }
+            : null,
         })
-      : Promise.resolve({ rows: [], totalCount: 0 }),
+      : Promise.resolve({ rows: [], totalCount: 0, groupRows: [] }),
     view === "kanban"
       ? Promise.resolve({ rows: [], totalCount: 0 })
       : loadTasksPageForGlobalView(orgId, effectiveFilters, {
@@ -254,6 +263,12 @@ async function TasksBoardSection({
         initialBoardTasks={boardBundle.rows}
         initialListTasks={listBundle.rows}
         totalCount={filteredTotalCount}
+        groupingRows={view === "kanban" ? boardBundle.groupRows : []}
+        boardPartition={
+          view === "kanban" && boardPartition
+            ? { key: groupBy[0], perBucket: boardPartition.perBucket }
+            : null
+        }
         pageSize={pageSize}
       />
     </TasksCountProvider>

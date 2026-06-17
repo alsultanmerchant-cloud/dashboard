@@ -10,7 +10,6 @@ import {
   getClientHealth,
   getPerformerLeaderboard,
   getServiceLineHealth,
-  getStageFunnel,
   getWipAging,
 } from "@/lib/data/executive";
 import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
@@ -39,7 +38,6 @@ export interface BriefChange {
 
 export type RiskKind =
   | "delivery_slip"
-  | "intake_bottleneck"
   | "client_churn"
   | "stuck_project"
   | "idle_people"
@@ -53,7 +51,12 @@ export interface BriefRisk {
   title: string; // Arabic — what the risk is
   severity: "critical" | "high" | "medium";
   metric: string; // Arabic — the supporting numbers
-  href: string | null; // where the CEO drills into the evidence
+  href: string | null; // where the CEO drills into the SPECIFIC evidence (deep link)
+  // The concrete entity this risk is about (project/client/employee/task/index
+  // key). Drives both the deep link and per-instance dismissal: a dismissal
+  // scoped to this entity suppresses only this instance, not the whole kind.
+  // Undefined for genuinely agency-wide risks (delivery_slip, overdue_money …).
+  entityId?: string;
   weight: number; // internal ranking only (not rendered)
 }
 
@@ -157,6 +160,32 @@ async function loadSnapshotDeltas(orgId: string): Promise<SnapshotDeltas | null>
   };
 }
 
+// Risks the CEO has explicitly dismissed ("this isn't a problem"). A row with a
+// null entity_id suppresses the whole kind; a scoped row suppresses only that
+// instance, so a genuinely new project/client of the same kind still surfaces.
+interface DismissedRisk {
+  riskId: string;
+  entityId: string | null;
+}
+
+async function loadDismissedRisks(orgId: string): Promise<DismissedRisk[]> {
+  const { data } = await supabaseAdmin
+    .from("ceo_brief_dismissed_risks")
+    .select("risk_id, entity_id")
+    .eq("organization_id", orgId)
+    .eq("is_active", true);
+  return ((data ?? []) as Array<{ risk_id: string; entity_id: string | null }>).map((r) => ({
+    riskId: r.risk_id,
+    entityId: r.entity_id,
+  }));
+}
+
+function isDismissed(risk: BriefRisk, dismissed: DismissedRisk[]): boolean {
+  return dismissed.some(
+    (d) => d.riskId === risk.id && (d.entityId == null || d.entityId === risk.entityId),
+  );
+}
+
 function computeVerdict(
   snap: SnapshotDeltas | null,
   completedShift: number,
@@ -206,7 +235,7 @@ function eventCategoryFromHighlight(
 
 function eventCategoryFromRisk(id: RiskKind): BriefEventCategory {
   if (id === "client_churn" || id === "at_risk_client") return "complaint";
-  if (id === "idle_people" || id === "review_bottleneck" || id === "intake_bottleneck") return "internal";
+  if (id === "idle_people" || id === "review_bottleneck") return "internal";
   return "delay";
 }
 
@@ -377,10 +406,10 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     performers,
     snap,
     services,
-    funnel,
     wip,
     satAgg,
     satRisk,
+    dismissed,
   ] = await Promise.all([
     getExecutiveScores(orgId),
     buildCeoBriefData(orgId),
@@ -392,10 +421,10 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     getPerformerLeaderboard(orgId),
     loadSnapshotDeltas(orgId),
     getServiceLineHealth(orgId),
-    getStageFunnel(orgId),
     getWipAging(orgId),
     getOrgSatisfactionAggregate(orgId).catch(() => null),
     getAtRiskClients(orgId).catch(() => []),
+    loadDismissedRisks(orgId),
   ]);
 
   const statusPct = Math.round(scores.stability.score);
@@ -482,22 +511,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     });
   }
 
-  // Intake bottleneck — the stage funnel reveals whether work is even being
-  // started. A large, slow "new" stage is the upstream cause of the slip.
-  const openTotal = scores.delivery.openCount;
-  const newStage = funnel.find((f) => f.stage === "new");
-  if (newStage && newStage.openCount >= 50) {
-    const dwell = Math.round(newStage.avgDwellHours);
-    const pct = openTotal > 0 ? Math.round((newStage.openCount / openTotal) * 100) : 0;
-    risks.push({
-      id: "intake_bottleneck",
-      title: "اختناق عند الإدخال — مهام لا تبدأ",
-      severity: newStage.openCount >= 200 || dwell >= 72 ? "critical" : "high",
-      metric: `${newStage.openCount} مهمة عالقة في مرحلة «جديدة» (${pct}% من المفتوح) · ${dwell} ساعة قبل البدء`,
-      href: "/tasks?view=kanban",
-      weight: newStage.openCount * 0.6 + dwell,
-    });
-  }
+  // NOTE: the "intake bottleneck" risk (large/slow «new» stage) was removed on
+  // the team's instruction (2026-06-17). The «new» stage backlog is an Odoo
+  // import artifact — hundreds of tasks parked in "new" is a data-shape quirk,
+  // not a real operational signal — so reporting it as a top danger was noise.
+  // Do NOT reintroduce it without confirming the stage data is genuine.
 
   // Client churn — the satisfaction layer (imported WhatsApp chats, AI-scored).
   // This is the commercial risk the brief was previously blind to.
@@ -534,7 +552,8 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: `مشروع ${topStuck.projectName} متعثّر`,
       severity,
       metric: `${topStuck.overdueTasks} متأخرة من ${topStuck.openTasks} مفتوحة · انزلاق ${slip}%${idle}${client}`,
-      href: "/projects",
+      href: `/projects/${topStuck.projectId}`,
+      entityId: topStuck.projectId,
       weight: topStuck.overdueTasks * 3 + slip,
     });
   }
@@ -544,12 +563,16 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   // is not the same as being inactive and must not be reported as a risk).
   const idlePeople = activity.counts.idle;
   if (idlePeople >= 1) {
+    // Deep-link to the single idle person when there's exactly one; otherwise the
+    // accountability board (the aggregate) is the right landing for several.
+    const idleRows = activity.rows.filter((r) => r.status === "idle");
+    const soleIdle = idleRows.length === 1 ? idleRows[0] : null;
     risks.push({
       id: "idle_people",
       title: "موظفون خاملون",
       severity: idlePeople >= 3 ? "high" : "medium",
       metric: `${idlePeople} موظف بلا نشاط رغم وجود مهام مُسندة`,
-      href: "/accountability",
+      href: soleIdle ? `/accountability?emp=${soleIdle.employeeId}` : "/accountability",
       weight: 10 + idlePeople * 4,
     });
   }
@@ -563,6 +586,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       severity: hrs >= 48 ? "high" : "medium",
       metric: `«${topBottleneck.title}» عالقة ${hrs} ساعة عمل في ${topBottleneck.stage} · ${topBottleneck.projectName}`,
       href: `/tasks/${topBottleneck.taskId}`,
+      entityId: topBottleneck.taskId,
       weight: 8 + Math.min(40, hrs / 2),
     });
   }
@@ -574,7 +598,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: "دفعات متأخرة التحصيل",
       severity: val >= 50000 ? "critical" : val >= 10000 ? "high" : "medium",
       metric: `${briefData.money.overdueInstallments} دفعة بقيمة ${val.toLocaleString("en-US")} ريال`,
-      href: "/contracts",
+      href: "/contracts?view=dashboard",
       weight: 50 + Math.min(60, val / 3000),
     });
   }
@@ -590,7 +614,8 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: `العميل ${worstClient.clientName} في منطقة الخطر`,
       severity: worstClient.overdueTaskCount >= 10 ? "high" : "medium",
       metric: `${showOt ? `التزام ${ot}% · ` : ""}${worstClient.overdueTaskCount} مهمة متأخرة`,
-      href: "/satisfaction",
+      href: `/satisfaction?client=${worstClient.clientId}`,
+      entityId: worstClient.clientId,
       weight: 9 + worstClient.overdueTaskCount * 2 + (showOt ? (100 - ot) / 5 : 0),
     });
   }
@@ -604,11 +629,14 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       severity: worstLine.score < 40 ? "high" : "medium",
       metric: `المؤشر عند ${worstLine.score}% (تقدير ${worstLine.grade})`,
       href: "/dashboard",
+      entityId: worstLine.label,
       weight: 6 + (55 - worstLine.score) / 3,
     });
   }
 
-  risks.sort((a, b) => b.weight - a.weight);
+  // Drop anything the CEO has explicitly dismissed ("this isn't a problem").
+  const activeRisks = risks.filter((r) => !isDismissed(r, dismissed));
+  activeRisks.sort((a, b) => b.weight - a.weight);
 
   // ── Opportunities — cross-cutting facts for a broad action plan ─────────
   const opportunities: CeoBriefOpportunities = {
@@ -646,13 +674,8 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
         open: s.openCount,
       })),
     bestService: bestSvc ? { name: bestSvc.name, onTimePct: bestSvc.onTimePct30d } : null,
-    intake: newStage
-      ? {
-          newOpen: newStage.openCount,
-          dwellHours: Math.round(newStage.avgDwellHours),
-          pctOfOpen: openTotal > 0 ? Math.round((newStage.openCount / openTotal) * 100) : 0,
-        }
-      : null,
+    // Intake/«new» stage intentionally not surfaced — see the removed risk above.
+    intake: null,
     wip: { chronicOverdue: wipChronic, freshOverdue: wipFresh },
     satisfaction: satAgg
       ? {
@@ -685,14 +708,14 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     reworkRate: scores.quality.reworkRate,
   };
 
-  const eventPack = await loadBriefTimelineEvents(orgId, risks.slice(0, 5), new Date().toISOString());
+  const eventPack = await loadBriefTimelineEvents(orgId, activeRisks.slice(0, 5), new Date().toISOString());
 
   return {
     statusPct,
     grade,
     verdict,
     changes: changes.slice(0, 5),
-    risks: risks.slice(0, 5),
+    risks: activeRisks.slice(0, 5),
     criticalEvents: eventPack.criticalEvents,
     timelineEvents: eventPack.timelineEvents,
     opportunities,

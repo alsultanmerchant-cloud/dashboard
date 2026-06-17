@@ -22,11 +22,15 @@ type Selection = { text: string; field: string | null; context: string | null };
 type Anchor = { top: number; left: number };
 
 // AI SDK tool-UI part with an output payload once resolved.
-type ToolPartOutput = { success?: boolean; field?: string; newText?: string };
+type ToolPartOutput = { success?: boolean; field?: string; newText?: string; riskId?: string };
 
 // Dispatched on a successful inline brief edit so CeoBriefCard re-renders
 // instantly without a re-fetch. The card listens for this event.
 export const BRIEF_PATCHED_EVENT = "ceo-brief:patched";
+
+// Dispatched when a risk/alert is dismissed so CeoBriefCard removes it instantly
+// (the server already persisted both the removal and the durable suppression).
+export const RISK_DISMISSED_EVENT = "ceo-brief:risk-dismissed";
 
 /**
  * Global "Ask AI" popover for the whole dashboard. Watches text selections
@@ -146,17 +150,25 @@ export function DashboardSelectionAssistant({
     for (const msg of messages) {
       if (msg.role !== "assistant") continue;
       for (const part of msg.parts ?? []) {
-        if (!isToolUIPart(part) || getToolName(part) !== "editBriefText") continue;
+        if (!isToolUIPart(part)) continue;
+        const toolName = getToolName(part);
+        if (toolName !== "editBriefText" && toolName !== "dismissRisk") continue;
         if (part.state !== "output-available") continue;
         const id = part.toolCallId;
         if (!id || appliedRef.current.has(id)) continue;
         const out = part.output as ToolPartOutput | undefined;
-        if (out?.success && out.field && typeof out.newText === "string") {
+        if (!out?.success) continue;
+        if (toolName === "editBriefText" && out.field && typeof out.newText === "string") {
           appliedRef.current.add(id);
           window.dispatchEvent(
             new CustomEvent(BRIEF_PATCHED_EVENT, {
               detail: { field: out.field, newText: out.newText },
             }),
+          );
+        } else if (toolName === "dismissRisk" && out.riskId) {
+          appliedRef.current.add(id);
+          window.dispatchEvent(
+            new CustomEvent(RISK_DISMISSED_EVENT, { detail: { riskId: out.riskId } }),
           );
         }
       }
@@ -420,6 +432,7 @@ function ToolBadge({
 }) {
   const map: Record<string, { active: string; done: string; icon: typeof Database }> = {
     editBriefText: { active: t("editing"), done: t("edited"), icon: Wand2 },
+    dismissRisk: { active: t("dismissing"), done: t("dismissed"), icon: X },
     saveLesson: { active: t("teaching"), done: t("taught"), icon: GraduationCap },
   };
   const meta = map[name] ?? { active: t("reading"), done: t("read"), icon: Database };

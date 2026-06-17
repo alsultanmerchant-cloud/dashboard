@@ -6,7 +6,12 @@ import { GEMINI_MODEL } from "@/lib/ai-model";
 import { buildReadTools } from "@/lib/ai-tools";
 import { buildKnowledgeBlock, insertKnowledge } from "@/lib/data/ai-knowledge";
 import { logAudit, logAiEvent } from "@/lib/audit";
-import { applyBriefPatch, BRIEF_FIELD_RE, type CeoBriefResult } from "@/lib/ceo-brief-schema";
+import {
+  applyBriefPatch,
+  BRIEF_FIELD_RE,
+  RISK_IDS,
+  type CeoBriefResult,
+} from "@/lib/ceo-brief-schema";
 import { z } from "zod";
 
 // §9.1: cap runtime so a hung tool/stream surfaces as an error to the client.
@@ -21,16 +26,21 @@ const SYSTEM_PROMPT = `أنت "مساعد لوحة القيادة" — مساع�
    - الحقول القابلة للتعديل: العنوان (headline)، الخلاصة (bottomLine)، نص توصية (rec:N)، تفسير خطر (risk:ID).
    - **بقية أرقام ومؤشرات اللوحة محسوبة آليًا من البيانات ولا يمكن تعديلها كنص.** إذا طلب المستخدم "تصحيح" رقم أو نص خارج الموجز (لا يوجد مفتاح حقل)، فلا تستخدم editBriefText؛ بل افهم التصحيح واحفظه عبر \`saveLesson\`، أو اشرح كيف يُحتسب الرقم.
 
-٢) **التعليم / الحفظ الدائم**: إذا علّمك المستخدم حقيقة عن الشركة أو صحّح فهمًا خاطئًا يجب ألّا يتكرر، احفظه باستخدام \`saveLesson\`.
+٢) **إزالة تنبيه/خطر بالكامل**: إذا أوضح المستخدم أنّ خطرًا معيّنًا في «أين الخطر؟» **ليس مشكلة فعلية** (مع سبب)، استخدم \`dismissRisk\` بتمرير \`riskId\` الخاص بذلك الخطر و\`reason\` يلخّص السبب.
+   - هذا يحذف التنبيه من الموجز الحالي **ويمنع ظهوره مجددًا** في كل توليد قادم.
+   - **لا تستخدم \`editBriefText\` لإفراغ النص بهدف "الحذف"** — التعديل لا يقبل نصًّا فارغًا؛ الإزالة الكاملة تتم عبر \`dismissRisk\` فقط.
+   - استخدمها كذلك مع \`saveLesson\` عندما يكون السبب قاعدة عامة مفيدة لاحقًا.
+
+٣) **التعليم / الحفظ الدائم**: إذا علّمك المستخدم حقيقة عن الشركة أو صحّح فهمًا خاطئًا يجب ألّا يتكرر، احفظه باستخدام \`saveLesson\`.
    - صُغ \`instruction\` كقاعدة عامة واضحة (لا ترتبط بهذه الجملة فقط) كي تُطبَّق في كل تحليل قادم (الموجز والمساعد الذكي).
    - اختر \`kind\` المناسب: correction (تصحيح خطأ)، fact (حقيقة)، preference (تفضيل صياغة)، terminology (مصطلح).
    - عند تصحيح نص الموجز بسبب معلومة مغلوطة، استخدم \`saveLesson\` **أيضًا** حتى لا يتكرر الخطأ.
 
-٣) **الشرح والتوضيح**: لأي نص محدد، استخدم أدوات القراءة (\`runAnalytics\`, \`queryDatabase\`) لجلب الأرقام الداعمة ثم اشرح بإيجاز كيف نشأ هذا الرقم/الاستنتاج.
+٤) **الشرح والتوضيح**: لأي نص محدد، استخدم أدوات القراءة (\`runAnalytics\`, \`queryDatabase\`) لجلب الأرقام الداعمة ثم اشرح بإيجاز كيف نشأ هذا الرقم/الاستنتاج.
 
 قواعد:
-- **اطرح سؤالًا توضيحيًا واحدًا** قبل التصحيح أو الحفظ إذا كان الطلب غامضًا — هدفك فهم الشركة بدقة قبل الكتابة.
-- **ممنوع منعًا باتًا** أن تقول إنك "حفظت" أو "علّمت النظام" أو "صحّحت" دون أن تكون قد استدعيت الأداة المناسبة فعليًا (\`saveLesson\` للتعليم، \`editBriefText\` للتصحيح) في نفس الرد. الحفظ والتعديل لا يحدثان إلا عبر استدعاء الأداة — التأكيد النصّي وحده لا يحفظ شيئًا. إن قرّر المستخدم تعليمك حقيقة، استدعِ \`saveLesson\` أولًا ثم أكّد.
+- **اطرح سؤالًا توضيحيًا واحدًا** قبل التصحيح أو الحفظ أو الإزالة إذا كان الطلب غامضًا — هدفك فهم الشركة بدقة قبل الكتابة.
+- **ممنوع منعًا باتًا** أن تقول إنك "حفظت" أو "علّمت النظام" أو "صحّحت" أو "أزلت التنبيه" دون أن تكون قد استدعيت الأداة المناسبة فعليًا (\`saveLesson\` للتعليم، \`editBriefText\` للتصحيح، \`dismissRisk\` للإزالة) في نفس الرد. الحفظ والتعديل والإزالة لا تحدث إلا عبر استدعاء الأداة — التأكيد النصّي وحده لا يفعل شيئًا.
 - لا تخترع أرقامًا أبدًا. استخدم الأرقام الفعلية من أدوات القراءة.
 - ردود قصيرة ومباشرة بالعربية الفصحى. بعد أي استدعاء أداة، اكتب جملة تؤكد ما تم.`;
 
@@ -130,6 +140,92 @@ export async function POST(req: Request) {
               importance: "low",
             });
             return { success: true as const, field: targetField, newText };
+          },
+        }),
+        dismissRisk: tool({
+          description:
+            "إزالة خطر/تنبيه بالكامل من «أين الخطر؟» في موجز المدير التنفيذي بعد أن يوضّح المستخدم أنّه ليس مشكلة فعلية. يحذفه من الموجز الحالي ويمنع ظهوره في كل توليد قادم. استخدمه بدل تفريغ النص.",
+          inputSchema: z.object({
+            riskId: z
+              .enum(RISK_IDS)
+              .describe("معرّف الخطر المراد إزالته — يطابق أحد المخاطر المعروضة"),
+            reason: z
+              .string()
+              .min(3)
+              .describe("سبب اعتبار هذا التنبيه ليس مشكلة (للتوثيق ولمنع تكراره)"),
+          }),
+          execute: async ({ riskId, reason }) => {
+            const { data: row } = await supabaseAdmin
+              .from("ceo_brief_runs")
+              .select("id, result_json")
+              .eq("organization_id", orgId)
+              .eq("is_current", true)
+              .eq("status", "ready")
+              .maybeSingle();
+            const current = (row?.result_json ?? null) as CeoBriefResult | null;
+            if (!row || !current) {
+              return { success: false as const, error: "لا يوجد موجز حالي" };
+            }
+            const target = current.risks?.find((r) => r.id === riskId);
+            if (!target) {
+              return { success: false as const, error: "هذا الخطر غير موجود في الموجز الحالي" };
+            }
+            // entity_id scopes the suppression: a specific project/client is
+            // suppressed per-instance; a kind-level risk suppresses the whole kind.
+            const entityId = target.entityId ?? null;
+
+            // Durable suppression — survives every future generation. Idempotent
+            // on the (org, risk_id, entity_id) unique index.
+            const { error: insertError } = await supabaseAdmin
+              .from("ceo_brief_dismissed_risks")
+              .upsert(
+                {
+                  organization_id: orgId,
+                  risk_id: riskId,
+                  entity_id: entityId,
+                  reason,
+                  dismissed_by: userId,
+                  is_active: true,
+                },
+                { onConflict: "organization_id,risk_id,entity_id", ignoreDuplicates: false },
+              );
+            if (insertError) {
+              return { success: false as const, error: insertError.message };
+            }
+
+            // Remove it from the live brief immediately (risks + any events the
+            // signal builder synthesized from this risk: id `risk-<id>-<n>`).
+            const next: CeoBriefResult = structuredClone(current);
+            next.risks = (next.risks ?? []).filter((r) => r.id !== riskId);
+            const dropEvent = (id: string) => id.startsWith(`risk-${riskId}-`);
+            next.criticalEvents = (next.criticalEvents ?? []).filter((e) => !dropEvent(e.id));
+            next.timelineEvents = (next.timelineEvents ?? []).filter((e) => !dropEvent(e.id));
+
+            const { error: updateError } = await supabaseAdmin
+              .from("ceo_brief_runs")
+              .update({ result_json: next })
+              .eq("id", row.id as string);
+            if (updateError) {
+              return { success: false as const, error: updateError.message };
+            }
+            await logAudit({
+              organizationId: orgId,
+              actorUserId: userId,
+              action: "ceo_brief.risk_dismiss",
+              entityType: "ceo_brief_runs",
+              entityId: row.id as string,
+              metadata: { riskId, scopedEntityId: entityId, reason },
+            });
+            await logAiEvent({
+              organizationId: orgId,
+              actorUserId: userId,
+              eventType: "CEO_BRIEF_RISK_DISMISSED",
+              entityType: "ceo_brief_runs",
+              entityId: row.id as string,
+              payload: { riskId, entityId },
+              importance: "normal",
+            });
+            return { success: true as const, riskId };
           },
         }),
         saveLesson: tool({

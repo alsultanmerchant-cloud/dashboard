@@ -12,7 +12,6 @@ import type { BriefChange, BriefRisk, Verdict } from "@/lib/data/ceo-brief-signa
 
 export const RISK_IDS = [
   "delivery_slip",
-  "intake_bottleneck",
   "client_churn",
   "stuck_project",
   "idle_people",

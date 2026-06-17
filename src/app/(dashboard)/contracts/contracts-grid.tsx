@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { MetricInfo } from "@/components/metric-info";
 import type { GridContract } from "@/lib/data/contracts";
 import { formatShortDate } from "@/lib/utils-format";
 import { updateContractFieldAction, liftContractHoldAction } from "./_actions";
@@ -203,6 +204,29 @@ function statusLabel(t: (key: string) => string, key: string): string {
   }
 }
 
+// The sheet's "Contract Status" column is the team's source of truth for which
+// contracts are live. The grid's Status COLUMN already displays this
+// (`contract_status_label`), but the filter used to run on the derived DB
+// `status` enum — which (a) collapses "SOON TO Be Renewed" into `active` (no
+// chip for it) and (b) reclassifies live-but-Hold contracts as `status='hold'`,
+// dropping them out of the «نشط + منتهي» view. Both made the count undershoot
+// the sheet. Bucketing the stored label into the 4 sheet states keeps the
+// filter, the displayed column, and the sheet in agreement.
+type StatusBucket = "Active" | "Expired" | "SOON" | "Closed";
+function statusBucket(c: GridContract): StatusBucket {
+  const label = (c.contract_status_label ?? "").trim();
+  if (label === "Active") return "Active";
+  if (label === "Expired") return "Expired";
+  if (label === "SOON TO Be Renewed") return "SOON";
+  if (label.startsWith("Closed")) return "Closed";
+  // Fallback to the derived enum only when the sheet label is missing (e.g. a
+  // contract created in-app before its first sheet sync). Hold counts as live.
+  if (c.status === "expired") return "Expired";
+  if (c.status === "closed" || c.status === "lost" || c.status === "renewed")
+    return "Closed";
+  return "Active";
+}
+
 function typeLabel(t: (key: string) => string, key: string): string {
   switch (key) {
     case "New":
@@ -367,10 +391,16 @@ export function ContractsGrid({
   // values; empty array = «الكل» (no constraint). A row passes when its value
   // is in the array (OR within a group, AND across groups).
   const [targets, setTargets] = useState<string[]>([]);
-  // Default = «نشط + منتهي»: both are contracts that haven't closed yet, so
-  // those clients still have live work with us. The closed/lost rows stay one
-  // chip-click away under «الكل».
-  const [statuses, setStatuses] = useState<string[]>(["active", "expired"]);
+  // Default = the live roster the team tracks in the sheet: Active + Expired +
+  // SOON TO Be Renewed. These are the sheet's "Contract Status" values for
+  // contracts that haven't closed yet (SOON is a live contract nearing renewal,
+  // and the team counts it alongside نشط/منتهي). Closed rows stay one chip-click
+  // away under «الكل».
+  const [statuses, setStatuses] = useState<string[]>([
+    "Active",
+    "Expired",
+    "SOON",
+  ]);
   const [types, setTypes] = useState<string[]>([]);
   // Service/package + payment filters. Text search alone conflated package
   // names with client names, so a dedicated picker is more reliable.
@@ -416,7 +446,8 @@ export function ContractsGrid({
     const payment: Record<string, number> = {};
     for (const r of rows) {
       target[r.target] = (target[r.target] ?? 0) + 1;
-      status[r.status] = (status[r.status] ?? 0) + 1;
+      const bucket = statusBucket(r);
+      status[bucket] = (status[bucket] ?? 0) + 1;
       if (r.contract_type_key) {
         type[r.contract_type_key] = (type[r.contract_type_key] ?? 0) + 1;
       }
@@ -445,7 +476,7 @@ export function ContractsGrid({
     return rows.filter((r) => {
       if (scope === "mine" && r.account_manager_id !== meEmployeeId) return false;
       if (targets.length && !targets.includes(r.target)) return false;
-      if (statuses.length && !statuses.includes(r.status)) return false;
+      if (statuses.length && !statuses.includes(statusBucket(r))) return false;
       if (types.length && (!r.contract_type_key || !types.includes(r.contract_type_key)))
         return false;
       if (packages.length && !r.package_names.some((p) => packages.includes(p.trim())))
@@ -539,13 +570,13 @@ export function ContractsGrid({
             values={statuses}
             onChange={setStatuses}
             presets={[
-              { value: "open", label: t("grid.filters.openStatus"), members: ["active", "expired"] },
+              { value: "open", label: t("grid.filters.openStatus"), members: ["Active", "Expired", "SOON"] },
             ]}
             options={[
-              { value: "active", count: counts.status["active"] ?? 0, label: t("grid.statusLabels.active") },
-              { value: "expired", count: counts.status["expired"] ?? 0, label: t("grid.statusLabels.expired") },
-              { value: "hold", count: counts.status["hold"] ?? 0, label: t("grid.statusLabels.hold") },
-              { value: "closed", count: counts.status["closed"] ?? 0, label: t("grid.statusLabels.closed") },
+              { value: "Active", count: counts.status["Active"] ?? 0, label: t("grid.statusLabels.active") },
+              { value: "Expired", count: counts.status["Expired"] ?? 0, label: t("grid.statusLabels.expired") },
+              { value: "SOON", count: counts.status["SOON"] ?? 0, label: t("grid.statusLabels.soonRenew") },
+              { value: "Closed", count: counts.status["Closed"] ?? 0, label: t("grid.statusLabels.closed") },
             ]}
           />
           <ChipGroup
@@ -614,7 +645,12 @@ export function ContractsGrid({
                 <Th sticky stickyOffset="108px" className="min-w-[200px]">{t("grid.headers.client")}</Th>
                 <Th>{t("grid.headers.accountManager")}</Th>
                 <Th>{t("grid.headers.startDate")}</Th>
-                <Th>{t("grid.headers.target")}</Th>
+                <Th>
+                  <span className="inline-flex items-center gap-1">
+                    {t("grid.headers.target")}
+                    <MetricInfo text={t("grid.help.target")} label={t("grid.headers.target")} />
+                  </span>
+                </Th>
                 <Th>{t("grid.headers.type")}</Th>
                 <Th className="min-w-[200px]">{t("grid.headers.package")}</Th>
                 <Th className="text-center">{t("grid.headers.duration")}</Th>
@@ -623,7 +659,12 @@ export function ContractsGrid({
                 <Th>{t("grid.headers.payment")}</Th>
                 <Th className="text-center">{t("grid.headers.days")}</Th>
                 <Th>{t("grid.headers.expectedEnd")}</Th>
-                <Th>{t("grid.headers.status")}</Th>
+                <Th>
+                  <span className="inline-flex items-center gap-1">
+                    {t("grid.headers.status")}
+                    <MetricInfo text={t("grid.help.status")} label={t("grid.headers.status")} />
+                  </span>
+                </Th>
                 <Th className="text-end">{t("grid.headers.renewalValue")}</Th>
                 <Th className="text-end">{t("grid.headers.renewalPaid")}</Th>
                 <Th>{t("grid.headers.actualEnd")}</Th>
