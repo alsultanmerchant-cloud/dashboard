@@ -219,10 +219,10 @@ export async function syncContractsFromGoogleSheet({
   // For the public sheet, one XLSX export carries every tab (raw + computed) with
   // correct date typing and merged-cell values. parseAccSheet/parseLogsSheet read
   // "Clients Contracts" / "💲Installments Tracker" / "Edits  Updates log" by name.
-  let publicWorkbook: ArrayBuffer | null = null;
+  let isPublicWorkbook = false;
   if (!config.clientEmail || !config.privateKey) {
-    publicWorkbook = await fetchPublicWorkbook(config.spreadsheetId);
-    workbookBuffer = publicWorkbook;
+    workbookBuffer = await fetchPublicWorkbook(config.spreadsheetId);
+    isPublicWorkbook = true;
   } else {
     const accessToken = await getAccessToken(config);
     const [clientsContractsRows, installmentsRows] = await Promise.all([
@@ -253,7 +253,12 @@ export async function syncContractsFromGoogleSheet({
     }
     workbookBuffer = valuesToWorkbookBuffer(privateSheets);
   }
-  const payload = parseAccSheet(workbookBuffer);
+  // Parse the (multi-MB) workbook ONCE and reuse it for every tab — contracts,
+  // logs and the computed dashboard tabs. Re-running XLSX.read per consumer on a
+  // large export costs seconds each and was pushing the sync past the 60s
+  // serverless limit (FUNCTION_INVOCATION_TIMEOUT).
+  const workbook = XLSX.read(workbookBuffer, { type: "array", cellDates: true });
+  const payload = parseAccSheet(workbook);
   if (payload.contracts.length === 0) {
     throw new Error("Google Sheet sync found no valid contract rows.");
   }
@@ -268,7 +273,7 @@ export async function syncContractsFromGoogleSheet({
   let parsedLogs = 0;
   let logsUpserted = 0;
   try {
-    const logsPayload = parseLogsSheet(workbookBuffer);
+    const logsPayload = parseLogsSheet(workbook);
     parsedLogs = logsPayload.logs.length;
     warnings.push(...logsPayload.warnings);
     const logsResult = await commitSheetLogs({
@@ -289,13 +294,12 @@ export async function syncContractsFromGoogleSheet({
     let ceo: Aoa;
     let target: Aoa;
     let accBreak: Aoa;
-    if (publicWorkbook) {
-      // Parse the (multi-MB) workbook ONCE, then read each dashboard tab from
-      // the same object — not a fresh XLSX.read per tab.
-      const wb = XLSX.read(publicWorkbook, { type: "array", raw: false });
-      ceo = workbookTabAoa(wb, CEO_SHEET);
-      target = workbookTabAoa(wb, TARGET_CONTRACTS_SHEET);
-      accBreak = workbookTabAoa(wb, ACC_BREAKDOWN_SHEET);
+    if (isPublicWorkbook) {
+      // Read each dashboard tab from the already-parsed workbook — no fresh
+      // XLSX.read.
+      ceo = workbookTabAoa(workbook, CEO_SHEET);
+      target = workbookTabAoa(workbook, TARGET_CONTRACTS_SHEET);
+      accBreak = workbookTabAoa(workbook, ACC_BREAKDOWN_SHEET);
     } else {
       const accessToken = await getAccessToken(config);
       [ceo, target, accBreak] = await Promise.all([

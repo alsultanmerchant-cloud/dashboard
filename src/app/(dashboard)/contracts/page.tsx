@@ -35,9 +35,12 @@ import { SheetSyncButton } from "./sheet-sync-button";
 // Source of truth: dashboard. The sheet is archived; all edits happen here.
 
 // "Pull from Sheet" (syncGoogleSheetAction) runs from this route and downloads
-// + parses the whole Google workbook, which takes far longer than the 10s
-// serverless default. Raise to the Vercel-Hobby max so the action can finish.
-export const maxDuration = 60;
+// + parses the whole Google workbook + writes contracts/installments/logs/
+// dashboard tabs. At 60s it hit FUNCTION_INVOCATION_TIMEOUT. The identical sync
+// runs from /api/cron/contracts-google-sheet-sync at maxDuration=300, so match
+// it here (Vercel Pro ceiling) — paired with the parse-the-workbook-once fix in
+// google-sheets-sync.ts.
+export const maxDuration = 300;
 
 const CONTRACT_TARGET_FILTERS = new Set(["Overdue", "Sales Deposit", "On Target", "Closed"]);
 const CONTRACT_STATUS_FILTERS = new Set(["Active", "Expired", "SOON", "Closed"]);

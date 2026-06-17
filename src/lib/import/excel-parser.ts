@@ -298,8 +298,21 @@ const LOG_SNAPSHOT_COLUMNS = [
 
 // ── main ───────────────────────────────────────────────────────────────────
 
-export function parseAccSheet(buf: ArrayBuffer): ParseResult {
-  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+// Accepts a raw export buffer OR an already-parsed workbook. Reading a
+// multi-MB Google-Sheets xlsx export costs seconds; the Google-sheet sync reads
+// it ONCE (cellDates:true) and passes the same WorkBook to parseAccSheet,
+// parseLogsSheet and the dashboard-tab reader so the heavy parse runs a single
+// time instead of three (the serverless-timeout culprit).
+export type SheetSource = ArrayBuffer | XLSX.WorkBook;
+
+function toWorkbook(src: SheetSource): XLSX.WorkBook {
+  return src instanceof ArrayBuffer
+    ? XLSX.read(src, { type: "array", cellDates: true })
+    : src;
+}
+
+export function parseAccSheet(src: SheetSource): ParseResult {
+  const wb = toWorkbook(src);
   const warnings: string[] = [];
   let skippedRows = 0;
 
@@ -520,11 +533,11 @@ export function parseAccSheet(buf: ArrayBuffer): ParseResult {
   };
 }
 
-export function parseLogsSheet(buf: ArrayBuffer): {
+export function parseLogsSheet(src: SheetSource): {
   logs: ParsedSheetLog[];
   warnings: string[];
 } {
-  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const wb = toWorkbook(src);
   const warnings: string[] = [];
   // The real Sky Light sheet names this tab "Edits  Updates log"; older
   // CSV-assembled workbooks named it "Logs". Accept either.
