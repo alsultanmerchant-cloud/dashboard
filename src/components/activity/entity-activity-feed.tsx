@@ -119,6 +119,7 @@ export async function EntityActivityFeed({ items }: { items: EntityActivity[] })
                     <SheetLogNote
                       notes={item.notes}
                       wasLabel={tc("logs.note.was")}
+                      locale={locale}
                       className="mt-1.5"
                     />
                     <SheetLogSnapshot

@@ -220,7 +220,7 @@ export interface ClientSatisfactionDetail {
 }
 
 const ANALYSIS_COLUMNS =
-  "id, satisfaction_score, brief_adherence_score, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, indicators, client_group_signals, technical_group_signals, causes, contract_context, big_picture, model, created_at, window_kind, window_start, window_end";
+  "id, satisfaction_score, brief_adherence_score, brief_adherence, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, indicators, client_group_signals, technical_group_signals, causes, contract_context, big_picture, model, created_at, window_kind, window_start, window_end";
 
 // Defaults for the rich fields so rows written before migration 0178 (which
 // have NULL in the new columns) still render without per-call null checks.
@@ -247,6 +247,7 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     id: a.id as string,
     satisfactionScore: (a.satisfaction_score as number) ?? 0,
     briefAdherenceScore: (a.brief_adherence_score as number | null) ?? null,
+    briefAdherence: (a.brief_adherence as SatisfactionResult["briefAdherence"]) ?? null,
     sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
     summary: (a.summary as string) ?? "",
     bigPicture: (a.big_picture as SatisfactionResult["bigPicture"]) ?? EMPTY_BIG_PICTURE,

@@ -117,6 +117,80 @@ export interface StoredCeoBrief {
   result: CeoBriefResult | null;
 }
 
+const INTAKE_STAGE_NOISE_RE =
+  /(اختناق\s+(?:عند|في)\s+الإدخال|مهام\s+لا\s+تبد|intake\s+bottleneck|new\s+stage\s+bottleneck|stuck\s+in\s+new|مرحلة\s+[«"]?جديدة[»"]?|عالقة\s+في\s+مرحلة\s+[«"]?جديدة[»"]?)/i;
+
+function isIntakeStageNoise(value: unknown): boolean {
+  return typeof value === "string" && INTAKE_STAGE_NOISE_RE.test(value);
+}
+
+function isIgnoredIntakeEvent(event: CeoBriefEvent): boolean {
+  const id = String(event.id ?? "");
+  return (
+    id.includes("intake") ||
+    isIntakeStageNoise(event.title)
+  );
+}
+
+function evidenceHrefForRisk(
+  id: string,
+  currentHref: string | null,
+  entityId?: string,
+): string | null {
+  switch (id) {
+    case "delivery_slip":
+      return "/tasks?view=list&filter=overdue";
+    case "stuck_project":
+      return entityId ? `/tasks?view=list&projectId=${entityId}&filter=overdue` : currentHref;
+    case "overdue_money":
+      return "/contracts?view=table&target=Overdue";
+    default:
+      return currentHref;
+  }
+}
+
+function evidenceHrefForEvent(event: CeoBriefEvent): string | null {
+  if (event.id.startsWith("risk-delivery_slip-")) {
+    return evidenceHrefForRisk("delivery_slip", event.href);
+  }
+  if (event.id.startsWith("risk-overdue_money-")) {
+    return evidenceHrefForRisk("overdue_money", event.href);
+  }
+  return event.href;
+}
+
+/**
+ * Older stored briefs may contain an intake/new-stage bottleneck that the
+ * business has rejected as a meaningful executive signal. Keep the stored JSON
+ * backward-compatible, but suppress that item wherever current briefs are read.
+ */
+export function sanitizeCeoBriefResult(result: CeoBriefResult | null): CeoBriefResult | null {
+  if (!result) return null;
+  const recommendations = (result.recommendations ?? []).filter(
+    (rec) => !isIntakeStageNoise(rec.action),
+  );
+  const bottomLine = isIntakeStageNoise(result.bottomLine)
+    ? (recommendations[0]?.action ?? "")
+    : result.bottomLine;
+  return {
+    ...result,
+    risks: (result.risks ?? []).filter(
+      (risk) => String(risk.id) !== "intake_bottleneck" && !isIntakeStageNoise(risk.title),
+    ).map((risk) => ({
+      ...risk,
+      href: evidenceHrefForRisk(String(risk.id), risk.href, risk.entityId),
+    })),
+    recommendations,
+    bottomLine,
+    criticalEvents: (result.criticalEvents ?? [])
+      .filter((event) => !isIgnoredIntakeEvent(event))
+      .map((event) => ({ ...event, href: evidenceHrefForEvent(event) })),
+    timelineEvents: (result.timelineEvents ?? [])
+      .filter((event) => !isIgnoredIntakeEvent(event))
+      .map((event) => ({ ...event, href: evidenceHrefForEvent(event) })),
+  };
+}
+
 // =========================================================================
 // Inline brief editing (select-text → "correct this" feature).
 //

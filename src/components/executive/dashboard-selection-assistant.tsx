@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isToolUIPart, getToolName } from "ai";
 import { useTranslations } from "next-intl";
@@ -15,6 +15,7 @@ import {
   Loader2,
   Check,
   Database,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,14 @@ type Selection = { text: string; field: string | null; context: string | null };
 type Anchor = { top: number; left: number };
 
 // AI SDK tool-UI part with an output payload once resolved.
-type ToolPartOutput = { success?: boolean; field?: string; newText?: string; riskId?: string };
+type ToolPartOutput = {
+  success?: boolean;
+  field?: string;
+  newText?: string;
+  riskId?: string;
+  error?: string;
+};
+type ToolBadgeStatus = "active" | "success" | "error";
 
 // Dispatched on a successful inline brief edit so CeoBriefCard re-renders
 // instantly without a re-fetch. The card listens for this event.
@@ -49,6 +57,11 @@ export function DashboardSelectionAssistant({
 }) {
   const t = useTranslations("Executive.assistant");
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // On the satisfaction page the selected client lives in ?client=<id>; passing
+  // it lets the assistant ground answers on that client's analysis (e.g. the
+  // brief-adherence breakdown behind the score).
+  const clientId = searchParams.get("client");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [buttonAt, setButtonAt] = useState<Anchor | null>(null);
   const [open, setOpen] = useState(false);
@@ -82,11 +95,12 @@ export function DashboardSelectionAssistant({
             field: sel?.field ?? null,
             context: sel?.context ?? null,
             page: pathname,
+            clientId,
           },
         },
       );
     },
-    [briefRunId, pathname, sendMessage],
+    [briefRunId, clientId, pathname, sendMessage],
   );
 
   // --- Capture selections anywhere inside the dashboard ----------------------
@@ -324,7 +338,20 @@ export function DashboardSelectionAssistant({
                   <div className="space-y-1.5">
                     {(msg.parts ?? []).map((part, i) => {
                       if (isToolUIPart(part)) {
-                        return <ToolBadge key={i} name={getToolName(part)} done={part.state === "output-available" || part.state === "output-error"} t={t} />;
+                        const output = "output" in part ? (part.output as ToolPartOutput | undefined) : undefined;
+                        const errorText =
+                          "errorText" in part && typeof part.errorText === "string"
+                            ? part.errorText
+                            : output?.error;
+                        return (
+                          <ToolBadge
+                            key={i}
+                            name={getToolName(part)}
+                            status={toolBadgeStatus(part.state, output)}
+                            errorText={errorText}
+                            t={t}
+                          />
+                        );
                       }
                       if (part.type === "text" && part.text) {
                         return (
@@ -423,33 +450,72 @@ function QuickChip({
 
 function ToolBadge({
   name,
-  done,
+  status,
+  errorText,
   t,
 }: {
   name: string;
-  done: boolean;
+  status: ToolBadgeStatus;
+  errorText?: string;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const map: Record<string, { active: string; done: string; icon: typeof Database }> = {
-    editBriefText: { active: t("editing"), done: t("edited"), icon: Wand2 },
-    dismissRisk: { active: t("dismissing"), done: t("dismissed"), icon: X },
-    saveLesson: { active: t("teaching"), done: t("taught"), icon: GraduationCap },
+  const map: Record<
+    string,
+    { active: string; done: string; failed: string; icon: typeof Database }
+  > = {
+    editBriefText: { active: t("editing"), done: t("edited"), failed: t("editFailed"), icon: Wand2 },
+    dismissRisk: {
+      active: t("dismissing"),
+      done: t("dismissed"),
+      failed: t("dismissFailed"),
+      icon: X,
+    },
+    saveLesson: {
+      active: t("teaching"),
+      done: t("taught"),
+      failed: t("teachFailed"),
+      icon: GraduationCap,
+    },
   };
-  const meta = map[name] ?? { active: t("reading"), done: t("read"), icon: Database };
-  const Icon = done ? Check : meta.icon;
+  const meta = map[name] ?? {
+    active: t("reading"),
+    done: t("read"),
+    failed: t("readFailed"),
+    icon: Database,
+  };
+  const Icon = status === "success" ? Check : status === "error" ? AlertCircle : meta.icon;
+  const label =
+    status === "success"
+      ? meta.done
+      : status === "error"
+        ? `${meta.failed}${errorText ? `: ${shortError(errorText)}` : ""}`
+        : meta.active;
   return (
     <div
+      title={status === "error" ? errorText : undefined}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px]",
-        done
+        "inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px]",
+        status === "success"
           ? "border-cc-green/20 bg-cc-green/[0.06] text-cc-green"
-          : "border-cyan/15 bg-cyan/5 text-cyan",
+          : status === "error"
+            ? "border-cc-red/25 bg-red-dim/40 text-cc-red"
+            : "border-cyan/15 bg-cyan/5 text-cyan",
       )}
     >
-      <Icon className={cn("size-3", !done && "animate-pulse")} />
-      {done ? meta.done : meta.active}
+      <Icon className={cn("size-3 shrink-0", status === "active" && "animate-pulse")} />
+      <span className="truncate">{label}</span>
     </div>
   );
+}
+
+function toolBadgeStatus(state: string, output?: ToolPartOutput): ToolBadgeStatus {
+  if (state === "output-error" || state === "output-denied") return "error";
+  if (state === "output-available") return output?.success === false ? "error" : "success";
+  return "active";
+}
+
+function shortError(error: string): string {
+  return error.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 function textOf(msg: { parts?: Array<{ type: string; text?: string }> }): string {

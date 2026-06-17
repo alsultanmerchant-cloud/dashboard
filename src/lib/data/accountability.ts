@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
+import { nonLeadershipFilter } from "@/lib/data/leadership";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 
 // =========================================================================
@@ -123,7 +124,9 @@ export interface AccountabilityCoverage {
 export interface AccountabilityOverview {
   generatedAt: string;
   rows: AccountabilityScorecardRow[];
-  reviewers: ReviewerRigorRow[];
+  // Two review stages, shown as separate sections: Manager Review (credited to
+  // the Manager/Head) and Specialist Review (credited to the executing specialist).
+  reviewers: { managerReview: ReviewerRigorRow[]; specialistReview: ReviewerRigorRow[] };
   aiSignals: AiLinkedSignal[];
   coverage: AccountabilityCoverage;
 }
@@ -156,8 +159,6 @@ const LOW_SAMPLE = 5;
 const FAST_REVIEW_MINUTES = 10;
 // Measurement window for stage-dwell / SLA / rework counters (days).
 const WINDOW_DAYS = 30;
-// A "pass" out of manager_review goes forward to one of these stages.
-const PASS_STAGES = ["specialist_review", "ready_to_send", "sent_to_client", "done"];
 // Rework-after-pass: task re-enters one of these within this many days.
 const REWORK_STAGES = ["in_progress", "client_changes"];
 const REWORK_WINDOW_DAYS = 14;
@@ -259,74 +260,24 @@ interface ScorecardSqlRow {
 }
 
 async function loadScorecard(org: string): Promise<AccountabilityScorecardRow[]> {
+  // Reads the precomputed per-(employee, role) rollup from the
+  // `accountability_scorecard` cache (migration 0193), refreshed by pg_cron
+  // every 10 min via refresh_accountability_scorecard(). The live aggregate
+  // (30 days of stage-history × the whole org's assignee fan-out) exceeded
+  // the 12s agent_run_readonly_sql statement timeout on cold cache (57014),
+  // tripping the page error boundary. The heavy work now runs off the request
+  // path under the cron role's 120s budget; the page reads a trivial indexed
+  // join. The cached counters are byte-for-byte identical to the former live
+  // output — names/positions are joined fresh here so they never go stale.
   const sql = `
-with ${attribCte(org)},
-live as (
-  select id, is_overdue, stage
-    from tasks
-   where organization_id = '${org}' and archived_at is null
-),
-open_counts as (
-  select a.employee_id, a.role,
-         count(distinct a.task_id) filter (where lt.stage <> 'done') as open_tasks,
-         count(distinct a.task_id) filter (where lt.stage <> 'done' and lt.is_overdue) as overdue_owned
-    from attrib a
-    join live lt on lt.id = a.task_id
-   group by 1, 2
-),
-intervals as (
-  -- dwell comes from the task_stage_dwell cache (migration 0163, pg_cron
-  -- refresh every 10 min) — live business_minutes_between() only as a
-  -- fallback for rows the Odoo sync rewrote since the last refresh.
-  select a.employee_id, a.role, h.to_stage::text as stage_key, h.exited_at,
-         coalesce(d.dwell_business_minutes::numeric,
-                  public.business_minutes_between(h.entered_at, coalesce(h.exited_at, now()))) as dwell_min
-    from attrib a
-    join live lt on lt.id = a.task_id
-    join task_stage_history h on h.task_id = a.task_id
-    left join task_stage_dwell d on d.history_id = h.id
-   where ${roleStagePredicate("a")}
-     and h.entered_at >= now() - interval '${WINDOW_DAYS} days'
-),
-measured as (
-  -- avg dwell / sample_size: CLOSED intervals only (open dwell still grows).
-  -- sla_n / sla_ok: closed intervals + OPEN intervals already past their
-  -- rule (decidable breaches — excluding them is survivorship bias). Open
-  -- intervals still within SLA stay out (verdict unknown).
-  -- rework_30d: every client_changes re-entry in the window (agent role),
-  -- open or closed.
-  select i.employee_id, i.role,
-         avg(i.dwell_min) filter (where i.exited_at is not null) as avg_dwell,
-         count(*) filter (where i.exited_at is not null) as sample_size,
-         count(*) filter (where s.max_minutes is not null
-                            and (i.exited_at is not null or i.dwell_min > s.max_minutes)) as sla_n,
-         count(*) filter (where s.max_minutes is not null
-                            and i.exited_at is not null
-                            and i.dwell_min <= s.max_minutes) as sla_ok,
-         count(*) filter (where i.role = 'agent' and i.stage_key = 'client_changes') as rework_30d
-    from intervals i
-    left join sla_rules s
-      on s.organization_id = '${org}' and s.stage_key = i.stage_key
-   group by 1, 2
-),
-keys as (
-  select employee_id, role from open_counts
-  union
-  select employee_id, role from measured
-)
-select e.id as employee_id, e.full_name, e.job_title, pp.role as position_role, k.role,
-       coalesce(oc.open_tasks, 0)::int as open_tasks,
-       coalesce(oc.overdue_owned, 0)::int as overdue_owned,
-       m.avg_dwell,
-       coalesce(m.sample_size, 0)::int as sample_size,
-       coalesce(m.sla_n, 0)::int as sla_n,
-       coalesce(m.sla_ok, 0)::int as sla_ok,
-       coalesce(m.rework_30d, 0)::int as rework_30d
-  from keys k
-  join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
+select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.role,
+       sc.open_tasks, sc.overdue_owned, sc.avg_dwell, sc.sample_size,
+       sc.sla_n, sc.sla_ok, sc.rework_30d
+  from accountability_scorecard sc
+  join employee_profiles e on e.id = sc.employee_id and e.organization_id = '${org}'
   left join positions pp on pp.id = e.position_id
-  left join open_counts oc on oc.employee_id = k.employee_id and oc.role = k.role
-  left join measured m on m.employee_id = k.employee_id and m.role = k.role`;
+ where sc.organization_id = '${org}'
+   and ${nonLeadershipFilter("pp")}`;
 
   const raw = await runSql<ScorecardSqlRow>(sql);
 
@@ -468,7 +419,110 @@ function mapReviewerRows(
   }));
 }
 
-async function loadReviewers(org: string): Promise<ReviewerRigorRow[]> {
+// Stage-specific "pass" (forward) destinations. A review "passes" when its task
+// advances to a stage AFTER the review stage in the workflow:
+//   new → in_progress → manager_review → specialist_review → ready_to_send →
+//   sent_to_client → (client_changes) → done
+const MANAGER_PASS_STAGES = ["specialist_review", "ready_to_send", "sent_to_client", "done"];
+const SPECIALIST_PASS_STAGES = ["ready_to_send", "sent_to_client", "done"];
+
+// Stage-history reviewer query, parameterized per review stage + attribution.
+// On Odoo-synced data moved_by is 100% NULL, so reviews are credited by
+// ASSIGNMENT (a team-level proxy, not a personal verdict):
+//   - manager_review    → team_manager_employee_id (the Manager/Head who
+//                         "reviews quality" — Sky Light ops manual)
+//   - specialist_review → the executing assignee (role_type='agent' — the
+//                         Specialist who "reviews final work in Specialist Review")
+// The chosen reviewer is deduplicated to ONE deterministic person per task
+// (most-frequent value across the task's assignee rows, uuid as tie-break)
+// because a task can carry conflicting assignee rows and naive fan-out would
+// count one review for several people. The UI labels this "attributed by
+// assignment, not action".
+function buildStageReviewerSql(
+  org: string,
+  opts: { stage: string; passStages: string[]; attribution: "team_manager" | "agent" },
+): string {
+  const actorCol =
+    opts.attribution === "team_manager" ? "team_manager_employee_id" : "employee_id";
+  const actorFilter =
+    opts.attribution === "team_manager"
+      ? "ta.team_manager_employee_id is not null"
+      : "ta.role_type = 'agent' and ta.employee_id is not null";
+  return `
+with hist as (
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
+         lead(h.to_stage::text) over (partition by h.task_id order by h.entered_at) as next_stage
+    from task_stage_history h
+    join tasks t on t.id = h.task_id and t.archived_at is null
+   where h.organization_id = '${org}'
+),
+tm as (
+  select distinct on (g.task_id) g.task_id, g.employee_id
+    from (
+      select ta.task_id, ta.${actorCol} as employee_id, count(*) as n
+        from task_assignees ta
+       where ta.organization_id = '${org}'
+         and ${actorFilter}
+       group by 1, 2
+    ) g
+   order by g.task_id, g.n desc, g.employee_id
+),
+reviews as (
+  -- dwell from the task_stage_dwell cache (0163) — live fallback only for
+  -- rows the Odoo sync rewrote since the last 10-min refresh.
+  select hist.id, hist.task_id, hist.exited_at, tm.employee_id,
+         coalesce(d.dwell_business_minutes::numeric,
+                  public.business_minutes_between(hist.entered_at, hist.exited_at)) as rev_min,
+         (hist.next_stage in (${stageList(opts.passStages)})) as passed
+    from hist
+    join tm on tm.task_id = hist.task_id
+    left join task_stage_dwell d on d.history_id = hist.id
+   where hist.stage = '${opts.stage}' and hist.exited_at is not null
+),
+agg as (
+  select r.employee_id, count(*)::int as reviews,
+         percentile_cont(0.5) within group (order by r.rev_min) as median_min,
+         count(*) filter (where r.rev_min < ${FAST_REVIEW_MINUTES})::int as fast_n,
+         count(*) filter (where r.passed)::int as pass_n,
+         count(*) filter (where r.passed and exists (
+           select 1 from task_stage_history h3
+            where h3.task_id = r.task_id
+              and h3.to_stage in (${stageList(REWORK_STAGES)})
+              and h3.entered_at > r.exited_at
+              and h3.entered_at <= r.exited_at + interval '${REWORK_WINDOW_DAYS} days'
+         ))::int as rework_n
+    from reviews r
+   group by 1
+),
+pend as (
+  select tm.employee_id, count(*)::int as pending,
+         max(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(hist.entered_at, now()))) as oldest_min
+    from hist
+    join tm on tm.task_id = hist.task_id
+    left join task_stage_dwell d on d.history_id = hist.id
+   where hist.stage = '${opts.stage}' and hist.exited_at is null
+   group by 1
+),
+keys as (
+  select employee_id from agg union select employee_id from pend
+)
+select e.id as employee_id, e.full_name,
+       coalesce(a.reviews, 0) as reviews, a.median_min, coalesce(a.fast_n, 0) as fast_n,
+       coalesce(a.pass_n, 0) as pass_n, coalesce(a.rework_n, 0) as rework_n,
+       coalesce(p.pending, 0) as pending, p.oldest_min
+  from keys k
+  join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
+  left join positions pe on pe.id = e.position_id
+  left join agg a on a.employee_id = k.employee_id
+  left join pend p on p.employee_id = k.employee_id
+ where ${nonLeadershipFilter("pe")}
+ order by coalesce(a.reviews, 0) desc`;
+}
+
+// Manager Review rigor — approval-gate decisions preferred (real decider,
+// inheritance-proof), else the stage-history assignment fallback.
+async function loadManagerReviewers(org: string): Promise<ReviewerRigorRow[]> {
   // Preferred source — approval gates (0048): decided reviews carry
   // requested→decided timestamps and the ACTUAL decider (inheritance-proof
   // attribution). Pass/rework classification still comes from stage history
@@ -520,95 +574,53 @@ select e.id as employee_id, e.full_name,
        coalesce(p.pending, 0) as pending, p.oldest_min
   from keys k
   join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
+  left join positions pe on pe.id = e.position_id
   left join agg a on a.employee_id = k.employee_id
   left join pend p on p.employee_id = k.employee_id
+ where ${nonLeadershipFilter("pe")}
  order by coalesce(a.reviews, 0) desc`;
 
   const gateRows = await runSql<ReviewerSqlRow>(gateSql);
   if (gateRows.length > 0) return mapReviewerRows(gateRows, "approval_gate");
 
   // Fallback — the Odoo sync never writes the approval-gate columns, so on
-  // synced data the gate query is structurally empty while hundreds of real
-  // manager_review intervals sit in task_stage_history. Derive reviews from
-  // those intervals (live tasks, closed = completed review, open = pending).
-  //
-  // Attribution caveat: moved_by is 100% NULL, so we credit the task's team
-  // manager from task_assignees — deduplicated to ONE deterministic TM per
-  // task (most frequent team_manager_employee_id across the task's assignee
-  // rows, uuid as tie-break) because ~40% of tasks carry conflicting TM
-  // values and naive fan-out would count one review for up to 5 people.
-  // The UI labels this mode "attributed by assignment, not action".
-  const fallbackSql = `
-with hist as (
-  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
-         lead(h.to_stage::text) over (partition by h.task_id order by h.entered_at) as next_stage
-    from task_stage_history h
-    join tasks t on t.id = h.task_id and t.archived_at is null
-   where h.organization_id = '${org}'
-),
-tm as (
-  select distinct on (g.task_id) g.task_id, g.team_manager_employee_id as employee_id
-    from (
-      select ta.task_id, ta.team_manager_employee_id, count(*) as n
-        from task_assignees ta
-       where ta.organization_id = '${org}'
-         and ta.team_manager_employee_id is not null
-       group by 1, 2
-    ) g
-   order by g.task_id, g.n desc, g.team_manager_employee_id
-),
-reviews as (
-  -- dwell from the task_stage_dwell cache (0163) — live fallback only for
-  -- rows the Odoo sync rewrote since the last 10-min refresh.
-  select hist.id, hist.task_id, hist.exited_at, tm.employee_id,
-         coalesce(d.dwell_business_minutes::numeric,
-                  public.business_minutes_between(hist.entered_at, hist.exited_at)) as rev_min,
-         (hist.next_stage in (${stageList(PASS_STAGES)})) as passed
-    from hist
-    join tm on tm.task_id = hist.task_id
-    left join task_stage_dwell d on d.history_id = hist.id
-   where hist.stage = 'manager_review' and hist.exited_at is not null
-),
-agg as (
-  select r.employee_id, count(*)::int as reviews,
-         percentile_cont(0.5) within group (order by r.rev_min) as median_min,
-         count(*) filter (where r.rev_min < ${FAST_REVIEW_MINUTES})::int as fast_n,
-         count(*) filter (where r.passed)::int as pass_n,
-         count(*) filter (where r.passed and exists (
-           select 1 from task_stage_history h3
-            where h3.task_id = r.task_id
-              and h3.to_stage in (${stageList(REWORK_STAGES)})
-              and h3.entered_at > r.exited_at
-              and h3.entered_at <= r.exited_at + interval '${REWORK_WINDOW_DAYS} days'
-         ))::int as rework_n
-    from reviews r
-   group by 1
-),
-pend as (
-  select tm.employee_id, count(*)::int as pending,
-         max(coalesce(d.dwell_business_minutes::numeric,
-                      public.business_minutes_between(hist.entered_at, now()))) as oldest_min
-    from hist
-    join tm on tm.task_id = hist.task_id
-    left join task_stage_dwell d on d.history_id = hist.id
-   where hist.stage = 'manager_review' and hist.exited_at is null
-   group by 1
-),
-keys as (
-  select employee_id from agg union select employee_id from pend
-)
-select e.id as employee_id, e.full_name,
-       coalesce(a.reviews, 0) as reviews, a.median_min, coalesce(a.fast_n, 0) as fast_n,
-       coalesce(a.pass_n, 0) as pass_n, coalesce(a.rework_n, 0) as rework_n,
-       coalesce(p.pending, 0) as pending, p.oldest_min
-  from keys k
-  join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
-  left join agg a on a.employee_id = k.employee_id
-  left join pend p on p.employee_id = k.employee_id
- order by coalesce(a.reviews, 0) desc`;
-
-  const fallbackRows = await runSql<ReviewerSqlRow>(fallbackSql);
+  // synced data the gate query is structurally empty while thousands of real
+  // manager_review intervals sit in task_stage_history. Credit the task's team
+  // manager (assignment proxy). See buildStageReviewerSql for the caveat.
+  const fallbackRows = await runSql<ReviewerSqlRow>(
+    buildStageReviewerSql(org, {
+      stage: "manager_review",
+      passStages: MANAGER_PASS_STAGES,
+      attribution: "team_manager",
+    }),
+  );
   return mapReviewerRows(fallbackRows, "stage_history_assignment");
+}
+
+// Specialist Review rigor — the executing specialist (task assignee, role_type
+// 'agent') reviews final work in this stage. There is no approval-gate
+// equivalent for it, so attribution is always stage-history (assignment proxy).
+async function loadSpecialistReviewers(org: string): Promise<ReviewerRigorRow[]> {
+  const rows = await runSql<ReviewerSqlRow>(
+    buildStageReviewerSql(org, {
+      stage: "specialist_review",
+      passStages: SPECIALIST_PASS_STAGES,
+      attribution: "agent",
+    }),
+  );
+  return mapReviewerRows(rows, "stage_history_assignment");
+}
+
+// Both review stages, computed in parallel. Manager Review (Manager/Head) and
+// Specialist Review (executing Specialist) are shown as two separate sections.
+async function loadReviewers(
+  org: string,
+): Promise<{ managerReview: ReviewerRigorRow[]; specialistReview: ReviewerRigorRow[] }> {
+  const [managerReview, specialistReview] = await Promise.all([
+    loadManagerReviewers(org),
+    loadSpecialistReviewers(org),
+  ]);
+  return { managerReview, specialistReview };
 }
 
 // ---- Coverage ---------------------------------------------------------------

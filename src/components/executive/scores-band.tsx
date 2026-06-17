@@ -17,6 +17,7 @@ import {
   type ScoreGrade,
 } from "@/lib/data/executive-scores";
 import { cn } from "@/lib/utils";
+import { Explained } from "@/components/metric-info";
 
 // Executive index band: one big Operational Stability hero + the four
 // contributing indices. Each index is a 0-100 composite with a grade,
@@ -122,6 +123,7 @@ function IndexCard({
   gradeLabel,
   metrics,
   href,
+  scoreHelp,
 }: {
   icon: ReactNode;
   name: string;
@@ -132,6 +134,7 @@ function IndexCard({
   gradeLabel: string;
   metrics: Metric[];
   href: string;
+  scoreHelp?: string;
 }) {
   const tone = toneByScore(score);
   return (
@@ -152,17 +155,19 @@ function IndexCard({
       </div>
 
       <div className="mt-3 flex items-center gap-3">
-        <div className={cn("relative shrink-0", tone.ring)}>
-          <ScoreRing score={score} />
-          <span
-            className={cn(
-              "absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums",
-              tone.text,
-            )}
-          >
-            {score}
-          </span>
-        </div>
+        <Explained text={scoreHelp ?? ""}>
+          <div className={cn("relative shrink-0", tone.ring)}>
+            <ScoreRing score={score} />
+            <span
+              className={cn(
+                "absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums",
+                tone.text,
+              )}
+            >
+              {score}
+            </span>
+          </div>
+        </Explained>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{name}</p>
           <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
@@ -237,9 +242,11 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
           </div>
 
           <div className="mt-4 flex items-end gap-2">
-            <span className={cn("text-6xl font-bold tabular-nums leading-none", stabilityTone.text)}>
-              {stability.score}
-            </span>
+            <Explained text={t("scoreTooltips.stability")}>
+              <span className={cn("text-6xl font-bold tabular-nums leading-none", stabilityTone.text)}>
+                {stability.score}
+              </span>
+            </Explained>
             <span className="mb-1 text-base font-medium text-muted-foreground">/100</span>
             <span className="mb-1.5 ms-auto">
               <DeltaChip delta={stability.delta} label={t("vsPrev")} />
@@ -299,6 +306,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             delta={delivery.delta}
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(delivery.score))}
+            scoreHelp={t("scoreTooltips.delivery")}
             href="/tasks?filter=overdue"
             metrics={[
               {
@@ -342,6 +350,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             delta={quality.delta}
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(quality.score))}
+            scoreHelp={t("scoreTooltips.quality")}
             href="/tasks?filter=client_changes"
             metrics={[
               {
@@ -401,6 +410,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             delta={discipline.delta}
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(discipline.score))}
+            scoreHelp={t("scoreTooltips.discipline")}
             href="/tasks"
             metrics={[
               discipline.activeMembers === null
@@ -454,6 +464,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             delta={productivity.delta}
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(productivity.score))}
+            scoreHelp={t("scoreTooltips.productivity")}
             href="/reports"
             metrics={[
               {

@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isLeadershipPosition } from "@/lib/data/leadership";
 
 // =========================================================================
 // Activity / audit reader (CEO "نبض الفريق" board). Reads the nightly
@@ -79,15 +80,24 @@ async function _getTeamActivityOverview(orgId: string): Promise<TeamActivityOver
   const { data, error } = await supabaseAdmin
     .from("employee_activity_daily")
     .select(
-      "employee_id, owned_episodes, answered_episodes, stale_open, responsiveness, throughput, freshness, activity_pct, confidence, status, employee:employee_profiles!employee_activity_daily_employee_id_fkey(full_name, job_title)",
+      "employee_id, owned_episodes, answered_episodes, stale_open, responsiveness, throughput, freshness, activity_pct, confidence, status, employee:employee_profiles!employee_activity_daily_employee_id_fkey(full_name, job_title, position:positions(role, name))",
     )
     .eq("organization_id", orgId)
     .eq("activity_date", activityDate);
   if (error) throw error;
 
-  const rows: ActivityRow[] = (data ?? []).map((r) => {
-    const emp = Array.isArray(r.employee) ? r.employee[0] : r.employee;
-    return {
+  type ActEmp = {
+    full_name: string | null;
+    job_title: string | null;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  };
+  const rows: ActivityRow[] = [];
+  for (const r of data ?? []) {
+    const emp = (Array.isArray(r.employee) ? r.employee[0] : r.employee) as ActEmp | null;
+    // Agents-only performance: skip leadership.
+    const pos = emp ? (Array.isArray(emp.position) ? emp.position[0] : emp.position) : null;
+    if (isLeadershipPosition(pos)) continue;
+    rows.push({
       employeeId: r.employee_id,
       fullName: emp?.full_name ?? "—",
       jobTitle: emp?.job_title ?? null,
@@ -100,8 +110,8 @@ async function _getTeamActivityOverview(orgId: string): Promise<TeamActivityOver
       activityPct: r.activity_pct,
       confidence: (r.confidence as "high" | "low") ?? "high",
       status: (r.status as ActivityStatus) ?? "not_instrumented",
-    };
-  });
+    });
+  }
 
   rows.sort((a, b) => {
     // Idle-with-duty floats to the top, then ascending activity (worst first).

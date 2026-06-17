@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import type { HeroKpis, OnTimeTrendPoint } from "@/lib/data/executive";
 import { Sparkline } from "./sparkline";
+import { MetricInfo } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 
 // Hero strip: ONE big metric (on-time %) + three secondary stats.
@@ -53,6 +54,10 @@ export async function ExecutiveHeroRow({
   return (
     <section className="mb-8 grid gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
       {/* HERO */}
+      <div className="relative">
+      <span className="absolute end-10 top-5 z-10">
+        <MetricInfo text={t("metricTooltips.dashboard_heroOnTime")} />
+      </span>
       <Link
         href="/reports"
         className={cn(
@@ -98,6 +103,7 @@ export async function ExecutiveHeroRow({
           </span>
         </div>
       </Link>
+      </div>
 
       {/* Secondary */}
       <SecondaryCard
@@ -108,6 +114,7 @@ export async function ExecutiveHeroRow({
         accent={data.overdue.current > 50 ? "danger" : data.overdue.current > 0 ? "warning" : "neutral"}
         deltaInfo={overdueDelta}
         sparkData={fakeSparkFromTrend(data.overdue.current, data.overdue.weekAgo)}
+        tip={t("metricTooltips.dashboard_heroOverdue")}
       />
 
       <SecondaryCard
@@ -118,6 +125,7 @@ export async function ExecutiveHeroRow({
         accent={data.stuckInReview.current > 0 ? "warning" : "neutral"}
         hint={t("stuckHint")}
         sparkData={[]}
+        tip={t("metricTooltips.dashboard_heroStuck")}
       />
 
       <SecondaryCard
@@ -128,6 +136,7 @@ export async function ExecutiveHeroRow({
         accent={data.revisionVolume.totalComments30d > 50 ? "warning" : "neutral"}
         hint={t("revisionsHint")}
         sparkData={[]}
+        tip={t("metricTooltips.dashboard_heroRevisions")}
       />
     </section>
   );
@@ -142,6 +151,7 @@ function SecondaryCard({
   deltaInfo,
   hint,
   sparkData,
+  tip,
 }: {
   label: string;
   value: number;
@@ -151,6 +161,7 @@ function SecondaryCard({
   deltaInfo?: { sign: string; DirIcon: React.ElementType; tone: string };
   hint?: string;
   sparkData: number[];
+  tip?: React.ReactNode;
 }) {
   const valueTone =
     accent === "danger"
@@ -172,6 +183,12 @@ function SecondaryCard({
         : "border-cyan/15";
 
   return (
+    <div className="relative">
+    {tip ? (
+      <span className="absolute end-12 top-4 z-10">
+        <MetricInfo text={tip} />
+      </span>
+    ) : null}
     <Link
       href={href}
       className={cn(
@@ -208,5 +225,6 @@ function SecondaryCard({
         )}
       </div>
     </Link>
+    </div>
   );
 }

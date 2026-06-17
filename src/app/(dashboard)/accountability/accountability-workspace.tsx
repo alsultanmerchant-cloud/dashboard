@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -14,7 +14,6 @@ import {
   Info,
   Quote,
   Scale,
-  Search,
   Sparkles,
   Timer,
   Users,
@@ -22,6 +21,8 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import { FilterBar } from "@/components/filter-bar";
+import { FilterChip } from "@/components/filter-chip";
 import { cn } from "@/lib/utils";
 import {
   TASK_OWNER_ROLE_KEYS,
@@ -77,11 +78,43 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const t = useTranslations("AccountabilityPage");
   const tStages = useTranslations("TasksBoard.stages");
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const searchParams = useSearchParams();
+  // Filtering stays client-side (instant) because getAccountabilityOverview is
+  // an expensive live-compute that already loads every row — re-running it per
+  // keystroke would be wrong. We still mirror state to the URL via
+  // history.replaceState so links/refresh restore the view WITHOUT a server
+  // round-trip, and seed initial state from the URL on mount.
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   // Filter by the employee's real POSITION (positions.role), not the
   // accountability/stage attribution — so the chips agree with the الدور
   // column. "all" = no filter; NONE_KEY = employees with no position set.
-  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [roleFilter, setRoleFilter] = useState<string>(
+    () => searchParams.get("role") ?? "all",
+  );
+
+  // Mirror toolbar state into the URL bar without triggering a Next navigation
+  // (which would re-run the expensive server component). `emp` is preserved.
+  const mirrorUrl = (next: { q?: string; role?: string }) => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const q = next.q ?? query;
+    const role = next.role ?? roleFilter;
+    if (q.trim()) params.set("q", q.trim());
+    else params.delete("q");
+    if (role !== "all") params.set("role", role);
+    else params.delete("role");
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  };
+
+  const onQueryChange = (value: string) => {
+    setQuery(value);
+    mirrorUrl({ q: value });
+  };
+  const onRoleChange = (key: string) => {
+    setRoleFilter(key);
+    mirrorUrl({ role: key });
+  };
 
   const stageLabel = (s: string) => {
     try {
@@ -161,24 +194,33 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const select = (id: string) => router.push(`/accountability?emp=${id}`);
 
   const headStats = [
-    { icon: Users, label: t("stats.measured"), value: String(stats.measured), tone: "text-cyan" },
+    {
+      icon: Users,
+      label: t("stats.measured"),
+      value: String(stats.measured),
+      tone: "text-cyan",
+      help: t("metricTooltips.accountability_measured"),
+    },
     {
       icon: Gauge,
       label: t("stats.medianScore"),
       value: stats.median == null ? NA : `${stats.median}%`,
       tone: scoreTone(stats.median, false),
+      help: t("metricTooltips.accountability_medianScore"),
     },
     {
       icon: AlertTriangle,
       label: t("stats.overdueOwned"),
       value: String(stats.overdueOwned),
       tone: stats.overdueOwned > 0 ? "text-cc-red" : "text-cc-green",
+      help: t("metricTooltips.accountability_overdueOwned"),
     },
     {
       icon: Hourglass,
       label: t("stats.lowConfidence"),
       value: String(stats.lowConfidence),
       tone: "text-muted-foreground",
+      help: t("metricTooltips.accountability_lowConfidence"),
     },
   ];
 
@@ -211,49 +253,44 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
             <CardContent className="p-4">
               <s.icon className={cn("size-4", s.tone)} />
               <p className={cn("mt-2 text-2xl font-bold tabular-nums", s.tone)}>
-                <span dir="ltr">{s.value}</span>
+                <Explained text={s.help}>
+                  <span dir="ltr">{s.value}</span>
+                </Explained>
               </p>
-              <p className="text-[11px] text-muted-foreground">{s.label}</p>
+              <p className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                {s.label}
+              </p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Toolbar: search + role filter */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full max-w-xs">
-          <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("search")}
-            className="h-9 w-full rounded-lg border border-border bg-card ps-8 pe-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/40"
-          />
-        </div>
-        <div className="inline-flex flex-wrap rounded-lg border border-border bg-card p-0.5">
-          {[
-            { key: "all", label: t("roleFilter.all"), count: overview.rows.length },
-            ...positionGroups,
-          ].map((g) => (
-            <button
-              key={g.key}
-              type="button"
-              onClick={() => setRoleFilter(g.key)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                roleFilter === g.key
-                  ? "bg-soft-2 text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {g.label}
-              <span className="rounded-full bg-soft-1 px-1.5 text-[10px] tabular-nums text-muted-foreground">
-                {g.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Toolbar: search + role filter (shared FilterBar / FilterChip) */}
+      <FilterBar
+        className="mb-0"
+        search={{ value: query, onChange: onQueryChange, placeholder: t("search") }}
+        hasActiveFilters={query.trim() !== "" || roleFilter !== "all"}
+        onClear={() => {
+          setQuery("");
+          setRoleFilter("all");
+          mirrorUrl({ q: "", role: "all" });
+        }}
+      >
+        {[
+          { key: "all", label: t("roleFilter.all"), count: overview.rows.length },
+          ...positionGroups,
+        ].map((g) => (
+          <FilterChip
+            key={g.key}
+            as="button"
+            active={roleFilter === g.key}
+            count={g.count}
+            onClick={() => onRoleChange(g.key)}
+          >
+            {g.label}
+          </FilterChip>
+        ))}
+      </FilterBar>
 
       {/* Scorecard board */}
       <ScorecardTable
@@ -265,15 +302,12 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
         t={t}
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ReviewerRigorSection
-          reviewers={overview.reviewers}
-          onSelect={select}
-          fmtMinutes={fmtMinutes}
-          t={t}
-        />
-        <CoveragePanel coverage={overview.coverage} t={t} />
-      </div>
+      <ReviewerRigorSection
+        reviewers={overview.reviewers}
+        onSelect={select}
+        fmtMinutes={fmtMinutes}
+        t={t}
+      />
 
       {/* Tier-B: AI-linked signals — always quoted, always labeled, never scored */}
       <AiLinkedSection signals={overview.aiSignals} financeMap={financeMap} t={t} />
@@ -338,11 +372,36 @@ function ScorecardTable({
                     <MetricInfo text={t("help.onTime")} label={t("col.onTime")} />
                   </span>
                 </th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.avgDwell")}</th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.rework")}</th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.openTasks")}</th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.overdue")}</th>
-                <th className="px-3 py-3 text-center font-semibold">{t("col.sample")}</th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.avgDwell")}
+                    <MetricInfo text={t("metricTooltips.accountability_avgDwell")} label={t("col.avgDwell")} />
+                  </span>
+                </th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.rework")}
+                    <MetricInfo text={t("metricTooltips.accountability_rework")} label={t("col.rework")} />
+                  </span>
+                </th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.openTasks")}
+                    <MetricInfo text={t("metricTooltips.accountability_openTasks")} label={t("col.openTasks")} />
+                  </span>
+                </th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.overdue")}
+                    <MetricInfo text={t("metricTooltips.accountability_overdue")} label={t("col.overdue")} />
+                  </span>
+                </th>
+                <th className="px-3 py-3 text-center font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {t("col.sample")}
+                    <MetricInfo text={t("metricTooltips.accountability_sample")} label={t("col.sample")} />
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -512,7 +571,10 @@ function EvidencePanel({
                 </span>
               )}
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">{t("evidence.hint")}</p>
+            <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              {t("evidence.hint")}
+              <MetricInfo text={t("metricTooltips.accountability_evidenceDwell")} label={t("col.avgDwell")} />
+            </p>
           </div>
           <button
             type="button"
@@ -589,7 +651,7 @@ function ReviewerRigorSection({
   fmtMinutes,
   t,
 }: {
-  reviewers: ReviewerRigorRow[];
+  reviewers: { managerReview: ReviewerRigorRow[]; specialistReview: ReviewerRigorRow[] };
   onSelect: (id: string) => void;
   fmtMinutes: (min: number | null) => string;
   t: ReturnType<typeof useTranslations>;
@@ -603,33 +665,105 @@ function ReviewerRigorSection({
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
           {t("reviewers.hint")}
         </p>
-        {/* Honesty label: stage-history mode credits the assigned team
-            manager, not the person who actually moved the task. */}
-        {reviewers.some((r) => r.attribution === "stage_history_assignment") && (
-          <p className="mt-2 rounded-md border border-amber/20 bg-amber/5 px-2.5 py-1.5 text-[10px] leading-snug text-muted-foreground">
-            {t("reviewers.attributedNote")}
-          </p>
-        )}
 
-        {reviewers.length === 0 ? (
-          <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
-            {t("reviewers.empty")}
-          </p>
-        ) : (
-          <div className="mt-3 overflow-x-auto">
+        {/* Two distinct review stages, each credited to a different role:
+            Manager Review → the Manager/Head; Specialist Review → the executing
+            specialist (task assignee). Shown as separate sections. */}
+        <div className="mt-4 space-y-6">
+          <ReviewerStageBlock
+            title={t("reviewers.managerReviewTitle")}
+            subtitle={t("reviewers.managerReviewSubtitle")}
+            rows={reviewers.managerReview}
+            onSelect={onSelect}
+            fmtMinutes={fmtMinutes}
+            t={t}
+          />
+          <ReviewerStageBlock
+            title={t("reviewers.specialistReviewTitle")}
+            subtitle={t("reviewers.specialistReviewSubtitle")}
+            rows={reviewers.specialistReview}
+            onSelect={onSelect}
+            fmtMinutes={fmtMinutes}
+            t={t}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// One review stage's reviewer table (Manager Review or Specialist Review).
+function ReviewerStageBlock({
+  title,
+  subtitle,
+  rows,
+  onSelect,
+  fmtMinutes,
+  t,
+}: {
+  title: string;
+  subtitle: string;
+  rows: ReviewerRigorRow[];
+  onSelect: (id: string) => void;
+  fmtMinutes: (min: number | null) => string;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-foreground/90">{title}</p>
+      <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{subtitle}</p>
+      {/* Honesty label: stage-history mode credits the assigned person, not
+          whoever actually moved the task. */}
+      {rows.some((r) => r.attribution === "stage_history_assignment") && (
+        <p className="mt-2 rounded-md border border-amber/20 bg-amber/5 px-2.5 py-1.5 text-[10px] leading-snug text-muted-foreground">
+          {t("reviewers.attributedNote")}
+        </p>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
+          {t("reviewers.empty")}
+        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
                   <th className="p-2 text-start font-medium">{t("reviewers.col.reviewer")}</th>
-                  <th className="p-2 text-center font-medium">{t("reviewers.col.reviews")}</th>
-                  <th className="p-2 text-center font-medium">{t("reviewers.col.medianTime")}</th>
-                  <th className="p-2 text-center font-medium">{t("reviewers.col.fastShare")}</th>
-                  <th className="p-2 text-center font-medium">{t("reviewers.col.rework")}</th>
-                  <th className="p-2 text-center font-medium">{t("reviewers.col.pending")}</th>
+                  <th className="p-2 text-center font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      {t("reviewers.col.reviews")}
+                      <MetricInfo text={t("metricTooltips.accountability_reviewerReviews")} label={t("reviewers.col.reviews")} />
+                    </span>
+                  </th>
+                  <th className="p-2 text-center font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      {t("reviewers.col.medianTime")}
+                      <MetricInfo text={t("metricTooltips.accountability_reviewerMedianTime")} label={t("reviewers.col.medianTime")} />
+                    </span>
+                  </th>
+                  <th className="p-2 text-center font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      {t("reviewers.col.fastShare")}
+                      <MetricInfo text={t("metricTooltips.accountability_reviewerFastShare")} label={t("reviewers.col.fastShare")} />
+                    </span>
+                  </th>
+                  <th className="p-2 text-center font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      {t("reviewers.col.rework")}
+                      <MetricInfo text={t("metricTooltips.accountability_reviewerRework")} label={t("reviewers.col.rework")} />
+                    </span>
+                  </th>
+                  <th className="p-2 text-center font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      {t("reviewers.col.pending")}
+                      <MetricInfo text={t("metricTooltips.accountability_reviewerPending")} label={t("reviewers.col.pending")} />
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {reviewers.map((r) => {
+                {rows.map((r) => {
                   const low = r.confidence === "low";
                   // High fast-review share = possible rubber-stamping. Only an
                   // amber flag at high confidence — small samples stay neutral.
@@ -708,106 +842,11 @@ function ReviewerRigorSection({
             </table>
           </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---- Coverage panel ---------------------------------------------------------
-function CoveragePanel({
-  coverage,
-  t,
-}: {
-  coverage: AccountabilityOverview["coverage"];
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const pct = (num: number, den: number): string =>
-    den > 0 ? `${Math.round((num / den) * 100)}%` : NA;
-
-  const rows = [
-    { label: t("coverage.totalTasks"), value: String(coverage.totalTasks), share: null },
-    {
-      label: t("coverage.withHistory"),
-      value: String(coverage.tasksWithHistory),
-      share: pct(coverage.tasksWithHistory, coverage.totalTasks),
-    },
-    {
-      label: t("coverage.withAgent"),
-      value: String(coverage.tasksWithAgent),
-      share: pct(coverage.tasksWithAgent, coverage.tasksWithHistory),
-    },
-    {
-      label: t("coverage.withAm"),
-      value: String(coverage.tasksWithAccountManager),
-      share: pct(coverage.tasksWithAccountManager, coverage.tasksWithHistory),
-    },
-    {
-      label: t("coverage.overdueDistinct"),
-      value: String(coverage.distinctOverdueTasks),
-      share: null,
-    },
-    {
-      label: t("coverage.archivedExcluded"),
-      value: String(coverage.archivedExcluded),
-      share: null,
-    },
-  ];
-
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="inline-flex items-center gap-2 text-sm font-semibold">
-          <ClipboardCheck className="size-4 text-cyan" /> {t("coverage.title")}
-        </p>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          {t("coverage.hint")}
-        </p>
-        <ul className="mt-3 space-y-1.5">
-          {rows.map((row) => (
-            <li
-              key={row.label}
-              className="flex items-center justify-between gap-3 rounded-lg bg-soft-1/60 px-2.5 py-1.5 text-[13px]"
-            >
-              <span className="text-muted-foreground">{row.label}</span>
-              <span className="flex items-center gap-2">
-                <span className="font-semibold tabular-nums" dir="ltr">
-                  {row.value}
-                </span>
-                {row.share && (
-                  <span
-                    className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground"
-                    dir="ltr"
-                  >
-                    {row.share}
-                  </span>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-[10px] text-muted-foreground/70">
-          {t("coverage.window")}{" "}
-          <span dir="ltr" className="tabular-nums">
-            {coverage.windowStart && coverage.windowEnd
-              ? `${coverage.windowStart.slice(0, 10)} → ${coverage.windowEnd.slice(0, 10)}`
-              : t("coverage.allTime")}
-          </span>
-        </p>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
 // ---- Tier-B: AI-linked signals ----------------------------------------------
-const KIND_TONES: Record<string, string> = {
-  complaint: "text-cc-red",
-  praise: "text-cc-green",
-  delay_mention: "text-amber",
-  risk: "text-amber",
-};
-
-const KNOWN_KINDS = new Set(["complaint", "praise", "delay_mention", "risk"]);
-
 function AiLinkedSection({
   signals,
   financeMap,
@@ -817,104 +856,106 @@ function AiLinkedSection({
   financeMap: ClientFinanceMap;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [range, setRange] = useState<"today" | "week">("week");
+
+  // Latest COMPLAINT per client within the selected window. The task↔complaint
+  // linkage proved unreliable, so we drop "related tasks" and keep this concise:
+  // one freshest complaint per client, with its source quote.
+  const complaints = useMemo(() => {
+    const cutoff = new Date();
+    if (range === "today") cutoff.setHours(0, 0, 0, 0);
+    else cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffMs = cutoff.getTime();
+    const latest = new Map<string, AiLinkedSignal>();
+    for (const s of signals) {
+      if (s.kind !== "complaint" || !s.occurredAt) continue;
+      const ts = new Date(s.occurredAt).getTime();
+      if (Number.isNaN(ts) || ts < cutoffMs) continue;
+      const key = s.clientId ?? s.clientName ?? s.id;
+      const prev = latest.get(key);
+      if (!prev || new Date(prev.occurredAt as string).getTime() < ts) latest.set(key, s);
+    }
+    return [...latest.values()].sort(
+      (a, b) =>
+        new Date(b.occurredAt as string).getTime() - new Date(a.occurredAt as string).getTime(),
+    );
+  }, [signals, range]);
+
+  const rangeBtn = (key: "today" | "week", label: string) => (
+    <button
+      type="button"
+      onClick={() => setRange(key)}
+      aria-pressed={range === key}
+      className={cn(
+        "rounded-md px-2.5 py-1 text-[11px] transition-colors",
+        range === key
+          ? "bg-cyan-dim text-cyan font-medium"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <Card className="border-border">
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <Sparkles className="size-4 text-cyan" /> {t("ai.title")}
+            <Sparkles className="size-4 text-cyan" /> {t("ai.complaintsTitle")}
+            <MetricInfo text={t("ai.complaintsHint")} label={t("ai.complaintsTitle")} />
           </p>
           <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 text-[10px] font-medium text-cyan">
             {t("ai.badge")}
           </span>
+          {/* Today / This week toggle */}
+          <div className="ms-auto inline-flex rounded-lg border border-soft bg-card/60 p-0.5">
+            {rangeBtn("today", t("ai.windowToday"))}
+            {rangeBtn("week", t("ai.windowWeek"))}
+          </div>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("ai.hint")}</p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          {t("ai.complaintsHint")}
+        </p>
 
-        {signals.length === 0 ? (
+        {complaints.length === 0 ? (
           <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
-            {t("ai.empty")}
+            {t("ai.emptyComplaints")}
           </p>
         ) : (
           <ul className="mt-3 grid gap-2 lg:grid-cols-2">
-            {signals.map((s) => {
-              const kindKey = KNOWN_KINDS.has(s.kind) ? s.kind : "other";
-              return (
-                <li
-                  key={s.id}
-                  className="rounded-lg border border-border bg-card p-3 text-[13px]"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "text-xs font-semibold",
-                          KIND_TONES[s.kind] ?? "text-muted-foreground",
-                        )}
-                      >
-                        {t(`ai.kind.${kindKey}`)}
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-full border border-cyan/30 bg-cyan/10 px-1.5 py-0.5 text-[9px] font-medium text-cyan">
-                        <Sparkles className="size-2.5" />
-                        {t("ai.badge")}
-                      </span>
-                    </span>
-                    {s.occurredAt && (
-                      <span dir="ltr" className="text-[10px] tabular-nums text-muted-foreground/70">
-                        {s.occurredAt.slice(0, 10)}
-                      </span>
-                    )}
-                  </div>
-                  {/* Source quote — always rendered, per the trust posture */}
-                  <blockquote className="mt-2 flex gap-2 rounded-md bg-soft-1/60 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
-                    <Quote className="mt-0.5 size-3 shrink-0 text-cyan" />
-                    <span>{s.quote}</span>
-                  </blockquote>
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+            {complaints.map((s) => (
+              <li
+                key={s.id}
+                className="rounded-lg border border-border bg-card p-3 text-[13px]"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
                     {s.clientName && (
-                      <span className="rounded bg-soft-2 px-1.5 py-0.5">{s.clientName}</span>
+                      <span className="truncate font-semibold text-foreground">
+                        {s.clientName}
+                      </span>
                     )}
                     {s.clientId && <ClientFinanceBadges badge={financeMap[s.clientId]} />}
-                    <span className="rounded bg-soft-2 px-1.5 py-0.5">
-                      {t("ai.sourceLabel")}: {s.source}
+                  </span>
+                  {s.occurredAt && (
+                    <span dir="ltr" className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                      {s.occurredAt.slice(0, 10)}
                     </span>
-                  </div>
-                  {/* Related open work — the client's overdue tasks. Context
-                      for the conversation, never presented as the cause. */}
-                  {s.relatedOpenTasks.length > 0 && (
-                    <div className="mt-2 border-t border-border/60 pt-2">
-                      <p
-                        className="text-[10px] font-medium text-muted-foreground"
-                        title={t("ai.relatedWorkHint")}
-                      >
-                        {t("ai.relatedWork")}
-                      </p>
-                      <ul className="mt-1 space-y-1">
-                        {s.relatedOpenTasks.map((rt) => (
-                          <li key={rt.taskId}>
-                            <Link
-                              href={`/tasks/${rt.taskId}`}
-                              className="flex flex-wrap items-center gap-1.5 rounded-md bg-soft-1/60 px-2 py-1 text-[11px] transition-colors hover:bg-soft-1"
-                            >
-                              {rt.taskCode && (
-                                <span dir="ltr" className="shrink-0 text-[9px] tabular-nums text-cyan">
-                                  {rt.taskCode}
-                                </span>
-                              )}
-                              <span className="max-w-[16rem] truncate">{rt.title}</span>
-                              {rt.assigneeNames && (
-                                <span className="ms-auto shrink-0 text-[9px] text-muted-foreground">
-                                  {rt.assigneeNames}
-                                </span>
-                              )}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
                   )}
-                </li>
-              );
-            })}
+                </div>
+                {/* Source quote — always rendered, per the trust posture */}
+                <blockquote className="mt-2 flex gap-2 rounded-md bg-soft-1/60 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+                  <Quote className="mt-0.5 size-3 shrink-0 text-cc-red" />
+                  <span>{s.quote}</span>
+                </blockquote>
+                <div className="mt-2 text-[10px] text-muted-foreground">
+                  <span className="rounded bg-soft-2 px-1.5 py-0.5">
+                    {t("ai.sourceLabel")}: {s.source}
+                  </span>
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </CardContent>

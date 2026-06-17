@@ -6,7 +6,7 @@
 // the per-AM target breakdown table. Colors match the sheet's semantics.
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -25,7 +25,8 @@ import {
   YAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import { Explained } from "@/components/metric-info";
+import { GroupedAmTargetsTable } from "./GroupedAmTargetsTable";
+import { Explained, MetricInfo } from "@/components/metric-info";
 import { formatMonthYear } from "@/lib/utils-format";
 import type {
   MonthlyDashboard,
@@ -145,71 +146,8 @@ export function CeoDashboard({
             {copy("تارجت الأكونت هذا الشهر", "Account manager targets this month")}
           </h3>
         </div>
-        {amTargets.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {copy("لا يوجد تارجت محسوب لهذا الشهر.", "No targets calculated for this month.")}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-soft-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-start font-medium">{copy("الأكونت", "Account")}</th>
-                  <th className="px-3 py-2 text-end font-medium">{copy("المتوقع", "Expected")}</th>
-                  <th className="px-3 py-2 text-end font-medium">{copy("المحقق", "Actual")}</th>
-                  <th className="px-3 py-2 text-center font-medium">{copy("الإنجاز", "Achievement")}</th>
-                  <th className="px-3 py-2 font-medium">{copy("التقدم", "Progress")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {amTargets.map((a) => (
-                  <tr key={a.account_manager_id} className="border-t border-soft/60">
-                    <td className="px-3 py-2 font-medium">
-                      {a.account_manager_name ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-end tabular-nums text-muted-foreground">
-                      {fmtSR(a.expected_total)}
-                    </td>
-                    <td className="px-3 py-2 text-end tabular-nums">
-                      {fmtSR(a.achieved_total)}
-                    </td>
-                    <td className="px-3 py-2 text-center tabular-nums">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-semibold",
-                          a.achievement_pct >= 80
-                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-200"
-                            : a.achievement_pct >= 40
-                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-200"
-                              : "bg-rose-500/15 text-rose-700 dark:text-rose-200",
-                        )}
-                      >
-                        {a.achievement_pct >= 100 && <ArrowUpRight className="size-3" />}
-                        {a.achievement_pct.toFixed(0)}%
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 w-[180px]">
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-soft-1">
-                        <div
-                          className={cn(
-                            "h-full rounded-full",
-                            a.achievement_pct >= 80
-                              ? "bg-emerald-500"
-                              : a.achievement_pct >= 40
-                                ? "bg-amber-500"
-                                : "bg-rose-500",
-                          )}
-                          style={{ width: `${Math.min(100, a.achievement_pct)}%` }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        <GroupedAmTargetsTable amTargets={amTargets} copy={copy} t={t} MetricInfo={MetricInfo} fmtSR={fmtSR} />
+        </div>
 
       {/* Per-client target breakdown (Acc_Target_Breakdown) */}
       {driftedLists ? (
@@ -235,19 +173,27 @@ export function CeoDashboard({
             title={copy("On Target - ضمن الهدف", "On Target")}
             accent="emerald"
             clients={buckets.on_target}
+            info={t("metricTooltips.contracts_bucketOnTarget")}
           />
-          <BucketCard title={copy("Overdue - متأخرة", "Overdue - delayed")} accent="rose" clients={buckets.overdue} />
+          <BucketCard
+            title={copy("Overdue - متأخرة", "Overdue - delayed")}
+            accent="rose"
+            clients={buckets.overdue}
+            info={t("metricTooltips.contracts_bucketOverdue")}
+          />
           <BucketCard
             title={copy("جددت من التارجت", "Renewed from target")}
             accent="sky"
             clients={buckets.renewed}
             hideValue
+            info={t("metricTooltips.contracts_bucketRenewed")}
           />
           <BucketCard
             title={copy("فقدت من التارجت", "Lost from target")}
             accent="zinc"
             clients={buckets.lost}
             hideValue
+            info={t("metricTooltips.contracts_bucketLost")}
           />
         </div>
       )}
@@ -255,8 +201,12 @@ export function CeoDashboard({
       {/* Installments due this month */}
       <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
         <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
-          <h3 className="text-sm font-semibold">
+          <h3 className="flex items-center gap-1 text-sm font-semibold">
             {copy("الدفعات المستحقة هذا الشهر", "Installments due this month")}
+            <MetricInfo
+              text={t("metricTooltips.contracts_installmentsDue")}
+              label={copy("الدفعات المستحقة هذا الشهر", "Installments due this month")}
+            />
           </h3>
           <span className="text-[11px] text-muted-foreground">
             {copy(`${buckets.installments_due.length} دفعة`, `${buckets.installments_due.length} installments`)}
@@ -321,12 +271,13 @@ export function CeoDashboard({
         )}
       </div>
 
-      {/* Overdue installments — mirrored from the sheet's "Clients with
-          Installments" lists (TARGET_CONTRACTS), split by collecting department.
-          Account rows carry the overdue amount; Sales rows are name-only in the
-          sheet. Snapshot-only, so hidden for drifted (un-snapshotted) months —
-          and hidden when both lists are empty (e.g. before the first sheet pull
-          that captures them) rather than showing two empty cards. */}
+      {/* Overdue installments, split by collecting department. From a snapshot
+          month these mirror the sheet's "Clients with Installments" lists
+          (TARGET_CONTRACTS); on the live month they're derived from the overdue
+          installment rows (see getMonthTargetBuckets). Still hidden for a frozen
+          month whose snapshot is missing (driftedLists ⇒ data has drifted vs the
+          sheet), and hidden when both lists are empty rather than showing two
+          empty cards. */}
       {!driftedLists &&
         buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length > 0 && (
         <div className="space-y-2">
@@ -346,12 +297,14 @@ export function CeoDashboard({
               title={copy("أقساط متأخرة — أكونت", "Overdue — Account")}
               accent="rose"
               clients={buckets.acc_inst_overdue}
+              info={t("metricTooltips.contracts_bucketAccInstOverdue")}
             />
             <BucketCard
               title={copy("أقساط متأخرة — سيلز", "Overdue — Sales")}
               accent="rose"
               clients={buckets.sales_inst_overdue}
               hideValue
+              info={t("metricTooltips.contracts_bucketSalesInstOverdue")}
             />
           </div>
         </div>
@@ -378,6 +331,7 @@ function ModernSheetBoard({
   achievement: number;
   copy: (ar: string, en: string) => string;
 }) {
+  const t = useTranslations("ContractsPage");
   // Funnel counts mirror the sheet's "Account M. section" target overview, which
   // counts renewed/lost FROM TARGET this month (the bucket lists), not the
   // global Contracts-Movement tallies. Each "removing …" figure is independent
@@ -433,12 +387,12 @@ function ModernSheetBoard({
         <div className="rounded-[var(--radius-lg)] border border-border/80 bg-card/95 p-4 shadow-[var(--surface-elev)]">
           <SectionBand title={copy("ملخص الشهر", "Monthly Snapshot")} />
           <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
-            <SheetCell label={copy("New", "New")} value={dashboard.mov_new} tone="green" compact />
-            <SheetCell label={copy("مُجدَّد", "Renewed")} value={dashboard.mov_renewed} tone="blue" compact />
-            <SheetCell label={copy("Lost", "Lost")} value={dashboard.mov_lost} tone="red" compact />
-            <SheetCell label={copy("ترقية", "Upsell")} value={dashboard.mov_upsell} tone="magenta" compact />
-            <SheetCell label={copy("استرجاع", "Win-Back")} value={dashboard.mov_winback} tone="orange" compact />
-            <SheetCell label={copy("Closed", "Closed")} value={dashboard.mov_closed} tone="dark" compact />
+            <SheetCell label={copy("New", "New")} value={dashboard.mov_new} tone="green" compact info={t("metricTooltips.contracts_movNew")} />
+            <SheetCell label={copy("مُجدَّد", "Renewed")} value={dashboard.mov_renewed} tone="blue" compact info={t("metricTooltips.contracts_movRenewed")} />
+            <SheetCell label={copy("Lost", "Lost")} value={dashboard.mov_lost} tone="red" compact info={t("metricTooltips.contracts_movLost")} />
+            <SheetCell label={copy("ترقية", "Upsell")} value={dashboard.mov_upsell} tone="magenta" compact info={t("metricTooltips.contracts_movUpsell")} />
+            <SheetCell label={copy("استرجاع", "Win-Back")} value={dashboard.mov_winback} tone="orange" compact info={t("metricTooltips.contracts_movWinback")} />
+            <SheetCell label={copy("Closed", "Closed")} value={dashboard.mov_closed} tone="dark" compact info={t("metricTooltips.contracts_movClosed")} />
           </div>
 
           <SectionBand
@@ -452,21 +406,25 @@ function ModernSheetBoard({
               label={copy("إجمالي الدخل المتوقع", "Total Expected income")}
               value={fmtSR(dashboard.total_expected)}
               tone="blue"
+              info={t("metricTooltips.contracts_totalExpected")}
             />
             <SheetCell
               label={copy("إجمالي الدخل الفعلي", "Total Actual income")}
               value={fmtSR(dashboard.total_actual)}
               tone="greenStrong"
+              info={t("metricTooltips.contracts_totalActual")}
             />
             <SheetCell
               label={copy("إنجاز الشركة (الكلي)", "Company Achievement (total)")}
               value={`${dashboard.achievement_pct.toFixed(1)}%`}
               tone={dashboard.achievement_pct >= 70 ? "green" : "amber"}
+              info={t("metricTooltips.contracts_achievementPct")}
             />
             <SheetCell
               label={copy("فجوة الإيراد", "Revenue Gap")}
               value={fmtSR(revenueGap)}
               tone={revenueGap > 0 ? "red" : "green"}
+              info={t("metricTooltips.contracts_revenueGap")}
             />
           </div>
           <div className="px-1 py-3">
@@ -631,16 +589,18 @@ function CurrentRosterBoard({
   roster: ContractsRoster;
   copy: (ar: string, en: string) => string;
 }) {
+  const t = useTranslations("ContractsPage");
   const pills: Array<{
     label: string;
     value: number;
     tone: "green" | "blue" | "magenta" | "orange" | "amber";
+    info: string;
   }> = [
-    { label: copy("جديد", "New"), value: roster.cnt_new, tone: "green" },
-    { label: copy("تجديد", "Renewal"), value: roster.cnt_renew, tone: "blue" },
-    { label: copy("ترقية", "Upsell"), value: roster.cnt_upsell, tone: "magenta" },
-    { label: copy("استرجاع", "Win-Back"), value: roster.cnt_winback, tone: "orange" },
-    { label: copy("معلّق", "Hold"), value: roster.cnt_hold, tone: "amber" },
+    { label: copy("جديد", "New"), value: roster.cnt_new, tone: "green", info: t("metricTooltips.contracts_rosterNew") },
+    { label: copy("تجديد", "Renewal"), value: roster.cnt_renew, tone: "blue", info: t("metricTooltips.contracts_rosterRenew") },
+    { label: copy("ترقية", "Upsell"), value: roster.cnt_upsell, tone: "magenta", info: t("metricTooltips.contracts_rosterUpsell") },
+    { label: copy("استرجاع", "Win-Back"), value: roster.cnt_winback, tone: "orange", info: t("metricTooltips.contracts_rosterWinback") },
+    { label: copy("معلّق", "Hold"), value: roster.cnt_hold, tone: "amber", info: t("metricTooltips.contracts_rosterHold") },
   ];
   return (
     <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 p-5 shadow-[var(--surface-elev)]">
@@ -660,15 +620,19 @@ function CurrentRosterBoard({
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
         <div className="rounded-[var(--radius-md)] border border-primary/25 bg-primary p-4 text-primary-foreground shadow-sm sm:col-span-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-primary-foreground/75">
-            {copy("إجمالي العملاء", "Total Clients")}
+          <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-primary-foreground/75">
+            <span>{copy("إجمالي العملاء", "Total Clients")}</span>
+            <MetricInfo
+              text={t("metricTooltips.contracts_rosterTotal")}
+              label={copy("إجمالي العملاء", "Total Clients")}
+            />
           </div>
           <div className="mt-2 text-4xl font-black tabular-nums leading-none">
             {roster.total}
           </div>
         </div>
         {pills.map((p) => (
-          <SheetCell key={p.label} label={p.label} value={p.value} tone={p.tone} compact />
+          <SheetCell key={p.label} label={p.label} value={p.value} tone={p.tone} compact info={p.info} />
         ))}
       </div>
     </div>
@@ -698,6 +662,7 @@ function DepartmentIncomeCard({
   actualBreakdown: Array<{ label: string; value: number; tone?: BreakdownTone }>;
   copy: (ar: string, en: string) => string;
 }) {
+  const t = useTranslations("ContractsPage");
   const pct = achievementPct ?? 0;
   const barPct = Math.max(0, Math.min(100, pct));
   const palette =
@@ -731,8 +696,12 @@ function DepartmentIncomeCard({
           >
             {fmtPct(achievementPct)}
           </div>
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {copy("نسبة الإنجاز", "Achievement")}
+          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span>{copy("نسبة الإنجاز", "Achievement")}</span>
+            <MetricInfo
+              text={t("metricTooltips.contracts_deptAchievement")}
+              label={copy("نسبة الإنجاز", "Achievement")}
+            />
           </div>
         </div>
       </div>
@@ -746,24 +715,27 @@ function DepartmentIncomeCard({
 
       <div className="mt-4 grid grid-cols-3 gap-3 border-y border-border/60 py-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {copy("المحقق", "Actual")}
+          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span>{copy("المحقق", "Actual")}</span>
+            <MetricInfo text={t("metricTooltips.contracts_deptActual")} label={copy("المحقق", "Actual")} />
           </div>
           <div className="mt-1 text-lg font-black tabular-nums text-foreground">
             {fmtSR(actual)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {copy("المتوقع", "Expected")}
+          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span>{copy("المتوقع", "Expected")}</span>
+            <MetricInfo text={t("metricTooltips.contracts_deptExpected")} label={copy("المتوقع", "Expected")} />
           </div>
           <div className="mt-1 text-lg font-black tabular-nums text-muted-foreground">
             {fmtSR(expected)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {copy("الفجوة", "Gap")}
+          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span>{copy("الفجوة", "Gap")}</span>
+            <MetricInfo text={t("metricTooltips.contracts_deptGap")} label={copy("الفجوة", "Gap")} />
           </div>
           <div className={cn("mt-1 text-lg font-black tabular-nums", gapTone)}>
             {fmtSR(gap)}
@@ -845,6 +817,7 @@ function RenewalFunnelStrip({
   targetExclLost: number;
   copy: (ar: string, en: string) => string;
 }) {
+  const t = useTranslations("ContractsPage");
   const renewalGap = Math.max(0, expected - renewed);
   const ratioPct = expected > 0 ? (renewed / expected) * 100 : 0;
   const barPct = Math.max(0, Math.min(100, ratioPct));
@@ -855,19 +828,21 @@ function RenewalFunnelStrip({
         ? { text: "text-amber-600 dark:text-amber-300", bar: "bg-amber" }
         : { text: "text-rose-600 dark:text-rose-300", bar: "bg-cc-red" };
 
-  const stats: Array<{ label: string; value: number; tone?: "amber" | "rose" }> = [
-    { label: copy("ضمن الهدف", "On Target"), value: onTarget },
-    { label: copy("متأخر", "Overdue"), value: overdue, tone: "amber" },
-    { label: copy("عربون مبيعات", "Sales Deposit"), value: salesDeposit },
+  const stats: Array<{ label: string; value: number; tone?: "amber" | "rose"; info: string }> = [
+    { label: copy("ضمن الهدف", "On Target"), value: onTarget, info: t("metricTooltips.contracts_funnelOnTarget") },
+    { label: copy("متأخر", "Overdue"), value: overdue, tone: "amber", info: t("metricTooltips.contracts_funnelOverdue") },
+    { label: copy("عربون مبيعات", "Sales Deposit"), value: salesDeposit, info: t("metricTooltips.contracts_funnelSalesDeposit") },
     {
       label: copy("بعد التجديدات", "Excl. renewals"),
       value: targetExclRenewals,
+      info: t("metricTooltips.contracts_funnelExclRenewals"),
     },
-    { label: copy("بعد الفقد", "Excl. lost"), value: targetExclLost },
+    { label: copy("بعد الفقد", "Excl. lost"), value: targetExclLost, info: t("metricTooltips.contracts_funnelExclLost") },
     {
       label: copy("فجوة التجديد", "Renewal Gap"),
       value: renewalGap,
       tone: renewalGap > 0 ? "rose" : undefined,
+      info: t("metricTooltips.contracts_funnelRenewalGap"),
     },
   ];
 
@@ -890,8 +865,12 @@ function RenewalFunnelStrip({
               {expected}
             </span>
           </div>
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {copy("مجدّد / متوقع", "Renewed / Expected")}
+          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span>{copy("مجدّد / متوقع", "Renewed / Expected")}</span>
+            <MetricInfo
+              text={t("metricTooltips.contracts_funnelRenewedRatio")}
+              label={copy("مجدّد / متوقع", "Renewed / Expected")}
+            />
           </div>
         </div>
       </div>
@@ -913,8 +892,9 @@ function RenewalFunnelStrip({
               s.tone === "rose" && "border-rose-500/30 bg-rose-500/[0.06]",
             )}
           >
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {s.label}
+            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>{s.label}</span>
+              <MetricInfo text={s.info} label={s.label} />
             </div>
             <div
               className={cn(
@@ -946,11 +926,13 @@ function SheetCell({
   value,
   tone,
   compact,
+  info,
 }: {
   label: string;
   value: ReactNode;
   tone: "green" | "greenStrong" | "blue" | "amber" | "orange" | "red" | "magenta" | "gray" | "dark";
   compact?: boolean;
+  info?: string;
 }) {
   const toneCls = {
     green: "border-emerald-500/20 bg-card",
@@ -983,7 +965,10 @@ function SheetCell({
       )}
     >
       <span className={cn("absolute inset-x-0 top-0 h-1", accentCls)} />
-      <div className="text-[11px] font-semibold leading-4 text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-1 text-[11px] font-semibold leading-4 text-muted-foreground">
+        <span>{label}</span>
+        {info && <MetricInfo text={info} label={label} />}
+      </div>
       <div className="mt-2 text-xl font-black tabular-nums text-foreground">{value}</div>
     </div>
   );
@@ -994,11 +979,13 @@ function BucketCard({
   accent,
   clients,
   hideValue,
+  info,
 }: {
   title: string;
   accent: "emerald" | "rose" | "sky" | "zinc";
   clients: BucketClient[];
   hideValue?: boolean;
+  info?: string;
 }) {
   const t = useTranslations("ContractsPage");
   const dot = {
@@ -1015,6 +1002,7 @@ function BucketCard({
           <span className={cn("size-2 rounded-full", dot)} />
           {title}
           <span className="font-normal text-muted-foreground">({clients.length})</span>
+          {info && <MetricInfo text={info} label={title} />}
         </h3>
         {!hideValue && total > 0 && (
           <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
@@ -1053,6 +1041,36 @@ function BucketCard({
   );
 }
 
+// Renewal-pipeline badge for the selected month (renewal_status from
+// get_ceo_client_insights): Overdue = renewal date passed, not renewed yet
+// (chase first); On-Target = renewal due this month; null = not in this month's
+// pipeline (shown only in the "All" view).
+function RenewalStatusBadge({
+  status,
+  copy,
+}: {
+  status: "on_target" | "overdue" | null;
+  copy: (ar: string, en: string) => string;
+}) {
+  if (status == null) {
+    return <span className="text-[11px] text-muted-foreground">—</span>;
+  }
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        status === "overdue"
+          ? "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-200"
+          : "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-200",
+      )}
+    >
+      {status === "overdue"
+        ? copy("متأخر التجديد", "Overdue renewal")
+        : copy("تجديد هذا الشهر", "Due this month")}
+    </span>
+  );
+}
+
 function TopClientsPanel({
   clients,
   copy,
@@ -1060,7 +1078,15 @@ function TopClientsPanel({
   clients: CeoClientInsight[];
   copy: (ar: string, en: string) => string;
 }) {
-  const top = clients.slice(0, 8);
+  const t = useTranslations("ContractsPage");
+  // Default to the renewal-pipeline view: clients with a renewal due this month
+  // (On-Target) or already late (Overdue) who ALSO have a problem signal — the
+  // worklist for lifting renewal rates. "All" falls back to the full attention
+  // list (general problems regardless of renewal timing).
+  const [mode, setMode] = useState<"renewal" | "all">("renewal");
+  const renewalClients = clients.filter((c) => c.renewal_status != null);
+  const active = mode === "renewal" ? renewalClients : clients;
+  const top = active.slice(0, 10);
   return (
     <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
@@ -1069,22 +1095,57 @@ function TopClientsPanel({
             {copy("عملاء يحتاجون انتباهك", "Clients needing attention")}
           </h3>
           <p className="text-[11px] text-muted-foreground">
-            {copy(
-              "مخاطر مفتوحة، دفعات متأخرة، تقييم منخفض، أو تجديد قريب — مرتبة حسب الأولوية",
-              "open risk, overdue installments, low satisfaction, or renewal due soon — ordered by urgency",
-            )}
+            {mode === "renewal"
+              ? copy(
+                  "تجديدات هذا الشهر والمتأخرة التي لديها مخاطر — لرفع نسب التجديد",
+                  "this month's renewals and overdue renewals that carry risk — to lift renewal rates",
+                )
+              : copy(
+                  "مخاطر مفتوحة، دفعات متأخرة، تقييم منخفض، أو تجديد قريب — مرتبة حسب الأولوية",
+                  "open risk, overdue installments, low satisfaction, or renewal due soon — ordered by urgency",
+                )}
           </p>
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          {copy(`${clients.length} عميل`, `${clients.length} clients`)}
-        </span>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-full border border-border/70 bg-soft-1 p-0.5 text-[11px] font-medium">
+            <button
+              type="button"
+              onClick={() => setMode("renewal")}
+              className={cn(
+                "rounded-full px-2.5 py-1 transition",
+                mode === "renewal"
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {copy(`خط التجديد (${renewalClients.length})`, `Renewal (${renewalClients.length})`)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("all")}
+              className={cn(
+                "rounded-full px-2.5 py-1 transition",
+                mode === "all"
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {copy(`الكل (${clients.length})`, `All (${clients.length})`)}
+            </button>
+          </div>
+        </div>
       </div>
       {top.length === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-          {copy(
-            "لا يوجد عملاء يحتاجون انتباهًا خاصًا هذا الشهر.",
-            "No clients need special attention this month.",
-          )}
+          {mode === "renewal"
+            ? copy(
+                "لا يوجد عملاء في خط التجديد لديهم مخاطر هذا الشهر.",
+                "No at-risk renewal clients this month.",
+              )
+            : copy(
+                "لا يوجد عملاء يحتاجون انتباهًا خاصًا هذا الشهر.",
+                "No clients need special attention this month.",
+              )}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -1092,16 +1153,31 @@ function TopClientsPanel({
             <thead className="bg-soft-1 text-[10px] uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-start font-medium">
-                  {copy("العميل", "Client")}
+                  <span className="inline-flex items-center gap-1">
+                    {copy("العميل", "Client")}
+                    <MetricInfo text={t("metricTooltips.contracts_clientActiveContracts")} label={copy("العميل", "Client")} />
+                  </span>
+                </th>
+                <th className="px-3 py-2 text-start font-medium">
+                  {copy("التجديد", "Renewal")}
                 </th>
                 <th className="px-3 py-2 text-end font-medium">
-                  {copy("المحصل", "Collected")}
+                  <span className="inline-flex items-center gap-1">
+                    {copy("المحصل", "Collected")}
+                    <MetricInfo text={t("metricTooltips.contracts_clientCollected")} label={copy("المحصل", "Collected")} />
+                  </span>
                 </th>
                 <th className="px-3 py-2 text-end font-medium">
-                  {copy("المتوقع", "Expected")}
+                  <span className="inline-flex items-center gap-1">
+                    {copy("المتوقع", "Expected")}
+                    <MetricInfo text={t("metricTooltips.contracts_clientExpected")} label={copy("المتوقع", "Expected")} />
+                  </span>
                 </th>
                 <th className="px-3 py-2 text-center font-medium">
-                  {copy("التجربة", "Experience")}
+                  <span className="inline-flex items-center gap-1">
+                    {copy("التجربة", "Experience")}
+                    <MetricInfo text={t("metricTooltips.contracts_clientExperience")} label={copy("التجربة", "Experience")} />
+                  </span>
                 </th>
                 <th className="px-3 py-2 text-start font-medium">
                   {copy("إشارة الخطر", "Risk signal")}
@@ -1122,6 +1198,9 @@ function TopClientsPanel({
                       {c.client_code ?? "—"} · {c.account_manager_name ?? "—"} ·{" "}
                       {copy(`${c.active_contracts} عقد نشط`, `${c.active_contracts} active`)}
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <RenewalStatusBadge status={c.renewal_status} copy={copy} />
                   </td>
                   <td className="px-3 py-2 text-end tabular-nums">{fmtSR(c.month_collected)}</td>
                   <td className="px-3 py-2 text-end tabular-nums text-muted-foreground">
@@ -1231,6 +1310,7 @@ function TeamTargetsCard({
   amTargets: AmTargetRow[];
   copy: (ar: string, en: string) => string;
 }) {
+  const t = useTranslations("ContractsPage");
   // Dept manager last (it's the grand total), leaders by team size desc.
   const teamRows = amTargets
     .filter((a) => a.team_role != null)
@@ -1295,8 +1375,12 @@ function TeamTargetsCard({
                   <div className={cn("text-2xl font-black tabular-nums leading-none", palette.text)}>
                     {fmtPct(pct)}
                   </div>
-                  <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {copy("إنجاز الفريق", "Team achievement")}
+                  <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>{copy("إنجاز الفريق", "Team achievement")}</span>
+                    <MetricInfo
+                      text={t("metricTooltips.contracts_teamAchievement")}
+                      label={copy("إنجاز الفريق", "Team achievement")}
+                    />
                   </div>
                 </div>
               </div>
@@ -1307,14 +1391,16 @@ function TeamTargetsCard({
 
               <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {copy("المحقق", "Achieved")}
+                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>{copy("المحقق", "Achieved")}</span>
+                    <MetricInfo text={t("metricTooltips.contracts_teamAchieved")} label={copy("المحقق", "Achieved")} />
                   </div>
                   <div className="mt-0.5 font-black tabular-nums text-foreground">{fmtSR(ach)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {copy("المتوقع", "Expected")}
+                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>{copy("المتوقع", "Expected")}</span>
+                    <MetricInfo text={t("metricTooltips.contracts_teamExpected")} label={copy("المتوقع", "Expected")} />
                   </div>
                   <div className="mt-0.5 font-black tabular-nums text-muted-foreground">{fmtSR(exp)}</div>
                 </div>

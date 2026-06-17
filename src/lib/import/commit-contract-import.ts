@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { logAudit } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { ParseResult } from "@/lib/import/excel-parser";
+import { normName, diceRatio } from "@/lib/match/client-match";
 
 export const ACC_SHEET_SOURCE = "excel-acc-sheet";
 
@@ -183,6 +184,9 @@ export async function commitContractImportPayload({
 
   let contractsUpserted = 0;
   const contractIdByExternalKey = new Map<string, string>();
+  // contract external key → its type key, so installment rows can carry
+  // source_type_key (Account vs Sales attribution for the income engine).
+  const typeKeyByExternalKey = new Map<string, string>();
 
   const { data: existingContracts } = await supabaseAdmin
     .from("contracts")
@@ -194,6 +198,47 @@ export async function commitContractImportPayload({
     if (r.external_id) existingContractMap.set(String(r.external_id), r.id);
   }
 
+  // Resolve each sheet "Account manager" name to an employee_profiles FK so the
+  // contract carries account_manager_id (not just the free-text name) — the
+  // dashboard's AM column reads through that FK, so without it the column shows
+  // "—" even when the sheet names a manager. Exact normalized match first, with
+  // a high-confidence Dice fallback for minor spelling variance.
+  const { data: emps } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name")
+    .eq("organization_id", orgId);
+  const empByName = new Map<string, string>();
+  const empList: { id: string; norm: string }[] = [];
+  for (const e of emps ?? []) {
+    const k = normName(String(e.full_name ?? ""));
+    if (!k) continue;
+    if (!empByName.has(k)) empByName.set(k, e.id);
+    empList.push({ id: e.id, norm: k });
+  }
+  const resolveAmId = (name: string | null | undefined): string | null => {
+    if (!name) return null;
+    const k = normName(name);
+    if (!k) return null;
+    const exact = empByName.get(k);
+    if (exact) return exact;
+    let best: { id: string; score: number } | null = null;
+    let second = 0;
+    for (const e of empList) {
+      const score = diceRatio(k, e.norm);
+      if (!best || score > best.score) {
+        second = best?.score ?? 0;
+        best = { id: e.id, score };
+      } else if (score > second) {
+        second = score;
+      }
+    }
+    // Require a strong, unambiguous lead before trusting a fuzzy match.
+    return best && best.score >= 0.85 && best.score - second >= 0.1
+      ? best.id
+      : null;
+  };
+  const amUnmatched = new Set<string>();
+
   for (const c of payload.contracts) {
     const clientUuid = clientIdByExternal.get(c.clientExternalId);
     if (!clientUuid) {
@@ -203,9 +248,17 @@ export async function commitContractImportPayload({
     const typeId = c.contractTypeKey
       ? typeIdByKey.get(c.contractTypeKey) ?? null
       : null;
+    if (c.contractTypeKey) {
+      typeKeyByExternalKey.set(c.externalKey, c.contractTypeKey);
+    }
     const packageIds = splitPackageNames(c.packageName)
       .map((name) => packageIdByName.get(name))
       .filter((id): id is string => !!id);
+
+    const accountManagerId = resolveAmId(c.accountManagerName);
+    if (c.accountManagerName && !accountManagerId) {
+      amUnmatched.add(c.accountManagerName);
+    }
 
     const row = {
       organization_id: orgId,
@@ -213,6 +266,9 @@ export async function commitContractImportPayload({
       sheet_client_name: c.clientName,
       contract_type_id: typeId,
       account_manager_name: c.accountManagerName,
+      // Only write the FK when we resolved one. On the update path, writing null
+      // for an unmatched sheet name would clobber a manually-assigned manager.
+      ...(accountManagerId ? { account_manager_id: accountManagerId } : {}),
       package_id: packageIds[0] ?? null,
       package_name: c.packageName,
       start_date: c.startDate,
@@ -290,6 +346,12 @@ export async function commitContractImportPayload({
     contractsUpserted++;
   }
 
+  if (amUnmatched.size > 0) {
+    errors.push(
+      `مدراء حسابات لم تتم مطابقتهم بموظف: ${[...amUnmatched].join("، ")}`,
+    );
+  }
+
   // Reconcile sheet membership. Contracts previously synced from the sheet but
   // absent from this pull (e.g. a pre-renewal version whose Client ID|start_date
   // key was overwritten when the client renewed) are flagged sheet_present=false
@@ -331,6 +393,7 @@ export async function commitContractImportPayload({
       expected_amount: inst.expectedAmount,
       actual_date: inst.actualDate,
       actual_amount: inst.actualAmount > 0 ? inst.actualAmount : null,
+      source_type_key: typeKeyByExternalKey.get(inst.contractExternalKey) ?? null,
       status,
     };
 

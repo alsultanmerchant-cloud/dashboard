@@ -98,8 +98,10 @@ export async function analyzeClientSatisfaction(
   // the model must not infer the brief from internal team chat.
   const brief = await getClientBrief(orgId, clientId);
   const briefInstruction = brief
-    ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.`
-    : `- briefAdherenceScore: أعده null لأن نص وثيقة البريف غير متاح في مدخلات التحليل. لا تستنتج الالتزام بالبريف من مجموعة الفريق التقني أو من المحادثات.`;
+    ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.
+- briefAdherence: التفصيل الذي يفسّر الدرجة. { reason: جملة عربية واحدة تلخّص سبب هذه الدرجة، items: مصفوفة لكل بند مكتوب في البريف }. كل عنصر { requirement: نص البند/المخرج كما ورد في البريف، status: delivered (منفّذ) أو partial (جزئي) أو not_delivered (غير منفّذ) أو no_evidence (لا يوجد دليل في المصادر)، note: دليل قصير أو سبب الحالة (اقتباس/تلخيص أمين، أو null) }. اشمل البنود المنفّذة وغير المنفّذة معًا حتى يفهم الفريق أين الخلل بالضبط. لا تخترع بنوداً ليست في البريف.`
+    : `- briefAdherenceScore: أعده null لأن نص وثيقة البريف غير متاح في مدخلات التحليل. لا تستنتج الالتزام بالبريف من مجموعة الفريق التقني أو من المحادثات.
+- briefAdherence: أعده null لنفس السبب.`;
   const briefBlock = brief
     ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source}, ${brief.kind})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
     : "\n\n=== البريف ===\n(لم يتم العثور على نص بريف قابل للقراءة من ملفات المشروع/المهام لهذا العميل)";
@@ -241,7 +243,10 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
     }
   }
   if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
-  if (!brief) result.briefAdherenceScore = null;
+  if (!brief) {
+    result.briefAdherenceScore = null;
+    result.briefAdherence = null;
+  }
 
   // Latest import ids (for provenance), best-effort.
   const { data: imp } = await supabaseAdmin
@@ -275,6 +280,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
       client_id: clientId,
       satisfaction_score: result.satisfactionScore,
       brief_adherence_score: result.briefAdherenceScore,
+      brief_adherence: result.briefAdherence,
       sentiment: result.sentiment,
       summary: result.summary,
       highlights: result.highlights,

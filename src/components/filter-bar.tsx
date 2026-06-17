@@ -12,10 +12,19 @@ export interface FilterBarProps {
   onClear?: () => void;
   hasActiveFilters?: boolean;
   children?: React.ReactNode;
+  /** Pinned to the inline-end (e.g. result count, view switcher). */
+  trailing?: React.ReactNode;
   className?: string;
 }
 
-export function FilterBar({ search, onClear, hasActiveFilters, children, className }: FilterBarProps) {
+export function FilterBar({
+  search,
+  onClear,
+  hasActiveFilters,
+  children,
+  trailing,
+  className,
+}: FilterBarProps) {
   const tF = useTranslations("Forms");
   const tA = useTranslations("Actions");
   return (
@@ -27,12 +36,12 @@ export function FilterBar({ search, onClear, hasActiveFilters, children, classNa
     >
       {search && (
         <div className="relative min-w-0 flex-1 max-w-sm">
-          <Search className="pointer-events-none absolute rtl:right-2.5 ltr:left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search.value}
             onChange={(e) => search.onChange(e.target.value)}
             placeholder={search.placeholder ?? tF("placeholderSearch")}
-            className="rtl:pe-8 ltr:ps-8"
+            className="ps-9"
             type="search"
             inputMode="search"
           />
@@ -45,6 +54,7 @@ export function FilterBar({ search, onClear, hasActiveFilters, children, classNa
           {tA("clearFilters")}
         </Button>
       )}
+      {trailing && <div className="ms-auto flex items-center gap-2">{trailing}</div>}
     </div>
   );
 }

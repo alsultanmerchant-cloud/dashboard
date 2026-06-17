@@ -1,4 +1,4 @@
-import { streamText, convertToModelMessages, tool, stepCountIs } from "ai";
+import { streamText, convertToModelMessages, tool, stepCountIs, type UIMessage } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -59,19 +59,55 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
-    const { messages, selection, field, context, page } = (await req.json()) as {
+    const { messages, selection, field, context, page, clientId } = (await req.json()) as {
       messages: unknown[];
       briefRunId?: string | null;
       selection?: string | null;
       field?: string | null;
       context?: string | null;
       page?: string | null;
+      clientId?: string | null;
     };
     const orgId = session.orgId;
     const userId = session.userId;
 
     const knowledge = await buildKnowledgeBlock(orgId);
-    const modelMessages = await convertToModelMessages(messages);
+
+    // Satisfaction-page grounding: when the user asks about a client's metric
+    // (e.g. "why is brief-adherence 40?"), the bare selected label isn't enough.
+    // Load that client's current analysis — its brief-adherence breakdown and
+    // summary — so the assistant can answer from the real per-requirement data
+    // instead of guessing how the metric is computed.
+    let clientContext = "";
+    if (clientId && page?.includes("/satisfaction")) {
+      const { data: c } = await supabaseAdmin
+        .from("clients")
+        .select("name")
+        .eq("organization_id", orgId)
+        .eq("id", clientId)
+        .maybeSingle();
+      const { data: a } = await supabaseAdmin
+        .from("client_satisfaction_analyses")
+        .select("satisfaction_score, brief_adherence_score, brief_adherence, summary")
+        .eq("organization_id", orgId)
+        .eq("client_id", clientId)
+        .eq("is_current", true)
+        .maybeSingle();
+      if (c && a) {
+        const ba = a.brief_adherence as
+          | { reason?: string; items?: Array<{ requirement: string; status: string; note: string | null }> }
+          | null;
+        const briefBlock = ba
+          ? `الالتزام بالبريف: ${a.brief_adherence_score ?? "—"}%\nالسبب: ${ba.reason ?? "—"}\nبنود البريف:\n${(ba.items ?? [])
+              .map((it) => `- [${it.status}] ${it.requirement}${it.note ? ` — ${it.note}` : ""}`)
+              .join("\n")}`
+          : a.brief_adherence_score !== null
+            ? `الالتزام بالبريف: ${a.brief_adherence_score}% (لا يوجد تفصيل بنود محفوظ لهذا التحليل — اطلب إعادة التحليل لتوليد التفصيل).`
+            : "الالتزام بالبريف: غير متاح (لا يوجد بريف موثّق لهذا العميل).";
+        clientContext = `\n\n---\nسياق العميل المعروض حاليًا: "${c.name}"\nدرجة الرضا: ${a.satisfaction_score ?? "—"}\n${briefBlock}\nملخص التحليل: ${a.summary ?? "—"}\nاستند إلى هذا التفصيل عند شرح أرقام رضا/التزام هذا العميل؛ لا تخترع بنودًا.`;
+      }
+    }
+    const modelMessages = await convertToModelMessages(messages as Omit<UIMessage, "id">[]);
 
     const selectionContext = selection
       ? `\n\n---\nالنص المحدّد حاليًا في اللوحة: "${selection}"${page ? `\nالصفحة الحالية: ${page}` : ""}${context ? `\nالقسم/العنوان: ${context}` : ""}${field ? `\nمفتاح الحقل القابل للتعديل: ${field}` : "\n(لا يوجد حقل قابل للتعديل — هذا النص خارج موجز المدير التنفيذي، فلا تستخدم editBriefText؛ اشرح أو احفظ تعليمة بدلًا من ذلك.)"}`
@@ -82,7 +118,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: google(GEMINI_MODEL),
-      system: `${SYSTEM_PROMPT}${knowledge ? `\n\n---\n\n${knowledge}` : ""}${selectionContext}`,
+      system: `${SYSTEM_PROMPT}${knowledge ? `\n\n---\n\n${knowledge}` : ""}${clientContext}${selectionContext}`,
       messages: modelMessages,
       maxRetries: 0,
       stopWhen: stepCountIs(8),
@@ -95,7 +131,11 @@ export async function POST(req: Request) {
             "تعديل حقل نصّي واحد في موجز المدير التنفيذي الحالي للمنظمة. الحقول المسموحة فقط: headline, bottomLine, rec:<رقم التوصية>, risk:<معرّف الخطر>. لا يمكن تعديل الأرقام أو المؤشرات.",
           inputSchema: z.object({
             field: briefField,
-            newText: z.string().min(1).describe("النص الجديد بعد التصحيح، بنفس لغة ونبرة الموجز"),
+            newText: z
+              .string()
+              .trim()
+              .min(1)
+              .describe("النص الجديد بعد التصحيح، بنفس لغة ونبرة الموجز"),
           }),
           execute: async ({ field: targetField, newText }) => {
             // Always patch the live current brief row, resolved server-side

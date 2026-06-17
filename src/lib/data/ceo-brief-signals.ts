@@ -13,6 +13,7 @@ import {
   getWipAging,
 } from "@/lib/data/executive";
 import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
+import { getAiDataQuality, type AiDataQuality } from "@/lib/data/ai-data-quality";
 
 // =========================================================================
 // CEO Brief — deterministic signal builder.
@@ -119,6 +120,10 @@ export interface CeoBriefSignals {
   timelineEvents: BriefEvent[];
   opportunities: CeoBriefOpportunities;
   context: CeoBriefContext;
+  // Which signal families are trustworthy given the current (Odoo-synced) data.
+  // The AI generation prompt injects `dataQuality.caveats` so the model never
+  // states an unbacked metric (e.g. on-time % with no due dates) as fact.
+  dataQuality: AiDataQuality;
 }
 
 // ---- helpers -------------------------------------------------------------
@@ -410,6 +415,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     satAgg,
     satRisk,
     dismissed,
+    dataQuality,
   ] = await Promise.all([
     getExecutiveScores(orgId),
     buildCeoBriefData(orgId),
@@ -425,6 +431,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     getOrgSatisfactionAggregate(orgId).catch(() => null),
     getAtRiskClients(orgId).catch(() => []),
     loadDismissedRisks(orgId),
+    getAiDataQuality(orgId),
   ]);
 
   const statusPct = Math.round(scores.stability.score);
@@ -496,8 +503,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   if (overdueCount >= 20 || (onTimeDrop != null && onTimeDrop >= 5)) {
     const esc = scores.stability.unackEscalations;
     const parts = [`${overdueCount} مهمة متأخرة في ${lateProjects} مشروع`];
-    if (onTimePct != null) parts.push(`الالتزام ${Math.round(onTimePct)}%`);
-    if (onTimeDrop != null && onTimeDrop > 0)
+    // On-time % and the weekly trend are snapshot/due-date derived — only quote
+    // them when the data actually backs them, else they read as confident noise.
+    if (onTimePct != null && dataQuality.onTimePct.level !== "missing")
+      parts.push(`الالتزام ${Math.round(onTimePct)}%`);
+    if (onTimeDrop != null && onTimeDrop > 0 && dataQuality.weekOverWeek.level === "reliable")
       parts.push(`متراجع ${onTimeDrop} نقطة هذا الأسبوع`);
     if (esc > 0) parts.push(`${esc} تصعيد غير معالَج`);
     risks.push({
@@ -506,7 +516,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       severity:
         (onTimePct != null && onTimePct < 50) || overdueCount >= 150 ? "critical" : "high",
       metric: parts.join(" · "),
-      href: "/dashboard",
+      href: "/tasks?view=list&filter=overdue",
       weight: overdueCount * 0.5 + lateProjects * 2 + (onTimeDrop ?? 0),
     });
   }
@@ -525,12 +535,16 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     const parts = [`${satAgg.atRiskClients} من ${satAgg.analyzedClients} عميلًا معرّضون للفقد`];
     if (avg != null) parts.push(`متوسط الرضا ${avg}/100`);
     if (top) parts.push(`أبرزهم: ${top}`);
+    // Deep-link straight to the single worst at-risk client (the concrete
+    // evidence) rather than the whole satisfaction page; scope dismissal to it.
+    const worstChurn = satRisk[0];
     risks.push({
       id: "client_churn",
       title: "خطر فقدان عملاء",
       severity: satAgg.atRiskClients >= 10 || (avg != null && avg < 50) ? "critical" : "high",
       metric: parts.join(" · "),
-      href: "/satisfaction",
+      href: worstChurn?.clientId ? `/satisfaction?client=${worstChurn.clientId}` : "/satisfaction",
+      entityId: worstChurn?.clientId,
       weight: 40 + satAgg.atRiskClients * 3,
     });
   }
@@ -552,7 +566,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: `مشروع ${topStuck.projectName} متعثّر`,
       severity,
       metric: `${topStuck.overdueTasks} متأخرة من ${topStuck.openTasks} مفتوحة · انزلاق ${slip}%${idle}${client}`,
-      href: `/projects/${topStuck.projectId}`,
+      href: `/tasks?view=list&projectId=${topStuck.projectId}&filter=overdue`,
       entityId: topStuck.projectId,
       weight: topStuck.overdueTasks * 3 + slip,
     });
@@ -598,7 +612,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: "دفعات متأخرة التحصيل",
       severity: val >= 50000 ? "critical" : val >= 10000 ? "high" : "medium",
       metric: `${briefData.money.overdueInstallments} دفعة بقيمة ${val.toLocaleString("en-US")} ريال`,
-      href: "/contracts?view=dashboard",
+      href: "/contracts?view=table&target=Overdue",
       weight: 50 + Math.min(60, val / 3000),
     });
   }
@@ -628,7 +642,9 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: `ضعف في مؤشر ${worstLine.label}`,
       severity: worstLine.score < 40 ? "high" : "medium",
       metric: `المؤشر عند ${worstLine.score}% (تقدير ${worstLine.grade})`,
-      href: "/dashboard",
+      // The composite indices break down in /reports — link there, not back to
+      // the dashboard the CEO is already looking at.
+      href: "/reports",
       entityId: worstLine.label,
       weight: 6 + (55 - worstLine.score) / 3,
     });
@@ -720,5 +736,6 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     timelineEvents: eventPack.timelineEvents,
     opportunities,
     context,
+    dataQuality,
   };
 }

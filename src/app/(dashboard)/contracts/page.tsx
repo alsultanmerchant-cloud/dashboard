@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
 import { ContractsGrid } from "./contracts-grid";
+import type { ContractGridFilters } from "./contracts-grid";
 import { NewContractButton } from "./new-contract-dialog";
 import { CeoDashboard } from "./ceo-dashboard";
 import { LogsSection } from "./logs-section";
@@ -37,6 +38,45 @@ import { SheetSyncButton } from "./sheet-sync-button";
 // + parses the whole Google workbook, which takes far longer than the 10s
 // serverless default. Raise to the Vercel-Hobby max so the action can finish.
 export const maxDuration = 60;
+
+const CONTRACT_TARGET_FILTERS = new Set(["Overdue", "Sales Deposit", "On Target", "Closed"]);
+const CONTRACT_STATUS_FILTERS = new Set(["Active", "Expired", "SOON", "Closed"]);
+const CONTRACT_TYPE_FILTERS = new Set(["New", "Renew", "UPSELL", "Hold", "WinBack"]);
+const CONTRACT_PAYMENT_FILTERS = new Set(["Installments", "Complete"]);
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseCsvParam(value: string | string[] | undefined, allowed?: Set<string>): string[] | undefined {
+  const raw = firstParam(value);
+  if (raw === undefined) return undefined;
+  if (raw === "" || raw === "all") return [];
+  const values = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .filter((item) => !allowed || allowed.has(item));
+  return values.length > 0 ? values : [];
+}
+
+function parseContractGridFilters(
+  sp: Record<string, string | string[] | undefined>,
+): ContractGridFilters {
+  return {
+    search: firstParam(sp.q)?.trim() || undefined,
+    targets: parseCsvParam(sp.target, CONTRACT_TARGET_FILTERS),
+    statuses: parseCsvParam(sp.status, CONTRACT_STATUS_FILTERS),
+    types: parseCsvParam(sp.type, CONTRACT_TYPE_FILTERS),
+    packages: parseCsvParam(sp.package),
+    payments: parseCsvParam(sp.payment, CONTRACT_PAYMENT_FILTERS),
+    scope: firstParam(sp.scope) === "mine" ? "mine" : undefined,
+  };
+}
+
+function contractGridFilterKey(filters: ContractGridFilters): string {
+  return JSON.stringify(filters);
+}
 
 export default async function ContractsPage({
   searchParams,
@@ -135,6 +175,7 @@ export default async function ContractsPage({
           orgId={session.orgId}
           canEdit={canEdit}
           meEmployeeId={session.employeeId ?? null}
+          initialFilters={parseContractGridFilters(sp)}
         />
       )}
     </div>
@@ -147,10 +188,12 @@ async function TableSection({
   orgId,
   canEdit,
   meEmployeeId,
+  initialFilters,
 }: {
   orgId: string;
   canEdit: boolean;
   meEmployeeId: string | null;
+  initialFilters: ContractGridFilters;
 }) {
   const [rows, types, ams] = await Promise.all([
     listContractsGrid(orgId),
@@ -174,11 +217,13 @@ async function TableSection({
 
   return (
     <ContractsGrid
+      key={contractGridFilterKey(initialFilters)}
       rows={rows}
       meEmployeeId={meEmployeeId}
       canEdit={canEdit}
       contractTypes={typeOptions}
       accountManagers={amOptions}
+      initialFilters={initialFilters}
     />
   );
 }
@@ -220,7 +265,7 @@ async function DashboardSection({
       getContractsRoster(orgId),
       getAmTargets(orgId, selected),
       getMonthTargetBuckets(orgId, selected),
-      getCeoClientInsights(orgId, selected, 12),
+      getCeoClientInsights(orgId, selected, 50),
     ]);
 
   if (!dashboard) {

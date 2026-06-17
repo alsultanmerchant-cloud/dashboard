@@ -9,6 +9,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
+import { MetricInfo, Explained } from "@/components/metric-info";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +23,7 @@ import {
   getSpecialistLoad,
   getBehindScheduleBuckets,
   getDesignerMonthlyOutput,
+  getLeadershipNameSet,
 } from "@/lib/data/reports-extras";
 import { SummarizeWeekButton } from "./summarize-week-button";
 import { StageDwellChart } from "./stage-dwell-chart";
@@ -89,12 +91,13 @@ export default async function ReportsPage({
           pay the JSON-RPC round-trip once, but everything Supabase-backed
           streams in independently below. */}
       <Suspense fallback={<OdooSectionsFallback title={t("weeklyMetrics.title")} description={t("weeklyMetrics.description")} />}>
-        <OdooSections />
+        <OdooSections orgId={session.orgId} />
       </Suspense>
 
       <SectionTitle
         title={t("sections.stageDwell.title")}
         description={t("sections.stageDwell.description")}
+        actions={<MetricInfo text={t("metricTooltips.reports_stageDwell")} />}
       />
       <Suspense fallback={<ChartFallback />}>
         <StageDwellSection orgId={session.orgId} />
@@ -103,6 +106,7 @@ export default async function ReportsPage({
       <SectionTitle
         title={t("sections.specialistLoad.title")}
         description={t("sections.specialistLoad.description")}
+        actions={<MetricInfo text={t("metricTooltips.reports_specialistLoad")} />}
       />
       <Suspense fallback={<ChartFallback />}>
         <SpecialistLoadSection orgId={session.orgId} />
@@ -111,6 +115,7 @@ export default async function ReportsPage({
       <SectionTitle
         title={t("sections.designerOutput.title")}
         description={t("sections.designerOutput.description")}
+        actions={<MetricInfo text={t("metricTooltips.reports_designerOutput")} />}
       />
       <Suspense fallback={<ChartFallback />}>
         <DesignerOutputSection
@@ -124,6 +129,7 @@ export default async function ReportsPage({
       <SectionTitle
         title={t("sections.slipHeatmap.title")}
         description={t("sections.slipHeatmap.description")}
+        actions={<MetricInfo text={t("metricTooltips.reports_slipHeatmap")} />}
       />
       <Suspense fallback={<ChartFallback />}>
         <SlipHeatmapSection orgId={session.orgId} />
@@ -133,9 +139,12 @@ export default async function ReportsPage({
         title={t("sections.renewals.title")}
         description={t("sections.renewals.description")}
         actions={
-          <Link href="/projects?filter=renewals_this_month" className="text-xs text-cyan hover:underline">
-            {t("sections.renewals.openProjects")}
-          </Link>
+          <span className="inline-flex items-center gap-2">
+            <MetricInfo text={t("metricTooltips.reports_renewalDays")} />
+            <Link href="/projects?filter=renewals_this_month" className="text-xs text-cyan hover:underline">
+              {t("sections.renewals.openProjects")}
+            </Link>
+          </span>
         }
       />
       <Suspense fallback={<ListFallback />}>
@@ -158,7 +167,7 @@ export default async function ReportsPage({
 
 // ───────────────────────── Odoo-backed sections ─────────────────────────
 
-async function OdooSections() {
+async function OdooSections({ orgId }: { orgId: string }) {
   const t = await getTranslations("ReportsPage");
   let reports;
   try {
@@ -177,8 +186,15 @@ async function OdooSections() {
       </>
     );
   }
+  // Agents-only People Board: drop leadership (dept managers, CSO, leads). The
+  // Odoo leaderboard has no position data, so we filter by name against the
+  // Supabase leadership set (same org, same names → exact-after-trim match).
+  const leadershipNames = await getLeadershipNameSet(orgId);
+  const agentLeaderboard = reports.agentLeaderboard.filter(
+    (l) => !leadershipNames.has(l.fullName.trim().replace(/\s+/g, " ")),
+  );
   const maxRework = Math.max(1, ...reports.reworkByProject.map((h) => h.count));
-  const maxLb = Math.max(1, ...reports.agentLeaderboard.map((l) => l.closedCount));
+  const maxLb = Math.max(1, ...agentLeaderboard.map((l) => l.closedCount));
 
   return (
     <>
@@ -187,39 +203,48 @@ async function OdooSections() {
         description={t("weeklyMetrics.description")}
       />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-        <MetricCard
-          label={t("weeklyMetrics.cards.onTime")}
-          value={reports.onTime.pct === null ? "—" : `${reports.onTime.pct}%`}
-          hint={reports.onTime.sample === 0 ? t("weeklyMetrics.hints.noSample") : t("weeklyMetrics.hints.sample", { count: reports.onTime.sample })}
-          icon={<Timer className="size-5" />}
-          tone={pctTone(reports.onTime.pct)}
-        />
-        <MetricCard
-          label={t("weeklyMetrics.cards.reviewBacklog")}
-          value={reports.reviewBacklog.length}
-          hint={reports.reviewBacklog.length === 0 ? t("weeklyMetrics.hints.noDelay") : t("weeklyMetrics.hints.waitingReview")}
-          icon={<AlertTriangle className="size-5" />}
-          tone={reports.reviewBacklog.length > 0 ? "destructive" : "default"}
-        />
-        <MetricCard
-          label={t("weeklyMetrics.cards.rework")}
-          value={reports.reworkTotal}
-          hint={t("weeklyMetrics.hints.affectedProjects", { count: reports.reworkByProject.length })}
-          icon={<Activity className="size-5" />}
-          tone={reports.reworkTotal > 0 ? "warning" : "default"}
-        />
-        <MetricCard
-          label={t("weeklyMetrics.cards.odooTasks")}
-          value={reports.agentLeaderboard.reduce((s, r) => s + r.closedCount, 0)}
-          hint={t("weeklyMetrics.hints.last4Weeks")}
-          icon={<TrendingUp className="size-5" />}
-          tone="info"
-        />
+        <Explained text={t("metricTooltips.reports_onTime")} className="block">
+          <MetricCard
+            label={t("weeklyMetrics.cards.onTime")}
+            value={reports.onTime.pct === null ? "—" : `${reports.onTime.pct}%`}
+            hint={reports.onTime.sample === 0 ? t("weeklyMetrics.hints.noSample") : t("weeklyMetrics.hints.sample", { count: reports.onTime.sample })}
+            icon={<Timer className="size-5" />}
+            tone={pctTone(reports.onTime.pct)}
+          />
+        </Explained>
+        <Explained text={t("metricTooltips.reports_reviewBacklog")} className="block">
+          <MetricCard
+            label={t("weeklyMetrics.cards.reviewBacklog")}
+            value={reports.reviewBacklog.length}
+            hint={reports.reviewBacklog.length === 0 ? t("weeklyMetrics.hints.noDelay") : t("weeklyMetrics.hints.waitingReview")}
+            icon={<AlertTriangle className="size-5" />}
+            tone={reports.reviewBacklog.length > 0 ? "destructive" : "default"}
+          />
+        </Explained>
+        <Explained text={t("metricTooltips.reports_rework")} className="block">
+          <MetricCard
+            label={t("weeklyMetrics.cards.rework")}
+            value={reports.reworkTotal}
+            hint={t("weeklyMetrics.hints.affectedProjects", { count: reports.reworkByProject.length })}
+            icon={<Activity className="size-5" />}
+            tone={reports.reworkTotal > 0 ? "warning" : "default"}
+          />
+        </Explained>
+        <Explained text={t("metricTooltips.reports_odooTasks")} className="block">
+          <MetricCard
+            label={t("weeklyMetrics.cards.odooTasks")}
+            value={agentLeaderboard.reduce((s, r) => s + r.closedCount, 0)}
+            hint={t("weeklyMetrics.hints.last4Weeks")}
+            icon={<TrendingUp className="size-5" />}
+            tone="info"
+          />
+        </Explained>
       </div>
 
       <SectionTitle
         title={t("reworkByProject.title")}
         description={t("reworkByProject.description")}
+        actions={<MetricInfo text={t("metricTooltips.reports_reworkByProject")} />}
       />
       {reports.reworkByProject.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
@@ -257,16 +282,21 @@ async function OdooSections() {
       <SectionTitle
         title={t("peopleBoard.title")}
         description={t("peopleBoard.description")}
-        actions={<Users className="size-4 text-muted-foreground" />}
+        actions={
+          <span className="inline-flex items-center gap-2">
+            <MetricInfo text={t("metricTooltips.reports_peopleBoard")} />
+            <Users className="size-4 text-muted-foreground" />
+          </span>
+        }
       />
-      {reports.agentLeaderboard.length === 0 ? (
+      {agentLeaderboard.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-xl border border-dashed border-soft-2 bg-card/30 px-4 py-6 text-center mb-8">
           {t("peopleBoard.empty")}
         </p>
       ) : (
         <Card className="mb-8">
           <CardContent className="p-5 space-y-3">
-            {reports.agentLeaderboard.map((row) => {
+            {agentLeaderboard.map((row) => {
               const pct = (row.closedCount / maxLb) * 100;
               return (
                 <div key={row.userId}>
@@ -444,25 +474,37 @@ async function DigestSection({ orgId }: { orgId: string }) {
           <CardContent className="p-5 space-y-3 text-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.onTime")}</p>
+                <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                  {t("storedDigest.cards.onTime")}
+                  <MetricInfo text={t("metricTooltips.reports_digestOnTime")} />
+                </p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.on_time.pct === null ? "—" : `${latestDigest.payload.on_time.pct}%`}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.weekClosures")}</p>
+                <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                  {t("storedDigest.cards.weekClosures")}
+                  <MetricInfo text={t("metricTooltips.reports_digestWeekClosures")} />
+                </p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.productivity.closed_this_week}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.reviewBacklog")}</p>
+                <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                  {t("storedDigest.cards.reviewBacklog")}
+                  <MetricInfo text={t("metricTooltips.reports_digestReviewBacklog")} />
+                </p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.review_backlog.count}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-2.5">
-                <p className="text-[11px] text-muted-foreground">{t("storedDigest.cards.renewals90d")}</p>
+                <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                  {t("storedDigest.cards.renewals90d")}
+                  <MetricInfo text={t("metricTooltips.reports_digestRenewals90d")} />
+                </p>
                 <p className="text-base font-semibold tabular-nums">
                   {latestDigest.payload.renewals_next_90d.count}
                 </p>

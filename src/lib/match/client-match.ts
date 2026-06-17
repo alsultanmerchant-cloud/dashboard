@@ -2,7 +2,12 @@
 // (to show suggestions) and the bulk-merge action (to apply them), so the
 // score the team sees is exactly the score the bulk merge uses — no drift.
 
-const AR_DIAC = /[ؐ-ًؚ-ٰٟۖ-ۭ]/g;
+// Arabic combining marks only — harakat/tanwin/shadda/sukun (U+064B–U+0652),
+// superscript alef (U+0670) and Quranic annotation marks (U+06D6–U+06ED).
+// IMPORTANT: must NOT reach into the base-letter block (U+0621–U+064A) — an
+// earlier range (U+0610–U+064B) swallowed the whole alphabet, making normName
+// return "" for any pure-Arabic name.
+const AR_DIAC = /[ً-ْٰۖ-ۭ]/g;
 
 export function normName(s: string): string {
   let x = (s || "").trim().toLowerCase();

@@ -42,6 +42,7 @@ import {
   getTopRevisedTasks,
 } from "@/lib/data/executive";
 import { PageHeader } from "@/components/page-header";
+import { MetricInfo, Explained } from "@/components/metric-info";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
@@ -301,6 +302,7 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
 }
 
 async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFinance: boolean }) {
+  const t = await getTranslations("Dashboard");
   const [accountability, contracts] = await Promise.all([
     loadAccountabilitySummary(orgId),
     canFinance ? loadContractAnalysis(orgId) : Promise.resolve(null),
@@ -338,8 +340,8 @@ async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFin
       </div>
 
       <div className={cn("grid gap-3", contracts && "xl:grid-cols-2")}>
-        <AccountabilityAnalysisCard summary={accountability} />
-        {contracts && <ContractsAnalysisCard analysis={contracts} />}
+        <AccountabilityAnalysisCard summary={accountability} t={t} />
+        {contracts && <ContractsAnalysisCard analysis={contracts} t={t} />}
       </div>
     </section>
   );
@@ -458,7 +460,9 @@ async function loadContractAnalysis(orgId: string): Promise<ContractAnalysis> {
   }
 }
 
-function AccountabilityAnalysisCard({ summary }: { summary: AccountabilitySummary }) {
+type DashT = Awaited<ReturnType<typeof getTranslations<"Dashboard">>>;
+
+function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySummary; t: DashT }) {
   if (!summary.ok) {
     return <AnalysisUnavailable title="Accountability" message={summary.message} />;
   }
@@ -481,17 +485,21 @@ function AccountabilityAnalysisCard({ summary }: { summary: AccountabilitySummar
       </div>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <AnalysisStat label="Median score" value={fmtMaybePct(summary.medianScore)} tone="info" />
-        <AnalysisStat label="High risk" value={summary.highRiskCount} tone="danger" />
-        <AnalysisStat label="Overdue tasks" value={summary.overdueTasks} tone="warning" />
-        <AnalysisStat label="AI risk" value={summary.aiRiskSignals} tone="warning" />
+        <AnalysisStat label="Median score" value={fmtMaybePct(summary.medianScore)} tone="info" tip={t("metricTooltips.dashboard_medianScore")} />
+        <AnalysisStat label="High risk" value={summary.highRiskCount} tone="danger" tip={t("metricTooltips.dashboard_highRisk")} />
+        <AnalysisStat label="Overdue tasks" value={summary.overdueTasks} tone="warning" tip={t("metricTooltips.dashboard_overdueTasks")} />
+        <AnalysisStat label="AI risk" value={summary.aiRiskSignals} tone="warning" tip={t("metricTooltips.dashboard_aiRisk")} />
       </div>
 
       <div className="mt-4 rounded-xl border border-soft bg-soft-1/35">
         <div className="flex items-center justify-between border-b border-soft px-3 py-2">
-          <span className="text-xs font-medium">Lowest current scorecards</span>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+            Lowest current scorecards
+            <MetricInfo text={t("metricTooltips.dashboard_lowestScorecards")} />
+          </span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             {summary.lowConfidenceCount} low confidence
+            <MetricInfo text={t("metricTooltips.dashboard_lowConfidence")} />
           </span>
         </div>
         {summary.worstRows.length === 0 ? (
@@ -529,7 +537,7 @@ function AccountabilityAnalysisCard({ summary }: { summary: AccountabilitySummar
   );
 }
 
-function ContractsAnalysisCard({ analysis }: { analysis: ContractAnalysis }) {
+function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t: DashT }) {
   if (!analysis.ok) {
     return <AnalysisUnavailable title="Contracts analysis" message={analysis.message} />;
   }
@@ -557,16 +565,19 @@ function ContractsAnalysisCard({ analysis }: { analysis: ContractAnalysis }) {
       </div>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <AnalysisStat label="Expected" value={fmtSR(d.total_expected)} tone="info" />
-        <AnalysisStat label="Actual" value={fmtSR(d.total_actual)} tone="success" />
-        <AnalysisStat label="Achievement" value={`${d.achievement_pct.toFixed(1)}%`} tone={achievementTone(d.achievement_pct)} />
-        <AnalysisStat label="Due installments" value={fmtSR(totalDue)} tone="warning" />
+        <AnalysisStat label="Expected" value={fmtSR(d.total_expected)} tone="info" tip={t("metricTooltips.dashboard_contractsExpected")} />
+        <AnalysisStat label="Actual" value={fmtSR(d.total_actual)} tone="success" tip={t("metricTooltips.dashboard_contractsActual")} />
+        <AnalysisStat label="Achievement" value={`${d.achievement_pct.toFixed(1)}%`} tone={achievementTone(d.achievement_pct)} tip={t("metricTooltips.dashboard_contractsAchievement")} />
+        <AnalysisStat label="Due installments" value={fmtSR(totalDue)} tone="warning" tip={t("metricTooltips.dashboard_dueInstallments")} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.1fr]">
         <div className="rounded-xl border border-soft bg-soft-1/35 p-3">
           <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="font-medium">Monthly achievement</span>
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              Monthly achievement
+              <MetricInfo text={t("metricTooltips.dashboard_monthlyAchievementBar")} />
+            </span>
             <span className="tabular-nums text-muted-foreground">{analysis.month}</span>
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-soft-2">
@@ -583,18 +594,21 @@ function ContractsAnalysisCard({ analysis }: { analysis: ContractAnalysis }) {
             />
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-            <MiniCount label="New" value={d.mov_new} />
-            <MiniCount label="Renewed" value={d.mov_renewed} />
-            <MiniCount label="Lost" value={d.mov_lost} />
-            <MiniCount label="On target" value={d.cnt_on_target} />
-            <MiniCount label="Overdue" value={d.cnt_overdue} />
-            <MiniCount label="Hold" value={d.mov_hold} />
+            <MiniCount label="New" value={d.mov_new} tip={t("metricTooltips.dashboard_movNew")} />
+            <MiniCount label="Renewed" value={d.mov_renewed} tip={t("metricTooltips.dashboard_movRenewed")} />
+            <MiniCount label="Lost" value={d.mov_lost} tip={t("metricTooltips.dashboard_movLost")} />
+            <MiniCount label="On target" value={d.cnt_on_target} tip={t("metricTooltips.dashboard_cntOnTarget")} />
+            <MiniCount label="Overdue" value={d.cnt_overdue} tip={t("metricTooltips.dashboard_cntOverdue")} />
+            <MiniCount label="Hold" value={d.mov_hold} tip={t("metricTooltips.dashboard_movHold")} />
           </div>
         </div>
 
         <div className="rounded-xl border border-soft bg-soft-1/35">
           <div className="flex items-center justify-between border-b border-soft px-3 py-2">
-            <span className="text-xs font-medium">Top account managers</span>
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+              Top account managers
+              <MetricInfo text={t("metricTooltips.dashboard_topAccountManagers")} />
+            </span>
             <span className="text-[11px] text-muted-foreground">{amTargets.length} tracked</span>
           </div>
           {topAm.length === 0 ? (
@@ -613,9 +627,9 @@ function ContractsAnalysisCard({ analysis }: { analysis: ContractAnalysis }) {
                       {fmtSR(am.achieved_total)} / {fmtSR(am.expected_total)}
                     </span>
                   </span>
-                  <span className="self-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 font-semibold tabular-nums text-emerald-300">
+                  <Explained text={t("metricTooltips.dashboard_amAchievementPct")} className="self-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 font-semibold tabular-nums text-emerald-300">
                     {am.achievement_pct.toFixed(0)}%
-                  </span>
+                  </Explained>
                 </div>
               ))}
             </div>
@@ -642,10 +656,12 @@ function AnalysisStat({
   label,
   value,
   tone,
+  tip,
 }: {
   label: string;
   value: string | number;
   tone: "info" | "success" | "warning" | "danger";
+  tip?: React.ReactNode;
 }) {
   const toneCls = {
     info: "border-sky-500/25 bg-sky-500/5 text-sky-200",
@@ -655,17 +671,23 @@ function AnalysisStat({
   }[tone];
   return (
     <div className={cn("rounded-xl border p-3", toneCls)}>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        {label}
+        {tip ? <MetricInfo text={tip} /> : null}
+      </div>
       <div className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
 
-function MiniCount({ label, value }: { label: string; value: number }) {
+function MiniCount({ label, value, tip }: { label: string; value: number; tip?: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-soft bg-card/60 px-2 py-1.5">
       <div className="font-semibold tabular-nums">{value}</div>
-      <div className="mt-0.5 truncate text-muted-foreground">{label}</div>
+      <div className="mt-0.5 inline-flex items-center gap-1 truncate text-muted-foreground">
+        {label}
+        {tip ? <MetricInfo text={tip} /> : null}
+      </div>
     </div>
   );
 }

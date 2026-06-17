@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isLeadershipPosition } from "@/lib/data/leadership";
 import type { TaskStage } from "@/lib/labels";
 
 // Avg dwell time per stage, computed from task_stage_history segments
@@ -34,6 +35,29 @@ export async function getStageDwellAverages(
     .sort((a, b) => b.avg_hours - a.avg_hours);
 }
 
+// Normalized set of leadership employee names — the only join key available to
+// filter the Odoo People Board (Odoo res.users names ↔ Supabase full_name),
+// which carries no position data. Name match is best-effort: same org, same
+// Arabic names, so exact-after-trim matches in practice.
+export async function getLeadershipNameSet(orgId: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("full_name, position:positions ( role, name )")
+    .eq("organization_id", orgId);
+  if (error) throw error;
+  const set = new Set<string>();
+  for (const r of (data ?? []) as Array<{
+    full_name: string | null;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  }>) {
+    const pos = Array.isArray(r.position) ? r.position[0] : r.position;
+    if (r.full_name && isLeadershipPosition(pos)) {
+      set.add(r.full_name.trim().replace(/\s+/g, " "));
+    }
+  }
+  return set;
+}
+
 // Specialist load: open tasks per agent + summed allocated hours.
 export async function getSpecialistLoad(
   orgId: string,
@@ -49,20 +73,23 @@ export async function getSpecialistLoad(
       employee_id,
       role_type,
       task:tasks!inner ( id, stage, allocated_time_minutes ),
-      employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name )
+      employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, position:positions ( role, name ) )
     `)
     .eq("organization_id", orgId)
     .eq("role_type", "agent");
   if (error) throw error;
 
+  type EmpEmbed = {
+    id: string;
+    full_name: string;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  };
   type Row = {
     employee_id: string;
     task: { id: string; stage: string; allocated_time_minutes: number | null }
       | { id: string; stage: string; allocated_time_minutes: number | null }[]
       | null;
-    employee: { id: string; full_name: string }
-      | { id: string; full_name: string }[]
-      | null;
+    employee: EmpEmbed | EmpEmbed[] | null;
   };
 
   const agg = new Map<string, { name: string; count: number; minutes: number }>();
@@ -70,6 +97,9 @@ export async function getSpecialistLoad(
     const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
     const e = Array.isArray(raw.employee) ? raw.employee[0] : raw.employee;
     if (!t || !e) continue;
+    // Agents-only performance: skip leadership (dept managers, CSO, leads).
+    const pos = Array.isArray(e.position) ? e.position[0] : e.position;
+    if (isLeadershipPosition(pos)) continue;
     if (t.stage === "done") continue;
     const cur = agg.get(e.id) ?? { name: e.full_name, count: 0, minutes: 0 };
     cur.count += 1;
@@ -194,7 +224,7 @@ export async function getDesignerMonthlyOutput(
   const { data: assignees, error: aErr } = await supabaseAdmin
     .from("task_assignees")
     .select(
-      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, job_title )",
+      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey ( id, full_name, job_title, position:positions ( role, name ) )",
     )
     .eq("organization_id", orgId)
     .in("task_id", taskIds);
@@ -216,15 +246,21 @@ export async function getDesignerMonthlyOutput(
   >();
   const seen = new Set<string>();
 
+  type DesignerEmp = {
+    id: string;
+    full_name: string;
+    job_title: string | null;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  };
   for (const row of (assignees ?? []) as Array<{
     task_id: string;
-    employee:
-      | { id: string; full_name: string; job_title: string | null }
-      | { id: string; full_name: string; job_title: string | null }[]
-      | null;
+    employee: DesignerEmp | DesignerEmp[] | null;
   }>) {
     const emp = Array.isArray(row.employee) ? row.employee[0] : row.employee;
     if (!emp) continue;
+    // Agents-only performance: skip leadership.
+    const pos = Array.isArray(emp.position) ? emp.position[0] : emp.position;
+    if (isLeadershipPosition(pos)) continue;
     const dedupeKey = `${emp.id}:${row.task_id}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);

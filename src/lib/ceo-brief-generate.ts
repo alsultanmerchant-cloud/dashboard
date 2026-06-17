@@ -7,6 +7,7 @@ import { buildCeoBriefSignals } from "@/lib/data/ceo-brief-signals";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import {
   CeoBriefAiSchema,
+  sanitizeCeoBriefResult,
   type CeoBriefResult,
   type CeoBriefRiskRendered,
   type StoredCeoBrief,
@@ -47,7 +48,7 @@ function rowToStored(row: BriefRunRow): StoredCeoBrief {
     createdAt: row.created_at,
     completedAt: row.completed_at,
     errorMessage: row.error_message,
-    result: row.result_json,
+    result: sanitizeCeoBriefResult(row.result_json),
   };
 }
 
@@ -107,7 +108,19 @@ export async function generateAndStoreCeoBrief(
       })),
       opportunities: signals.opportunities,
       context: signals.context,
+      dataQuality: signals.dataQuality,
     };
+
+    // Hard data-quality guardrail: the agency's Odoo-synced data has structural
+    // gaps (no due dates, no snapshot history, no timesheets). Without this, the
+    // model narrates unbacked metrics as confident facts — the #1 source of the
+    // "most analyses are wrong" complaint. Inject the live caveats as rules.
+    const caveats = signals.dataQuality.caveats;
+    const dataQualityBlock = caveats.length
+      ? `\n\n⚠️ قيود جودة البيانات (التزم بها حرفيًا):\n${caveats
+          .map((c) => `- ${c}`)
+          .join("\n")}\n- إن لم يكن الرقم مُعطى صراحةً في الحقائق أدناه، فلا تذكره. الأفضل عدم ذكر مؤشر على أن لا تذكره خاطئًا.`
+      : "";
 
     const prompt = `أنت رئيس أركان (Chief of Staff) للرئيس التنفيذي لوكالة تسويق سعودية (رواسم).
 الرئيس التنفيذي لا يريد قراءة أرقام كثيرة — يريد إجابات عملية لثلاثة أسئلة فقط:
@@ -116,6 +129,7 @@ export async function generateAndStoreCeoBrief(
 قواعد صارمة:
 - **لا تخترع أي رقم**. الأرقام كلها محسوبة مسبقًا في البيانات أدناه؛ مهمتك الصياغة وربط الأسباب فقط.
 - عربية فصحى، حاسمة وموجزة، موجّهة للقرار. لا تشجيع ولا حشو.
+- لا تعتبر مرحلة "new/جديدة" أو تراكم المهام فيها اختناقًا أو خطرًا أو إجراءً مطلوبًا. في رواسم هذا وضع طبيعي/أثر استيراد من Odoo، وليس مؤشرًا تشغيليًا مهمًا. ممنوع اقتراح "تحريك مهام جديدة" أو تقليل انتظار مرحلة جديدة.${dataQualityBlock}
 
 البيانات (الحقائق المحسوبة):
 \`\`\`json

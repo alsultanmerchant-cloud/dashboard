@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ScrollText, X } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import {
@@ -14,10 +13,20 @@ import {
   DataTableRow,
   DataTableShell,
 } from "@/components/data-table-shell";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useUrlFilters } from "@/lib/use-url-filters";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/utils-format";
 import type { SheetLog, SheetLogFilters } from "@/lib/data/contracts";
 import { logTypeMeta, type LogTypeKey } from "./log-type-meta";
+import { SheetLogNote } from "./sheet-log-note";
 
 const LOG_TYPE_OPTIONS: Array<{ raw: string; key: LogTypeKey }> = [
   { raw: "Contract Close (Lost)", key: "lost" },
@@ -43,61 +52,46 @@ export function LogsView({
 }) {
   const t = useTranslations("ContractsPage");
   const locale = useLocale();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  // Shared URL-filter state. `view=logs` already lives in the URL on this tab,
+  // so copying current params keeps it intact across every change.
+  const { set, setDebounced, clear } = useUrlFilters();
   const selectedTypes = new Set(filters.logTypes ?? []);
 
-  const pushParams = (mutate: (params: URLSearchParams) => void) => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("view", "logs");
-    mutate(next);
-    const query = next.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
-  };
-
-  const setParam = (key: string, value: string) => {
-    pushParams((next) => {
-      if (value) next.set(key, value);
-      else next.delete(key);
-    });
-  };
-
-  // Search runs through local state + debounce so the controlled input keeps
+  // Search keeps local state + debounce so the controlled input retains
   // focus / cursor position instead of remounting on every server round-trip.
-  const [searchValue, setSearchValue] = useState(filters.search ?? "");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Re-sync when the URL changes from elsewhere (chips, clear, manager…).
-  useEffect(() => {
-    setSearchValue(filters.search ?? "");
-  }, [filters.search]);
+  const propSearch = filters.search ?? "";
+  const [searchDraft, setSearchDraft] = useState(() => ({
+    value: propSearch,
+    prop: propSearch,
+  }));
+  const searchValue =
+    searchDraft.prop !== propSearch && searchDraft.value.trim() !== propSearch
+      ? propSearch
+      : searchDraft.value;
+
   const onSearchChange = (value: string) => {
-    setSearchValue(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setParam("q", value.trim());
-    }, 350);
+    setSearchDraft({ value, prop: propSearch });
+    setDebounced({ q: value.trim() });
   };
-  useEffect(
-    () => () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    },
-    [],
-  );
 
   const toggleType = (raw: string) => {
     const nextTypes = new Set(selectedTypes);
     if (nextTypes.has(raw)) nextTypes.delete(raw);
     else nextTypes.add(raw);
-    pushParams((next) => {
-      const values = Array.from(nextTypes);
-      if (values.length > 0) next.set("logType", values.join(","));
-      else next.delete("logType");
-    });
+    const values = Array.from(nextTypes);
+    set({ logType: values.length > 0 ? values.join(",") : null });
   };
 
+  const hasActiveFilters =
+    selectedTypes.size > 0 ||
+    Boolean(filters.accountManager) ||
+    Boolean(filters.search) ||
+    Boolean(filters.from) ||
+    Boolean(filters.to);
+
   const clearFilters = () => {
-    router.push(`${pathname}?view=logs`);
+    setSearchDraft({ value: "", prop: propSearch });
+    clear(["logType", "am", "q", "from", "to"]);
   };
 
   const labelFor = (raw: string) => {
@@ -119,7 +113,7 @@ export function LogsView({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setParam("logType", "")}
+            onClick={() => set({ logType: null })}
             className={cn(
               "inline-flex h-8 items-center rounded-full border px-3 text-xs transition-colors",
               selectedTypes.size === 0
@@ -155,18 +149,26 @@ export function LogsView({
             <span className="text-[11px] font-medium text-muted-foreground">
               {t("logs.filters.manager")}
             </span>
-            <select
-              value={filters.accountManager ?? ""}
-              onChange={(event) => setParam("am", event.target.value)}
-              className="h-9 w-full rounded-[var(--radius-md)] border border-soft bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-cyan/50"
+            <Select
+              value={filters.accountManager ?? "__all__"}
+              onValueChange={(v) => set({ am: v === "__all__" ? null : v })}
             >
-              <option value="">{t("logs.filters.allManagers")}</option>
-              {managers.map((manager) => (
-                <option key={manager} value={manager}>
-                  {manager}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue>
+                  {(value: string) =>
+                    value === "__all__" ? t("logs.filters.allManagers") : value
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false} className="max-h-72">
+                <SelectItem value="__all__">{t("logs.filters.allManagers")}</SelectItem>
+                {managers.map((manager) => (
+                  <SelectItem key={manager} value={manager}>
+                    {manager}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
 
           <label className="space-y-1.5">
@@ -174,13 +176,14 @@ export function LogsView({
               {t("logs.filters.search")}
             </span>
             <span className="relative block">
-              <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
+              <Search className="pointer-events-none absolute start-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 type="search"
+                inputMode="search"
                 value={searchValue}
                 onChange={(event) => onSearchChange(event.target.value)}
                 placeholder={t("logs.filters.searchPlaceholder")}
-                className="h-9 w-full rounded-[var(--radius-md)] border border-soft bg-background px-9 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-cyan/50"
+                className="h-9 ps-9"
               />
             </span>
           </label>
@@ -189,11 +192,11 @@ export function LogsView({
             <span className="text-[11px] font-medium text-muted-foreground">
               {t("logs.filters.from")}
             </span>
-            <input
+            <Input
               type="date"
               value={filters.from ?? ""}
-              onChange={(event) => setParam("from", event.target.value)}
-              className="h-9 w-full rounded-[var(--radius-md)] border border-soft bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-cyan/50"
+              onChange={(event) => set({ from: event.target.value })}
+              className="h-9"
             />
           </label>
 
@@ -201,18 +204,19 @@ export function LogsView({
             <span className="text-[11px] font-medium text-muted-foreground">
               {t("logs.filters.to")}
             </span>
-            <input
+            <Input
               type="date"
               value={filters.to ?? ""}
-              onChange={(event) => setParam("to", event.target.value)}
-              className="h-9 w-full rounded-[var(--radius-md)] border border-soft bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-cyan/50"
+              onChange={(event) => set({ to: event.target.value })}
+              className="h-9"
             />
           </label>
 
           <button
             type="button"
             onClick={clearFilters}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-md)] border border-soft bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-cyan/35 hover:text-foreground"
+            disabled={!hasActiveFilters}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-md)] border border-soft bg-background px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-cyan/35 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
             <X className="size-3.5" />
             {t("logs.filters.clear")}
@@ -278,8 +282,14 @@ export function LogsView({
                     <DataTableCell className="text-sm text-muted-foreground">
                       {row.account_manager ?? "—"}
                     </DataTableCell>
-                    <DataTableCell className="max-w-[520px] whitespace-pre-wrap break-words text-sm text-muted-foreground [unicode-bidi:plaintext]">
-                      {row.notes ?? "—"}
+                    <DataTableCell className="max-w-[560px] align-top">
+                      <SheetLogNote
+                        notes={row.notes}
+                        wasLabel={t("logs.note.was")}
+                        locale={locale}
+                        compact
+                        emptyLabel="—"
+                      />
                     </DataTableCell>
                   </DataTableRow>
                 );

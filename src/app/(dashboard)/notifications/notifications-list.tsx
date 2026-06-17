@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import { FilterChip } from "@/components/filter-chip";
 import { relativeTimeAr } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import {
@@ -44,21 +45,26 @@ export function NotificationsList({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const tL = useTranslations("NotificationsList");
   const tA = useTranslations("Actions");
   const tE = useTranslations("Empty");
-  const [unreadOnly, setUnreadOnly] = useState(false);
   const [pendingAll, startAll] = useTransition();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
+  // Both toolbar filters live in the URL (shareable + refresh-safe) — no more
+  // category-in-URL / unread-in-local split. Unread filtering is client-side.
+  const unreadOnly = searchParams.get("unread") === "1";
   const list = unreadOnly ? initial.filter((n) => !n.read_at) : initial;
 
-  function setCategory(cat: NotificationCategory | null) {
-    const sp = new URLSearchParams();
-    if (cat) sp.set("category", cat);
+  function setParam(key: string, value: string | null) {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (value) sp.set(key, value);
+    else sp.delete(key);
     const qs = sp.toString();
     router.push(qs ? `${pathname}?${qs}` : pathname);
   }
+  const setCategory = (cat: NotificationCategory | null) => setParam("category", cat);
 
   function handleClick(n: Notification) {
     const href = notificationHref({ type: n.type, entityType: n.entity_type, entityId: n.entity_id });
@@ -116,35 +122,19 @@ export function NotificationsList({
         ))}
       </div>
 
-      {/* Toolbar: All chip + unread toggle + mark-all */}
+      {/* Toolbar: All chip + unread toggle + mark-all (shared FilterChip) */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-soft bg-card/60 px-3 py-2.5">
-        <button
-          onClick={() => setCategory(null)}
-          className={cn(
-            "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-            !activeCategory
-              ? "border-cyan/30 bg-cyan-dim text-cyan"
-              : "border-soft bg-soft-1 text-muted-foreground hover:text-foreground",
-          )}
-        >
+        <FilterChip as="button" active={!activeCategory} onClick={() => setCategory(null)}>
           {tL("filterAll")}
-        </button>
-        <button
-          onClick={() => setUnreadOnly((v) => !v)}
-          className={cn(
-            "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-            unreadOnly
-              ? "border-cyan/30 bg-cyan-dim text-cyan"
-              : "border-soft bg-soft-1 text-muted-foreground hover:text-foreground",
-          )}
+        </FilterChip>
+        <FilterChip
+          as="button"
+          active={unreadOnly}
+          count={totalUnread > 0 ? totalUnread : null}
+          onClick={() => setParam("unread", unreadOnly ? null : "1")}
         >
           {tL("filterUnread")}
-          {totalUnread > 0 && (
-            <span className="ms-1.5 rounded-full bg-cc-red/20 px-1.5 text-[10px] text-cc-red">
-              {totalUnread}
-            </span>
-          )}
-        </button>
+        </FilterChip>
         <span className="ms-auto text-xs text-muted-foreground tabular-nums">
           {tL("countLabel", { count: list.length })}
         </span>

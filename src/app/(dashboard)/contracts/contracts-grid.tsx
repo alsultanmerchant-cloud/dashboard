@@ -40,7 +40,24 @@ type Props = {
   canEdit: boolean;
   contractTypes: TypeOption[];
   accountManagers: AmOption[];
+  initialFilters?: ContractGridFilters;
 };
+
+export type ContractGridFilters = {
+  search?: string;
+  targets?: string[];
+  statuses?: string[];
+  types?: string[];
+  packages?: string[];
+  payments?: string[];
+  scope?: "all" | "mine";
+};
+
+const OPEN_STATUS_FILTER = ["Active", "Expired", "SOON"];
+
+function sameValues(a: string[], b: string[]) {
+  return a.length === b.length && a.every((value) => b.includes(value));
+}
 
 // Discriminated payload for the single inline-edit action. Mirrors the
 // zod schema on the server so the client can't drift.
@@ -368,6 +385,7 @@ export function ContractsGrid({
   canEdit,
   contractTypes,
   accountManagers,
+  initialFilters,
 }: Props) {
   const t = useTranslations("ContractsPage");
   const locale = useLocale();
@@ -386,29 +404,83 @@ export function ContractsGrid({
   }
   const router = useRouter();
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialFilters?.search ?? "");
   // Multi-select filters (team request): each group holds an array of picked
   // values; empty array = «الكل» (no constraint). A row passes when its value
   // is in the array (OR within a group, AND across groups).
-  const [targets, setTargets] = useState<string[]>([]);
+  const [targets, setTargets] = useState<string[]>(initialFilters?.targets ?? []);
   // Default = the live roster the team tracks in the sheet: Active + Expired +
   // SOON TO Be Renewed. These are the sheet's "Contract Status" values for
   // contracts that haven't closed yet (SOON is a live contract nearing renewal,
   // and the team counts it alongside نشط/منتهي). Closed rows stay one chip-click
   // away under «الكل».
-  const [statuses, setStatuses] = useState<string[]>([
-    "Active",
-    "Expired",
-    "SOON",
-  ]);
-  const [types, setTypes] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>(
+    initialFilters?.statuses ?? OPEN_STATUS_FILTER,
+  );
+  const [types, setTypes] = useState<string[]>(initialFilters?.types ?? []);
   // Service/package + payment filters. Text search alone conflated package
   // names with client names, so a dedicated picker is more reliable.
-  const [packages, setPackages] = useState<string[]>([]);
-  const [payments, setPayments] = useState<string[]>([]);
-  const [scope, setScope] = useState<"all" | "mine">("all");
+  const [packages, setPackages] = useState<string[]>(initialFilters?.packages ?? []);
+  const [payments, setPayments] = useState<string[]>(initialFilters?.payments ?? []);
+  const [scope, setScope] = useState<"all" | "mine">(initialFilters?.scope ?? "all");
   // Hold popup — opened when the inline type dropdown picks "Hold".
   const [holdFor, setHoldFor] = useState<GridContract | null>(null);
+
+  function pushFilterUrl(nextFilters: Partial<ContractGridFilters>) {
+    const next = {
+      search,
+      targets,
+      statuses,
+      types,
+      packages,
+      payments,
+      scope,
+      ...nextFilters,
+    };
+    const params = new URLSearchParams({ view: "table" });
+    if (next.search?.trim()) params.set("q", next.search.trim());
+    if (next.targets?.length) params.set("target", next.targets.join(","));
+    if (next.statuses?.length === 0) {
+      params.set("status", "all");
+    } else if (next.statuses?.length && !sameValues(next.statuses, OPEN_STATUS_FILTER)) {
+      params.set("status", next.statuses.join(","));
+    }
+    if (next.types?.length) params.set("type", next.types.join(","));
+    if (next.packages?.length) params.set("package", next.packages.join(","));
+    if (next.payments?.length) params.set("payment", next.payments.join(","));
+    if (next.scope === "mine") params.set("scope", "mine");
+    router.push(`/contracts?${params.toString()}`, { scroll: false });
+  }
+
+  function updateTargets(next: string[]) {
+    setTargets(next);
+    pushFilterUrl({ targets: next });
+  }
+
+  function updateStatuses(next: string[]) {
+    setStatuses(next);
+    pushFilterUrl({ statuses: next });
+  }
+
+  function updateTypes(next: string[]) {
+    setTypes(next);
+    pushFilterUrl({ types: next });
+  }
+
+  function updatePackages(next: string[]) {
+    setPackages(next);
+    pushFilterUrl({ packages: next });
+  }
+
+  function updatePayments(next: string[]) {
+    setPayments(next);
+    pushFilterUrl({ payments: next });
+  }
+
+  function updateScope(next: "all" | "mine") {
+    setScope(next);
+    pushFilterUrl({ scope: next });
+  }
 
   // Shared save handler — patches the row optimistically, then calls the
   // server action. On failure we revert to the prior snapshot. Same code
@@ -527,7 +599,7 @@ export function ContractsGrid({
             <div className="inline-flex shrink-0 rounded-md border border-soft bg-soft-1 p-0.5 text-xs">
               <button
                 type="button"
-                onClick={() => setScope("all")}
+                onClick={() => updateScope("all")}
                 className={cn(
                   "rounded-md px-2.5 py-1 transition-colors",
                   scope === "all"
@@ -539,7 +611,7 @@ export function ContractsGrid({
               </button>
               <button
                 type="button"
-                onClick={() => setScope("mine")}
+                onClick={() => updateScope("mine")}
                 className={cn(
                   "rounded-md px-2.5 py-1 transition-colors",
                   scope === "mine"
@@ -553,59 +625,62 @@ export function ContractsGrid({
           )}
         </div>
 
-        <div className="mt-2 grid min-w-0 gap-1.5 lg:grid-cols-2 xl:grid-cols-[minmax(160px,0.9fr)_minmax(210px,1.15fr)_minmax(170px,1fr)_minmax(150px,0.75fr)_minmax(250px,1.45fr)]">
-          <ChipGroup
-            label={t("grid.filters.target")}
-            values={targets}
-            onChange={setTargets}
-            options={[
-              { value: "Overdue", count: counts.target["Overdue"] ?? 0, label: t("grid.targetLabels.overdue") },
-              { value: "Sales Deposit", count: counts.target["Sales Deposit"] ?? 0, label: t("grid.targetLabels.salesDeposit") },
-              { value: "On Target", count: counts.target["On Target"] ?? 0, label: t("grid.targetLabels.onTarget") },
-              { value: "Closed", count: counts.target["Closed"] ?? 0, label: t("grid.targetLabels.closed") },
-            ]}
-          />
-          <ChipGroup
-            label={t("grid.filters.status")}
-            values={statuses}
-            onChange={setStatuses}
-            presets={[
-              { value: "open", label: t("grid.filters.openStatus"), members: ["Active", "Expired", "SOON"] },
-            ]}
-            options={[
-              { value: "Active", count: counts.status["Active"] ?? 0, label: t("grid.statusLabels.active") },
-              { value: "Expired", count: counts.status["Expired"] ?? 0, label: t("grid.statusLabels.expired") },
-              { value: "SOON", count: counts.status["SOON"] ?? 0, label: t("grid.statusLabels.soonRenew") },
-              { value: "Closed", count: counts.status["Closed"] ?? 0, label: t("grid.statusLabels.closed") },
-            ]}
-          />
-          <ChipGroup
-            label={t("grid.filters.type")}
-            values={types}
-            onChange={setTypes}
-            options={[
-              { value: "New", count: counts.type["New"] ?? 0, label: t("grid.typeLabels.new") },
-              { value: "Renew", count: counts.type["Renew"] ?? 0, label: t("grid.typeLabels.renew") },
-              { value: "UPSELL", count: counts.type["UPSELL"] ?? 0, label: t("grid.typeLabels.upsell") },
-              { value: "Hold", count: counts.type["Hold"] ?? 0, label: t("grid.typeLabels.hold") },
-              { value: "WinBack", count: counts.type["WinBack"] ?? 0, label: t("grid.typeLabels.winBack") },
-            ]}
-          />
-          <ChipGroup
-            label={t("grid.filters.payment")}
-            values={payments}
-            onChange={setPayments}
-            options={[
-              { value: "Installments", count: counts.payment["Installments"] ?? 0, label: t("grid.paymentLabels.installments") },
-              { value: "Complete", count: counts.payment["Complete"] ?? 0, label: t("grid.paymentLabels.complete") },
-            ]}
-          />
+        <div className="mt-2 flex min-w-0 flex-col gap-1.5">
+          {/* Short groups pair up two-per-row on wide screens to save vertical
+              space; PACKAGE (many options) keeps its own full-width row below. */}
+          <div className="grid min-w-0 gap-1.5 xl:grid-cols-2">
+            <ChipGroup
+              label={t("grid.filters.target")}
+              values={targets}
+              onChange={updateTargets}
+              options={[
+                { value: "Overdue", count: counts.target["Overdue"] ?? 0, label: t("grid.targetLabels.overdue") },
+                { value: "Sales Deposit", count: counts.target["Sales Deposit"] ?? 0, label: t("grid.targetLabels.salesDeposit") },
+                { value: "On Target", count: counts.target["On Target"] ?? 0, label: t("grid.targetLabels.onTarget") },
+                { value: "Closed", count: counts.target["Closed"] ?? 0, label: t("grid.targetLabels.closed") },
+              ]}
+            />
+            <ChipGroup
+              label={t("grid.filters.status")}
+              values={statuses}
+              onChange={updateStatuses}
+              presets={[
+                { value: "open", label: t("grid.filters.openStatus"), members: ["Active", "Expired", "SOON"] },
+              ]}
+              options={[
+                { value: "Active", count: counts.status["Active"] ?? 0, label: t("grid.statusLabels.active") },
+                { value: "Expired", count: counts.status["Expired"] ?? 0, label: t("grid.statusLabels.expired") },
+                { value: "SOON", count: counts.status["SOON"] ?? 0, label: t("grid.statusLabels.soonRenew") },
+                { value: "Closed", count: counts.status["Closed"] ?? 0, label: t("grid.statusLabels.closed") },
+              ]}
+            />
+            <ChipGroup
+              label={t("grid.filters.type")}
+              values={types}
+              onChange={updateTypes}
+              options={[
+                { value: "New", count: counts.type["New"] ?? 0, label: t("grid.typeLabels.new") },
+                { value: "Renew", count: counts.type["Renew"] ?? 0, label: t("grid.typeLabels.renew") },
+                { value: "UPSELL", count: counts.type["UPSELL"] ?? 0, label: t("grid.typeLabels.upsell") },
+                { value: "Hold", count: counts.type["Hold"] ?? 0, label: t("grid.typeLabels.hold") },
+                { value: "WinBack", count: counts.type["WinBack"] ?? 0, label: t("grid.typeLabels.winBack") },
+              ]}
+            />
+            <ChipGroup
+              label={t("grid.filters.payment")}
+              values={payments}
+              onChange={updatePayments}
+              options={[
+                { value: "Installments", count: counts.payment["Installments"] ?? 0, label: t("grid.paymentLabels.installments") },
+                { value: "Complete", count: counts.payment["Complete"] ?? 0, label: t("grid.paymentLabels.complete") },
+              ]}
+            />
+          </div>
           {packageOptions.length > 0 && (
             <ChipGroup
-              className="lg:col-span-2 xl:col-span-1"
               label={t("grid.filters.package")}
               values={packages}
-              onChange={setPackages}
+              onChange={updatePackages}
               options={packageOptions}
             />
           )}
@@ -1625,12 +1700,15 @@ function ChipGroup({
   className?: string;
 }) {
   const t = useTranslations("ContractsPage");
-  const chipCls = (active: boolean) =>
+  // Each group is one full-width row: label, then spaced rounded pills that
+  // wrap. Active pill = soft cyan-dim highlight (multi-select, so several can
+  // be lit). No dividers — clean, airy, matches the sheet's filter strip.
+  const pillCls = (active: boolean) =>
     cn(
-      "inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[11px] leading-none transition-colors cursor-pointer",
+      "inline-flex h-6 shrink-0 items-center rounded-full px-2.5 text-[11px] leading-none transition-colors cursor-pointer",
       active
         ? "bg-cyan-dim text-cyan font-medium"
-        : "text-muted-foreground hover:text-foreground",
+        : "text-muted-foreground hover:bg-soft-1 hover:text-foreground",
     );
   const sameSet = (a: string[], b: string[]) =>
     a.length === b.length && a.every((x) => b.includes(x));
@@ -1640,18 +1718,18 @@ function ChipGroup({
   return (
     <div
       className={cn(
-        "grid min-w-0 grid-cols-[76px_minmax(0,1fr)] items-center gap-1 rounded-md border border-soft bg-soft-1 px-2 py-1 text-xs",
+        "grid min-w-0 grid-cols-[76px_minmax(0,1fr)] items-start gap-2 rounded-md border border-soft bg-soft-1/60 px-2 py-1.5 text-xs",
         className,
       )}
     >
-      <span className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
+      <span className="truncate pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <div className="scrollbar-hide flex min-w-0 items-center gap-1 overflow-x-auto">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => onChange([])}
-          className={chipCls(values.length === 0)}
+          className={pillCls(values.length === 0)}
         >
           {t("grid.filters.all")}
         </button>
@@ -1662,7 +1740,7 @@ function ChipGroup({
               key={p.value}
               type="button"
               onClick={() => onChange(active ? [] : p.members)}
-              className={chipCls(active)}
+              className={pillCls(active)}
             >
               {p.label}
             </button>
@@ -1673,7 +1751,7 @@ function ChipGroup({
             key={o.value}
             type="button"
             onClick={() => toggle(o.value)}
-            className={chipCls(values.includes(o.value))}
+            className={pillCls(values.includes(o.value))}
             title={`${o.label ?? o.value} (${o.count})`}
           >
             <span className="whitespace-nowrap">{o.label ?? o.value}</span>

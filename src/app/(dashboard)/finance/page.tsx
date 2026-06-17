@@ -12,6 +12,7 @@ import {
 } from "@/lib/data/ceo-dashboard";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { MetricInfo } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 import { MonthSelector } from "./month-selector";
 
@@ -28,13 +29,14 @@ function monthLabel(monthIso: string, locale: string) {
 
 // Headline tile (small, count-only)
 function StatTile({
-  label, value, hint, tone = "default", icon,
+  label, value, hint, tone = "default", icon, info,
 }: {
   label: string;
   value: number | string;
   hint?: string;
   tone?: "default" | "success" | "warning" | "destructive" | "info" | "purple";
   icon?: React.ReactNode;
+  info?: string;
 }) {
   const accent = {
     default: "border-soft-2 bg-card/60",
@@ -48,7 +50,10 @@ function StatTile({
     <div className={cn("rounded-xl border p-3.5", accent)}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+          <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+            {label}
+            {info && <MetricInfo text={info} label={label} />}
+          </p>
           <p className="mt-1.5 text-2xl font-bold tabular-nums">{value}</p>
           {hint && <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p>}
         </div>
@@ -62,13 +67,14 @@ function StatTile({
 
 // Money row inside the account/sales sub-tables
 function MoneyRow({
-  label, value, tone = "default", isHeader, isBig,
+  label, value, tone = "default", isHeader, isBig, info,
 }: {
   label: string;
   value: string | number;
   tone?: "default" | "success" | "warning" | "destructive";
   isHeader?: boolean;
   isBig?: boolean;
+  info?: string;
 }) {
   return (
     <div
@@ -79,11 +85,12 @@ function MoneyRow({
     >
       <span
         className={cn(
-          "text-xs",
+          "flex items-center gap-1 text-xs",
           isHeader ? "font-semibold uppercase tracking-wider" : "text-muted-foreground",
         )}
       >
         {label}
+        {info && <MetricInfo text={info} label={label} />}
       </span>
       <span
         className={cn(
@@ -159,36 +166,42 @@ export default async function FinancePage({
             value={today.newContracts}
             tone="info"
             icon={<Sparkles className="size-4" />}
+            info={t("metricTooltips.finance_todayNew")}
           />
           <StatTile
             label={t("todayStatus.renewing")}
             value={today.renewing}
             tone="success"
             icon={<RefreshCw className="size-4" />}
+            info={t("metricTooltips.finance_todayRenewing")}
           />
           <StatTile
             label={t("todayStatus.hold")}
             value={today.hold}
             tone="warning"
             icon={<PauseCircle className="size-4" />}
+            info={t("metricTooltips.finance_todayHold")}
           />
           <StatTile
             label={t("todayStatus.totalClients")}
             value={today.totalClients}
             tone="default"
             icon={<Users className="size-4" />}
+            info={t("metricTooltips.finance_todayTotalClients")}
           />
           <StatTile
             label={t("todayStatus.upsell")}
             value={today.upsell}
             tone="purple"
             icon={<Award className="size-4" />}
+            info={t("metricTooltips.finance_todayUpsell")}
           />
           <StatTile
             label={t("todayStatus.winBack")}
             value={today.winBack}
             tone="warning"
             icon={<ArrowUp className="size-4" />}
+            info={t("metricTooltips.finance_todayWinBack")}
           />
         </div>
       </section>
@@ -211,6 +224,7 @@ export default async function FinancePage({
               hint={movement.byType[key].value > 0 ? `${formatMoney(movement.byType[key].value, locale)} ${currency}` : undefined}
               tone={tone}
               icon={icon}
+              info={t("metricTooltips.finance_movementCell")}
             />
           ))}
         </div>
@@ -226,8 +240,9 @@ export default async function FinancePage({
             <CardContent className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
                     {t("income.expected")}
+                    <MetricInfo text={t("metricTooltips.finance_incomeExpected")} label={t("income.expected")} />
                   </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums text-cyan">
                     {formatMoney(income.expected, locale)} <span className="text-base text-muted-foreground">{currency}</span>
@@ -244,8 +259,9 @@ export default async function FinancePage({
             <CardContent className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
                     {t("income.actual")}
+                    <MetricInfo text={t("metricTooltips.finance_incomeActual")} label={t("income.actual")} />
                   </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums text-cc-green">
                     {formatMoney(income.actual, locale)} <span className="text-base text-muted-foreground">{currency}</span>
@@ -266,8 +282,9 @@ export default async function FinancePage({
                       }}
                     />
                   </div>
-                  <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+                  <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
                     {t("income.ofExpected", { count: Math.round((income.actual / income.expected) * 100) })}
+                    <MetricInfo text={t("metricTooltips.finance_incomeOfExpected")} label={t("income.actual")} />
                   </p>
                 </div>
               )}
@@ -292,25 +309,28 @@ export default async function FinancePage({
               {t("account.countOverview")}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-              <StatTile label={t("account.salesDeposit")} value={account.salesDeposit} />
-              <StatTile label={t("account.onTarget")} value={account.onTarget} tone="success" />
-              <StatTile label={t("account.overdue")} value={account.overdue} tone="destructive" />
+              <StatTile label={t("account.salesDeposit")} value={account.salesDeposit} info={t("metricTooltips.finance_accSalesDeposit")} />
+              <StatTile label={t("account.onTarget")} value={account.onTarget} tone="success" info={t("metricTooltips.finance_accOnTarget")} />
+              <StatTile label={t("account.overdue")} value={account.overdue} tone="destructive" info={t("metricTooltips.finance_accOverdue")} />
               <StatTile
                 label={t("account.expectedAll")}
                 value={account.expectedOnPlusOverdue}
                 hint={t("account.expectedAllHint")}
+                info={t("metricTooltips.finance_accExpectedAll")}
               />
               <StatTile
                 label={t("account.afterRenewed")}
                 value={account.expectedRemovingRenewed}
                 hint={t("account.afterRenewedHint")}
                 tone="warning"
+                info={t("metricTooltips.finance_accAfterRenewed")}
               />
               <StatTile
                 label={t("account.actualAchieved")}
                 value={account.actualAchievedThisMonth}
                 tone="success"
                 icon={<CircleCheck className="size-4" />}
+                info={t("metricTooltips.finance_accActualAchieved")}
               />
             </div>
           </CardContent>
@@ -324,23 +344,28 @@ export default async function FinancePage({
               <MoneyRow
                 label={t("account.overdueInstallmentsAdded")}
                 value={`${formatMoney(account.overdueInstallmentsAmount, locale)} ${currency}`}
+                info={t("metricTooltips.finance_accOverdueInstallmentsAmount")}
               />
               <MoneyRow
                 label={t("account.thisMonthInstallments")}
                 value={`${formatMoney(account.installmentsAmount, locale)} ${currency}`}
+                info={t("metricTooltips.finance_accInstallmentsAmount")}
               />
               <MoneyRow
                 label={t("account.onTargetClients")}
                 value={`${formatMoney(account.onTargetClientsAmount, locale)} ${currency}`}
+                info={t("metricTooltips.finance_accOnTargetClientsAmount")}
               />
               <MoneyRow
                 label={t("account.overdueClients")}
                 value={`${formatMoney(account.overdueClientsAmount, locale)} ${currency}`}
+                info={t("metricTooltips.finance_accOverdueClientsAmount")}
               />
               <MoneyRow
                 label={t("account.totalExpected")}
                 value={`${formatMoney(account.totalExpected, locale)} ${currency}`}
                 isBig
+                info={t("metricTooltips.finance_accTotalExpected")}
               />
             </CardContent>
           </Card>
@@ -351,31 +376,37 @@ export default async function FinancePage({
                 label={t("account.collectedOverdueInstallments")}
                 value={`${formatMoney(account.actualOverdueInstallments, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_accActualOverdueInstallments")}
               />
               <MoneyRow
                 label={t("account.thisMonthInstallments")}
                 value={`${formatMoney(account.actualInstallments, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_accActualInstallments")}
               />
               <MoneyRow
                 label={t("account.upsell")}
                 value={`${formatMoney(account.upsellAcc, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_accUpsell")}
               />
               <MoneyRow
                 label={t("account.winBack")}
                 value={`${formatMoney(account.winBackAcc, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_accWinBack")}
               />
               <MoneyRow
                 label={t("account.totalIncome")}
                 value={`${formatMoney(account.totalIncomeFromAccount, locale)} ${currency}`}
                 isBig
                 tone="success"
+                info={t("metricTooltips.finance_accTotalIncome")}
               />
               <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
                   label={t("account.achievement")}
+                  info={t("metricTooltips.finance_accAchievement")}
                   value={
                     account.revenueAchievementPct === null
                       ? "—"
@@ -395,6 +426,7 @@ export default async function FinancePage({
                   label={t("account.revenueGap")}
                   value={`${formatMoney(account.revenueGap, locale)} ${currency}`}
                   tone={account.revenueGap > 0 ? "warning" : "default"}
+                  info={t("metricTooltips.finance_accRevenueGap")}
                 />
               </div>
             </CardContent>
@@ -418,15 +450,18 @@ export default async function FinancePage({
                 label={t("sales.overdueInstallments")}
                 value={`${formatMoney(sales.overdueInstallments, locale)} ${currency}`}
                 tone="warning"
+                info={t("metricTooltips.finance_salesOverdueInstallments")}
               />
               <MoneyRow
                 label={t("sales.thisMonthInstallments")}
                 value={`${formatMoney(sales.expectedInstallments, locale)} ${currency}`}
+                info={t("metricTooltips.finance_salesExpectedInstallments")}
               />
               <MoneyRow
                 label={t("sales.totalExpected")}
                 value={`${formatMoney(sales.totalExpectedFromInstallments, locale)} ${currency}`}
                 isBig
+                info={t("metricTooltips.finance_salesTotalExpected")}
               />
             </CardContent>
           </Card>
@@ -437,21 +472,25 @@ export default async function FinancePage({
                 label={t("sales.collectedInstallments")}
                 value={`${formatMoney(sales.actualInstallments, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_salesActualInstallments")}
               />
               <MoneyRow
                 label={t("sales.newClientIncome")}
                 value={`${formatMoney(sales.actualIncomeFromNewClients, locale)} ${currency}`}
                 tone="success"
+                info={t("metricTooltips.finance_salesNewClientIncome")}
               />
               <MoneyRow
                 label={t("sales.totalIncome")}
                 value={`${formatMoney(sales.totalIncomeFromSales, locale)} ${currency}`}
                 isBig
                 tone="success"
+                info={t("metricTooltips.finance_salesTotalIncome")}
               />
               <div className="pt-2 mt-2 border-t border-soft-2">
                 <MoneyRow
                   label={t("sales.collectionRate")}
+                  info={t("metricTooltips.finance_salesCollectionRate")}
                   value={
                     sales.installmentsAchievementPct === null
                       ? "—"
@@ -471,6 +510,7 @@ export default async function FinancePage({
                   label={t("sales.gap")}
                   value={`${formatMoney(sales.gap, locale)} ${currency}`}
                   tone={sales.gap > 0 ? "warning" : "default"}
+                  info={t("metricTooltips.finance_salesGap")}
                 />
               </div>
             </CardContent>

@@ -8,6 +8,8 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Palette, RefreshCw, Users } from "lucide-react";
 import { useTransition } from "react";
+import { useTranslations } from "next-intl";
+import { MetricInfo } from "@/components/metric-info";
 
 export type DesignerOutputRow = {
   employee_id: string;
@@ -34,6 +36,7 @@ export function DesignerMonthlyOutput({
   const path = usePathname();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
+  const t = useTranslations("ReportsPage");
 
   function setMonth(value: string) {
     const next = new URLSearchParams(params.toString());
@@ -77,9 +80,18 @@ export function DesignerMonthlyOutput({
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2 border-b border-soft/40 bg-soft-1/40 px-4 py-2 text-xs">
-            <div className="text-muted-foreground">إجمالي التصاميم</div>
-            <div className="text-muted-foreground">إجمالي التعديلات</div>
-            <div className="text-muted-foreground">عدد الموظفين</div>
+            <div className="text-muted-foreground inline-flex items-center gap-1">
+              إجمالي التصاميم
+              <MetricInfo text={t("metricTooltips.reports_totalDesigns")} />
+            </div>
+            <div className="text-muted-foreground inline-flex items-center gap-1">
+              إجمالي التعديلات
+              <MetricInfo text={t("metricTooltips.reports_totalRevisions")} />
+            </div>
+            <div className="text-muted-foreground inline-flex items-center gap-1">
+              عدد الموظفين
+              <MetricInfo text={t("metricTooltips.reports_employeeCount")} />
+            </div>
             <div className="font-bold tabular-nums">{totalDesigns}</div>
             <div className="font-bold tabular-nums">{totalRevisions}</div>
             <div className="font-bold tabular-nums">{rows.length}</div>
@@ -91,15 +103,27 @@ export function DesignerMonthlyOutput({
                 <th className="px-4 py-2 text-start font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     <Palette className="size-3.5" /> تصاميم
+                    <MetricInfo text={t("metricTooltips.reports_designColumn")} />
                   </span>
                 </th>
                 <th className="px-4 py-2 text-start font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     <RefreshCw className="size-3.5" /> تعديلات
+                    <MetricInfo text={t("metricTooltips.reports_revisionColumn")} />
                   </span>
                 </th>
-                <th className="px-4 py-2 text-start font-medium">عدد المهام</th>
-                <th className="px-4 py-2 text-start font-medium">المجموع</th>
+                <th className="px-4 py-2 text-start font-medium">
+                  <span className="inline-flex items-center gap-1.5">
+                    عدد المهام
+                    <MetricInfo text={t("metricTooltips.reports_taskCountColumn")} />
+                  </span>
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  <span className="inline-flex items-center gap-1.5">
+                    المجموع
+                    <MetricInfo text={t("metricTooltips.reports_rowTotalColumn")} />
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>

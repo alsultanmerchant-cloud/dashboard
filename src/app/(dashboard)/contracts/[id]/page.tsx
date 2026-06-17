@@ -133,6 +133,11 @@ export default async function ContractDetailPage({
   const total = Number(contract.total_value || 0);
   const paid = Number(contract.paid_value || 0);
   const outstanding = total - paid;
+  const nextContractValue =
+    contract.next_contract_value == null ? null : Number(contract.next_contract_value);
+  const repeatedServicesValue =
+    contract.repeated_services_value == null ? null : Number(contract.repeated_services_value);
+  const paymentStatus = (contract.payment_status as string | null) ?? null;
 
   // Hold awareness (gap G2): currently on hold, or any hold activity logged
   // this month — the team wants this visible at a glance on the contract.
@@ -274,6 +279,24 @@ export default async function ContractDetailPage({
           <DetailField
             label={t("detail.fields.target")}
             value={translateTarget(t, contract.target as string)}
+          />
+          <DetailField
+            label={t("detail.fields.paymentStatus")}
+            value={
+              paymentStatus === "Installments"
+                ? t("grid.paymentLabels.installments")
+                : paymentStatus === "Complete"
+                  ? t("grid.paymentLabels.complete")
+                  : "—"
+            }
+          />
+          <DetailField
+            label={t("detail.fields.nextContractValue")}
+            value={nextContractValue == null ? "—" : formatCurrency(nextContractValue)}
+          />
+          <DetailField
+            label={t("detail.fields.repeatedServicesValue")}
+            value={repeatedServicesValue == null ? "—" : formatCurrency(repeatedServicesValue)}
           />
           <DetailField
             label={t("detail.fields.graceDays")}

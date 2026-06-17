@@ -74,6 +74,31 @@ export const SatisfactionSchema = z.object({
   // 0-100 how well delivery matched the client's documented brief. null when
   // the actual brief document text is not available; never infer this from chat.
   briefAdherenceScore: z.number().int().min(0).max(100).nullable(),
+  // WHY the score landed where it did: a per-requirement breakdown comparing the
+  // documented brief clauses against delivery. Populated ONLY when a brief
+  // document was available (else null — same rule as briefAdherenceScore). The
+  // model already reasons per clause; this captures it so the UI can explain the
+  // score and the assistant can answer "why 40 / what wasn't delivered".
+  briefAdherence: z
+    .object({
+      // One-line Arabic synthesis of why the score is what it is.
+      reason: z.string(),
+      // Each documented brief requirement and how delivery measured against it.
+      items: z
+        .array(
+          z.object({
+            requirement: z.string(), // the brief clause/deliverable, Arabic
+            status: z
+              .enum(["delivered", "partial", "not_delivered", "no_evidence"])
+              .catch("no_evidence"),
+            note: z.string().nullable(), // short evidence / why this status
+          }),
+        )
+        .max(20)
+        .default([]),
+    })
+    .nullable()
+    .default(null),
   sentiment: z.enum(["positive", "neutral", "negative", "mixed"]),
   // Short Arabic executive summary (2-4 sentences) — "تحليل الحالة الحالية".
   summary: z.string(),

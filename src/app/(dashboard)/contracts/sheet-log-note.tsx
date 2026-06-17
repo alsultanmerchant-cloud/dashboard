@@ -14,8 +14,14 @@ import { ArrowRight } from "lucide-react";
 // colored type badge and the timestamp already convey them.
 
 export type SheetLogChange = { field: string; from: string; to: string };
+export type SheetLogTransition = {
+  direction: "entered" | "left";
+  state: string;
+  nextState: string | null;
+};
 
 export type ParsedSheetLogNote = {
+  transition: SheetLogTransition | null;
   changes: SheetLogChange[];
   priorType: string | null; // "Contract Type was: X"
   comment: string | null; // free-form human note
@@ -25,14 +31,41 @@ const CHANGE_RE = /^-\s*(.+?):\s*"([\s\S]*?)"\s*→\s*"([\s\S]*?)"\s*$/gm;
 const PRIOR_TYPE_RE = /Contract Type was:\s*"([^"]*)"/;
 const NOTES_RE = /Notes:\s*"([\s\S]*?)"\s*$/m;
 const TRANSITION_RE = /^(Entered|Left)\s/;
+const TRANSITION_LINE_RE = /^(Entered|Left)\s+([A-Z]+)(?:\s*->\s*([^\s—]+))?/;
+
+const FIELD_LABELS: Record<"ar" | "en", Record<string, string>> = {
+  ar: {
+    "Contract Type": "نوع العقد",
+    "Value of repeated services": "قيمة الخدمات المتكررة",
+    Start: "تاريخ البدء",
+  },
+  en: {
+    "Contract Type": "Contract type",
+    "Value of repeated services": "Recurring value",
+    Start: "Start date",
+  },
+};
+
+function fieldLabel(field: string, locale: string) {
+  const key = locale === "ar" ? "ar" : "en";
+  return FIELD_LABELS[key][field] ?? field;
+}
 
 export function parseSheetLogNote(
   notes: string | null | undefined,
 ): ParsedSheetLogNote {
   if (!notes || !notes.trim()) {
-    return { changes: [], priorType: null, comment: null };
+    return { transition: null, changes: [], priorType: null, comment: null };
   }
   const text = notes.replace(/\r/g, "");
+  const transitionMatch = text.trim().match(TRANSITION_LINE_RE);
+  const transition: SheetLogTransition | null = transitionMatch
+    ? {
+        direction: transitionMatch[1] === "Entered" ? "entered" : "left",
+        state: transitionMatch[2],
+        nextState: transitionMatch[3]?.trim() || null,
+      }
+    : null;
 
   const changes: SheetLogChange[] = [];
   CHANGE_RE.lastIndex = 0;
@@ -56,34 +89,79 @@ export function parseSheetLogNote(
     ? notesMatch?.[1]?.trim() || null
     : text.trim() || null;
 
-  return { changes, priorType, comment };
+  return { transition, changes, priorType, comment };
 }
 
 export function SheetLogNote({
   notes,
   wasLabel = "Was",
+  locale = "en",
+  compact = false,
+  emptyLabel,
   className = "",
 }: {
   notes: string | null | undefined;
   wasLabel?: string;
+  locale?: string;
+  compact?: boolean;
+  emptyLabel?: string;
   className?: string;
 }) {
-  const { changes, priorType, comment } = parseSheetLogNote(notes);
-  if (changes.length === 0 && !priorType && !comment) return null;
+  const { transition, changes, priorType, comment } = parseSheetLogNote(notes);
+  if (changes.length === 0 && !priorType && !comment && !transition) {
+    return emptyLabel ? (
+      <span className={`text-sm text-muted-foreground ${className}`}>{emptyLabel}</span>
+    ) : null;
+  }
+  const showTransition = transition && changes.length === 0 && !priorType && !comment;
 
   return (
-    <div className={`space-y-1.5 ${className}`}>
-      {changes.length > 0 && (
-        <ul className="space-y-1">
-          {changes.map((c, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">{c.field}</span>
-              <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-rose-200/90 line-through decoration-rose-400/40 [unicode-bidi:plaintext]">
-                {c.from || "—"}
-              </span>
+    <div
+      className={`space-y-2 rounded-lg border border-soft bg-background/45 p-2.5 ${compact ? "max-w-xl" : ""} ${className}`}
+    >
+      {showTransition && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground">
+            {transition.direction === "entered"
+              ? locale === "ar"
+                ? "دخول"
+                : "Entered"
+              : locale === "ar"
+                ? "خروج"
+                : "Left"}
+          </span>
+          <span className="rounded-md border border-soft bg-muted px-2 py-0.5 font-medium text-foreground [unicode-bidi:plaintext]">
+            {transition.state}
+          </span>
+          {transition.nextState && (
+            <>
               <ArrowRight className="size-3 shrink-0 text-muted-foreground icon-flip-rtl" />
-              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-200 [unicode-bidi:plaintext]">
-                {c.to || "—"}
+              <span className="rounded-md border border-soft bg-muted px-2 py-0.5 font-medium text-foreground [unicode-bidi:plaintext]">
+                {transition.nextState}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {changes.length > 0 && (
+        <ul className="space-y-1.5">
+          {changes.map((c, i) => (
+            <li
+              key={i}
+              className="grid gap-1.5 text-xs sm:grid-cols-[minmax(8rem,11rem)_1fr] sm:items-center"
+            >
+              <span className="text-[11px] font-medium text-muted-foreground">
+                {fieldLabel(c.field, locale)}
+              </span>
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="max-w-full truncate rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-rose-700 line-through decoration-rose-500/50 [unicode-bidi:plaintext] dark:text-rose-200/90 dark:decoration-rose-400/40">
+                  {c.from || "—"}
+                </span>
+                <ArrowRight className="size-3 shrink-0 text-muted-foreground icon-flip-rtl" />
+                <span className="max-w-full truncate rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 [unicode-bidi:plaintext] dark:text-emerald-200">
+                  {c.to || "—"}
+                </span>
               </span>
             </li>
           ))}
@@ -91,16 +169,16 @@ export function SheetLogNote({
       )}
 
       {priorType && (
-        <p className="text-[11px] text-muted-foreground">
-          {wasLabel}:{" "}
-          <span className="font-medium text-foreground/80 [unicode-bidi:plaintext]">
+        <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span>{wasLabel}</span>
+          <span className="rounded-md border border-soft bg-muted px-2 py-0.5 font-medium text-foreground/85 [unicode-bidi:plaintext]">
             {priorType}
           </span>
         </p>
       )}
 
       {comment && (
-        <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground [unicode-bidi:plaintext]">
+        <p className="rounded-md border border-soft bg-card/60 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground [unicode-bidi:plaintext] whitespace-pre-wrap break-words">
           {comment}
         </p>
       )}

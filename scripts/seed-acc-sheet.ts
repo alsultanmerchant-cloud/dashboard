@@ -25,6 +25,13 @@ function num(v: unknown): number {
   const n = Number(String(v).replace(/[, ]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const str = String(v).trim();
+  if (!str) return null;
+  const n = Number(str.replace(/[, ]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
 function parseDate(v: unknown): string | null {
   if (!v && v !== 0) return null;
   if (v instanceof Date && !isNaN(v.getTime())) return v.toISOString().slice(0, 10);
@@ -102,6 +109,7 @@ interface Contract {
   durationMonths: number | null;
   totalValue: number;
   paidValue: number;
+  paymentStatus: string | null;
   nextContractValue: number | null;
   renewalPaidValue: number | null;
   repeatedServicesValue: number | null;
@@ -134,6 +142,17 @@ interface Client {
 const contracts: Contract[] = [];
 const clients = new Map<string, Client>();
 const installments: Installment[] = [];
+const fullContractValueByKey = new Map<string, number>();
+
+for (const r of itRows) {
+  const cid = s(r["Client ID"]);
+  if (!cid || !/^C\d+$/i.test(cid)) continue;
+  const key =
+    s(r["Key"]) ??
+    `${cid}|${(parseDate(r["تاريخ الدفعة الاولى وبداية العقد"]) ?? "").replace(/-/g, "")}`;
+  const fullValue = numOrNull(r["قيمة العقد بالكامل\n(بدون ضرائب)"]);
+  if (fullValue != null && fullValue > 0) fullContractValueByKey.set(key, fullValue);
+}
 
 for (const r of ccRows) {
   const cid = s(r["Client ID"]);
@@ -166,6 +185,17 @@ for (const r of ccRows) {
   const nextContractValue = num(r["Next Contract Value"]) || null;
   const repeatedServicesValue = num(r[" Value of repeated services"]) || null;
   const renewalPaidValue = num(r["Actual Paid for renewal"]) || null;
+  const paidValue = num(r["Actual paid value"]);
+  const paymentStatusRaw = s(r["payment status"]);
+  const paymentStatus = paymentStatusRaw
+    ? /install/i.test(paymentStatusRaw) ? "Installments"
+      : /complete/i.test(paymentStatusRaw) ? "Complete"
+      : null
+    : null;
+  const totalValue =
+    paymentStatus === "Complete"
+      ? paidValue
+      : fullContractValueByKey.get(externalKey) ?? paidValue;
 
   contracts.push({
     externalKey,
@@ -177,8 +207,9 @@ for (const r of ccRows) {
     startDate: start,
     endDate: actualEnd ?? end,
     durationMonths: num(r["C.Duration (Months)"]) > 0 ? Math.round(num(r["C.Duration (Months)"])) : null,
-    totalValue: nextContractValue ?? repeatedServicesValue ?? 0,
-    paidValue: num(r["Actual paid value"]),
+    totalValue,
+    paidValue,
+    paymentStatus,
     nextContractValue,
     renewalPaidValue,
     repeatedServicesValue,
@@ -320,6 +351,7 @@ for (const c of contracts) {
     duration_months: c.durationMonths,
     total_value: c.totalValue,
     paid_value: c.paidValue,
+    payment_status: c.paymentStatus,
     next_contract_value: c.nextContractValue,
     renewal_paid_value: c.renewalPaidValue,
     repeated_services_value: c.repeatedServicesValue,

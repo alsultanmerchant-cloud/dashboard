@@ -61,6 +61,7 @@ export function Explained({
   children: ReactNode;
   className?: string;
 }) {
+  if (!text) return <>{children}</>;
   return (
     <TooltipProvider delay={150}>
       <Tooltip>

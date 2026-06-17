@@ -34,6 +34,10 @@ import {
   FileSignature,
   FileText,
   ExternalLink,
+  XCircle,
+  MinusCircle,
+  HelpCircle,
+  ClipboardList,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
@@ -42,7 +46,7 @@ import {
 } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
-import { MetricInfo } from "@/components/metric-info";
+import { MetricInfo, Explained } from "@/components/metric-info";
 import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -433,10 +437,18 @@ function SatisfactionOverview({
               </button>
             ))}
           </div>
+          <MetricInfo
+            text={t("metricTooltips.satisfaction_relationCounts")}
+            label={t("relationFilter.all")}
+          />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             {t("clientsCount", { n: filtered.length })}
+            <MetricInfo
+              text={t("metricTooltips.satisfaction_clientsCount")}
+              label={t("clientsCount", { n: filtered.length })}
+            />
           </span>
           <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
             <button
@@ -516,6 +528,10 @@ function SatisfactionBoard({
                 <span className="rounded-full bg-soft-2 px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
                   {items.length}
                 </span>
+                <MetricInfo
+                  text={t(`metricTooltips.satisfaction_bucket_${b.key}`)}
+                  label={t(`board.${b.key}`)}
+                />
               </div>
             </div>
             <p className="px-3 pb-2 text-[10px] leading-snug text-muted-foreground/70">
@@ -770,13 +786,17 @@ function ExecutionPanel({
             <AlertTriangle className="size-4 text-amber" /> {t("execution.title")}
           </p>
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span className="tabular-nums">
-              {t("execution.overdueCount", { n: snapshot.overdueCount })}
-            </span>
-            {snapshot.maxDaysStuck !== null && (
+            <Explained text={t("metricTooltips.satisfaction_execOverdueCount")}>
               <span className="tabular-nums">
-                {t("execution.maxStuck", { n: snapshot.maxDaysStuck })}
+                {t("execution.overdueCount", { n: snapshot.overdueCount })}
               </span>
+            </Explained>
+            {snapshot.maxDaysStuck !== null && (
+              <Explained text={t("metricTooltips.satisfaction_execMaxStuck")}>
+                <span className="tabular-nums">
+                  {t("execution.maxStuck", { n: snapshot.maxDaysStuck })}
+                </span>
+              </Explained>
             )}
           </div>
         </div>
@@ -791,7 +811,9 @@ function ExecutionPanel({
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-soft-1 px-2 py-1 text-[11px]"
               >
                 <span className="text-muted-foreground">{stageLabel(s.stage)}</span>
-                <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">{s.count}</span>
+                <Explained text={t("metricTooltips.satisfaction_execStageCount")}>
+                  <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">{s.count}</span>
+                </Explained>
               </span>
             ))}
           </div>
@@ -817,9 +839,11 @@ function ExecutionPanel({
                   {stageLabel(task.stage)}
                 </span>
                 {task.daysStuck !== null && (
-                  <span className="tabular-nums text-amber">
-                    {t("execution.daysStuck", { n: task.daysStuck })}
-                  </span>
+                  <Explained text={t("metricTooltips.satisfaction_execDaysStuck")}>
+                    <span className="tabular-nums text-amber">
+                      {t("execution.daysStuck", { n: task.daysStuck })}
+                    </span>
+                  </Explained>
                 )}
               </span>
             </li>
@@ -1078,29 +1102,35 @@ function AnalysisView({
                   : ""}
               </p>
             </div>
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
-                  ? "border-cc-red/30 bg-red-dim text-cc-red"
+            <Explained text={t("metricTooltips.satisfaction_riskBadge")}>
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                  analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                    ? "border-cc-red/30 bg-red-dim text-cc-red"
+                    : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
+                      ? "border-amber/30 bg-amber/10 text-amber"
+                      : "border-cc-green/30 bg-green-dim text-cc-green",
+                )}
+              >
+                {analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                  ? t("executive.riskHigh")
                   : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
-                    ? "border-amber/30 bg-amber/10 text-amber"
-                    : "border-cc-green/30 bg-green-dim text-cc-green",
-              )}
-            >
-              {analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
-                ? t("executive.riskHigh")
-                : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
-                  ? t("executive.riskMedium")
-                  : t("executive.riskLow")}
-            </span>
+                    ? t("executive.riskMedium")
+                    : t("executive.riskLow")}
+              </span>
+            </Explained>
           </div>
           <div className="flex flex-wrap items-center gap-6 border-t border-border pt-4">
           <div className="flex items-center gap-3">
             <Ring score={analysis.satisfactionScore} size={84} />
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
                 {t("satisfactionScore")}
+                <MetricInfo
+                  text={t("metricTooltips.satisfaction_score")}
+                  label={t("satisfactionScore")}
+                />
               </p>
               <p className={cn("text-sm font-semibold", tone.text)}>
                 {sentimentLabel(analysis.sentiment)}
@@ -1121,8 +1151,12 @@ function AnalysisView({
               <Ring score={analysis.briefAdherenceScore} size={64} />
             )}
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
                 {t("briefAdherence")}
+                <MetricInfo
+                  text={t("metricTooltips.satisfaction_briefAdherence")}
+                  label={t("briefAdherence")}
+                />
               </p>
               {briefMissing ? (
                 <p className="mt-1 text-[11px] font-medium text-amber">
@@ -1142,6 +1176,15 @@ function AnalysisView({
 
       {briefMissing && (
         <MissingBriefPanel clientId={clientId} activeProjects={activeProjects} t={t} />
+      )}
+
+      {/* لماذا هذه الدرجة — per-requirement brief-adherence breakdown */}
+      {!briefMissing && analysis.briefAdherence && (
+        <BriefAdherencePanel
+          breakdown={analysis.briefAdherence}
+          score={analysis.briefAdherenceScore}
+          t={t}
+        />
       )}
 
       {/* الصورة الكبرى — each source rolled up into one account-health verdict */}
@@ -1393,24 +1436,28 @@ function BigPicturePanel({
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {contract && (
+              <Explained text={t("metricTooltips.satisfaction_contractTarget")}>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                    CONTRACT_TARGET_TONE[contract.target] ?? "border-border bg-soft-2 text-muted-foreground",
+                  )}
+                >
+                  <FileSignature className="size-3" />
+                  {t(`contractTarget.${contract.target}`)}
+                </span>
+              </Explained>
+            )}
+            <Explained text={t("metricTooltips.satisfaction_accountHealth")}>
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                  CONTRACT_TARGET_TONE[contract.target] ?? "border-border bg-soft-2 text-muted-foreground",
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                  ACCOUNT_HEALTH_TONE[bigPicture.accountHealth] ?? ACCOUNT_HEALTH_TONE.watch,
                 )}
               >
-                <FileSignature className="size-3" />
-                {t(`contractTarget.${contract.target}`)}
+                {t(`accountHealth.${bigPicture.accountHealth}`)}
               </span>
-            )}
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                ACCOUNT_HEALTH_TONE[bigPicture.accountHealth] ?? ACCOUNT_HEALTH_TONE.watch,
-              )}
-            >
-              {t(`accountHealth.${bigPicture.accountHealth}`)}
-            </span>
+            </Explained>
           </div>
         </div>
         {bigPicture.headline && (
@@ -1420,8 +1467,12 @@ function BigPicturePanel({
           {dims.map((d) => (
             <div key={d.key} className="flex flex-col items-center gap-1.5 text-center">
               <Ring score={d.score} size={64} />
-              <p className="text-[11px] font-medium text-muted-foreground">
+              <p className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
                 {t(`bigPicture.${d.key}`)}
+                <MetricInfo
+                  text={t(`metricTooltips.satisfaction_dim_${d.key}`)}
+                  label={t(`bigPicture.${d.key}`)}
+                />
               </p>
             </div>
           ))}
@@ -1490,6 +1541,10 @@ function IndicatorsPanel({
       <CardContent className="p-4">
         <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
           <ShieldAlert className="size-4 text-cc-red" /> {t("indicators.title")}
+          <MetricInfo
+            text={t("metricTooltips.satisfaction_indicatorCounts")}
+            label={t("indicators.title")}
+          />
         </p>
         {indicators.length === 0 ? (
           <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
@@ -1541,8 +1596,12 @@ function ClientSignalsPanel({
           <MessagesSquare className="size-4 text-cyan" /> {t("signals.clientTitle")}
         </p>
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1.5 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {t("signals.requests")}
+            <MetricInfo
+              text={t("metricTooltips.satisfaction_reqCounts")}
+              label={t("signals.requests")}
+            />
           </p>
           <div className="flex flex-wrap gap-1.5">
             {reqKeys.map((k) => (
@@ -1557,8 +1616,12 @@ function ClientSignalsPanel({
           </div>
         </div>
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1.5 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {t("signals.approvals")}
+            <MetricInfo
+              text={t("metricTooltips.satisfaction_apprCounts")}
+              label={t("signals.approvals")}
+            />
           </p>
           <div className="flex flex-wrap gap-1.5">
             {apprKeys.map((k) => (
@@ -1574,9 +1637,11 @@ function ClientSignalsPanel({
         </div>
         <p className="text-[12px] text-muted-foreground">
           {t("signals.responseSpeed")}:{" "}
-          <span className="font-semibold text-foreground">
-            {t(`responseSpeed.${signals.responseSpeed}`)}
-          </span>
+          <Explained text={t("metricTooltips.satisfaction_responseSpeed")}>
+            <span className="font-semibold text-foreground">
+              {t(`responseSpeed.${signals.responseSpeed}`)}
+            </span>
+          </Explained>
         </p>
       </CardContent>
     </Card>
@@ -1664,6 +1729,97 @@ function TechnicalSignalsPanel({
 }
 
 // أسباب المشاكل: problem → root cause → owner.
+// Brief-adherence breakdown — explains WHY the score is what it is by listing
+// each documented brief requirement and whether it was delivered. Renders only
+// when the analysis carried a brief (briefAdherence non-null).
+const BRIEF_STATUS_META = {
+  delivered: { icon: CheckCircle2, cls: "text-cc-green", badge: "border-cc-green/25 bg-cc-green/[0.07] text-cc-green" },
+  partial: { icon: MinusCircle, cls: "text-amber", badge: "border-amber/30 bg-amber/10 text-amber" },
+  not_delivered: { icon: XCircle, cls: "text-cc-red", badge: "border-cc-red/25 bg-red-dim/40 text-cc-red" },
+  no_evidence: { icon: HelpCircle, cls: "text-muted-foreground", badge: "border-border bg-soft-2 text-muted-foreground" },
+} as const;
+
+function BriefAdherencePanel({
+  breakdown,
+  score,
+  t,
+}: {
+  breakdown: NonNullable<Analysis["briefAdherence"]>;
+  score: number | null;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const items = breakdown.items ?? [];
+  // Order: problems first (not_delivered, partial), then delivered, then no_evidence.
+  const rank = { not_delivered: 0, partial: 1, delivered: 2, no_evidence: 3 } as const;
+  const sorted = [...items].sort((a, b) => rank[a.status] - rank[b.status]);
+  const counts = items.reduce(
+    (m, it) => ((m[it.status] = (m[it.status] ?? 0) + 1), m),
+    {} as Record<string, number>,
+  );
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <ClipboardList className="size-4 text-muted-foreground" /> {t("briefBreakdown.title")}
+            {score !== null && (
+              <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
+                {score}%
+              </span>
+            )}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {(["delivered", "partial", "not_delivered", "no_evidence"] as const).map((s) =>
+              counts[s] ? (
+                <span
+                  key={s}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                    BRIEF_STATUS_META[s].badge,
+                  )}
+                >
+                  {counts[s]} {t(`briefBreakdown.status.${s}`)}
+                </span>
+              ) : null,
+            )}
+          </div>
+        </div>
+        {breakdown.reason && (
+          <p className="mb-3 rounded-lg border border-border bg-soft-1 p-3 text-[13px] leading-relaxed">
+            {breakdown.reason}
+          </p>
+        )}
+        {sorted.length > 0 ? (
+          <ul className="space-y-2">
+            {sorted.map((it, i) => {
+              const meta = BRIEF_STATUS_META[it.status];
+              const Icon = meta.icon;
+              return (
+                <li key={i} className="flex items-start gap-2.5 rounded-lg border border-border bg-soft-1 p-3">
+                  <Icon className={cn("mt-0.5 size-4 shrink-0", meta.cls)} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[13px] font-medium leading-snug">{it.requirement}</span>
+                      <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium", meta.badge)}>
+                        {t(`briefBreakdown.status.${it.status}`)}
+                      </span>
+                    </div>
+                    {it.note && (
+                      <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{it.note}</p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">{t("briefBreakdown.empty")}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CausesPanel({
   causes,
   t,
@@ -1764,6 +1920,10 @@ function ClientTimelinePanel({
           <div className="rounded-lg border border-border bg-soft-1 p-3">
             <p className="mb-3 inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <TrendingUp className="size-3.5 text-cyan" /> {t("timeline")}
+              <MetricInfo
+                text={t("metricTooltips.satisfaction_sentimentTimeline")}
+                label={t("timeline")}
+              />
             </p>
             <div className="flex items-end gap-2" style={{ height: 96 }}>
               {sentimentTimeline.map((pt, i) => {
@@ -2036,6 +2196,10 @@ function HistoryList({
       <CardContent className="p-4">
         <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
           <History className="size-4 text-cyan" /> {t("history.title")}
+          <MetricInfo
+            text={t("metricTooltips.satisfaction_historyScore")}
+            label={t("history.title")}
+          />
         </p>
         <ul className="space-y-1.5">
           {history.map((h) => {

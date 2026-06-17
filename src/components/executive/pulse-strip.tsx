@@ -2,6 +2,7 @@ import { CheckCircle2, MessageSquareWarning, Plus, ShieldCheck, TrendingDown, Tr
 import { getTranslations } from "next-intl/server";
 import type { PulseStats } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
+import { MetricInfo } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 
 function pct(curr: number, prev: number): { sign: string; tone: string; Dir: React.ElementType } {
@@ -39,9 +40,10 @@ interface CellProps {
   Icon: React.ElementType;
   iconTone: string;
   reverse?: boolean;
+  tip?: React.ReactNode;
 }
 
-function Cell({ label, value, prev, Icon, iconTone, reverse }: CellProps) {
+function Cell({ label, value, prev, Icon, iconTone, reverse, tip }: CellProps) {
   const d = reverse ? pctReverse(value, prev) : pct(value, prev);
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -49,7 +51,10 @@ function Cell({ label, value, prev, Icon, iconTone, reverse }: CellProps) {
         <Icon className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+        <p className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {label}
+          {tip ? <MetricInfo text={tip} /> : null}
+        </p>
         <div className="mt-0.5 flex items-baseline gap-2">
           <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
           <span className={cn("inline-flex items-center gap-0.5 text-[11px] font-medium", d.tone)}>
@@ -74,6 +79,7 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
             prev={data.completed.previous}
             Icon={CheckCircle2}
             iconTone="bg-green-dim text-cc-green"
+            tip={t("metricTooltips.dashboard_pulseCompleted")}
           />
           <Cell
             label={t("tasksAdded")}
@@ -81,6 +87,7 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
             prev={data.tasksAdded.previous}
             Icon={Plus}
             iconTone="bg-cyan-dim text-cyan"
+            tip={t("metricTooltips.dashboard_pulseTasksAdded")}
           />
           <Cell
             label={t("clientChanges")}
@@ -89,6 +96,7 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
             Icon={MessageSquareWarning}
             iconTone="bg-amber-dim text-amber"
             reverse
+            tip={t("metricTooltips.dashboard_pulseClientChanges")}
           />
           <Cell
             label={t("approvals")}
@@ -96,6 +104,7 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
             prev={data.approvalsResolved.previous}
             Icon={ShieldCheck}
             iconTone="bg-purple-dim text-cc-purple"
+            tip={t("metricTooltips.dashboard_pulseApprovals")}
           />
         </CardContent>
       </Card>

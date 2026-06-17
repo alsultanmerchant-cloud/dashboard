@@ -18,6 +18,7 @@ import {
   FolderX,
 } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { MetricInfo } from "@/components/metric-info";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -161,8 +162,24 @@ export function WaGroupsWorkspace({
                 <thead>
                   <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="p-3 text-start font-medium">{t("groups.col.group")}</th>
-                    <th className="p-3 text-center font-medium">{t("groups.col.members")}</th>
-                    <th className="p-3 text-center font-medium">{t("groups.col.messages")}</th>
+                    <th className="p-3 text-center font-medium">
+                      <span className="inline-flex items-center justify-center gap-1">
+                        {t("groups.col.members")}
+                        <MetricInfo
+                          text={t("metricTooltips.groups_members")}
+                          label={t("groups.col.members")}
+                        />
+                      </span>
+                    </th>
+                    <th className="p-3 text-center font-medium">
+                      <span className="inline-flex items-center justify-center gap-1">
+                        {t("groups.col.messages")}
+                        <MetricInfo
+                          text={t("metricTooltips.groups_messages")}
+                          label={t("groups.col.messages")}
+                        />
+                      </span>
+                    </th>
                     <th className="p-3 text-start font-medium">{t("groups.col.client")}</th>
                     <th className="p-3 text-start font-medium">{t("groups.col.project")}</th>
                     <th className="p-3 text-center font-medium">{t("groups.col.kind")}</th>

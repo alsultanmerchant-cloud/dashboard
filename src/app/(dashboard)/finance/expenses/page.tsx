@@ -12,6 +12,7 @@ import {
 } from "@/lib/data/expenses";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
+import { MetricInfo } from "@/components/metric-info";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
@@ -102,19 +103,28 @@ export default async function FinancePage() {
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{t("month.revenue")}</p>
+              <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                {t("month.revenue")}
+                <MetricInfo text={t("metricTooltips.financeExpenses_monthRevenue")} label={t("month.revenue")} />
+              </p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-cc-green">
                 {sar(monthTotals.revenue)}
               </p>
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{t("month.expenses")}</p>
+              <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                {t("month.expenses")}
+                <MetricInfo text={t("metricTooltips.financeExpenses_monthExpenses")} label={t("month.expenses")} />
+              </p>
               <p className="mt-1 text-2xl font-bold tabular-nums text-amber">
                 {sar(monthTotals.expenses)}
               </p>
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{t("month.net")}</p>
+              <p className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                {t("month.net")}
+                <MetricInfo text={t("metricTooltips.financeExpenses_monthNet")} label={t("month.net")} />
+              </p>
               <p className={cn(
                 "mt-1 text-2xl font-bold tabular-nums",
                 monthTotals.net >= 0 ? "text-cc-green" : "text-cc-red",
@@ -129,7 +139,10 @@ export default async function FinancePage() {
       {/* 6-month trend */}
       <Card>
         <CardContent className="p-4">
-          <p className="mb-4 text-sm font-semibold">{t("trend.title")}</p>
+          <p className="mb-4 flex items-center gap-1 text-sm font-semibold">
+            {t("trend.title")}
+            <MetricInfo text={t("metricTooltips.financeExpenses_trend")} label={t("trend.title")} />
+          </p>
           <div className="flex items-end justify-between gap-2 h-40">
             {monthly.map((m) => {
               const revH = (m.revenue / maxBar) * 100;
@@ -169,7 +182,10 @@ export default async function FinancePage() {
       {/* Expense category breakdown */}
       <Card>
         <CardContent className="p-4">
-          <p className="mb-4 text-sm font-semibold">{t("breakdown.title")}</p>
+          <p className="mb-4 flex items-center gap-1 text-sm font-semibold">
+            {t("breakdown.title")}
+            <MetricInfo text={t("metricTooltips.financeExpenses_breakdown")} label={t("breakdown.title")} />
+          </p>
           {ytdExpenseSummary.totalAmount === 0 ? (
             <p className="text-sm text-muted-foreground">{t("breakdown.empty")}</p>
           ) : (
@@ -210,6 +226,7 @@ export default async function FinancePage() {
         <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
           <ReceiptText className="size-4" />
           {t("expensesList.title")}
+          <MetricInfo text={t("metricTooltips.financeExpenses_listAmount")} label={t("expensesList.title")} />
         </h2>
         {firstExpensesPage.items.length === 0 ? (
           <EmptyState

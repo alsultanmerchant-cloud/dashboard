@@ -282,6 +282,7 @@ export type AmTargetRow = {
   team_expected: number | null;
   team_achieved: number | null;
   team_role: "team_lead" | "dept_manager" | null;
+  team_leader_id?: string | null;
   breakdown: {
     expected_renewals?: number;
     expected_installments?: number;
@@ -316,7 +317,7 @@ export async function getAmTargets(
     .select(
       `account_manager_id, expected_total, achieved_total, achievement_pct,
        team_expected, team_achieved, team_role, breakdown_json,
-       am:employee_profiles!am_targets_account_manager_id_fkey(full_name)`,
+       am:employee_profiles!am_targets_account_manager_id_fkey(full_name, team_leader_employee_id)`,
     )
     .eq("organization_id", orgId)
     .eq("month", month)
@@ -331,12 +332,14 @@ export async function getAmTargets(
     team_expected: number | string | null;
     team_achieved: number | string | null;
     team_role: "team_lead" | "dept_manager" | null;
+  team_leader_id?: string | null;
     breakdown_json: AmTargetRow["breakdown"];
-    am: { full_name: string } | null;
+    am: { full_name: string, team_leader_employee_id: string | null } | null;
   };
   return ((data ?? []) as unknown as Row[]).map((r) => ({
     account_manager_id: r.account_manager_id,
     account_manager_name: r.am?.full_name ?? null,
+    team_leader_id: r.am?.team_leader_employee_id ?? null,
     expected_total: Number(r.expected_total),
     achieved_total: Number(r.achieved_total),
     achievement_pct: Number(r.achievement_pct),
@@ -378,9 +381,11 @@ export type MonthBuckets = {
   renewed: BucketClient[];
   lost: BucketClient[];
   installments_due: InstallmentDue[];
-  // Overdue installments per collecting department, mirrored verbatim from the
-  // sheet's "Clients with Installments" lists (TARGET_CONTRACTS). Account rows
-  // carry an amount; Sales rows are name-only (value 0).
+  // Overdue installments per collecting department. From a snapshot month these
+  // mirror the sheet's "Clients with Installments" lists (TARGET_CONTRACTS); on
+  // the live path (no snapshot) they're derived from the overdue installment
+  // rows, summed per contract and split by source_type_key. Both carry an amount
+  // on the live path; in the UI the Sales card hides its value.
   acc_inst_overdue: BucketClient[];
   sales_inst_overdue: BucketClient[];
   // True when the per-client lists come from the frozen monthly_target_snapshot.
@@ -412,6 +417,11 @@ export type CeoClientInsight = {
   on_time_pct_30d: number | null;
   health_score: number;
   health_label: "healthy" | "watch" | "risk";
+  // Selected-month renewal-pipeline membership (migrations 0172/0174 predicates):
+  // 'overdue' = a not-yet-renewed contract ended before the month; 'on_target' =
+  // ends within the month; null = not in this month's renewal pipeline (future
+  // renewal or no renewal due). Drives the panel's renewal-pipeline toggle.
+  renewal_status: "on_target" | "overdue" | null;
 };
 
 export async function getMonthTargetBuckets(
@@ -515,17 +525,17 @@ export async function getMonthTargetBuckets(
 
   type IRow = {
     expected_amount: number | string;
+    expected_date: string;
     status: string;
     source_type_key: string | null;
     contract: {
       id: string;
       client: { name: string | null } | null;
-      am: { full_name: string } | null;
+      am: { full_name: string, team_leader_employee_id: string | null } | null;
     } | null;
   };
-  const installments_due: InstallmentDue[] = (
-    (insts ?? []) as unknown as IRow[]
-  ).map((i) => ({
+  const instRows = (insts ?? []) as unknown as IRow[];
+  const installments_due: InstallmentDue[] = instRows.map((i) => ({
     contract_id: i.contract?.id ?? "",
     client_name: i.contract?.client?.name ?? null,
     account_manager_name: i.contract?.am?.full_name ?? null,
@@ -534,10 +544,56 @@ export async function getMonthTargetBuckets(
     source_type_key: i.source_type_key ?? null,
   }));
 
+  // Live fallback for the per-department overdue lists. The snapshot path fills
+  // acc_inst_overdue/sales_inst_overdue from the sheet's "Clients with
+  // Installments" lists, but the live RPC (0174) never emits them — so for any
+  // month without a captured snapshot the dedicated "الدفعات المتأخرة" section
+  // would be empty and silently hidden, even though overdue rows exist inline in
+  // installments_due. Derive the split here from the overdue installment rows
+  // (expected before this month and still owed — mirrors 0168's E27 and the
+  // sheet's overdue lists), grouped by collecting department via source_type_key
+  // ('New' → Sales; Renew/WinBack/UPSELL → Account), one row per contract with
+  // the summed overdue amount. Only when the snapshot/RPC didn't already supply
+  // the lists (both empty ⇒ live path).
+  if (acc_inst_overdue.length === 0 && sales_inst_overdue.length === 0) {
+    const ACCOUNT_TYPES = new Set(["Renew", "WinBack", "UPSELL"]);
+    const accMap = new Map<string, BucketClient>();
+    const salesMap = new Map<string, BucketClient>();
+    for (const i of instRows) {
+      if (i.expected_date >= start) continue; // this-month rows are "due", not overdue
+      if (i.status === "received" || i.status === "waived") continue;
+      const cid = i.contract?.id;
+      if (!cid) continue;
+      const target =
+        i.source_type_key === "New"
+          ? salesMap
+          : i.source_type_key && ACCOUNT_TYPES.has(i.source_type_key)
+            ? accMap
+            : null; // null/legacy type can't be routed to a department; stays in the inline table only
+      if (!target) continue;
+      const amount = Number(i.expected_amount);
+      const existing = target.get(cid);
+      if (existing) {
+        existing.value += amount;
+      } else {
+        target.set(cid, {
+          contract_id: cid,
+          client_name: i.contract?.client?.name ?? null,
+          client_code: null,
+          account_manager_name: i.contract?.am?.full_name ?? null,
+          value: amount,
+        });
+      }
+    }
+    acc_inst_overdue.push(...accMap.values());
+    sales_inst_overdue.push(...salesMap.values());
+  }
+
   const byValue = (a: BucketClient, b: BucketClient) => b.value - a.value;
   on_target.sort(byValue);
   overdue.sort(byValue);
   acc_inst_overdue.sort(byValue);
+  sales_inst_overdue.sort(byValue);
   return {
     on_target,
     overdue,
@@ -857,7 +913,8 @@ export async function getContractById(orgId: string, id: string) {
     .from("contracts")
     .select(
       `id, organization_id, external_id, start_date, end_date, duration_months,
-       total_value, paid_value, target, status, notes,
+       total_value, paid_value, next_contract_value, repeated_services_value,
+       payment_status, target, status, notes,
        contract_code, hold_started_at, hold_end_date, type_before_hold_id,
        project_id, account_manager_id, contract_type_id, package_id,
        client:clients(id, name, client_code, external_id),

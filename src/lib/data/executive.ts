@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isLeadershipPosition } from "@/lib/data/leadership";
 import {
   getDashboardOdooMetrics,
   type DashboardOdooMetrics,
@@ -239,22 +240,24 @@ async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]
   const { data, error } = await supabaseAdmin
     .from("task_assignees")
     .select(
-      "employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name)",
+      "employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name, position:positions(role, name))",
     )
     .eq("organization_id", orgId)
     .eq("role_type", "agent");
   if (error) throw error;
 
+  type EmpEmbed = {
+    id: string;
+    full_name: string;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  };
   type Row = {
     employee_id: string;
     task:
       | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
       | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
       | null;
-    employee:
-      | { id: string; full_name: string }
-      | { id: string; full_name: string }[]
-      | null;
+    employee: EmpEmbed | EmpEmbed[] | null;
   };
 
   const agg = new Map<string, { name: string; count: number; minutes: number }>();
@@ -262,6 +265,9 @@ async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]
     const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
     const e = Array.isArray(raw.employee) ? raw.employee[0] : raw.employee;
     if (!t || !e) continue;
+    // Agents-only performance: skip leadership.
+    const pos = Array.isArray(e.position) ? e.position[0] : e.position;
+    if (isLeadershipPosition(pos)) continue;
     if (t.archived_at) continue;
     if (t.stage === "done") continue;
     const cur = agg.get(e.id) ?? { name: e.full_name, count: 0, minutes: 0 };
@@ -304,7 +310,7 @@ async function _getPerformerLeaderboard(orgId: string): Promise<{
   const { data, error } = await supabaseAdmin
     .from("task_assignees")
     .select(
-      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name), task:tasks!inner(id, due_date, planned_date, completed_at, stage)",
+      "task_id, employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name, position:positions(role, name)), task:tasks!inner(id, due_date, planned_date, completed_at, stage)",
     )
     .eq("organization_id", orgId)
     .eq("role_type", "agent")
@@ -312,12 +318,14 @@ async function _getPerformerLeaderboard(orgId: string): Promise<{
     .gte("task.completed_at", `${since}T00:00:00Z`);
   if (error) throw error;
 
+  type PerfEmp = {
+    id: string;
+    full_name: string;
+    position: { role: string | null; name: string | null } | { role: string | null; name: string | null }[] | null;
+  };
   type ARow = {
     task_id: string;
-    employee:
-      | { id: string; full_name: string }
-      | { id: string; full_name: string }[]
-      | null;
+    employee: PerfEmp | PerfEmp[] | null;
     task:
       | { id: string; due_date: string | null; planned_date: string | null; completed_at: string | null }
       | { id: string; due_date: string | null; planned_date: string | null; completed_at: string | null }[]
@@ -330,6 +338,9 @@ async function _getPerformerLeaderboard(orgId: string): Promise<{
     const e = Array.isArray(r.employee) ? r.employee[0] : r.employee;
     const t = Array.isArray(r.task) ? r.task[0] : r.task;
     if (!e || !t) continue;
+    // Agents-only performance: skip leadership.
+    const pos = Array.isArray(e.position) ? e.position[0] : e.position;
+    if (isLeadershipPosition(pos)) continue;
     const key = `${e.id}:${r.task_id}`;
     if (seen.has(key)) continue;
     seen.add(key);
