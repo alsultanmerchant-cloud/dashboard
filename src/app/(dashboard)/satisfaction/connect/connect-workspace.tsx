@@ -16,6 +16,7 @@ import {
   Plus,
   Trash2,
   Star,
+  History,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,8 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState<string | null>(null);
+  const [backfillNote, setBackfillNote] = useState<Record<string, string>>({});
 
   const poll = useCallback(async () => {
     try {
@@ -130,6 +133,29 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
     }
   };
 
+  const backfill = async (session: string) => {
+    setError(null);
+    setBackfilling(session);
+    try {
+      const res = await fetch(`/api/wa/accounts/backfill?session=${encodeURIComponent(session)}`, {
+        method: "POST",
+      });
+      const data = (await res.json()) as { imported?: number; remaining?: number; error?: string };
+      if (!res.ok || data.error) {
+        setError(data.error ?? "تعذر سحب السجل");
+      } else {
+        const note =
+          (data.remaining ?? 0) > 0
+            ? t("backfillMore")
+            : t("backfillDone", { count: data.imported ?? 0 });
+        setBackfillNote((m) => ({ ...m, [session]: note }));
+      }
+      await poll();
+    } finally {
+      setBackfilling(null);
+    }
+  };
+
   const remove = async (session: string) => {
     if (!window.confirm(t("removeConfirm"))) return;
     setBusy(session);
@@ -198,9 +224,12 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
             isPrimary={a.session_id === primarySession}
             qr={qrBySession[a.session_id] ?? null}
             busy={busy === a.session_id}
+            backfilling={backfilling === a.session_id}
+            backfillNote={backfillNote[a.session_id] ?? null}
             t={t}
             onConnect={() => connect(a.session_id)}
             onDisconnect={() => disconnect(a.session_id)}
+            onBackfill={() => backfill(a.session_id)}
             onRemove={() => remove(a.session_id)}
           />
         ))
@@ -225,18 +254,24 @@ function AccountCard({
   isPrimary,
   qr,
   busy,
+  backfilling,
+  backfillNote,
   t,
   onConnect,
   onDisconnect,
+  onBackfill,
   onRemove,
 }: {
   account: Account;
   isPrimary: boolean;
   qr: string | null;
   busy: boolean;
+  backfilling: boolean;
+  backfillNote: string | null;
   t: ReturnType<typeof useTranslations>;
   onConnect: () => void;
   onDisconnect: () => void;
+  onBackfill: () => void;
   onRemove: () => void;
 }) {
   const s = a.status;
@@ -313,6 +348,12 @@ function AccountCard({
             </Button>
           )}
           {s === "CONNECTED" && (
+            <Button variant="outline" size="sm" onClick={onBackfill} disabled={backfilling || busy}>
+              {backfilling ? <Loader2 className="size-4 animate-spin" /> : <History className="size-4" />}
+              {backfilling ? t("backfilling") : t("backfillHistory")}
+            </Button>
+          )}
+          {s === "CONNECTED" && (
             <Button variant="outline" size="sm" onClick={onDisconnect} disabled={busy}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Power className="size-4" />}
               {t("disconnect")}
@@ -324,6 +365,10 @@ function AccountCard({
             </Button>
           )}
         </div>
+
+        {backfillNote && (
+          <p className="text-[11px] text-muted-foreground">{backfillNote}</p>
+        )}
       </CardContent>
     </Card>
   );

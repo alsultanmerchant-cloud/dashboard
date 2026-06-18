@@ -6035,6 +6035,48 @@ export type Database = {
           },
         ]
       }
+      wa_account_backfills: {
+        Row: {
+          account_id: string
+          chat_id: string
+          id: string
+          imported_at: string
+          imported_count: number
+          organization_id: string
+        }
+        Insert: {
+          account_id: string
+          chat_id: string
+          id?: string
+          imported_at?: string
+          imported_count?: number
+          organization_id: string
+        }
+        Update: {
+          account_id?: string
+          chat_id?: string
+          id?: string
+          imported_at?: string
+          imported_count?: number
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_account_backfills_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "wa_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_account_backfills_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wa_accounts: {
         Row: {
           created_at: string

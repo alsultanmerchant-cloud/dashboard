@@ -3681,7 +3681,11 @@
       "lastSeen": "Last activity",
       "reconnect": "Reconnect",
       "scanForLabel": "Scan to connect this number",
-      "neverSeen": "No activity yet"
+      "neverSeen": "No activity yet",
+      "backfillHistory": "Backfill history",
+      "backfilling": "Pulling history…",
+      "backfillDone": "Added {count} messages",
+      "backfillMore": "More history pending — click again"
     },
     "analyzeWeek": "Analyze current week",
     "analyzeAll": "Analyze all time",

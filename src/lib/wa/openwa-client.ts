@@ -261,9 +261,10 @@ export interface WaHistoryMessage {
 export async function fetchChatHistory(
   chatId: string,
   limit = 1000,
+  sessionName: string = WA_SESSION_ID,
 ): Promise<WaHistoryMessage[]> {
   if (!waConfigured()) return [];
-  const uuid = await findSessionUuid();
+  const uuid = await findSessionUuid(sessionName);
   if (!uuid) return [];
   const { ok, json } = await call(
     `/api/sessions/${uuid}/groups/${chatId}/messages?limit=${limit}`,
@@ -287,9 +288,9 @@ export interface WaRemoteGroup {
   name: string | null;
 }
 
-export async function listGroups(): Promise<WaRemoteGroup[]> {
+export async function listGroups(sessionName: string = WA_SESSION_ID): Promise<WaRemoteGroup[]> {
   if (!waConfigured()) return [];
-  const uuid = await findSessionUuid();
+  const uuid = await findSessionUuid(sessionName);
   if (!uuid) return [];
   const { ok, json } = await call(`/api/sessions/${uuid}/groups`);
   if (!ok) return [];

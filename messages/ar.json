@@ -3681,7 +3681,11 @@
       "lastSeen": "آخر نشاط",
       "reconnect": "إعادة الربط",
       "scanForLabel": "امسح الرمز لربط هذا الرقم",
-      "neverSeen": "لا يوجد نشاط بعد"
+      "neverSeen": "لا يوجد نشاط بعد",
+      "backfillHistory": "سحب السجل",
+      "backfilling": "جارٍ سحب السجل…",
+      "backfillDone": "تمت إضافة {count} رسالة",
+      "backfillMore": "يوجد سجل إضافي — اضغط مرة أخرى"
     },
     "analyzeWeek": "تحليل الأسبوع الحالي",
     "analyzeAll": "تحليل كل الفترة",
