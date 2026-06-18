@@ -3687,6 +3687,7 @@
       "lastSeen": "آخر نشاط",
       "reconnect": "إعادة الربط",
       "scanForLabel": "امسح الرمز لربط هذا الرقم",
+      "preparingQr": "جارٍ تجهيز رمز QR… يستغرق بضع ثوانٍ",
       "neverSeen": "لا يوجد نشاط بعد",
       "backfillHistory": "سحب السجل",
       "backfilling": "جارٍ سحب السجل…",

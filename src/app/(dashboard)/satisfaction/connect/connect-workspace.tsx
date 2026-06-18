@@ -345,6 +345,18 @@ function AccountCard({
           </div>
         )}
 
+        {/* Freshly-added/restarting number: the gateway is spinning up its
+            browser and hasn't produced the QR yet. Show a spinner so the card
+            doesn't read as "stuck on Connecting" while we wait for SCAN_QR. */}
+        {(s === "INITIALIZING" || s === "CONNECTING") && (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-soft-1/40 p-4">
+            <div className="flex size-56 items-center justify-center rounded-xl border border-border">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("preparingQr")}</p>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           {s === "CONNECTED" && (
             <Link

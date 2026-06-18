@@ -751,7 +751,11 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
   const { data, error } = await supabaseAdmin
     .from("wa_group_links")
     .select(
-      "id, chat_id, chat_name, client_id, project_id, group_kind, is_active, message_count, member_count, admin_count, last_message_at, client:clients(name), project:projects(name, project_code)",
+      // Pin both FKs: wa_group_links has a second relationship to each table
+      // (suggested_client_id / suggested_project_id, added with the link
+      // suggestions feature), so an implicit embed now fails with PGRST201
+      // and silently empties the whole list. See [[feedback_postgrest_ambiguous_embeds]].
+      "id, chat_id, chat_name, client_id, project_id, group_kind, is_active, message_count, member_count, admin_count, last_message_at, client:clients!wa_group_links_client_id_fkey(name), project:projects!wa_group_links_project_id_fkey(name, project_code)",
     )
     .eq("organization_id", orgId)
     .order("last_message_at", { ascending: false, nullsFirst: false });

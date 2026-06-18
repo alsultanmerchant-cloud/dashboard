@@ -3687,6 +3687,7 @@
       "lastSeen": "Last activity",
       "reconnect": "Reconnect",
       "scanForLabel": "Scan to connect this number",
+      "preparingQr": "Preparing QR code… this takes a few seconds",
       "neverSeen": "No activity yet",
       "backfillHistory": "Backfill history",
       "backfilling": "Pulling history…",
