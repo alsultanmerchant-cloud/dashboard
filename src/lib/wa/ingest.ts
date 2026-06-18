@@ -46,6 +46,7 @@ export interface NormalMessage {
   chatId: string;
   chatName: string | null;
   waMessageId: string;
+  waRawId: string | null; // original serialized id, kept for debugging
   sender: string | null;
   senderId: string | null;
   body: string;
@@ -60,6 +61,47 @@ function str(v: unknown): string | null {
     return String((v as { _serialized: unknown })._serialized);
   }
   return null;
+}
+
+// Recover the STABLE bare message id (whatsapp-web.js `id.id`, e.g. "3EB0F1A2...").
+//
+// The WA id object is { fromMe, remote, id, _serialized }. The serialized form is
+//   `<fromMe>_<remoteJid>_<bareId>[_<participant>]`
+// The leading fromMe flag (and the group participant suffix) differ depending on
+// WHICH connected number received the message, so we must NOT key on `_serialized`
+// — the same message would be stored once per number. The bare `id` segment is
+// sender-generated and identical across every recipient, so deduping on
+// (chat_id, bareId) collapses a message seen by multiple numbers to one row.
+export function bareWaMessageId(v: unknown): { id: string | null; raw: string | null } {
+  if (v == null) return { id: null, raw: null };
+
+  // Already an id object: trust `id.id`, keep `_serialized` as the raw form.
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const raw = typeof o._serialized === "string" ? o._serialized : null;
+    if (typeof o.id === "string" && o.id.length > 0) {
+      return { id: o.id, raw: raw ?? o.id };
+    }
+    if (raw) return { id: parseBareFromSerialized(raw), raw };
+    return { id: null, raw: null };
+  }
+
+  // A plain serialized (or already-bare) string.
+  if (typeof v === "string" && v.length > 0) {
+    return { id: parseBareFromSerialized(v), raw: v };
+  }
+  return { id: null, raw: null };
+}
+
+// `<fromMe>_<remoteJid>_<bareId>[_<participant>]` → bareId.
+// remoteJid contains no "_", so segment index 2 (0-based) is the bare id.
+// If the string isn't in serialized form, it's already bare — return as-is.
+function parseBareFromSerialized(s: string): string {
+  const parts = s.split("_");
+  if (parts.length >= 3 && (parts[0] === "true" || parts[0] === "false")) {
+    return parts[2];
+  }
+  return s;
 }
 
 function pickMessageObjects(payload: unknown): Record<string, unknown>[] {
@@ -85,7 +127,7 @@ export function normalizeWaEvents(payload: unknown): NormalMessage[] {
     // Only group chats (…@g.us). Skip 1:1 to avoid storing personal DMs.
     if (!chatId.endsWith("@g.us")) continue;
 
-    const waMessageId = str(m.id) ?? str(m.messageId) ?? null;
+    const { id: waMessageId, raw: waRawId } = bareWaMessageId(m.id ?? m.messageId ?? null);
     if (!waMessageId) continue;
 
     const type = (str(m.type) ?? "chat").toLowerCase();
@@ -122,6 +164,7 @@ export function normalizeWaEvents(payload: unknown): NormalMessage[] {
       chatId,
       chatName,
       waMessageId,
+      waRawId,
       sender,
       senderId: str(m.author) ?? str(m.participant) ?? null,
       body,
@@ -199,6 +242,7 @@ export async function ingestWaMessages(messages: NormalMessage[]): Promise<Inges
       organization_id: orgId,
       chat_id: m.chatId,
       wa_message_id: m.waMessageId,
+      wa_raw_id: m.waRawId,
       client_id: link?.clientId ?? null,
       group_kind: link?.groupKind ?? null,
       sender: m.sender,

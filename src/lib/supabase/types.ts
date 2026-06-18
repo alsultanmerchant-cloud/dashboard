@@ -6196,6 +6196,7 @@ export type Database = {
           sender_id: string | null
           sent_at: string | null
           wa_message_id: string
+          wa_raw_id: string | null
         }
         Insert: {
           body?: string
@@ -6211,6 +6212,7 @@ export type Database = {
           sender_id?: string | null
           sent_at?: string | null
           wa_message_id: string
+          wa_raw_id?: string | null
         }
         Update: {
           body?: string
@@ -6226,6 +6228,7 @@ export type Database = {
           sender_id?: string | null
           sent_at?: string | null
           wa_message_id?: string
+          wa_raw_id?: string | null
         }
         Relationships: [
           {
