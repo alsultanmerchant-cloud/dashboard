@@ -55,8 +55,10 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
   const [error, setError] = useState<string | null>(null);
   const [backfilling, setBackfilling] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState<Record<string, string>>({});
+  const [nowMs, setNowMs] = useState(0);
 
   const poll = useCallback(async () => {
+    setNowMs(Date.now()); // captured in effect/handler context (never during render)
     try {
       const res = await fetch("/api/wa/accounts", { cache: "no-store" });
       if (!res.ok) {
@@ -226,6 +228,7 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
             busy={busy === a.session_id}
             backfilling={backfilling === a.session_id}
             backfillNote={backfillNote[a.session_id] ?? null}
+            nowMs={nowMs}
             t={t}
             onConnect={() => connect(a.session_id)}
             onDisconnect={() => disconnect(a.session_id)}
@@ -256,6 +259,7 @@ function AccountCard({
   busy,
   backfilling,
   backfillNote,
+  nowMs,
   t,
   onConnect,
   onDisconnect,
@@ -268,6 +272,7 @@ function AccountCard({
   busy: boolean;
   backfilling: boolean;
   backfillNote: string | null;
+  nowMs: number;
   t: ReturnType<typeof useTranslations>;
   onConnect: () => void;
   onDisconnect: () => void;
@@ -276,6 +281,14 @@ function AccountCard({
 }) {
   const s = a.status;
   const title = a.label || a.pushname || (isPrimary ? t("primary") : t("addNumber"));
+  // Warn only when we HAVE seen activity but it has gone quiet for 7+ days —
+  // a connected number that silently stopped delivering. Never warn on null
+  // (no provenance yet ≠ a problem).
+  const stale =
+    s === "CONNECTED" &&
+    a.last_seen_at != null &&
+    nowMs > 0 &&
+    nowMs - new Date(a.last_seen_at).getTime() > 7 * 24 * 3600 * 1000;
 
   return (
     <Card>
@@ -365,6 +378,12 @@ function AccountCard({
             </Button>
           )}
         </div>
+
+        {stale && (
+          <p className="flex items-center gap-1.5 text-[11px] text-amber">
+            <AlertTriangle className="size-3.5" /> {t("stale")}
+          </p>
+        )}
 
         {backfillNote && (
           <p className="text-[11px] text-muted-foreground">{backfillNote}</p>

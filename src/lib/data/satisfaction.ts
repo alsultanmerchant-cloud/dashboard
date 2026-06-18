@@ -744,6 +744,7 @@ export interface WaGroupLink {
   memberCount: number | null;
   adminCount: number | null;
   lastMessageAt: string | null;
+  coverageCount: number; // distinct connected numbers that contributed messages
 }
 
 async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
@@ -755,6 +756,13 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     .eq("organization_id", orgId)
     .order("last_message_at", { ascending: false, nullsFirst: false });
   if (error || !data) return [];
+
+  // How many distinct connected numbers fed each group (provenance from 0200).
+  const coverage = new Map<string, number>();
+  const { data: cov } = await supabaseAdmin.rpc("get_wa_group_coverage", { p_org: orgId });
+  for (const row of (cov ?? []) as Array<{ chat_id: string; account_count: number }>) {
+    coverage.set(row.chat_id, row.account_count);
+  }
 
   type Row = {
     id: string;
@@ -793,6 +801,7 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
       memberCount: r.member_count,
       adminCount: r.admin_count,
       lastMessageAt: r.last_message_at,
+      coverageCount: coverage.get(r.chat_id) ?? 0,
     };
   });
 }

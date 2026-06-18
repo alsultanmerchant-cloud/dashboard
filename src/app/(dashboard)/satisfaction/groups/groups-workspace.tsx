@@ -12,6 +12,7 @@ import {
   Ban,
   Users,
   Link2,
+  Smartphone,
   History,
   X,
   AlertTriangle,
@@ -146,7 +147,17 @@ export function WaGroupsWorkspace({
         />
       )}
 
-      {coverageGaps.length > 0 && <CoverageSection gaps={coverageGaps} t={t} />}
+      {coverageGaps.length > 0 && (
+        <CoverageSection
+          gaps={coverageGaps}
+          groupOptions={links.map((l) => ({
+            value: l.chatId,
+            label: l.chatName ?? l.chatId,
+          }))}
+          t={t}
+          onLinked={() => router.refresh()}
+        />
+      )}
 
       {links.length === 0 ? (
         <Card>
@@ -301,7 +312,17 @@ function GroupRow({
           <span className="text-muted-foreground">—</span>
         )}
       </td>
-      <td className="p-3 text-center tabular-nums text-muted-foreground">{link.messageCount}</td>
+      <td className="p-3 text-center tabular-nums text-muted-foreground">
+        <div className="inline-flex flex-col items-center leading-tight">
+          <span>{link.messageCount}</span>
+          {link.coverageCount >= 2 && (
+            <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+              <Smartphone className="size-3" />
+              {t("groups.numbersCovered", { n: link.coverageCount })}
+            </span>
+          )}
+        </div>
+      </td>
       <td className="p-3 min-w-[180px]">
         <SearchableSelect
           value={clientId}
@@ -477,10 +498,14 @@ function SuggestionRow({
 // ---- Projects missing their client/team groups ---------------------------
 function CoverageSection({
   gaps,
+  groupOptions,
   t,
+  onLinked,
 }: {
   gaps: ProjectCoverageGap[];
+  groupOptions: { value: string; label: string }[];
   t: ReturnType<typeof useTranslations>;
+  onLinked: () => void;
 }) {
   return (
     <Card className="border-cc-red/25">
@@ -489,42 +514,112 @@ function CoverageSection({
           <FolderX className="size-4" />
           {t("groups.coverage.title", { n: gaps.length })}
         </div>
-        <p className="mb-3 text-xs text-muted-foreground">{t("groups.coverage.subtitle")}</p>
+        <p className="mb-1 text-xs text-muted-foreground">{t("groups.coverage.subtitle")}</p>
+        <p className="mb-3 text-xs text-cyan">{t("groups.coverage.linkHint")}</p>
         <div className="flex flex-col gap-2">
           {gaps.map((g) => (
-            <div
+            <CoverageRow
               key={g.projectId}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-card/40 px-3 py-2"
-            >
-              <div className="min-w-[180px]">
-                <p className="text-sm font-medium">
-                  {g.projectCode ? (
-                    <span className="font-mono text-xs text-muted-foreground">{g.projectCode} · </span>
-                  ) : null}
-                  {g.projectName}
-                </p>
-                {g.clientName && (
-                  <p className="text-xs text-muted-foreground">{g.clientName}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {!g.hasClientGroup && (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-red-dim px-2 py-0.5 text-[11px] text-cc-red">
-                    <MessageSquare className="size-3" />
-                    {t("groups.coverage.missingClient")}
-                  </span>
-                )}
-                {!g.hasTechnicalGroup && (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-red-dim px-2 py-0.5 text-[11px] text-cc-red">
-                    <Wrench className="size-3" />
-                    {t("groups.coverage.missingTeam")}
-                  </span>
-                )}
-              </div>
-            </div>
+              g={g}
+              groupOptions={groupOptions}
+              t={t}
+              onLinked={onLinked}
+            />
           ))}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CoverageRow({
+  g,
+  groupOptions,
+  t,
+  onLinked,
+}: {
+  g: ProjectCoverageGap;
+  groupOptions: { value: string; label: string }[];
+  t: ReturnType<typeof useTranslations>;
+  onLinked: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  // Link the chosen WhatsApp group to this project, stamping it with the
+  // project's client + the slot's kind so it satisfies coverage immediately.
+  const linkGroup = (chatId: string, kind: GroupKind) => {
+    if (!chatId) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await mapWaGroupAction({
+        chatId,
+        projectId: g.projectId,
+        ...(g.clientId ? { clientId: g.clientId } : {}),
+        groupKind: kind,
+        isActive: true,
+      });
+      if (res.error) setError(res.error);
+      else onLinked();
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-card/40 px-3 py-2">
+      <div className="min-w-[180px]">
+        <p className="text-sm font-medium">
+          {g.projectCode ? (
+            <span className="font-mono text-xs text-muted-foreground">{g.projectCode} · </span>
+          ) : null}
+          {g.projectName}
+        </p>
+        {g.clientName && <p className="text-xs text-muted-foreground">{g.clientName}</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {!g.hasClientGroup && (
+          <div className="flex items-center gap-1.5">
+            <MessageSquare className="size-3.5 text-cc-red" />
+            <div className="min-w-[200px]">
+              <SearchableSelect
+                value=""
+                onValueChange={(v) => linkGroup(v, "client")}
+                options={groupOptions}
+                placeholder={t("groups.coverage.linkClient")}
+                searchPlaceholder={t("groups.searchProject")}
+                emptyMessage={t("groups.coverage.noGroups")}
+                ariaLabel={t("groups.coverage.linkClient")}
+              />
+            </div>
+          </div>
+        )}
+        {!g.hasTechnicalGroup && (
+          <div className="flex items-center gap-1.5">
+            <Wrench className="size-3.5 text-cc-red" />
+            <div className="min-w-[200px]">
+              <SearchableSelect
+                value=""
+                onValueChange={(v) => linkGroup(v, "technical")}
+                options={groupOptions}
+                placeholder={t("groups.coverage.linkTeam")}
+                searchPlaceholder={t("groups.searchProject")}
+                emptyMessage={t("groups.coverage.noGroups")}
+                ariaLabel={t("groups.coverage.linkTeam")}
+              />
+            </div>
+          </div>
+        )}
+        {pending && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            {t("groups.coverage.linking")}
+          </span>
+        )}
+        {error && (
+          <span className="text-[10px] text-cc-red" title={error}>
+            تعذّر الحفظ
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

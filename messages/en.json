@@ -3637,8 +3637,14 @@
         "title": "{n} project(s) missing WhatsApp groups",
         "subtitle": "Every active project should have both a 💫 client group and a 📍 team group.",
         "missingClient": "No client group",
-        "missingTeam": "No team group"
-      }
+        "missingTeam": "No team group",
+        "linkClient": "Pick client group…",
+        "linkTeam": "Pick team group…",
+        "linkHint": "Link a group to the project right here — pick a WhatsApp group for each missing slot.",
+        "noGroups": "No groups",
+        "linking": "Linking…"
+      },
+      "numbersCovered": "{n} numbers"
     },
     "connect": {
       "title": "Connect WhatsApp number",
@@ -3685,7 +3691,8 @@
       "backfillHistory": "Backfill history",
       "backfilling": "Pulling history…",
       "backfillDone": "Added {count} messages",
-      "backfillMore": "More history pending — click again"
+      "backfillMore": "More history pending — click again",
+      "stale": "No recent activity — may have stopped syncing"
     },
     "analyzeWeek": "Analyze current week",
     "analyzeAll": "Analyze all time",

@@ -7042,6 +7042,13 @@ export type Database = {
           out_event_type: string
         }[]
       }
+      get_wa_group_coverage: {
+        Args: { p_org: string }
+        Returns: {
+          account_count: number
+          chat_id: string
+        }[]
+      }
       has_org_access: { Args: { target_org: string }; Returns: boolean }
       has_permission:
         | { Args: { perm_key: string }; Returns: boolean }
