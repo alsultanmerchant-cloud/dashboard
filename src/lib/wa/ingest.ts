@@ -183,9 +183,47 @@ export interface IngestResult {
   chats: string[];
 }
 
-export async function ingestWaMessages(messages: NormalMessage[]): Promise<IngestResult> {
+// OpenWA may carry a session identifier on the event envelope (shape varies by
+// version). The webhook prefers the ?account=<name> query tag we register the
+// webhook URL with; this is the fallback when that tag is absent.
+export function extractSessionId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const data = (p.data as Record<string, unknown>) ?? null;
+  return (
+    (typeof p.session === "string" ? p.session : null) ??
+    (typeof p.sessionId === "string" ? p.sessionId : null) ??
+    (typeof p.sessionName === "string" ? p.sessionName : null) ??
+    (data && typeof data.session === "string" ? data.session : null) ??
+    null
+  );
+}
+
+export async function ingestWaMessages(
+  messages: NormalMessage[],
+  accountSessionId?: string | null,
+): Promise<IngestResult> {
   if (messages.length === 0) return { ingested: 0, skipped: 0, chats: [] };
   const orgId = await getDefaultOrgId();
+
+  // Resolve which connected number delivered these events (provenance only —
+  // never part of the dedup key). Bumps the account's heartbeat.
+  let accountId: string | null = null;
+  if (accountSessionId) {
+    const { data: acct } = await supabaseAdmin
+      .from("wa_accounts")
+      .select("id")
+      .eq("organization_id", orgId)
+      .eq("session_id", accountSessionId)
+      .maybeSingle();
+    accountId = (acct?.id as string | null) ?? null;
+    if (accountId) {
+      await supabaseAdmin
+        .from("wa_accounts")
+        .update({ last_seen_at: new Date().toISOString(), status: "CONNECTED" })
+        .eq("id", accountId);
+    }
+  }
 
   // Resolve / auto-register each chat → link (client_id + group_kind).
   const byChat = new Map<string, NormalMessage[]>();
@@ -243,6 +281,7 @@ export async function ingestWaMessages(messages: NormalMessage[]): Promise<Inges
       chat_id: m.chatId,
       wa_message_id: m.waMessageId,
       wa_raw_id: m.waRawId,
+      first_seen_account_id: accountId,
       client_id: link?.clientId ?? null,
       group_kind: link?.groupKind ?? null,
       sender: m.sender,

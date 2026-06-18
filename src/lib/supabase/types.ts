@@ -6035,6 +6035,53 @@ export type Database = {
           },
         ]
       }
+      wa_accounts: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string | null
+          last_seen_at: string | null
+          organization_id: string
+          phone: string | null
+          session_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          last_seen_at?: string | null
+          organization_id: string
+          phone?: string | null
+          session_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          last_seen_at?: string | null
+          organization_id?: string
+          phone?: string | null
+          session_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wa_group_links: {
         Row: {
           admin_count: number | null

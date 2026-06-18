@@ -13,6 +13,9 @@ import {
   RefreshCw,
   Settings2,
   ArrowRight,
+  Plus,
+  Trash2,
+  Star,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,34 +33,56 @@ type Status =
   | "FAILED"
   | "LOADING";
 
-interface SessionInfo {
-  status: Status;
+interface Account {
+  id: string;
+  session_id: string;
   phone: string | null;
-  pushname: string | null;
-  detail?: string;
+  label: string | null;
+  is_active: boolean;
+  status: Status;
+  last_seen_at: string | null;
+  pushname?: string | null;
 }
 
-export function ConnectWorkspace() {
+export function ConnectWorkspace({ primarySession }: { primarySession: string }) {
   const t = useTranslations("SatisfactionPage.connect");
-  const [info, setInfo] = useState<SessionInfo>({ status: "LOADING", phone: null, pushname: null });
-  const [qr, setQr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [gatewayState, setGatewayState] = useState<Status>("LOADING");
+  const [qrBySession, setQrBySession] = useState<Record<string, string | null>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch("/api/wa/session", { cache: "no-store" });
-      const data = (await res.json()) as SessionInfo;
-      setInfo(data);
-      if (data.status === "SCAN_QR") {
-        const qres = await fetch("/api/wa/session/qr", { cache: "no-store" });
-        const qjson = await qres.json();
-        setQr(qjson.image ?? null);
-      } else {
-        setQr(null);
+      const res = await fetch("/api/wa/accounts", { cache: "no-store" });
+      if (!res.ok) {
+        // 403 etc. — surface gateway-level state via the primary session probe.
+        const probe = await fetch("/api/wa/session", { cache: "no-store" });
+        const pj = (await probe.json()) as { status?: Status };
+        setGatewayState(pj.status ?? "UNREACHABLE");
+        setAccounts([]);
+        return;
       }
+      const data = (await res.json()) as { accounts: Account[] };
+      setAccounts(data.accounts);
+      setGatewayState(data.accounts.length ? "CONNECTED" : "NOT_CREATED");
+
+      // Refresh QR for any session awaiting a scan.
+      const scanning = data.accounts.filter((a) => a.status === "SCAN_QR");
+      const entries = await Promise.all(
+        scanning.map(async (a) => {
+          const qres = await fetch(`/api/wa/session/qr?session=${encodeURIComponent(a.session_id)}`, {
+            cache: "no-store",
+          });
+          const qjson = await qres.json();
+          return [a.session_id, qjson.image ?? null] as const;
+        }),
+      );
+      setQrBySession(Object.fromEntries(entries));
     } catch {
-      setInfo({ status: "UNREACHABLE", phone: null, pushname: null });
+      setGatewayState("UNREACHABLE");
+      setAccounts([]);
     }
   }, []);
 
@@ -67,38 +92,59 @@ export function ConnectWorkspace() {
     return () => clearInterval(id);
   }, [poll]);
 
-  const connect = async () => {
+  const addNumber = async () => {
     setError(null);
-    setBusy(true);
+    setAdding(true);
     try {
-      const res = await fetch("/api/wa/session", { method: "POST" });
+      const res = await fetch("/api/wa/accounts", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok && !data.account) setError(data.error ?? "تعذر إضافة الرقم");
+      await poll();
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const connect = async (session: string) => {
+    setError(null);
+    setBusy(session);
+    try {
+      const res = await fetch(`/api/wa/session?session=${encodeURIComponent(session)}`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (!res.ok) setError(data.error ?? "تعذر بدء الجلسة");
       await poll();
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const disconnect = async () => {
-    setError(null);
-    setBusy(true);
+  const disconnect = async (session: string) => {
+    setBusy(session);
     try {
-      await fetch("/api/wa/session", { method: "DELETE" });
+      await fetch(`/api/wa/session?session=${encodeURIComponent(session)}`, { method: "DELETE" });
       await poll();
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const s = info.status;
+  const remove = async (session: string) => {
+    if (!window.confirm(t("removeConfirm"))) return;
+    setBusy(session);
+    try {
+      await fetch(`/api/wa/accounts?session=${encodeURIComponent(session)}`, { method: "DELETE" });
+      await poll();
+    } finally {
+      setBusy(null);
+    }
+  };
 
-  return (
-    <div className="max-w-2xl space-y-4">
-      <StatusBanner status={s} info={info} t={t} />
-
-      {/* NOT CONFIGURED — needs env + deployed OpenWA */}
-      {s === "NOT_CONFIGURED" && (
+  // Gateway not configured / unreachable — show the same global guidance as before.
+  if (gatewayState === "NOT_CONFIGURED") {
+    return (
+      <div className="max-w-2xl space-y-4">
         <Card>
           <CardContent className="space-y-3 p-5 text-sm">
             <p className="flex items-center gap-2 font-semibold">
@@ -112,94 +158,58 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
             <p className="text-xs text-muted-foreground">{t("seeRunbook")} <code dir="ltr">docs/WHATSAPP_INGESTION.md</code></p>
           </CardContent>
         </Card>
-      )}
+      </div>
+    );
+  }
 
-      {/* UNREACHABLE */}
-      {s === "UNREACHABLE" && (
+  if (gatewayState === "UNREACHABLE") {
+    return (
+      <div className="max-w-2xl space-y-4">
         <Card>
           <CardContent className="space-y-3 p-5 text-sm">
             <p className="text-muted-foreground">{t("unreachableBody")}</p>
-            {info.detail && <p className="font-mono text-[11px] text-cc-red" dir="ltr">{info.detail}</p>}
             <Button variant="outline" size="sm" onClick={poll}>
               <RefreshCw className="size-4" /> {t("retry")}
             </Button>
           </CardContent>
         </Card>
-      )}
+      </div>
+    );
+  }
 
-      {/* QR to scan */}
-      {s === "SCAN_QR" && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-4 p-6">
-            <p className="flex items-center gap-2 text-sm font-semibold">
-              <QrCode className="size-4 text-cyan" /> {t("scanTitle")}
-            </p>
-            {qr ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={qr} alt="WhatsApp QR" className="size-64 rounded-xl border border-border bg-white p-2" />
-            ) : (
-              <div className="flex size-64 items-center justify-center rounded-xl border border-border">
-                <Loader2 className="size-6 animate-spin text-muted-foreground" />
-              </div>
-            )}
-            <ol className="list-decimal space-y-1 ps-5 text-xs text-muted-foreground">
-              <li>{t("scanStep1")}</li>
-              <li>{t("scanStep2")}</li>
-              <li>{t("scanStep3")}</li>
-            </ol>
-          </CardContent>
-        </Card>
-      )}
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold">{t("numbersTitle")}</h2>
+        <p className="text-xs text-muted-foreground">{t("numbersSubtitle")}</p>
+      </div>
 
-      {/* CONNECTED */}
-      {s === "CONNECTED" && (
-        <Card>
-          <CardContent className="space-y-4 p-5">
-            <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-full bg-green-dim text-cc-green">
-                <CheckCircle2 className="size-5" />
-              </span>
-              <div>
-                <p className="font-semibold">{info.pushname ?? t("connected")}</p>
-                {info.phone && <p className="font-mono text-xs text-muted-foreground" dir="ltr">{info.phone}</p>}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/satisfaction/groups"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan/10 px-3 py-2 text-xs font-medium text-cyan hover:bg-cyan/20"
-              >
-                {t("goMapGroups")} <ArrowRight className="size-3.5 rtl:rotate-180" />
-              </Link>
-              <Button variant="outline" size="sm" onClick={disconnect} disabled={busy}>
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <Power className="size-4" />}
-                {t("disconnect")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Disconnected / not created / failed → Connect button */}
-      {(s === "NOT_CREATED" || s === "DISCONNECTED" || s === "FAILED") && (
-        <Card>
-          <CardContent className="space-y-3 p-5">
-            <p className="text-sm text-muted-foreground">{t("connectPrompt")}</p>
-            <Button onClick={connect} disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Smartphone className="size-4" />}
-              {t("connectBtn")}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {(s === "CONNECTING" || s === "INITIALIZING" || s === "LOADING") && (
+      {accounts === null ? (
         <Card>
           <CardContent className="flex items-center gap-3 p-5 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> {t("working")}
           </CardContent>
         </Card>
+      ) : (
+        accounts.map((a) => (
+          <AccountCard
+            key={a.id}
+            account={a}
+            isPrimary={a.session_id === primarySession}
+            qr={qrBySession[a.session_id] ?? null}
+            busy={busy === a.session_id}
+            t={t}
+            onConnect={() => connect(a.session_id)}
+            onDisconnect={() => disconnect(a.session_id)}
+            onRemove={() => remove(a.session_id)}
+          />
+        ))
       )}
+
+      <Button onClick={addNumber} disabled={adding} variant="outline">
+        {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+        {adding ? t("adding") : t("addNumber")}
+      </Button>
 
       {error && (
         <p className="flex items-center gap-2 rounded-lg bg-red-dim px-3 py-2 text-sm text-cc-red">
@@ -210,15 +220,116 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
   );
 }
 
-function StatusBanner({
-  status,
-  info,
+function AccountCard({
+  account: a,
+  isPrimary,
+  qr,
+  busy,
   t,
+  onConnect,
+  onDisconnect,
+  onRemove,
 }: {
-  status: Status;
-  info: SessionInfo;
+  account: Account;
+  isPrimary: boolean;
+  qr: string | null;
+  busy: boolean;
   t: ReturnType<typeof useTranslations>;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onRemove: () => void;
 }) {
+  const s = a.status;
+  const title = a.label || a.pushname || (isPrimary ? t("primary") : t("addNumber"));
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                "flex size-10 items-center justify-center rounded-full",
+                s === "CONNECTED" ? "bg-green-dim text-cc-green" : "bg-soft-1 text-muted-foreground",
+              )}
+            >
+              {s === "CONNECTED" ? <CheckCircle2 className="size-5" /> : <Smartphone className="size-5" />}
+            </span>
+            <div>
+              <p className="flex items-center gap-1.5 font-semibold">
+                {title}
+                {isPrimary && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+                    <Star className="size-3" /> {t("primary")}
+                  </span>
+                )}
+              </p>
+              {a.phone && (
+                <p className="font-mono text-xs text-muted-foreground" dir="ltr">{a.phone}</p>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                {t("lastSeen")}: {a.last_seen_at ? new Date(a.last_seen_at).toLocaleString() : t("neverSeen")}
+              </p>
+            </div>
+          </div>
+          <StatusPill status={s} t={t} />
+        </div>
+
+        {/* QR to scan this specific number */}
+        {s === "SCAN_QR" && (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-soft-1/40 p-4">
+            <p className="flex items-center gap-2 text-xs font-semibold">
+              <QrCode className="size-4 text-cyan" /> {t("scanForLabel")}
+            </p>
+            {qr ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={qr} alt="WhatsApp QR" className="size-56 rounded-xl border border-border bg-white p-2" />
+            ) : (
+              <div className="flex size-56 items-center justify-center rounded-xl border border-border">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            <ol className="list-decimal space-y-1 ps-5 text-[11px] text-muted-foreground">
+              <li>{t("scanStep1")}</li>
+              <li>{t("scanStep2")}</li>
+              <li>{t("scanStep3")}</li>
+            </ol>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {s === "CONNECTED" && (
+            <Link
+              href="/satisfaction/groups"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-cyan/10 px-3 py-2 text-xs font-medium text-cyan hover:bg-cyan/20"
+            >
+              {t("goMapGroups")} <ArrowRight className="size-3.5 rtl:rotate-180" />
+            </Link>
+          )}
+          {(s === "NOT_CREATED" || s === "DISCONNECTED" || s === "FAILED") && (
+            <Button size="sm" onClick={onConnect} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Smartphone className="size-4" />}
+              {s === "DISCONNECTED" || s === "FAILED" ? t("reconnect") : t("connectBtn")}
+            </Button>
+          )}
+          {s === "CONNECTED" && (
+            <Button variant="outline" size="sm" onClick={onDisconnect} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Power className="size-4" />}
+              {t("disconnect")}
+            </Button>
+          )}
+          {!isPrimary && (
+            <Button variant="ghost" size="sm" onClick={onRemove} disabled={busy} className="text-cc-red hover:text-cc-red">
+              <Trash2 className="size-4" /> {t("remove")}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusPill({ status, t }: { status: Status; t: ReturnType<typeof useTranslations> }) {
   const map: Record<string, { tone: string; label: string }> = {
     CONNECTED: { tone: "text-cc-green bg-green-dim", label: t("state.connected") },
     SCAN_QR: { tone: "text-amber bg-amber-dim", label: t("state.scan") },
@@ -226,17 +337,14 @@ function StatusBanner({
     INITIALIZING: { tone: "text-amber bg-amber-dim", label: t("state.connecting") },
     DISCONNECTED: { tone: "text-muted-foreground bg-soft-1", label: t("state.disconnected") },
     NOT_CREATED: { tone: "text-muted-foreground bg-soft-1", label: t("state.disconnected") },
-    NOT_CONFIGURED: { tone: "text-amber bg-amber-dim", label: t("state.notConfigured") },
-    UNREACHABLE: { tone: "text-cc-red bg-red-dim", label: t("state.unreachable") },
     FAILED: { tone: "text-cc-red bg-red-dim", label: t("state.failed") },
     LOADING: { tone: "text-muted-foreground bg-soft-1", label: t("state.loading") },
   };
   const m = map[status] ?? map.LOADING;
   return (
-    <div className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium", m.tone)}>
+    <span className={cn("inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-1 text-xs font-medium", m.tone)}>
       <span className="size-2 rounded-full bg-current" />
       {m.label}
-      {info.detail && status === "UNREACHABLE" ? "" : ""}
-    </div>
+    </span>
   );
 }

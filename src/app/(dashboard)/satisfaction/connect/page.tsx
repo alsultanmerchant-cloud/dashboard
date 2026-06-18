@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
 import { PageHeader } from "@/components/page-header";
+import { WA_SESSION_ID } from "@/lib/wa/openwa-client";
 import { ConnectWorkspace } from "./connect-workspace";
 
 export default async function ConnectPage() {
@@ -18,7 +19,7 @@ export default async function ConnectPage() {
         <ArrowRight className="size-3.5 rtl:rotate-180" />
         {t("back")}
       </Link>
-      <ConnectWorkspace />
+      <ConnectWorkspace primarySession={WA_SESSION_ID} />
     </div>
   );
 }

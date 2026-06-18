@@ -3,6 +3,7 @@ import {
   verifyWaSignature,
   normalizeWaEvents,
   ingestWaMessages,
+  extractSessionId,
 } from "@/lib/wa/ingest";
 
 // OpenWA webhook receiver. The self-hosted OpenWA gateway posts group-message
@@ -48,8 +49,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, ingested: 0, note: "no group messages" });
   }
 
+  // Attribute the events to a connected number: prefer the ?account=<name> tag
+  // we register webhook URLs with, fall back to any session id in the payload.
+  const accountSessionId =
+    req.nextUrl.searchParams.get("account") ?? extractSessionId(payload);
+
   try {
-    const result = await ingestWaMessages(messages);
+    const result = await ingestWaMessages(messages, accountSessionId);
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     return NextResponse.json(

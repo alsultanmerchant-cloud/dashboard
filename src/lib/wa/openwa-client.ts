@@ -112,20 +112,22 @@ export interface WaSessionInfo {
 }
 
 // OpenWA addresses sessions by UUID, NOT by the human "name". We look up the
-// uuid for our configured WA_SESSION_ID name once per process and reuse it.
-// `null` = no session yet. Cleared on logout.
-let cachedSessionUuid: string | null = null;
+// uuid for a session name once per process and reuse it. Multiple numbers =
+// multiple session names, so the cache is keyed by name. Cleared on logout.
+const sessionUuidCache = new Map<string, string>();
 
-async function findSessionUuid(): Promise<string | null> {
-  if (cachedSessionUuid) return cachedSessionUuid;
+async function findSessionUuid(sessionName: string = WA_SESSION_ID): Promise<string | null> {
+  const cached = sessionUuidCache.get(sessionName);
+  if (cached) return cached;
   const { ok, json } = await call("/api/sessions");
   if (!ok) return null;
   const list = Array.isArray(json)
     ? json
     : ((json as { data?: unknown }).data ?? (json as { sessions?: unknown }).sessions ?? []);
-  const found = (list as Array<Record<string, unknown>>).find((s) => s.name === WA_SESSION_ID);
-  cachedSessionUuid = (found?.id as string) ?? null;
-  return cachedSessionUuid;
+  const found = (list as Array<Record<string, unknown>>).find((s) => s.name === sessionName);
+  const uuid = (found?.id as string) ?? null;
+  if (uuid) sessionUuidCache.set(sessionName, uuid);
+  return uuid;
 }
 
 function parseSessionPayload(json: unknown): WaSessionInfo {
@@ -142,14 +144,14 @@ function parseSessionPayload(json: unknown): WaSessionInfo {
   };
 }
 
-export async function getSessionInfo(): Promise<WaSessionInfo> {
+export async function getSessionInfo(sessionName: string = WA_SESSION_ID): Promise<WaSessionInfo> {
   if (!waConfigured()) return { status: "NOT_CONFIGURED", phone: null, pushname: null };
   try {
-    const uuid = await findSessionUuid();
+    const uuid = await findSessionUuid(sessionName);
     if (!uuid) return { status: "NOT_CREATED", phone: null, pushname: null };
     const { ok, status, json } = await call(`/api/sessions/${uuid}`);
     if (status === 404) {
-      cachedSessionUuid = null;
+      sessionUuidCache.delete(sessionName);
       return { status: "NOT_CREATED", phone: null, pushname: null };
     }
     if (!ok) return { status: "UNREACHABLE", phone: null, pushname: null, detail: `HTTP ${status}` };
@@ -159,10 +161,10 @@ export async function getSessionInfo(): Promise<WaSessionInfo> {
   }
 }
 
-export async function getQrImage(): Promise<string | null> {
+export async function getQrImage(sessionName: string = WA_SESSION_ID): Promise<string | null> {
   if (!waConfigured()) return null;
   try {
-    const uuid = await findSessionUuid();
+    const uuid = await findSessionUuid(sessionName);
     if (!uuid) return null;
     const { ok, json } = await call(`/api/sessions/${uuid}/qr`);
     if (!ok) return null;
@@ -177,25 +179,27 @@ export async function getQrImage(): Promise<string | null> {
 
 // Create (idempotent) + start the session, and register our webhook so
 // incoming group messages flow to the dashboard automatically.
-export async function startSession(): Promise<{ ok: boolean; error?: string }> {
+export async function startSession(
+  sessionName: string = WA_SESSION_ID,
+): Promise<{ ok: boolean; error?: string }> {
   if (!waConfigured()) return { ok: false, error: "WA_API_URL غير مهيأ" };
   try {
     // Find or create — POST /api/sessions returns the new uuid; 409 if it
     // already exists, in which case we look it up.
-    let uuid = await findSessionUuid();
+    let uuid = await findSessionUuid(sessionName);
     if (!uuid) {
       const created = await call(`/api/sessions`, {
         method: "POST",
-        body: JSON.stringify({ name: WA_SESSION_ID }),
+        body: JSON.stringify({ name: sessionName }),
       });
       const body = created.json as { id?: string; data?: { id?: string } } | null;
       uuid = body?.id ?? body?.data?.id ?? null;
       if (!uuid) {
         // Conflict or unexpected — re-list.
-        cachedSessionUuid = null;
-        uuid = await findSessionUuid();
+        sessionUuidCache.delete(sessionName);
+        uuid = await findSessionUuid(sessionName);
       }
-      cachedSessionUuid = uuid;
+      if (uuid) sessionUuidCache.set(sessionName, uuid);
     }
     if (!uuid) return { ok: false, error: "could not resolve session uuid" };
 
@@ -204,12 +208,16 @@ export async function startSession(): Promise<{ ok: boolean; error?: string }> {
       return { ok: false, error: `start HTTP ${started.status}` };
     }
     // Best-effort webhook registration (idempotent on the OpenWA side).
+    // Tag the URL with ?account=<sessionName> so the webhook can attribute each
+    // inbound event to the right wa_accounts row (provenance), independent of
+    // whatever session field the OpenWA payload may or may not carry.
     const webhookUrl = process.env.WA_PUBLIC_WEBHOOK_URL;
     if (webhookUrl) {
+      const taggedUrl = `${webhookUrl}${webhookUrl.includes("?") ? "&" : "?"}account=${encodeURIComponent(sessionName)}`;
       await call(`/api/sessions/${uuid}/webhooks`, {
         method: "POST",
         body: JSON.stringify({
-          url: webhookUrl,
+          url: taggedUrl,
           // OpenWA gateway event names: incoming messages = "message.received"
           // (NOT "message", which it silently ignores). See docs/06-api-spec.
           events: ["message.received", "session.status"],
@@ -223,13 +231,15 @@ export async function startSession(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-export async function logoutSession(): Promise<{ ok: boolean; error?: string }> {
+export async function logoutSession(
+  sessionName: string = WA_SESSION_ID,
+): Promise<{ ok: boolean; error?: string }> {
   if (!waConfigured()) return { ok: false, error: "WA_API_URL غير مهيأ" };
   try {
-    const uuid = await findSessionUuid();
+    const uuid = await findSessionUuid(sessionName);
     if (!uuid) return { ok: true }; // nothing to log out
     const { ok, status } = await call(`/api/sessions/${uuid}/logout`, { method: "POST" });
-    cachedSessionUuid = null; // forget so next call re-resolves
+    sessionUuidCache.delete(sessionName); // forget so next call re-resolves
     return ok || status === 404 ? { ok: true } : { ok: false, error: `HTTP ${status}` };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

@@ -3669,7 +3669,19 @@
         "unreachable": "Unreachable",
         "failed": "Failed",
         "loading": "Loading"
-      }
+      },
+      "numbersTitle": "Connected numbers",
+      "numbersSubtitle": "Connect more than one WhatsApp number to the same groups — their message coverage is merged and de-duplicated, so older numbers fill in history the current one is missing.",
+      "addNumber": "Add number",
+      "adding": "Adding…",
+      "labelPlaceholder": "Label (e.g. Customer Service line)",
+      "primary": "Primary",
+      "remove": "Remove",
+      "removeConfirm": "Remove this number? Its past messages stay; it just stops syncing.",
+      "lastSeen": "Last activity",
+      "reconnect": "Reconnect",
+      "scanForLabel": "Scan to connect this number",
+      "neverSeen": "No activity yet"
     },
     "analyzeWeek": "Analyze current week",
     "analyzeAll": "Analyze all time",
