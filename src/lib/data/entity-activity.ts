@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import type { MentionableEmployee } from "@/lib/data/employees";
 
 // Unified activity feed for contracts & clients. Merges three sources into one
 // chronological, task-style feed (avatar + name + timestamp + body):
@@ -75,6 +76,8 @@ type EmployeeLite = {
   user_id: string | null;
   full_name: string;
   avatar_url: string | null;
+  job_title: string | null;
+  employment_status: string;
 };
 
 type ActorResolver = {
@@ -83,13 +86,15 @@ type ActorResolver = {
   byName: (name: string | null | undefined) => ActivityActor;
 };
 
-async function buildActorResolver(orgId: string): Promise<ActorResolver> {
+async function listActivityEmployees(orgId: string): Promise<EmployeeLite[]> {
   const { data } = await supabaseAdmin
     .from("employee_profiles")
-    .select("id, user_id, full_name, avatar_url")
+    .select("id, user_id, full_name, avatar_url, job_title, employment_status")
     .eq("organization_id", orgId);
-  const employees = (data ?? []) as EmployeeLite[];
+  return (data ?? []) as EmployeeLite[];
+}
 
+function buildActorResolver(employees: EmployeeLite[]): ActorResolver {
   const byUid = new Map<string, EmployeeLite>();
   const byPid = new Map<string, EmployeeLite>();
   const byNorm = new Map<string, EmployeeLite>();
@@ -115,41 +120,62 @@ async function buildActorResolver(orgId: string): Promise<ActorResolver> {
 
 // ── feed assembly ───────────────────────────────────────────────────────────
 
-export async function listEntityActivity(
+type ActivityEventRow = {
+  id: string;
+  event_type: string;
+  occurred_at: string;
+  actor_id: string | null;
+  payload: Record<string, unknown> | null;
+};
+
+async function loadEntityActivity(
   orgId: string,
   ref: EntityRef,
-  limit = 200,
-): Promise<EntityActivity[]> {
-  const resolver = await buildActorResolver(orgId);
+  limit: number,
+  knownContractExternalId?: string | null,
+): Promise<{
+  items: EntityActivity[];
+  employees: EmployeeLite[];
+  events: ActivityEventRow[];
+}> {
+  // These requests are independent. Start them together so employee lookup,
+  // contract-scope resolution, and comments do not form a waterfall.
+  const employeesPromise = listActivityEmployees(orgId);
+  const scopePromise = (async () => {
+    if (ref.entityType === "contract") {
+      if (knownContractExternalId !== undefined) {
+        return {
+          contractIds: [ref.entityId],
+          contractKeys: knownContractExternalId ? [knownContractExternalId] : [],
+        };
+      }
+      const { data: contract } = await supabaseAdmin
+        .from("contracts")
+        .select("external_id")
+        .eq("organization_id", orgId)
+        .eq("id", ref.entityId)
+        .maybeSingle();
+      const externalId = (contract as { external_id?: string | null } | null)?.external_id;
+      return {
+        contractIds: [ref.entityId],
+        contractKeys: externalId ? [externalId] : [],
+      };
+    }
 
-  // Resolve the set of contracts in scope (for sheet logs + events).
-  let contractIds: string[] = [];
-  let contractKeys: string[] = [];
-  if (ref.entityType === "contract") {
-    contractIds = [ref.entityId];
-    const { data: c } = await supabaseAdmin
-      .from("contracts")
-      .select("external_id")
-      .eq("id", ref.entityId)
-      .maybeSingle();
-    const ext = (c as { external_id?: string | null } | null)?.external_id;
-    if (ext) contractKeys = [ext];
-  } else {
     const { data: rows } = await supabaseAdmin
       .from("contracts")
       .select("id, external_id")
       .eq("organization_id", orgId)
       .eq("client_id", ref.entityId);
-    for (const r of (rows ?? []) as { id: string; external_id: string | null }[]) {
-      contractIds.push(r.id);
-      if (r.external_id) contractKeys.push(r.external_id);
+    const contractIds: string[] = [];
+    const contractKeys: string[] = [];
+    for (const row of (rows ?? []) as { id: string; external_id: string | null }[]) {
+      contractIds.push(row.id);
+      if (row.external_id) contractKeys.push(row.external_id);
     }
-  }
-
-  const out: EntityActivity[] = [];
-
-  // 1) entity_comments (+ mentions + attachments)
-  const { data: comments } = await supabaseAdmin
+    return { contractIds, contractKeys };
+  })();
+  const commentsPromise = supabaseAdmin
     .from("entity_comments")
     .select("id, body, is_internal, created_at, author_user_id")
     .eq("organization_id", orgId)
@@ -157,6 +183,11 @@ export async function listEntityActivity(
     .eq("entity_id", ref.entityId)
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  const [{ contractIds, contractKeys }, { data: comments }] = await Promise.all([
+    scopePromise,
+    commentsPromise,
+  ]);
   const commentRows = (comments ?? []) as {
     id: string;
     body: string;
@@ -166,52 +197,108 @@ export async function listEntityActivity(
   }[];
 
   const commentIds = commentRows.map((c) => c.id);
-  const mentionsByComment = new Map<string, { employee_id: string; full_name: string }[]>();
-  const attachmentsByComment = new Map<string, ActivityAttachment[]>();
-  if (commentIds.length > 0) {
-    const [{ data: mns }, { data: atts }] = await Promise.all([
-      supabaseAdmin
-        .from("entity_comment_mentions")
-        .select("comment_id, mentioned_employee_id, employee_profiles!entity_comment_mentions_mentioned_employee_id_fkey(full_name)")
-        .in("comment_id", commentIds),
-      supabaseAdmin
-        .from("entity_comment_attachments")
-        .select("id, comment_id, storage_path, filename, mimetype, size_bytes")
-        .in("comment_id", commentIds),
-    ]);
-    for (const m of (mns ?? []) as unknown as Array<{
-      comment_id: string;
-      mentioned_employee_id: string;
-      employee_profiles: { full_name: string } | { full_name: string }[] | null;
-    }>) {
-      const emp = Array.isArray(m.employee_profiles) ? m.employee_profiles[0] : m.employee_profiles;
-      const arr = mentionsByComment.get(m.comment_id) ?? [];
-      arr.push({ employee_id: m.mentioned_employee_id, full_name: emp?.full_name ?? "" });
-      mentionsByComment.set(m.comment_id, arr);
+  const commentDetailsPromise =
+    commentIds.length > 0
+      ? Promise.all([
+          supabaseAdmin
+            .from("entity_comment_mentions")
+            .select("comment_id, mentioned_employee_id, employee_profiles!entity_comment_mentions_mentioned_employee_id_fkey(full_name)")
+            .in("comment_id", commentIds),
+          supabaseAdmin
+            .from("entity_comment_attachments")
+            .select("id, comment_id, storage_path, filename, mimetype, size_bytes")
+            .in("comment_id", commentIds),
+        ])
+      : Promise.resolve([
+          { data: [] as unknown[] },
+          { data: [] as unknown[] },
+        ]);
+
+  let logsPromise: PromiseLike<{ data: unknown[] | null }> = Promise.resolve({ data: [] });
+  if (contractIds.length > 0 || contractKeys.length > 0) {
+    const orParts: string[] = [];
+    if (contractIds.length > 0) orParts.push(`contract_id.in.(${contractIds.join(",")})`);
+    if (contractKeys.length > 0) {
+      const quoted = contractKeys.map((key) => `"${key.replace(/"/g, '\\"')}"`).join(",");
+      orParts.push(`contract_key.in.(${quoted})`);
     }
-    for (const a of (atts ?? []) as Array<{
-      id: string;
-      comment_id: string;
-      storage_path: string;
-      filename: string;
-      mimetype: string | null;
-      size_bytes: number | null;
-    }>) {
-      const { data: signed } = await supabaseAdmin.storage
-        .from("attachments")
-        .createSignedUrl(a.storage_path, 3600);
-      const arr = attachmentsByComment.get(a.comment_id) ?? [];
-      arr.push({
-        id: a.id,
-        filename: a.filename,
-        mimetype: a.mimetype,
-        size_bytes: a.size_bytes,
-        url: signed?.signedUrl ?? null,
-      });
-      attachmentsByComment.set(a.comment_id, arr);
-    }
+    logsPromise = supabaseAdmin
+      .from("contract_sheet_logs")
+      .select("id, log_type, notes, snapshot, log_time, account_manager, contract_key, contract_id")
+      .eq("organization_id", orgId)
+      .or(orParts.join(","))
+      .order("log_time", { ascending: false })
+      .limit(limit);
   }
 
+  const eventsPromise =
+    contractIds.length > 0
+      ? supabaseAdmin
+          .from("contract_events")
+          .select("id, event_type, occurred_at, actor_id, payload")
+          .eq("organization_id", orgId)
+          .in("contract_id", contractIds)
+          .order("occurred_at", { ascending: false })
+          .limit(limit)
+      : Promise.resolve({ data: [] as unknown[] });
+
+  const [employees, commentDetails, logsResult, eventsResult] = await Promise.all([
+    employeesPromise,
+    commentDetailsPromise,
+    logsPromise,
+    eventsPromise,
+  ]);
+  const resolver = buildActorResolver(employees);
+  const [{ data: mns }, { data: atts }] = commentDetails;
+  const mentionsByComment = new Map<string, { employee_id: string; full_name: string }[]>();
+  const attachmentsByComment = new Map<string, ActivityAttachment[]>();
+  for (const mention of (mns ?? []) as unknown as Array<{
+    comment_id: string;
+    mentioned_employee_id: string;
+    employee_profiles: { full_name: string } | { full_name: string }[] | null;
+  }>) {
+    const employee = Array.isArray(mention.employee_profiles)
+      ? mention.employee_profiles[0]
+      : mention.employee_profiles;
+    const rows = mentionsByComment.get(mention.comment_id) ?? [];
+    rows.push({
+      employee_id: mention.mentioned_employee_id,
+      full_name: employee?.full_name ?? "",
+    });
+    mentionsByComment.set(mention.comment_id, rows);
+  }
+
+  const attachmentRows = (atts ?? []) as Array<{
+    id: string;
+    comment_id: string;
+    storage_path: string;
+    filename: string;
+    mimetype: string | null;
+    size_bytes: number | null;
+  }>;
+  const signedByPath = new Map<string, string>();
+  if (attachmentRows.length > 0) {
+    const paths = Array.from(new Set(attachmentRows.map((attachment) => attachment.storage_path)));
+    const { data: signed } = await supabaseAdmin.storage
+      .from("attachments")
+      .createSignedUrls(paths, 3600);
+    for (const row of signed ?? []) {
+      if (row.path && row.signedUrl) signedByPath.set(row.path, row.signedUrl);
+    }
+  }
+  for (const attachment of attachmentRows) {
+    const rows = attachmentsByComment.get(attachment.comment_id) ?? [];
+    rows.push({
+      id: attachment.id,
+      filename: attachment.filename,
+      mimetype: attachment.mimetype,
+      size_bytes: attachment.size_bytes,
+      url: signedByPath.get(attachment.storage_path) ?? null,
+    });
+    attachmentsByComment.set(attachment.comment_id, rows);
+  }
+
+  const out: EntityActivity[] = [];
   for (const c of commentRows) {
     out.push({
       kind: "comment",
@@ -226,72 +313,86 @@ export async function listEntityActivity(
   }
 
   // 2) contract_sheet_logs (by contract_id, falling back to contract_key)
-  if (contractIds.length > 0 || contractKeys.length > 0) {
-    const orParts: string[] = [];
-    if (contractIds.length > 0) orParts.push(`contract_id.in.(${contractIds.join(",")})`);
-    if (contractKeys.length > 0) {
-      const quoted = contractKeys.map((k) => `"${k.replace(/"/g, '\\"')}"`).join(",");
-      orParts.push(`contract_key.in.(${quoted})`);
-    }
-    const { data: logs } = await supabaseAdmin
-      .from("contract_sheet_logs")
-      .select("id, log_type, notes, snapshot, log_time, account_manager, contract_key, contract_id")
-      .eq("organization_id", orgId)
-      .or(orParts.join(","))
-      .order("log_time", { ascending: false })
-      .limit(limit);
-    for (const l of (logs ?? []) as Array<{
-      id: string;
-      log_type: string;
-      notes: string | null;
-      snapshot: Record<string, unknown> | null;
-      log_time: string | null;
-      account_manager: string | null;
-      contract_key: string;
-      contract_id: string | null;
-    }>) {
-      out.push({
-        kind: "sheet_log",
-        id: l.id,
-        created_at: l.log_time ?? new Date(0).toISOString(),
-        actor: resolver.byName(l.account_manager),
-        log_type: l.log_type,
-        notes: l.notes,
-        snapshot: l.snapshot ?? {},
-        contract_key: l.contract_key,
-        contract_id: l.contract_id,
-      });
-    }
+  for (const log of (logsResult.data ?? []) as Array<{
+    id: string;
+    log_type: string;
+    notes: string | null;
+    snapshot: Record<string, unknown> | null;
+    log_time: string | null;
+    account_manager: string | null;
+    contract_key: string;
+    contract_id: string | null;
+  }>) {
+    out.push({
+      kind: "sheet_log",
+      id: log.id,
+      created_at: log.log_time ?? new Date(0).toISOString(),
+      actor: resolver.byName(log.account_manager),
+      log_type: log.log_type,
+      notes: log.notes,
+      snapshot: log.snapshot ?? {},
+      contract_key: log.contract_key,
+      contract_id: log.contract_id,
+    });
   }
 
   // 3) contract_events
-  if (contractIds.length > 0) {
-    const { data: events } = await supabaseAdmin
-      .from("contract_events")
-      .select("id, event_type, occurred_at, actor_id, payload")
-      .eq("organization_id", orgId)
-      .in("contract_id", contractIds)
-      .order("occurred_at", { ascending: false })
-      .limit(limit);
-    for (const e of (events ?? []) as Array<{
-      id: string;
-      event_type: string;
-      occurred_at: string;
-      actor_id: string | null;
-      payload: Record<string, unknown> | null;
-    }>) {
-      out.push({
-        kind: "event",
-        id: e.id,
-        created_at: e.occurred_at,
-        actor: resolver.byProfileId(e.actor_id),
-        event_type: e.event_type,
-        payload: e.payload ?? {},
-      });
-    }
+  const events = (eventsResult.data ?? []) as ActivityEventRow[];
+  for (const event of events) {
+    out.push({
+      kind: "event",
+      id: event.id,
+      created_at: event.occurred_at,
+      actor: resolver.byProfileId(event.actor_id),
+      event_type: event.event_type,
+      payload: event.payload ?? {},
+    });
   }
 
   // newest first
   out.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
-  return out.slice(0, limit);
+  return { items: out.slice(0, limit), employees, events };
+}
+
+export async function listEntityActivity(
+  orgId: string,
+  ref: EntityRef,
+  limit = 200,
+): Promise<EntityActivity[]> {
+  const result = await loadEntityActivity(orgId, ref, limit);
+  return result.items;
+}
+
+export async function getContractActivityBundle(
+  orgId: string,
+  contractId: string,
+  contractExternalId: string | null,
+  limit = 200,
+): Promise<{
+  activity: EntityActivity[];
+  mentionable: MentionableEmployee[];
+  events: Array<{ event_type: string; occurred_at: string }>;
+}> {
+  const result = await loadEntityActivity(
+    orgId,
+    { entityType: "contract", entityId: contractId },
+    limit,
+    contractExternalId,
+  );
+  return {
+    activity: result.items,
+    mentionable: result.employees
+      .filter((employee) => employee.employment_status === "active")
+      .sort((a, b) => a.full_name.localeCompare(b.full_name, "ar"))
+      .map((employee) => ({
+        id: employee.id,
+        name: employee.full_name,
+        jobTitle: employee.job_title,
+        avatarUrl: employee.avatar_url,
+      })),
+    events: result.events.map((event) => ({
+      event_type: event.event_type,
+      occurred_at: event.occurred_at,
+    })),
+  };
 }

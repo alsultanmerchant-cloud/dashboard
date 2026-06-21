@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isToolUIPart, getToolName } from "ai";
 import { useRef, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Bot,
   Send,
@@ -73,43 +74,37 @@ function writeStorage(key: string, value: unknown) {
 const SUGGESTED_PROMPTS = [
   {
     icon: TrendingUp,
-    label: "تحليل المبيعات",
-    prompt: "حلل أداء المبيعات هالشهر وقارنه بالأشهر السابقة",
+    key: "sales",
     color: "text-cyan",
     bg: "bg-cyan/10 hover:bg-cyan/20 border-cyan/20",
   },
   {
     icon: Users,
-    label: "أداء الفريق",
-    prompt: "مين أفضل موظف في الفريق ومين يحتاج دعم؟ أبي تفاصيل",
+    key: "team",
     color: "text-cc-green",
     bg: "bg-cc-green/10 hover:bg-cc-green/20 border-cc-green/20",
   },
   {
     icon: Headphones,
-    label: "حالة الدعم الفني",
-    prompt: "وش حالة تذاكر الدعم الفني؟ كم تذكرة عاجلة عندنا؟",
+    key: "support",
     color: "text-amber",
     bg: "bg-amber/10 hover:bg-amber/20 border-amber/20",
   },
   {
     icon: DollarSign,
-    label: "التقرير المالي",
-    prompt: "أعطني ملخص عن الوضع المالي للشركة مع ARR و MRR",
+    key: "finance",
     color: "text-cc-purple",
     bg: "bg-cc-purple/10 hover:bg-cc-purple/20 border-cc-purple/20",
   },
   {
     icon: Target,
-    label: "تحقيق الأهداف",
-    prompt: "كيف أداءنا مقارنة بالأهداف المحددة؟ وش اللي ناقصنا؟",
+    key: "targets",
     color: "text-pink",
     bg: "bg-pink/10 hover:bg-pink/20 border-pink/20",
   },
   {
     icon: BarChart3,
-    label: "توقعات الربع القادم",
-    prompt: "بناءً على البيانات الحالية، وش توقعاتك للربع القادم؟",
+    key: "forecast",
     color: "text-cc-blue",
     bg: "bg-cc-blue/10 hover:bg-cc-blue/20 border-cc-blue/20",
   },
@@ -117,6 +112,8 @@ const SUGGESTED_PROMPTS = [
 
 export default function AgentPage() {
   const { orgId } = useOrg();
+  const locale = useLocale();
+  const t = useTranslations("AIAgent");
   // §9.2: stash the active conversation id in a ref so the transport's
   // body callback (called per-send) always sees the latest value without
   // having to remount the chat. The chat's `body` accepts either an object
@@ -129,6 +126,7 @@ export default function AgentPage() {
       body: () => ({
         orgId,
         conversationId: activeConversationRef.current,
+        locale,
       }),
     }),
     onError: (err) => {
@@ -136,7 +134,7 @@ export default function AgentPage() {
       setChatError(
         err instanceof Error
           ? err.message
-          : "حدث خطأ في الاتصال بالمساعد الذكي. حاول مرة أخرى.",
+          : t("errors.connection"),
       );
     },
   });
@@ -157,10 +155,10 @@ export default function AgentPage() {
     const hasTools = last.parts?.some((p) => isToolUIPart(p));
     if (!hasText && hasTools) {
       setChatError(
-        "تم جلب البيانات لكن النموذج لم يصدر إجابة نصية. حاول إعادة صياغة السؤال أو اضغط إرسال مرة أخرى.",
+        t("errors.silentFinish"),
       );
     }
-  }, [status, messages]);
+  }, [status, messages, t]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -207,7 +205,7 @@ export default function AgentPage() {
             setConversations(
               data.conversations.map((c) => ({
                 id: c.id,
-                title: c.title ?? "محادثة بدون عنوان",
+                title: c.title ?? t("untitledConversation"),
                 createdAt: new Date(c.created_at),
               })),
             );
@@ -491,14 +489,14 @@ export default function AgentPage() {
           className="w-full gap-2 border-cyan/30 text-xs text-cyan hover:bg-cyan/10 rtl:justify-end ltr:justify-start"
         >
           <MessageSquarePlus className="w-3.5 h-3.5" />
-          محادثة جديدة
+          {t("newConversation")}
         </Button>
       </div>
       <ScrollArea className="flex-1 p-2">
         {conversations.length === 0 ? (
           <div className="px-3 py-8 text-center">
             <Bot className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
-            <p className="text-[11px] text-muted-foreground">لا توجد محادثات سابقة</p>
+            <p className="text-[11px] text-muted-foreground">{t("noConversations")}</p>
           </div>
         ) : (
           <div className="space-y-1">
@@ -507,7 +505,7 @@ export default function AgentPage() {
                 key={conv.id}
                 onClick={() => openConversation(conv.id)}
                 className={cn(
-                  "group flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs transition-colors rtl:flex-row-reverse",
+                  "group flex w-full items-center justify-between rounded-lg px-3 py-2 text-start text-xs transition-colors",
                   activeConversation === conv.id
                     ? "bg-cyan/10 text-cyan"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -540,13 +538,13 @@ export default function AgentPage() {
 
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
         <SheetContent
-          side="left"
+          side={locale === "ar" ? "right" : "left"}
           className="w-[88vw] max-w-[360px] border-border bg-card p-0 sm:w-[360px]"
         >
           <SheetHeader className="border-b border-border">
-            <SheetTitle>المحادثات</SheetTitle>
+            <SheetTitle>{t("conversations")}</SheetTitle>
             <SheetDescription>
-              افتح محادثة سابقة أو ابدأ محادثة جديدة.
+              {t("historyDescription")}
             </SheetDescription>
           </SheetHeader>
           {conversationsList}
@@ -561,20 +559,20 @@ export default function AgentPage() {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan to-cc-purple">
               <Bot className="w-5 h-5 text-white" />
             </div>
-            <div className="min-w-0 text-right">
+            <div className="min-w-0 text-start">
               <div className="mb-1 flex flex-wrap items-center gap-2 rtl:flex-row-reverse">
                 <span className="rounded-full border border-cyan/20 bg-cyan/10 px-2 py-0.5 text-[10px] font-semibold text-cyan">
                   AI Copilot
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  مدعوم ببيانات الشركة
+                  {t("poweredByCompanyData")}
                 </span>
               </div>
               <h3 className="truncate text-sm font-bold text-foreground sm:text-base">
-                المساعد الذكي
+                {t("title")}
               </h3>
               <p className="text-[10px] text-muted-foreground sm:text-[11px]">
-                اسأل عن الأداء، الفريق، والمشاريع من شاشة واحدة واضحة.
+                {t("subtitle")}
               </p>
             </div>
           </div>
@@ -584,7 +582,7 @@ export default function AgentPage() {
               size="icon"
               onClick={() => setHistoryOpen(true)}
               className="lg:hidden rounded-xl bg-soft-2 hover:bg-soft-2"
-              aria-label="فتح المحادثات"
+              aria-label={t("openConversations")}
             >
               <PanelRightOpen className="h-4 w-4 text-muted-foreground" />
             </Button>
@@ -596,8 +594,8 @@ export default function AgentPage() {
                 className="gap-1.5 text-xs text-muted-foreground"
               >
                 <RotateCcw className="w-3 h-3" />
-                <span className="hidden sm:inline">محادثة جديدة</span>
-                <span className="sm:hidden">جديد</span>
+                <span className="hidden sm:inline">{t("newConversation")}</span>
+                <span className="sm:hidden">{t("newShort")}</span>
               </Button>
             )}
           </div>
@@ -612,30 +610,30 @@ export default function AgentPage() {
                 <Sparkles className="w-8 h-8 text-cyan" />
               </div>
               <h2 className="mb-1 text-center text-lg font-bold text-foreground">
-                مرحباً، أنا المساعد الذكي
+                {t("empty.title")}
               </h2>
               <p className="mb-6 max-w-md text-center text-xs leading-6 text-muted-foreground sm:mb-8">
-                أساعدك في تحليل بيانات الشركة، متابعة الأداء، وتقديم توصيات عملية.
-                ابدأ بسؤال مباشر أو اختر واحدة من هذه المحاور.
+                {t("empty.description")}
               </p>
 
             <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {SUGGESTED_PROMPTS.map((item, i) => {
+              {SUGGESTED_PROMPTS.map((item) => {
                 const Icon = item.icon;
+                const prompt = t(`prompts.${item.key}.prompt`);
                 return (
                   <button
-                    key={i}
-                    onClick={() => handlePromptClick(item.prompt)}
+                    key={item.key}
+                    onClick={() => handlePromptClick(prompt)}
                     className={cn(
-                        "flex items-start gap-3 rounded-xl border p-3.5 text-right transition-all rtl:flex-row-reverse",
+                        "flex items-start gap-3 rounded-xl border p-3.5 text-start transition-all",
                         item.bg
                       )}
                     >
                       <Icon className={cn("w-5 h-5 mt-0.5 flex-shrink-0", item.color)} />
                       <div>
-                        <p className={cn("text-xs font-bold", item.color)}>{item.label}</p>
+                        <p className={cn("text-xs font-bold", item.color)}>{t(`prompts.${item.key}.label`)}</p>
                         <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-                          {item.prompt}
+                          {prompt}
                         </p>
                       </div>
                     </button>
@@ -660,23 +658,26 @@ export default function AgentPage() {
                       )}
                     >
                       {msg.role === "user" ? (
-                        <span className="text-xs font-bold text-cyan">م</span>
+                        <span className="text-xs font-bold text-cyan">{t("userInitial")}</span>
                       ) : (
                         <Bot className="w-4 h-4 text-cyan" />
                       )}
                     </div>
 
                     {/* Message Content */}
-                    <div className="flex-1 min-w-0 text-right">
+                    <div className="flex-1 min-w-0 text-start">
                       <div className="mb-1 flex items-center gap-2 rtl:flex-row-reverse">
                         <span className="text-xs font-bold text-foreground">
-                          {msg.role === "user" ? "أنت" : "المساعد الذكي"}
+                          {msg.role === "user" ? t("you") : t("title")}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {new Date().toLocaleTimeString("ar-SA-u-nu-latn", {
+                          {new Date().toLocaleTimeString(
+                            locale === "ar" ? "ar-SA-u-nu-latn" : "en-US",
+                            {
                             hour: "2-digit",
                             minute: "2-digit",
-                          })}
+                            },
+                          )}
                         </span>
                       </div>
 
@@ -694,7 +695,7 @@ export default function AgentPage() {
                                   <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-cyan/5 border border-cyan/15 animate-pulse">
                                     <Globe className="w-4 h-4 text-cyan animate-spin" style={{ animationDuration: "2s" }} />
                                     <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-medium text-cyan">جاري البحث في الويب...</p>
+                                      <p className="text-xs font-medium text-cyan">{t("tools.webSearching")}</p>
                                       <div className="flex gap-2 mt-1.5">
                                         <div className="h-2 w-24 bg-cyan/10 rounded-full" />
                                         <div className="h-2 w-16 bg-cyan/10 rounded-full" />
@@ -709,7 +710,7 @@ export default function AgentPage() {
                                 return (
                                   <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan/5 border border-cyan/10 text-[11px] text-cyan/70">
                                     <Globe className="w-3 h-3" />
-                                    تم البحث في الويب
+                                    {t("tools.webSearched")}
                                   </div>
                                 );
                               }
@@ -719,7 +720,7 @@ export default function AgentPage() {
                                   <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-cc-purple/5 border border-cc-purple/15 animate-pulse">
                                     <Database className="w-4 h-4 text-cc-purple animate-pulse" />
                                     <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-medium text-cc-purple">جاري الاستعلام من قاعدة البيانات...</p>
+                                      <p className="text-xs font-medium text-cc-purple">{t("tools.databaseQuerying")}</p>
                                       <div className="flex gap-2 mt-1.5">
                                         <div className="h-2 w-20 bg-cc-purple/10 rounded-full" />
                                         <div className="h-2 w-28 bg-cc-purple/10 rounded-full" />
@@ -734,7 +735,7 @@ export default function AgentPage() {
                                 return (
                                   <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cc-purple/5 border border-cc-purple/10 text-[11px] text-cc-purple/70">
                                     <Database className="w-3 h-3" />
-                                    تم الاستعلام من قاعدة البيانات
+                                    {t("tools.databaseQueried")}
                                   </div>
                                 );
                               }
@@ -743,26 +744,27 @@ export default function AgentPage() {
                               // (odoo*, dashboard*, etc.). Without this they
                               // render nothing while the model is waiting,
                               // making it look stuck.
-                              const labelMap: Record<string, string> = {
-                                odooListProjects: "مشاريع أودو",
-                                odooGetProject: "مشروع أودو",
-                                odooListClients: "عملاء أودو",
-                                odooGetClient: "عميل أودو",
-                                odooListTasks: "مهام أودو",
-                                odooGetTask: "مهمة أودو",
-                                odooGetTaskMessages: "محادثات المهمة",
-                                odooListEmployees: "موظفي أودو",
-                                odooGetEmployee: "موظف أودو",
-                                dashboardGetTaskTimeline: "سجل المهمة",
-                                dashboardGetProjectStageActivity: "نشاط المشروع",
+                              const labelKeyMap: Record<string, string> = {
+                                odooListProjects: "odooProjects",
+                                odooGetProject: "odooProject",
+                                odooListClients: "odooClients",
+                                odooGetClient: "odooClient",
+                                odooListTasks: "odooTasks",
+                                odooGetTask: "odooTask",
+                                odooGetTaskMessages: "taskMessages",
+                                odooListEmployees: "odooEmployees",
+                                odooGetEmployee: "odooEmployee",
+                                dashboardGetTaskTimeline: "taskTimeline",
+                                dashboardGetProjectStageActivity: "projectActivity",
                               };
-                              const label = labelMap[name] ?? name;
+                              const labelKey = labelKeyMap[name];
+                              const label = labelKey ? t(`tools.labels.${labelKey}`) : name;
                               if (!isDone) {
                                 return (
                                   <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-cc-blue/5 border border-cc-blue/15 animate-pulse">
                                     <Database className="w-4 h-4 text-cc-blue animate-pulse" />
                                     <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-medium text-cc-blue">جاري جلب {label}...</p>
+                                      <p className="text-xs font-medium text-cc-blue">{t("tools.fetching", { label })}</p>
                                       <div className="flex gap-2 mt-1.5">
                                         <div className="h-2 w-20 bg-cc-blue/10 rounded-full" />
                                         <div className="h-2 w-28 bg-cc-blue/10 rounded-full" />
@@ -775,7 +777,7 @@ export default function AgentPage() {
                               return (
                                 <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cc-blue/5 border border-cc-blue/10 text-[11px] text-cc-blue/70">
                                   <Database className="w-3 h-3" />
-                                  تم جلب {label}
+                                  {t("tools.fetched", { label })}
                                 </div>
                               );
                             }
@@ -783,7 +785,7 @@ export default function AgentPage() {
                             // Text parts
                             if (part.type === "text" && part.text) {
                               return (
-                                <div key={i} className="prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground/90 prose-strong:text-foreground prose-td:text-foreground/80 prose-th:text-foreground prose-li:text-foreground/90 [&_table]:w-full [&_table]:text-xs [&_th]:bg-muted [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_td]:border-b [&_td]:border-border [&_th]:border-b [&_th]:border-border [&_th]:text-right [&_td]:text-right text-sm leading-relaxed text-foreground/90">
+                                <div key={i} className="prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground/90 prose-strong:text-foreground prose-td:text-foreground/80 prose-th:text-foreground prose-li:text-foreground/90 [&_table]:w-full [&_table]:text-xs [&_th]:bg-muted [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_td]:border-b [&_td]:border-border [&_th]:border-b [&_th]:border-border [&_th]:text-start [&_td]:text-start text-sm leading-relaxed text-foreground/90">
                                   <MessageContent content={part.text} />
                                 </div>
                               );
@@ -807,12 +809,12 @@ export default function AgentPage() {
                           {copiedId === msg.id ? (
                             <>
                               <Check className="w-3 h-3 text-cc-green" />
-                              <span className="text-cc-green">تم النسخ</span>
+                              <span className="text-cc-green">{t("copied")}</span>
                             </>
                           ) : (
                             <>
                               <Copy className="w-3 h-3" />
-                              نسخ
+                              {t("copy")}
                             </>
                           )}
                         </button>
@@ -829,7 +831,7 @@ export default function AgentPage() {
                     <Bot className="w-4 h-4 text-cyan" />
                   </div>
                   <div className="flex items-center gap-2 pt-2 rtl:flex-row-reverse">
-                    <span className="text-xs text-muted-foreground">يفكر</span>
+                    <span className="text-xs text-muted-foreground">{t("thinking")}</span>
                     <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                     <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-1.5 h-1.5 bg-cyan rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -843,12 +845,12 @@ export default function AgentPage() {
         {chatError && (
           <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-600 sm:mx-4">
             <span className="font-semibold">⚠️</span>
-            <div className="flex-1 text-right">{chatError}</div>
+            <div className="flex-1 text-start">{chatError}</div>
             <button
               type="button"
               onClick={() => setChatError(null)}
               className="text-red-600/70 hover:text-red-600"
-              aria-label="إغلاق"
+              aria-label={t("close")}
             >
               ×
             </button>
@@ -864,9 +866,9 @@ export default function AgentPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="اسأل عن المبيعات، الفريق، الدعم، أو المشاريع..."
+                placeholder={t("placeholder")}
                 rows={1}
-                className="w-full resize-none rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-right text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25"
+                className="w-full resize-none rounded-xl border border-border bg-muted/50 px-3.5 py-3 text-start text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-cyan/50 focus:outline-none focus:ring-1 focus:ring-cyan/25"
                 style={{ minHeight: "48px", maxHeight: "120px" }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;
@@ -885,7 +887,7 @@ export default function AgentPage() {
             </Button>
           </div>
           <p className="mt-2 text-center text-[10px] text-muted-foreground">
-            المساعد الذكي مدعوم بـ Gemini AI — الإجابات مبنية على بيانات الشركة الفعلية
+            {t("footer")}
           </p>
         </div>
       </div>
@@ -909,7 +911,7 @@ function MessageContent({ content }: { content: string }) {
             <thead>
               <tr>
                 {tableHeaders.map((h, i) => (
-                  <th key={i} className="bg-muted px-3 py-1.5 text-right font-bold border-b border-border">
+                  <th key={i} className="bg-muted px-3 py-1.5 text-start font-bold border-b border-border">
                     {h.trim()}
                   </th>
                 ))}
@@ -919,7 +921,7 @@ function MessageContent({ content }: { content: string }) {
               {tableRows.map((row, ri) => (
                 <tr key={ri}>
                   {row.map((cell, ci) => (
-                    <td key={ci} className="px-3 py-1.5 border-b border-border text-right">
+                    <td key={ci} className="px-3 py-1.5 border-b border-border text-start">
                       {cell.trim()}
                     </td>
                   ))}

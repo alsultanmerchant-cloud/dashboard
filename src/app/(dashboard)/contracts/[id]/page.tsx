@@ -7,14 +7,13 @@ import {
   getContractById,
   getContractInstallments,
   getContractCycles,
-  getContractEvents,
   getClientSiblingContracts,
 } from "@/lib/data/contracts";
-import { listEntityActivity } from "@/lib/data/entity-activity";
-import { listMentionableEmployees } from "@/lib/data/employees";
+import { getContractActivityBundle } from "@/lib/data/entity-activity";
 import { EntityActivityFeed } from "@/components/activity/entity-activity-feed";
 import { EntityCommentComposer } from "@/components/activity/entity-comment-composer";
 import { PageHeader } from "@/components/page-header";
+import { RefreshFromSheetButton } from "./refresh-from-sheet-button";
 import { SectionTitle } from "@/components/section-title";
 import { MetricCard } from "@/components/metric-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -108,23 +107,36 @@ export default async function ContractDetailPage({
   const contract = await getContractById(session.orgId, id);
   if (!contract) notFound();
 
-  const [installments, cycles, events, siblings, activity, mentionable] =
+  const [installments, cycles, siblings, activityBundle] =
     await Promise.all([
       getContractInstallments(session.orgId, id),
       getContractCycles(session.orgId, id),
-      getContractEvents(session.orgId, id, 50),
       getClientSiblingContracts(
         session.orgId,
         (contract.client as { id?: string } | null)?.id ?? "",
         id,
       ),
-      listEntityActivity(session.orgId, { entityType: "contract", entityId: id }),
-      listMentionableEmployees(session.orgId),
+      getContractActivityBundle(
+        session.orgId,
+        id,
+        (contract.external_id as string | null) ?? null,
+      ),
     ]);
+  const { activity, mentionable, events } = activityBundle;
 
   const canManage = hasPermission(session, "contract.manage");
 
-  const client = contract.client as { id?: string; name?: string } | null;
+  const client = contract.client as {
+    id?: string;
+    name?: string;
+    external_id?: string | null;
+  } | null;
+  // Sheet-sourced clients carry a "C27"-style external id; only those can be
+  // re-pulled from the Google Sheet per-contract.
+  const sheetClientId =
+    client?.external_id && /^C\d+$/i.test(client.external_id)
+      ? client.external_id
+      : null;
   const am = contract.am as { full_name?: string } | null;
   const type = contract.type as { key?: string; name_ar?: string } | null;
   const pkg = contract.package as { name_ar?: string; grace_days?: number } | null;
@@ -166,13 +178,18 @@ export default async function ContractDetailPage({
         }
         description={`${type?.name_ar ?? "—"} · ${pkg?.name_ar ?? "—"}`}
         actions={
-          <Link
-            href="/contracts"
-            className="text-xs text-cyan hover:underline inline-flex items-center gap-1"
-          >
-            <ArrowUpLeft className="size-3 icon-flip-rtl" />
-            {t("title")}
-          </Link>
+          <div className="flex items-center gap-3">
+            {canManage && sheetClientId && (
+              <RefreshFromSheetButton clientExternalId={sheetClientId} />
+            )}
+            <Link
+              href="/contracts"
+              className="text-xs text-cyan hover:underline inline-flex items-center gap-1"
+            >
+              <ArrowUpLeft className="size-3 icon-flip-rtl" />
+              {t("title")}
+            </Link>
+          </div>
         }
       />
 

@@ -1,0 +1,359 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img "Sky Light" [ref=e7]
+        - generic:
+          - img "Sky Light"
+          - generic:
+            - paragraph: Skylight
+            - paragraph: Demo Workspace
+      - navigation [ref=e8]:
+        - generic [ref=e9]:
+          - generic: AI Workspace
+          - list [ref=e10]:
+            - listitem [ref=e11]:
+              - link "AI agent" [ref=e12] [cursor=pointer]:
+                - /url: /agent
+                - img [ref=e14]
+                - generic: AI agent
+            - listitem [ref=e26]:
+              - link "AI insights" [ref=e27] [cursor=pointer]:
+                - /url: /ai-insights
+                - img [ref=e29]
+                - generic: AI insights
+            - listitem [ref=e32]:
+              - link "My dashboard" [ref=e33] [cursor=pointer]:
+                - /url: /dashboard
+                - img [ref=e35]
+                - generic: My dashboard
+            - listitem [ref=e40]:
+              - link "Chats" [ref=e41] [cursor=pointer]:
+                - /url: /messages
+                - img [ref=e43]
+                - generic: Chats
+            - listitem [ref=e45]:
+              - link "Notifications" [ref=e46] [cursor=pointer]:
+                - /url: /notifications
+                - img [ref=e48]
+                - generic: Notifications
+        - generic [ref=e51]:
+          - generic: Project Delivery
+          - list [ref=e52]:
+            - listitem [ref=e53]:
+              - link "Projects" [ref=e54] [cursor=pointer]:
+                - /url: /projects
+                - img [ref=e56]
+                - generic: Projects
+            - listitem [ref=e58]:
+              - link "Tasks" [ref=e59] [cursor=pointer]:
+                - /url: /tasks
+                - img [ref=e61]
+                - generic: Tasks
+            - listitem [ref=e64]:
+              - link "My activities" [ref=e65] [cursor=pointer]:
+                - /url: /my-activities
+                - img [ref=e67]
+                - generic: My activities
+            - listitem [ref=e70]:
+              - link "Today — uploads" [ref=e71] [cursor=pointer]:
+                - /url: /uploads
+                - img [ref=e73]
+                - generic: Today — uploads
+            - listitem [ref=e76]:
+              - link "Clients" [ref=e77] [cursor=pointer]:
+                - /url: /clients
+                - img [ref=e79]
+                - generic: Clients
+            - listitem [ref=e83]:
+              - link "Task templates" [ref=e84] [cursor=pointer]:
+                - /url: /task-templates
+                - img [ref=e86]
+                - generic: Task templates
+            - listitem [ref=e89]:
+              - link "Service categories" [ref=e90] [cursor=pointer]:
+                - /url: /service-categories
+                - img [ref=e92]
+                - generic: Service categories
+        - generic [ref=e96]:
+          - generic: Handovers & Contracts
+          - list [ref=e97]:
+            - listitem [ref=e98]:
+              - link "Sales handover" [ref=e99] [cursor=pointer]:
+                - /url: /handover
+                - img [ref=e101]
+                - generic: Sales handover
+            - listitem [ref=e106]:
+              - link "Contracts" [ref=e107] [cursor=pointer]:
+                - /url: /contracts
+                - img [ref=e109]
+                - generic: Contracts
+        - generic [ref=e113]:
+          - generic: Monitoring & Control
+          - list [ref=e114]:
+            - listitem [ref=e115]:
+              - link "Escalations" [ref=e116] [cursor=pointer]:
+                - /url: /escalations
+                - img [ref=e118]
+                - generic: Escalations
+            - listitem [ref=e123]:
+              - link "Governance issues" [ref=e124] [cursor=pointer]:
+                - /url: /governance
+                - img [ref=e126]
+                - generic: Governance issues
+            - listitem [ref=e130]:
+              - link "Team Pulse" [ref=e131] [cursor=pointer]:
+                - /url: /team-activity
+                - img [ref=e133]
+                - generic: Team Pulse
+            - listitem [ref=e135]:
+              - link "Accountability" [ref=e136] [cursor=pointer]:
+                - /url: /accountability
+                - img [ref=e138]
+                - generic: Accountability
+            - listitem [ref=e142]:
+              - link "Attendance" [ref=e143] [cursor=pointer]:
+                - /url: /attendance
+                - img [ref=e145]
+                - generic: Attendance
+            - listitem [ref=e148]:
+              - link "Warnings" [ref=e149] [cursor=pointer]:
+                - /url: /warnings
+                - img [ref=e151]
+                - generic: Warnings
+            - listitem [ref=e153]:
+              - link "Client satisfaction" [ref=e154] [cursor=pointer]:
+                - /url: /satisfaction
+                - img [ref=e156]
+                - generic: Client satisfaction
+            - listitem [ref=e158]:
+              - link "Reports" [ref=e159] [cursor=pointer]:
+                - /url: /reports
+                - img [ref=e161]
+                - generic: Reports
+        - generic [ref=e163]:
+          - generic: Organization
+          - list [ref=e164]:
+            - listitem [ref=e165]:
+              - link "Agency chart" [ref=e166] [cursor=pointer]:
+                - /url: /organization/chart
+                - img [ref=e168]
+                - generic: Agency chart
+            - listitem [ref=e173]:
+              - link "Departments" [ref=e174] [cursor=pointer]:
+                - /url: /organization/departments
+                - img [ref=e176]
+                - generic: Departments
+            - listitem [ref=e179]:
+              - link "Employees" [ref=e180] [cursor=pointer]:
+                - /url: /organization/employees
+                - img [ref=e182]
+                - generic: Employees
+            - listitem [ref=e186]:
+              - link "Roles & permissions" [ref=e187] [cursor=pointer]:
+                - /url: /organization/roles
+                - img [ref=e189]
+                - generic: Roles & permissions
+        - generic [ref=e192]:
+          - generic: Administration
+          - list [ref=e193]:
+            - listitem [ref=e194]:
+              - link "Settings" [ref=e195] [cursor=pointer]:
+                - /url: /settings
+                - img [ref=e197]
+                - generic: Settings
+            - listitem [ref=e200]:
+              - link "Feature flags" [ref=e201] [cursor=pointer]:
+                - /url: /settings/feature-flags
+                - img [ref=e203]
+                - generic: Feature flags
+      - generic [ref=e205]:
+        - generic:
+          - generic [ref=e206]: Operational status
+          - generic [ref=e207]:
+            - button "Switch to Arabic" [ref=e208]:
+              - img [ref=e209]
+              - generic [ref=e213]: العربية
+            - generic [ref=e214]: Live
+        - generic [ref=e215]:
+          - generic [ref=e217]:
+            - img "السلطان" [ref=e218]
+            - generic [ref=e219]: ا
+          - generic:
+            - paragraph: السلطان
+            - paragraph: المالك
+          - button "Sign out"
+    - generic [ref=e220]:
+      - generic [ref=e222]:
+        - generic [ref=e223]:
+          - button "Open app switcher" [ref=e224]:
+            - img [ref=e225]
+          - generic [ref=e227]:
+            - heading "امين · C182-2" [level=2] [ref=e228]
+            - paragraph [ref=e229]: رفع باقة · تصوير
+        - generic [ref=e230]:
+          - generic [ref=e231]:
+            - button "Create new" [ref=e232]:
+              - img [ref=e233]
+              - generic [ref=e234]: New
+            - button "Search the system… ⌘ K" [ref=e235]:
+              - img [ref=e236]
+              - generic [ref=e239]: Search the system…
+              - generic [ref=e240]:
+                - generic [ref=e241]: ⌘
+                - generic [ref=e242]: K
+          - button "أنشطتي — تقويم" [ref=e244]:
+            - img [ref=e245]
+          - button "Switch to dark mode" [ref=e247]:
+            - img
+          - link "المحادثات" [ref=e248] [cursor=pointer]:
+            - /url: /messages
+            - img [ref=e249]
+          - button "50" [ref=e252]:
+            - img
+            - generic [ref=e253]: "50"
+      - navigation "Sales" [ref=e254]:
+        - generic [ref=e255]:
+          - generic [ref=e256]: Sales
+          - generic [ref=e257]:
+            - link "Clients" [ref=e258] [cursor=pointer]:
+              - /url: /clients
+            - link "Sales handover" [ref=e259] [cursor=pointer]:
+              - /url: /handover
+            - link "Contracts" [ref=e260] [cursor=pointer]:
+              - /url: /contracts
+            - link "Sales team" [ref=e261] [cursor=pointer]:
+              - /url: /sales/team
+            - link "Leads" [ref=e262] [cursor=pointer]:
+              - /url: /sales/leads
+      - main [ref=e263]:
+        - generic [ref=e264]:
+          - link "Contracts" [ref=e268] [cursor=pointer]:
+            - /url: /contracts
+            - img [ref=e269]
+            - text: Contracts
+          - generic [ref=e272]:
+            - paragraph [ref=e273]:
+              - text: This client has
+              - strong [ref=e274]: one other contract
+              - text: "with us:"
+            - link "C182-1 جديد · نوفا Active" [ref=e276] [cursor=pointer]:
+              - /url: /contracts/f36b363b-02f2-4135-b29a-ce28a2ffd3ca
+              - generic [ref=e277]: C182-1
+              - generic [ref=e278]: جديد · نوفا
+              - generic [ref=e279]: Active
+          - generic [ref=e280]:
+            - generic [ref=e282]:
+              - generic [ref=e283]:
+                - generic [ref=e284]: Total value
+                - generic [ref=e285]: 12,500
+              - img [ref=e287]
+            - generic [ref=e293]:
+              - generic [ref=e294]: Paid
+              - generic [ref=e295]: 12,500
+            - generic [ref=e298]:
+              - generic [ref=e299]: Outstanding
+              - generic [ref=e300]: "0"
+            - generic [ref=e303]:
+              - generic [ref=e304]: Status
+              - generic [ref=e305]: Expired
+          - generic [ref=e307]:
+            - generic [ref=e308]:
+              - paragraph [ref=e309]: Account manager
+              - paragraph [ref=e310]: مريم المغير
+            - generic [ref=e311]:
+              - paragraph [ref=e312]: Start date
+              - paragraph [ref=e313]: Jun 9
+            - generic [ref=e314]:
+              - paragraph [ref=e315]: End date
+              - paragraph [ref=e316]: Jun 8
+            - generic [ref=e317]:
+              - paragraph [ref=e318]: Duration (months)
+              - paragraph [ref=e319]: —
+            - generic [ref=e320]:
+              - paragraph [ref=e321]: Target
+              - paragraph [ref=e322]: On Target
+            - generic [ref=e323]:
+              - paragraph [ref=e324]: Payment status
+              - paragraph [ref=e325]: Complete
+            - generic [ref=e326]:
+              - paragraph [ref=e327]: Requested renewal value
+              - paragraph [ref=e328]: "0"
+            - generic [ref=e329]:
+              - paragraph [ref=e330]: Repeated services value
+              - paragraph [ref=e331]: "0"
+            - generic [ref=e332]:
+              - paragraph [ref=e333]: Cycle grace days
+              - paragraph [ref=e334]: 0 days
+            - generic [ref=e335]:
+              - paragraph [ref=e336]: Linked project
+              - paragraph [ref=e337]: —
+            - generic [ref=e338]:
+              - paragraph [ref=e339]: Notes
+              - paragraph [ref=e340]: —
+          - generic [ref=e342]:
+            - heading "Installments schedule" [level=2] [ref=e343]
+            - paragraph [ref=e344]: Expected and received installments on this contract
+          - generic [ref=e346]:
+            - table [ref=e348]:
+              - rowgroup [ref=e349]:
+                - row "# Expected amount Expected date Received amount Receipt date Status" [ref=e350]:
+                  - columnheader "#" [ref=e351]
+                  - columnheader "Expected amount" [ref=e352]
+                  - columnheader "Expected date" [ref=e353]
+                  - columnheader "Received amount" [ref=e354]
+                  - columnheader "Receipt date" [ref=e355]
+                  - columnheader "Status" [ref=e356]
+                  - columnheader [ref=e357]
+              - rowgroup [ref=e358]:
+                - row "No installments yet." [ref=e359]:
+                  - cell "No installments yet." [ref=e360]
+            - button "Add installment" [ref=e361]:
+              - img [ref=e362]
+              - text: Add installment
+          - generic [ref=e364]:
+            - heading "Monthly cycles" [level=2] [ref=e365]
+            - paragraph [ref=e366]: Monthly follow-up with expected and actual meeting dates
+          - generic [ref=e369]: No monthly cycles yet. They will be created automatically at the start of each month.
+          - generic [ref=e371]:
+            - heading "Event log" [level=2] [ref=e372]
+            - paragraph [ref=e373]: Contract changes and notes
+          - generic [ref=e376]: No activity yet
+          - generic [ref=e379]:
+            - generic [ref=e380]:
+              - button "Message" [ref=e381]:
+                - img [ref=e382]
+                - text: Message
+              - button "Log note" [ref=e384]:
+                - img [ref=e385]
+                - text: Log note
+            - generic [ref=e389]:
+              - textbox "Log an internal note… use @ to mention" [ref=e391]
+              - generic [ref=e392]:
+                - generic [ref=e393]:
+                  - button "Attach" [ref=e394]:
+                    - img [ref=e395]
+                    - text: Attach
+                  - paragraph [ref=e397]: ⌘+Enter to send
+                - button "Post" [disabled]:
+                  - img
+                  - text: Post
+    - complementary "Power-user shortcuts":
+      - generic [ref=e398]:
+        - button "Bookmark panel" [disabled] [ref=e399]:
+          - img [ref=e400]
+        - link "Favorite" [ref=e402] [cursor=pointer]:
+          - /url: /projects?onlyFavorites=1
+          - img [ref=e403]
+        - button "Search (⌘K)" [ref=e405]:
+          - img [ref=e406]
+        - button "Enter fullscreen" [ref=e409]:
+          - img [ref=e410]
+        - button "Add bookmark" [disabled] [ref=e415]:
+          - img [ref=e416]
+    - button [ref=e418]:
+      - img [ref=e419]
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e432] [cursor=pointer]:
+    - img [ref=e433]
+  - alert [ref=e436]

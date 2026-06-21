@@ -16,7 +16,13 @@ import { formatMonthYear } from "@/lib/utils-format";
 // One click re-reads the real sheet (contracts + installments + logs) AND the
 // sheet's own computed CEO/target tabs, freezing them under the month the sheet
 // is currently showing. Older months stay untouched.
-export function SheetSyncButton() {
+export function SheetSyncButton({
+  lastSyncedLabel,
+}: {
+  // Pre-formatted "last pulled from sheet" timestamp (server-formatted in the
+  // org timezone so there's no client hydration mismatch). Null = never synced.
+  lastSyncedLabel?: string | null;
+}) {
   const router = useRouter();
   const locale = useLocale();
   const ar = locale.startsWith("ar");
@@ -67,15 +73,26 @@ export function SheetSyncButton() {
   }, [state, ar, locale, router]);
 
   return (
-    <form action={action}>
-      <Button type="submit" disabled={pending} size="sm" className="gap-1.5">
-        {pending ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <RefreshCw className="size-4" />
-        )}
-        {ar ? "سحب بيانات الشيت" : "Pull from Sheet"}
-      </Button>
-    </form>
+    <div className="flex flex-col items-end gap-1">
+      <form action={action}>
+        <Button type="submit" disabled={pending} size="sm" className="gap-1.5">
+          {pending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
+          {ar ? "سحب بيانات الشيت" : "Pull from Sheet"}
+        </Button>
+      </form>
+      <span className="text-[10px] leading-none text-muted-foreground">
+        {lastSyncedLabel
+          ? ar
+            ? `آخر سحب: ${lastSyncedLabel}`
+            : `Last synced: ${lastSyncedLabel}`
+          : ar
+            ? "لم تتم المزامنة بعد"
+            : "Never synced"}
+      </span>
+    </div>
   );
 }

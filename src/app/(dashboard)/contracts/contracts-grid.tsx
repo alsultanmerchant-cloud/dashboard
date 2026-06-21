@@ -54,6 +54,7 @@ export type ContractGridFilters = {
 };
 
 const OPEN_STATUS_FILTER = ["Active", "Expired", "SOON"];
+const PAGE_SIZE = 50;
 
 function sameValues(a: string[], b: string[]) {
   return a.length === b.length && a.every((value) => b.includes(value));
@@ -425,6 +426,7 @@ export function ContractsGrid({
   const [scope, setScope] = useState<"all" | "mine">(initialFilters?.scope ?? "all");
   // Hold popup — opened when the inline type dropdown picks "Hold".
   const [holdFor, setHoldFor] = useState<GridContract | null>(null);
+  const [page, setPage] = useState(1);
 
   function pushFilterUrl(nextFilters: Partial<ContractGridFilters>) {
     const next = {
@@ -453,31 +455,37 @@ export function ContractsGrid({
   }
 
   function updateTargets(next: string[]) {
+    setPage(1);
     setTargets(next);
     pushFilterUrl({ targets: next });
   }
 
   function updateStatuses(next: string[]) {
+    setPage(1);
     setStatuses(next);
     pushFilterUrl({ statuses: next });
   }
 
   function updateTypes(next: string[]) {
+    setPage(1);
     setTypes(next);
     pushFilterUrl({ types: next });
   }
 
   function updatePackages(next: string[]) {
+    setPage(1);
     setPackages(next);
     pushFilterUrl({ packages: next });
   }
 
   function updatePayments(next: string[]) {
+    setPage(1);
     setPayments(next);
     pushFilterUrl({ payments: next });
   }
 
   function updateScope(next: "all" | "mine") {
+    setPage(1);
     setScope(next);
     pushFilterUrl({ scope: next });
   }
@@ -569,6 +577,10 @@ export function ContractsGrid({
       );
     });
   }, [rows, search, scope, targets, statuses, types, packages, payments, meEmployeeId]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const visibleRows = filtered.slice(pageStart, pageStart + PAGE_SIZE);
 
   // Totals reflect ACTIVE contracts only — the team tracks live exposure, so
   // lost/closed rows are excluded from the value/paid sums even when visible.
@@ -590,7 +602,10 @@ export function ContractsGrid({
             <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setPage(1);
+                setSearch(e.target.value);
+              }}
               placeholder={t("grid.searchPlaceholder")}
               className="h-9 w-full rounded-md border border-input bg-input ps-8 pe-3 text-sm outline-none transition-colors focus:border-cyan/40"
             />
@@ -757,7 +772,7 @@ export function ContractsGrid({
                   </td>
                 </tr>
               ) : (
-                filtered.map((c, i) => (
+                visibleRows.map((c, i) => (
                   <tr
                     key={c.id}
                     className={cn(
@@ -766,7 +781,7 @@ export function ContractsGrid({
                     )}
                   >
                     <Td sticky className="text-center tabular-nums text-[11px] text-muted-foreground">
-                      {i + 1}
+                      {pageStart + i + 1}
                     </Td>
                     <Td sticky stickyOffset="44px" className="text-center font-mono text-[11px]">
                       <Link href={`/contracts/${c.id}`} className="hover:underline">
@@ -1222,6 +1237,34 @@ export function ContractsGrid({
             </tbody>
           </table>
         </div>
+        {filtered.length > PAGE_SIZE && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-soft px-3 py-2 text-xs">
+            <span className="text-muted-foreground">
+              {t("grid.pagination.page", {
+                page: currentPage,
+                pages: pageCount,
+              })}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                className="rounded-md border border-soft px-3 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              >
+                {t("grid.pagination.previous")}
+              </button>
+              <button
+                type="button"
+                disabled={currentPage === pageCount}
+                onClick={() => setPage((value) => Math.min(pageCount, value + 1))}
+                className="rounded-md border border-soft px-3 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              >
+                {t("grid.pagination.next")}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {holdFor && (

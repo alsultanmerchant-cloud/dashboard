@@ -109,7 +109,7 @@ function intOrNull(v: unknown): number | null {
 // "payment status" — the sheet uses "Installments" / "Complete" (the grid keys
 // its color swatches off those exact strings). Map loosely so stray casing or
 // the Arabic instruction row can never leak a junk value into the column.
-function normalizePaymentStatus(raw: string | null): string | null {
+export function normalizePaymentStatus(raw: string | null): string | null {
   if (!raw) return null;
   const k = raw.toLowerCase();
   if (k.includes("install")) return "Installments";
@@ -130,7 +130,7 @@ function normalizeRenewedStatus(raw: string | null): string | null {
 
 // Excel dates can come as JS Date, ISO strings, or "6 Sep 2025" / "24/9/2025".
 // Normalize to YYYY-MM-DD or null.
-function parseDate(v: unknown): string | null {
+export function parseDate(v: unknown): string | null {
   if (!v && v !== 0) return null;
   if (v instanceof Date && !isNaN(v.getTime())) {
     return v.toISOString().slice(0, 10);

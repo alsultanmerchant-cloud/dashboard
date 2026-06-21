@@ -40,6 +40,19 @@ const DashboardSelectionAssistant = dynamic(
     })),
 );
 
+function DeferredDashboardSelectionAssistant() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // This feature pulls in the AI chat runtime but is not needed for first
+    // paint. Delay it until after the dashboard has hydrated.
+    const timer = window.setTimeout(() => setReady(true), 1_500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return ready ? <DashboardSelectionAssistant /> : null;
+}
+
 type NotificationRow = {
   id: string;
   type: string;
@@ -252,7 +265,7 @@ export function DashboardShell({
             {!isAgentPage && (
               <AIChatFAB onClick={() => router.push("/agent")} />
             )}
-            <DashboardSelectionAssistant />
+            <DeferredDashboardSelectionAssistant />
           </div>
           </StackedSheetProvider>
         </TopbarProvider>

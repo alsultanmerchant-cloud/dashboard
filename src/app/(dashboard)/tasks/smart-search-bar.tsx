@@ -61,6 +61,7 @@ type FilterKey =
   | "done"
   | "mine"
   | "due_today"
+  | "due_week"
   | "behind"
   | "ahead"
   | "critical"

@@ -19,13 +19,20 @@ import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
-// (/api/satisfaction/analyze) AND the daily cron (/api/cron/wa-analyze).
+// (/api/satisfaction/analyze), the streaming re-analyze route
+// (/api/satisfaction/analyze/stream), AND the daily cron (/api/cron/wa-analyze).
 // Reads the merged transcript (one-time .txt import + live WhatsApp messages),
 // runs Gemini, and stores the result as the client's current analysis.
+//
+// The pipeline is split into three reusable steps so the blocking and streaming
+// paths share identical input-building + persistence:
+//   buildSatisfactionInput → (generateObject | streamObject) → persistSatisfaction
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 const MODEL = GEMINI_MODEL;
-const MAX_CHARS = 45_000;
+export const SATISFACTION_MODEL = MODEL;
+export const SATISFACTION_MAX_CHARS = 45_000;
+const MAX_CHARS = SATISFACTION_MAX_CHARS;
 
 function trim(t: string, budget: number = MAX_CHARS): string {
   if (t.length <= budget) return t;
@@ -61,12 +68,26 @@ export class NoRecentActivityError extends Error {
   }
 }
 
-export async function analyzeClientSatisfaction(
+// Everything needed to run the model + persist the result. `makePrompt(budget)`
+// rebuilds the prompt at a smaller transcript budget for the retry-shrink loop.
+export interface SatisfactionInput {
+  clientName: string;
+  windowKind: "week" | "all";
+  windowStart: string | null;
+  windowEnd: string;
+  brief: Awaited<ReturnType<typeof getClientBrief>>;
+  contract: Awaited<ReturnType<typeof getClientContractContext>>;
+  activity: Awaited<ReturnType<typeof getClientContractActivity>>;
+  makePrompt: (budget: number) => string;
+}
+
+// Step 1 — assemble the four sources + brief + knowledge into a prompt builder.
+// Throws NoRecentActivityError / NoTranscriptError when there's nothing to read.
+export async function buildSatisfactionInput(
   orgId: string,
   clientId: string,
-  actorUserId: string | null,
   opts?: AnalyzeOptions,
-): Promise<AnalyzeOutcome> {
+): Promise<SatisfactionInput> {
   const windowKind = opts?.windowKind ?? "week";
   const sinceDays = windowKind === "week" ? CURRENT_WINDOW_DAYS : undefined;
   const windowStart = sinceDays
@@ -84,18 +105,12 @@ export async function analyzeClientSatisfaction(
 
   const transcripts = await buildClientTranscripts(orgId, clientId, { sinceDays });
   if (!transcripts.client && !transcripts.technical) {
-    // A windowed run with nothing recent is not a hard error — it just means
-    // the client has been quiet (the team explicitly wants "quiet = not a live
-    // complaint"). Signal it distinctly so callers can fall back to all-time.
     throw windowKind === "week" ? new NoRecentActivityError() : new NoTranscriptError();
   }
 
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
 
-  // The documented brief from project/task documents is the only source of
-  // truth for brief-adherence. If it cannot be fetched, the score stays null;
-  // the model must not infer the brief from internal team chat.
   const brief = await getClientBrief(orgId, clientId);
   const briefInstruction = brief
     ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.
@@ -106,10 +121,6 @@ export async function analyzeClientSatisfaction(
     ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source}, ${brief.kind})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
     : "\n\n=== البريف ===\n(لم يتم العثور على نص بريف قابل للقراءة من ملفات المشروع/المهام لهذا العميل)";
 
-  // Real delivery state from Rawasm — the client's actually-overdue tasks and
-  // the stages they're stuck in. Feeding this lets the model CORRELATE chat
-  // complaints with concrete delayed work and give grounded recommendations
-  // (the team's explicit ask: "compare the chat with the tasks in Rawasm").
   const execution = await getClientExecutionSnapshot(orgId, clientId);
   const bottleneckLine =
     execution && execution.bottlenecks.length
@@ -132,11 +143,7 @@ export async function analyzeClientSatisfaction(
         .join("\n")}`
     : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام متأخرة مسجّلة لهذا العميل في رواسم)";
 
-  // Contract status — the commercial dimension of the big picture. Lets the
-  // model weigh relationship/execution signals against contract health.
   const contract = await getClientContractContext(orgId, clientId);
-  // Contract activity log — the trajectory (holds, edits, close/renew) that the
-  // snapshot can't show. Behavioral signal for the commercial dimension.
   const activity = await getClientContractActivity(orgId, clientId);
   const activityBlock = activity.length
     ? `\nسجل نشاط العقد (الأحدث أولًا — أحداث سلوكية: ON HOLD=تجميد/احتكاك، HOLD LIFTED=رفع التجميد، Contract Close (Lost)=خسارة/إنهاء، Contract Close (Renew)=تجديد، EDIT MODE=تعديل بنود):\n${activity
@@ -154,16 +161,10 @@ export async function analyzeClientSatisfaction(
       }\nتاريخ البداية: ${contract.startDate}${contract.endDate ? ` — تاريخ الانتهاء: ${contract.endDate}` : ""}${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
-  // Org-wide lessons the team taught the AI — applied to this analysis too.
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
 
-  const runOnce = async (budget: number) =>
-    (
-      await generateObject({
-        model: google(MODEL),
-        maxRetries: 2,
-        schema: SatisfactionSchema,
-        prompt: `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
+  const makePrompt = (budget: number) =>
+    `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
 ${
   windowKind === "week"
     ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
@@ -224,31 +225,36 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني 📍 ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`,
-      })
-    ).object;
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
 
-  // The model can occasionally fail structured output on long/messy
-  // transcripts. Retry with a progressively SMALLER transcript each attempt —
-  // a tighter input is much more likely to yield schema-valid output.
-  const budgets = [MAX_CHARS, 22_000, 10_000, 5_000];
-  let result: Awaited<ReturnType<typeof runOnce>> | undefined;
-  let lastErr: unknown;
-  for (const budget of budgets) {
-    try {
-      result = await runOnce(budget);
-      break;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
+  return {
+    clientName: client.name as string,
+    windowKind,
+    windowStart,
+    windowEnd,
+    brief,
+    contract,
+    activity,
+    makePrompt,
+  };
+}
+
+// Step 3 — store the result as the client's analysis (is_current for weekly
+// runs) + audit/AI events. Shared by the blocking and streaming paths.
+export async function persistSatisfaction(
+  orgId: string,
+  clientId: string,
+  actorUserId: string | null,
+  result: SatisfactionResult,
+  input: SatisfactionInput,
+): Promise<AnalyzeOutcome> {
+  const { brief, contract, activity, windowKind, windowStart, windowEnd } = input;
+  // Brief text wasn't available → the model must not have inferred adherence.
   if (!brief) {
     result.briefAdherenceScore = null;
     result.briefAdherence = null;
   }
 
-  // Latest import ids (for provenance), best-effort.
   const { data: imp } = await supabaseAdmin
     .from("client_chat_imports")
     .select("id, group_kind, created_at")
@@ -259,10 +265,6 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
   const clientImportId = rows.find((r) => r.group_kind === "client")?.id ?? null;
   const technicalImportId = rows.find((r) => r.group_kind === "technical")?.id ?? null;
 
-  // Only the current-status (weekly) analysis becomes is_current — that's what
-  // the board + executive index read, so they reflect the client's NOW. An
-  // all-time run is stored as a historical snapshot and never takes over the
-  // headline.
   const isCurrent = windowKind === "week";
   if (isCurrent) {
     await supabaseAdmin
@@ -325,8 +327,6 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
       briefAdherenceScore: result.briefAdherenceScore,
       sentiment: result.sentiment,
       accountHealth: result.bigPicture.accountHealth,
-      // The red (relationship-risk) indicator codes detected this run — the
-      // headline triage signals the team acts on.
       redIndicators: result.indicators
         .filter((i) => (RISK_INDICATORS as readonly string[]).includes(i.code))
         .map((i) => i.code),
@@ -342,4 +342,37 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
   });
 
   return { analysisId: inserted.id, result };
+}
+
+export async function analyzeClientSatisfaction(
+  orgId: string,
+  clientId: string,
+  actorUserId: string | null,
+  opts?: AnalyzeOptions,
+): Promise<AnalyzeOutcome> {
+  const input = await buildSatisfactionInput(orgId, clientId, opts);
+
+  // The model can occasionally fail structured output on long/messy
+  // transcripts. Retry with a progressively SMALLER transcript each attempt —
+  // a tighter input is much more likely to yield schema-valid output.
+  const budgets = [MAX_CHARS, 22_000, 10_000, 5_000];
+  let result: SatisfactionResult | undefined;
+  let lastErr: unknown;
+  for (const budget of budgets) {
+    try {
+      const { object } = await generateObject({
+        model: google(MODEL),
+        maxRetries: 2,
+        schema: SatisfactionSchema,
+        prompt: input.makePrompt(budget),
+      });
+      result = object;
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
+
+  return persistSatisfaction(orgId, clientId, actorUserId, result, input);
 }

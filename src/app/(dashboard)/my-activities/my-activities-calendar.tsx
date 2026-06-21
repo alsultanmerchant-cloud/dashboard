@@ -12,6 +12,7 @@ const TYPE_ICON = {
   email: Mail,
   review: Eye,
   upload: Upload,
+  task: ListTodo,
   other: ListTodo,
 } as const;
 
@@ -56,6 +57,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
     if (type === "email") return t("types.email");
     if (type === "review") return t("types.review");
     if (type === "upload") return t("types.upload");
+    if (type === "task") return t("types.task");
     return t("types.other");
   };
 

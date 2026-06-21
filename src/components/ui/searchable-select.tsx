@@ -14,6 +14,9 @@ export type SearchableOption = {
   value: string;
   label: string;
   hint?: string | null;
+  /** Extra text matched by search but NOT rendered — e.g. a client's project /
+   *  group / contract names so one entry is findable by any of its identifiers. */
+  keywords?: string | null;
 };
 
 type SingleProps = {
@@ -67,7 +70,8 @@ export function SearchableSelect(props: Props) {
     return props.options.filter(
       (o) =>
         o.label.toLowerCase().includes(q) ||
-        (o.hint?.toLowerCase().includes(q) ?? false),
+        (o.hint?.toLowerCase().includes(q) ?? false) ||
+        (o.keywords?.toLowerCase().includes(q) ?? false),
     );
   }, [props.options, query]);
 

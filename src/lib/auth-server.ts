@@ -50,8 +50,11 @@ export const getServerSession = cache(async (): Promise<ServerSession | null> =>
 
 async function loadSession(): Promise<ServerSession | null> {
   const supabase = await createServerSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) return null;
+  const { data } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
+  if (!userId) return null;
+  const email =
+    typeof data.claims.email === "string" ? data.claims.email : "";
 
   // One round-trip: profile + nested org.
   const { data: profile } = await supabaseAdmin
@@ -59,7 +62,7 @@ async function loadSession(): Promise<ServerSession | null> {
     .select(
       "id, full_name, email, organization_id, department_id, job_title, avatar_url, organization:organizations!employee_profiles_organization_id_fkey ( id, name )",
     )
-    .eq("user_id", data.user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (!profile) return null;
 
@@ -68,7 +71,7 @@ async function loadSession(): Promise<ServerSession | null> {
   const { data: roleRows } = await supabaseAdmin
     .from("user_roles")
     .select("role:roles ( key, name, role_permissions ( permission:permissions ( key ) ) )")
-    .eq("user_id", data.user.id)
+    .eq("user_id", userId)
     .eq("organization_id", profile.organization_id);
 
   const roleKeys: string[] = [];
@@ -86,8 +89,8 @@ async function loadSession(): Promise<ServerSession | null> {
   }
 
   return {
-    userId: data.user.id,
-    email: profile.email ?? data.user.email ?? "",
+    userId,
+    email: profile.email ?? email,
     employeeId: profile.id,
     orgId: profile.organization_id,
     orgName: org?.name ?? "",
@@ -130,23 +133,48 @@ export const getDashboardScope = cache(async (session: ServerSession): Promise<D
     return { kind: "ceo" };
   }
 
-  // Head: this employee heads at least one department.
-  const { data: headed } = await supabaseAdmin
-    .from("departments")
-    .select("id, name")
-    .eq("organization_id", session.orgId)
-    .eq("head_employee_id", session.employeeId)
-    .order("created_at", { ascending: true })
-    .limit(1);
+  // Structural scope checks are independent. Run them together and bound
+  // them so a slow Supabase request cannot leave /dashboard on its route-level
+  // loading skeleton forever.
+  const scopeSignal = AbortSignal.timeout(6_000);
+  const [headedResult, reportsResult] = await Promise.all([
+    supabaseAdmin
+      .from("departments")
+      .select("id, name")
+      .eq("organization_id", session.orgId)
+      .eq("head_employee_id", session.employeeId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .abortSignal(scopeSignal),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("id, department_id")
+      .eq("organization_id", session.orgId)
+      .eq("team_leader_employee_id", session.employeeId)
+      .abortSignal(scopeSignal),
+  ]);
 
+  if (headedResult.error) {
+    console.error("[getDashboardScope] department-head lookup failed:", headedResult.error.message);
+  }
+  if (reportsResult.error) {
+    console.error("[getDashboardScope] team-lead lookup failed:", reportsResult.error.message);
+  }
+
+  // Head: this employee heads at least one department.
+  const headed = headedResult.data;
   if (headed && headed.length > 0) {
     const dept = headed[0];
-    const { data: members } = await supabaseAdmin
+    const { data: members, error: membersError } = await supabaseAdmin
       .from("employee_profiles")
       .select("id")
       .eq("organization_id", session.orgId)
       .eq("department_id", dept.id)
-      .neq("id", session.employeeId);
+      .neq("id", session.employeeId)
+      .abortSignal(scopeSignal);
+    if (membersError) {
+      console.error("[getDashboardScope] department-members lookup failed:", membersError.message);
+    }
     return {
       kind: "head",
       departmentId: dept.id,
@@ -156,12 +184,7 @@ export const getDashboardScope = cache(async (session: ServerSession): Promise<D
   }
 
   // Team lead: at least one employee reports to this employee as team leader.
-  const { data: reports } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("id, department_id")
-    .eq("organization_id", session.orgId)
-    .eq("team_leader_employee_id", session.employeeId);
-
+  const reports = reportsResult.data;
   if (reports && reports.length > 0) {
     return {
       kind: "team_lead",

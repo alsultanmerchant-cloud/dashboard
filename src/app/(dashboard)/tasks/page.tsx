@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Briefcase } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
+import { requirePagePermission, getDashboardScope } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   buildTaskFiltersFromParams,
@@ -48,7 +48,14 @@ export default async function TasksPage({
     getTranslations("TasksPage"),
     searchParams,
   ]);
-  const view = resolveTasksView(sp);
+  // Agents (individual contributors) get the kanban board by default — it's the
+  // most useful "my work" surface. Explicit ?view= and project boards are
+  // untouched; only the bare /tasks default flips from list → kanban for them.
+  const baseView = resolveTasksView(sp);
+  const scope = await getDashboardScope(session);
+  const view = (
+    !sp.view && baseView === "list" && scope.kind === "agent" ? "kanban" : baseView
+  ) as "kanban" | "list" | "calendar" | "pivot";
 
   const VALID_GROUPS = [
     "stage", "project", "priority", "deadline",

@@ -254,10 +254,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const { messages, conversationId } = (await req.json()) as {
+    const { messages, conversationId, locale } = (await req.json()) as {
       messages: unknown[];
       conversationId?: string | null;
+      locale?: string;
     };
+    const responseLanguage =
+      locale === "en"
+        ? "Respond in clear professional English unless the user explicitly asks for another language."
+        : "أجب بالعربية الواضحة والمهنية ما لم يطلب المستخدم لغة أخرى صراحةً.";
     const orgId = session.orgId;
     const [snapshot, knowledge] = await Promise.all([
       buildOrgSnapshot(orgId),
@@ -304,7 +309,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: google(GEMINI_MODEL),
-      system: `${AGENT_SYSTEM_PROMPT}\n\n---\n\n${snapshot}${knowledge ? `\n\n---\n\n${knowledge}` : ""}`,
+      system: `${AGENT_SYSTEM_PROMPT}\n\nقاعدة لغة الواجهة: ${responseLanguage}\n\n---\n\n${snapshot}${knowledge ? `\n\n---\n\n${knowledge}` : ""}`,
       messages: modelMessages,
       // Fail fast on transient Gemini errors (esp. 429 rate limits) instead
       // of hanging 60-180s on 3 internal retries.

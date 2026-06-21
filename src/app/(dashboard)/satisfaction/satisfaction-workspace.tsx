@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useMemo, useRef } from "react";
+import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { useTranslations } from "next-intl";
+import { SatisfactionSchema } from "@/lib/satisfaction-schema";
 import {
   Sparkles,
   AlertTriangle,
@@ -59,7 +61,7 @@ import type {
 } from "@/lib/data/satisfaction";
 
 interface Props {
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; keywords?: string | null }[];
   rows: SatisfactionRow[];
   detail: ClientSatisfactionDetail | null;
   execution: ClientExecutionSnapshot | null;
@@ -194,6 +196,26 @@ export function SatisfactionWorkspace({
     }
   };
 
+  // Streaming "re-analyze (week)": the summary streams live while the rest of
+  // the analysis is generated; on finish we reload so the freshly-persisted
+  // full analysis renders (the body keeps rendering from the server-fetched
+  // analysis, so partial arrays never hit the rich cards).
+  const satStream = useObject({
+    api: "/api/satisfaction/analyze/stream",
+    schema: SatisfactionSchema,
+    onError: (e) => setError(e instanceof Error ? e.message : "تعذر التحليل"),
+    onFinish: ({ object }) => {
+      if (!object || !selectedId) return;
+      if (selectedAnalysisId) router.push(`/satisfaction?client=${selectedId}`);
+      else router.refresh();
+    },
+  });
+  const streamWeek = () => {
+    if (!selectedId) return;
+    setError(null);
+    satStream.submit({ clientId: selectedId, windowKind: "week" });
+  };
+
   const sentimentLabel = (s: string | null) =>
     s ? t(`sentiment.${s}`) : "—";
 
@@ -253,15 +275,15 @@ export function SatisfactionWorkspace({
             {(() => {
               const hasTranscript =
                 !!detail.imports.client || !!detail.imports.technical || detail.hasMessages;
-              const busy = analyzing !== null;
+              const busy = analyzing !== null || satStream.isLoading;
               return (
                 <>
                   <Button
-                    onClick={() => analyze("week")}
+                    onClick={streamWeek}
                     disabled={busy || !hasTranscript}
                     title={t("analyzeWeekHint")}
                   >
-                    {analyzing === "week" ? (
+                    {satStream.isLoading ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Sparkles className="size-4" />
@@ -310,6 +332,20 @@ export function SatisfactionWorkspace({
               {selRow?.manuallyArchived ? t("restore") : t("archive")}
             </Button>
           </div>
+
+          {/* Live streaming preview while re-analyzing — the summary streams in;
+              the full analysis below reloads once it finishes. */}
+          {satStream.isLoading && (
+            <div className="rounded-xl border border-cyan/25 bg-cyan/[0.04] p-4">
+              <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("analyzing")}
+              </p>
+              <p className="text-sm leading-7 text-foreground/85">
+                {satStream.object?.summary ?? "…"}
+              </p>
+            </div>
+          )}
 
           {/* Results */}
           {detail.analysis && (

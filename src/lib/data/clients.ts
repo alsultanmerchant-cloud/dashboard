@@ -19,6 +19,43 @@ export async function listClientOptions(orgId: string) {
   return data ?? [];
 }
 
+// Per-client search keywords for pickers: the names by which a human might look
+// a client up — its project names + codes, WhatsApp group names, contract codes
+// + the original sheet name, and the legacy external code. Lets the satisfaction
+// picker resolve a client by ANY identifier (project / group / contract), not
+// just its display name. Returns clientId → space-joined keyword blob.
+export async function getClientSearchKeywords(orgId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabaseAdmin
+    .from("clients")
+    .select(
+      // Pin the wa_group_links FK (2nd relationship via suggested_client_id
+      // → PGRST201). See [[feedback_postgrest_ambiguous_embeds]].
+      "id, external_id, projects(name, project_code), wa_group_links!wa_group_links_client_id_fkey(chat_name), contracts(contract_code, sheet_client_name)",
+    )
+    .eq("organization_id", orgId)
+    .is("merged_into_client_id", null);
+  if (error) throw error;
+
+  type Row = {
+    id: string;
+    external_id: string | null;
+    projects: { name: string | null; project_code: string | null }[] | null;
+    wa_group_links: { chat_name: string | null }[] | null;
+    contracts: { contract_code: string | null; sheet_client_name: string | null }[] | null;
+  };
+
+  const out = new Map<string, string>();
+  for (const r of (data ?? []) as unknown as Row[]) {
+    const parts: (string | null)[] = [r.external_id];
+    for (const p of r.projects ?? []) parts.push(p.name, p.project_code);
+    for (const g of r.wa_group_links ?? []) parts.push(g.chat_name);
+    for (const c of r.contracts ?? []) parts.push(c.contract_code, c.sheet_client_name);
+    const blob = parts.filter(Boolean).join(" ").trim();
+    if (blob) out.set(r.id, blob);
+  }
+  return out;
+}
+
 export async function listClients(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("clients")
@@ -172,17 +209,24 @@ export type MergeClient = {
   contracts: number;
   groups: number;
   projects: number;
+  // Cross-surface names that identify the same company: project names (odoo) /
+  // WhatsApp group names (sheet). Fed to the matcher so brand-only-in-project /
+  // group splits (e.g. «lip luster») are detected. See [[project_clients_centralization]].
+  aliases: string[];
 };
 
 export async function getClientMergeData(orgId: string): Promise<{
   sheetClients: MergeClient[];
   odooClients: MergeClient[];
 }> {
-  // All non-merged clients with their cross-module counts in one pass.
+  // All non-merged clients with their cross-module counts AND the names of
+  // their projects / groups (used as matcher aliases) in one pass. Pin the
+  // wa_group_links FK — it has a 2nd relationship (suggested_client_id) so an
+  // implicit embed fails with PGRST201. See [[feedback_postgrest_ambiguous_embeds]].
   const { data, error } = await supabaseAdmin
     .from("clients")
     .select(
-      "id, name, external_id, external_source, contracts(count), wa_group_links(count), projects(count)",
+      "id, name, external_id, external_source, contracts(count), projects(name), wa_group_links!wa_group_links_client_id_fkey(chat_name)",
     )
     .eq("organization_id", orgId)
     .is("merged_into_client_id", null)
@@ -195,18 +239,27 @@ export async function getClientMergeData(orgId: string): Promise<{
     external_id: string | null;
     external_source: string | null;
     contracts: { count: number }[] | null;
-    wa_group_links: { count: number }[] | null;
-    projects: { count: number }[] | null;
+    projects: { name: string | null }[] | null;
+    wa_group_links: { chat_name: string | null }[] | null;
   };
-  const map = (r: Row): MergeClient => ({
-    id: r.id,
-    name: r.name,
-    external_id: r.external_id,
-    external_source: r.external_source,
-    contracts: r.contracts?.[0]?.count ?? 0,
-    groups: r.wa_group_links?.[0]?.count ?? 0,
-    projects: r.projects?.[0]?.count ?? 0,
-  });
+  const map = (r: Row): MergeClient => {
+    const projectNames = (r.projects ?? []).map((p) => p.name).filter((n): n is string => !!n);
+    const groupNames = (r.wa_group_links ?? [])
+      .map((g) => g.chat_name)
+      .filter((n): n is string => !!n);
+    return {
+      id: r.id,
+      name: r.name,
+      external_id: r.external_id,
+      external_source: r.external_source,
+      contracts: r.contracts?.[0]?.count ?? 0,
+      groups: groupNames.length,
+      projects: projectNames.length,
+      // Odoo clients carry the delivery PROJECT names; sheet clients carry the
+      // WhatsApp GROUP names — the surfaces where the shared brand actually lives.
+      aliases: r.external_source === "odoo" ? projectNames : groupNames,
+    };
+  };
 
   const rows = (data ?? []) as unknown as Row[];
   const sheetClients = rows

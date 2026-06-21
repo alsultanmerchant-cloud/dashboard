@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { experimental_useObject as useObject } from "@ai-sdk/react";
 import {
   Sparkles,
   RefreshCw,
@@ -21,7 +23,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { InsightsResult, StoredInsightRun } from "@/lib/ai-insights-schema";
+import {
+  InsightSectionSchemas,
+  type InsightSection,
+  type InsightsResult,
+  type StoredInsightRun,
+} from "@/lib/ai-insights-schema";
 
 const HEALTH_CONFIG = {
   excellent: { label: "ممتاز", cls: "bg-green-dim text-cc-green border-cc-green/20" },
@@ -115,21 +122,61 @@ function SectionHeader({
   icon: Icon,
   title,
   hint,
+  action,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   hint?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-baseline justify-between">
+    <div className="flex items-baseline justify-between gap-2">
       <div className="flex items-center gap-2">
         <Icon className="size-3.5 text-muted-foreground" />
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </p>
       </div>
-      {hint ? <span className="text-[10px] text-muted-foreground">{hint}</span> : null}
+      <div className="flex items-center gap-2">
+        {hint ? <span className="text-[10px] text-muted-foreground">{hint}</span> : null}
+        {action}
+      </div>
     </div>
+  );
+}
+
+// Per-section streaming re-analyze. Streams `streamObject` server-side (fresh
+// signal pack each click → live data); the nested array cards aren't safe to
+// render from a partial object, so we show a spinner while streaming and apply
+// the full validated section on finish (then router.refresh reconciles).
+function ReanalyzeButton({
+  section,
+  onApplied,
+  disabled,
+}: {
+  section: InsightSection;
+  onApplied: (obj: Partial<InsightsResult>) => void;
+  disabled?: boolean;
+}) {
+  const { submit, isLoading, error } = useObject({
+    api: `/api/insights/section/${section}`,
+    schema: InsightSectionSchemas[section],
+    onFinish: ({ object }) => {
+      if (object) onApplied(object as Partial<InsightsResult>);
+    },
+  });
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => submit({})}
+      disabled={disabled || isLoading}
+      title={error ? "تعذّر تحليل هذا القسم — أعد المحاولة" : "إعادة تحليل هذا القسم"}
+      className={cn("h-6 gap-1 px-2 text-[10px] text-muted-foreground", error && "text-cc-red")}
+    >
+      <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
+      {isLoading ? "يحلل…" : "إعادة تحليل"}
+    </Button>
   );
 }
 
@@ -154,6 +201,27 @@ export function AiAnalysisPanel({
   );
   const [model, setModel] = useState<string | null>(initialInsight?.model ?? null);
   const [wasCached, setWasCached] = useState<boolean>(false);
+  const router = useRouter();
+
+  // Apply a re-analyzed section (full validated object) onto local state, then
+  // reconcile with the freshly-persisted run via router.refresh().
+  const applyInsightSection = useCallback(
+    (obj: Partial<InsightsResult>) => {
+      setData((prev) => (prev ? { ...prev, ...obj } : prev));
+      router.refresh();
+    },
+    [router],
+  );
+
+  // The summary is a plain string, so it's safe to stream its text live (the
+  // array-heavy sections use the spinner-then-swap ReanalyzeButton instead).
+  const summaryObj = useObject({
+    api: "/api/insights/section/summary",
+    schema: InsightSectionSchemas.summary,
+    onFinish: ({ object }) => {
+      if (object) applyInsightSection(object as Partial<InsightsResult>);
+    },
+  });
 
   const fetchInsights = useCallback(async (force = false) => {
     setLoading(true);
@@ -180,15 +248,7 @@ export function AiAnalysisPanel({
     }
   }, []);
 
-  // A freshly-taught instruction marks the stored run stale (migration 0197).
-  // Regenerate once on mount so the new lesson is reflected without a click.
-  const staleHandled = useRef(false);
-  useEffect(() => {
-    if (initialInsight?.stale && !staleHandled.current) {
-      staleHandled.current = true;
-      fetchInsights(false);
-    }
-  }, [initialInsight?.stale, fetchInsights]);
+  // NOTE: no auto-run on mount — analysis runs only when the user clicks.
 
   const health = data ? HEALTH_CONFIG[data.overallHealth] : null;
 
@@ -309,14 +369,29 @@ export function AiAnalysisPanel({
           {/* executive summary */}
           <Card className="border-cyan/20 bg-cyan/[0.03]">
             <CardContent className="p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="size-3.5 text-cyan" />
-                <span className="text-xs font-semibold text-cyan uppercase tracking-wider">
-                  الملخص التنفيذي
-                </span>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-3.5 text-cyan" />
+                  <span className="text-xs font-semibold text-cyan uppercase tracking-wider">
+                    الملخص التنفيذي
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => summaryObj.submit({})}
+                  disabled={loading || summaryObj.isLoading}
+                  className="h-6 gap-1 px-2 text-[10px] text-muted-foreground"
+                  title="إعادة تحليل الملخص"
+                >
+                  <RefreshCw className={cn("size-3", summaryObj.isLoading && "animate-spin")} />
+                  {summaryObj.isLoading ? "يحلل…" : "إعادة تحليل"}
+                </Button>
               </div>
-              <p className="text-sm leading-7 text-foreground/90">
-                {data.executiveSummary}
+              <p className={cn("text-sm leading-7 text-foreground/90", summaryObj.isLoading && "animate-pulse")}>
+                {summaryObj.isLoading
+                  ? summaryObj.object?.executiveSummary ?? data.executiveSummary
+                  : data.executiveSummary}
               </p>
             </CardContent>
           </Card>
@@ -328,6 +403,7 @@ export function AiAnalysisPanel({
                 icon={Target}
                 title="أجندة الرئيس التنفيذي"
                 hint={`${data.topPriorities.length} أولوية`}
+                action={<ReanalyzeButton section="priorities" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="space-y-2">
                 {data.topPriorities.map((p, i) => {
@@ -368,7 +444,12 @@ export function AiAnalysisPanel({
           {/* delivery reliability trend */}
           {data.deliveryTrend && (
             <div className="space-y-3">
-              <SectionHeader icon={Activity} title="موثوقية التسليم" hint="هذا الشهر مقابل السابق" />
+              <SectionHeader
+                icon={Activity}
+                title="موثوقية التسليم"
+                hint="هذا الشهر مقابل السابق"
+                action={<ReanalyzeButton section="delivery" onApplied={applyInsightSection} disabled={loading} />}
+              />
               {(() => {
                 const t = data.deliveryTrend!;
                 const tr = TREND_CONFIG[t.direction];
@@ -412,6 +493,7 @@ export function AiAnalysisPanel({
                 icon={ShieldAlert}
                 title="عملاء في منطقة الخطر"
                 hint={`${data.clientsAtRisk.length} عميل`}
+                action={<ReanalyzeButton section="clients" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="space-y-2">
                 {data.clientsAtRisk.map((c, i) => (
@@ -442,6 +524,7 @@ export function AiAnalysisPanel({
                 icon={Layers}
                 title="اختناقات المراحل"
                 hint="مهام عالقة في مرحلة واحدة"
+                action={<ReanalyzeButton section="operations" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 {data.stageBottlenecks.map((b, i) => (
@@ -475,7 +558,11 @@ export function AiAnalysisPanel({
           {/* service health */}
           {data.serviceHealth.length > 0 && (
             <div className="space-y-3">
-              <SectionHeader icon={Activity} title="صحة الخدمات" />
+              <SectionHeader
+                icon={Activity}
+                title="صحة الخدمات"
+                action={<ReanalyzeButton section="operations" onApplied={applyInsightSection} disabled={loading} />}
+              />
               <div className="grid gap-3 sm:grid-cols-3">
                 {data.serviceHealth.map((s, i) => {
                   const tone =
@@ -522,6 +609,7 @@ export function AiAnalysisPanel({
                 icon={Users}
                 title="نقاط ضغط الفريق"
                 hint="الصمت = صحي"
+                action={<ReanalyzeButton section="operations" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 {data.teamHotspots.map((t, i) => (
@@ -553,6 +641,7 @@ export function AiAnalysisPanel({
                 icon={UserCheck}
                 title="أداء الفريق"
                 hint={`${data.peoplePerformance.length} موظف`}
+                action={<ReanalyzeButton section="people" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 {data.peoplePerformance.map((p, i) => {
@@ -629,6 +718,7 @@ export function AiAnalysisPanel({
                 icon={Zap}
                 title="مكاسب سريعة"
                 hint="قابلة للتنفيذ هذا الأسبوع"
+                action={<ReanalyzeButton section="quickWins" onApplied={applyInsightSection} disabled={loading} />}
               />
               <div className="space-y-2">
                 {data.quickWins.map((q, i) => (

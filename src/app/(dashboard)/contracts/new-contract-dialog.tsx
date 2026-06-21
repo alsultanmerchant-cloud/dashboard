@@ -14,7 +14,11 @@ import { ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { createContractAction } from "./_actions";
+import {
+  createContractAction,
+  loadNewContractOptionsAction,
+  type NewContractOptions,
+} from "./_actions";
 
 export type ClientOption = {
   id: string;
@@ -25,35 +29,47 @@ export type PackageOption = { id: string; name_ar: string };
 export type TypeOption = { id: string; key: string; label: string };
 export type AmOption = { id: string; full_name: string };
 
-export function NewContractButton({
-  clients,
-  packages,
-  contractTypes,
-  accountManagers,
-}: {
-  clients: ClientOption[];
-  packages: PackageOption[];
-  contractTypes: TypeOption[];
-  accountManagers: AmOption[];
-}) {
+export function NewContractButton() {
   const t = useTranslations("ContractsPage");
   const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<NewContractOptions | null>(null);
+  const [loadingOptions, startLoadingOptions] = useTransition();
+
+  function openDialog() {
+    setOpen(true);
+    if (options || loadingOptions) return;
+    startLoadingOptions(async () => {
+      const result = await loadNewContractOptionsAction();
+      if ("error" in result) {
+        toast.error(result.error);
+        setOpen(false);
+        return;
+      }
+      setOptions(result.options);
+    });
+  }
+
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openDialog}
+        disabled={loadingOptions}
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-cyan/30 bg-cyan-dim px-3 text-xs font-medium text-cyan hover:bg-cyan-dim/80 transition-colors"
       >
-        <Plus className="size-3.5" />
+        {loadingOptions ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <Plus className="size-3.5" />
+        )}
         {t("newDialog.openButton")}
       </button>
-      {open && (
+      {open && options && (
         <NewContractDialog
-          clients={clients}
-          packages={packages}
-          contractTypes={contractTypes}
-          accountManagers={accountManagers}
+          clients={options.clients}
+          packages={options.packages}
+          contractTypes={options.contractTypes}
+          accountManagers={options.accountManagers}
           onClose={() => setOpen(false)}
         />
       )}

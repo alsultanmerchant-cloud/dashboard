@@ -138,18 +138,19 @@ export async function bulkMergeHighConfidenceAction(input: {
   const min = Math.min(1, Math.max(0.7, input.minScore || 0.85));
 
   const { getClientMergeData } = await import("@/lib/data/clients");
-  const { bestClientMatch } = await import("@/lib/match/client-match");
+  const { bestClientMatch, isPlaceholderClient } = await import("@/lib/match/client-match");
   const { sheetClients, odooClients } = await getClientMergeData(session.orgId);
   const odooById = new Map(odooClients.map((o) => [o.id, o]));
 
   // Build the merge list: best >= min, unambiguous (lead >= 0.05 over 2nd or
-  // an exact/alias 0.95+), and the target actually has a project.
+  // an exact/alias 0.95+), the target actually has a project, and the target is
+  // not a catch-all placeholder.
   const plan: Array<{ source: string; target: string; label: string }> = [];
   for (const s of sheetClients) {
     const { best, secondScore } = bestClientMatch(s, odooClients);
     if (!best || best.score < min) continue;
     const tgt = odooById.get(best.client.id);
-    if (!tgt || tgt.projects <= 0) continue;
+    if (!tgt || tgt.projects <= 0 || isPlaceholderClient(tgt.name)) continue;
     const unambiguous = best.score >= 0.95 || best.score - secondScore >= 0.05;
     if (!unambiguous) continue;
     plan.push({ source: s.id, target: best.client.id, label: `${s.name} → ${tgt.name}` });
@@ -203,7 +204,7 @@ export async function previewBulkMergeAction(input: {
   }
   const min = Math.min(1, Math.max(0.7, input.minScore || 0.85));
   const { getClientMergeData } = await import("@/lib/data/clients");
-  const { bestClientMatch } = await import("@/lib/match/client-match");
+  const { bestClientMatch, isPlaceholderClient } = await import("@/lib/match/client-match");
   const { sheetClients, odooClients } = await getClientMergeData(session.orgId);
   const odooById = new Map(odooClients.map((o) => [o.id, o]));
   const pairs: Array<{ from: string; to: string; score: number }> = [];
@@ -211,7 +212,7 @@ export async function previewBulkMergeAction(input: {
     const { best, secondScore } = bestClientMatch(s, odooClients);
     if (!best || best.score < min) continue;
     const tgt = odooById.get(best.client.id);
-    if (!tgt || tgt.projects <= 0) continue;
+    if (!tgt || tgt.projects <= 0 || isPlaceholderClient(tgt.name)) continue;
     if (!(best.score >= 0.95 || best.score - secondScore >= 0.05)) continue;
     pairs.push({ from: s.name, to: tgt.name, score: Math.round(best.score * 100) / 100 });
   }

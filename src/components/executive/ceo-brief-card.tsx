@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { experimental_useObject as useObject } from "@ai-sdk/react";
+import type { DeepPartial } from "ai";
 import {
   Sparkles,
   RefreshCw,
@@ -20,9 +23,15 @@ import { Explained, MetricInfo } from "@/components/metric-info";
 import type { BriefChange } from "@/lib/data/ceo-brief-signals";
 import {
   applyBriefPatch,
+  SECTION_SCHEMA,
   type CeoBriefResult,
+  type CeoBriefRecommendation,
   type StoredCeoBrief,
+  type TrajectoryAi,
+  type RisksAi,
+  type ActionsAi,
 } from "@/lib/ceo-brief-schema";
+import { applyTrajectory, applyActions, overlayRiskNotes } from "@/lib/ceo-brief/merge";
 import {
   BRIEF_PATCHED_EVENT,
   RISK_DISMISSED_EVENT,
@@ -50,6 +59,14 @@ const CATEGORY = {
 
 type T = ReturnType<typeof useTranslations>;
 
+// One section's streaming re-analyze controller, surfaced to BriefBody.
+interface Reanalyze<TObj> {
+  object: DeepPartial<TObj> | undefined;
+  isLoading: boolean;
+  error: Error | undefined;
+  run: () => void;
+}
+
 function changeLabel(c: BriefChange, t: T): string {
   return c.labelKey === "service"
     ? t("changes.service", { name: c.serviceName ?? "" })
@@ -62,31 +79,73 @@ function changeDelta(c: BriefChange, t: T): string {
   return `${sign}${c.value} ${t(`units.${c.unit}`)}`;
 }
 
+/** Small "re-analyze this section" button shown in each section header. */
+function ReanalyzeButton({
+  ctl,
+  t,
+  disabled,
+}: {
+  ctl: Pick<Reanalyze<unknown>, "isLoading" | "run">;
+  t: T;
+  disabled?: boolean;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={ctl.run}
+      disabled={disabled || ctl.isLoading}
+      className="h-7 gap-1.5 text-[11px] text-muted-foreground"
+    >
+      <RefreshCw className={cn("size-3", ctl.isLoading && "animate-spin")} />
+      {ctl.isLoading ? t("reanalyzingSection") : t("reanalyzeSection")}
+    </Button>
+  );
+}
+
 /** Numbered section wrapper for the executive brief questions. */
 function QSection({
   n,
   title,
+  action,
+  error,
   children,
 }: {
   n: number;
   title: string;
+  action?: React.ReactNode;
+  error?: string | null;
   children: React.ReactNode;
 }) {
   return (
     <section>
-      <div className="mb-3 flex items-center gap-2.5">
-        <span className="flex size-6 items-center justify-center rounded-full bg-cyan-dim text-xs font-bold text-cyan tabular-nums">
-          {n}
-        </span>
-        <h3 className="text-sm font-bold">{title}</h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-6 items-center justify-center rounded-full bg-cyan-dim text-xs font-bold text-cyan tabular-nums">
+            {n}
+          </span>
+          <h3 className="text-sm font-bold">{title}</h3>
+        </div>
+        {action}
       </div>
+      {error && (
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] text-cc-red">
+          <AlertTriangle className="size-3" />
+          {error}
+        </p>
+      )}
       {children}
     </section>
   );
 }
 
-function RecommendationsList({ data, t }: { data: CeoBriefResult; t: T }) {
-  const recommendations = data.recommendations ?? [];
+function RecommendationsList({
+  recommendations,
+  t,
+}: {
+  recommendations: CeoBriefRecommendation[];
+  t: T;
+}) {
   if (recommendations.length === 0) {
     return (
       <p className="rounded-xl bg-soft-1/40 px-4 py-5 text-center text-xs text-muted-foreground">
@@ -123,17 +182,59 @@ function RecommendationsList({ data, t }: { data: CeoBriefResult; t: T }) {
   );
 }
 
-function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
+function BriefBody({
+  data,
+  t,
+  traj,
+  risksCtl,
+  acts,
+  busy,
+}: {
+  data: CeoBriefResult;
+  t: T;
+  traj: Reanalyze<TrajectoryAi>;
+  risksCtl: Reanalyze<RisksAi>;
+  acts: Reanalyze<ActionsAi>;
+  busy: boolean;
+}) {
   const v = VERDICT[data.verdict];
   const VIcon = v.icon;
   // Tolerate older/partial cached briefs that predate a field.
   const changes = data.changes ?? [];
   const risks = data.risks ?? [];
-  const recommendations = data.recommendations ?? [];
+
+  // Streamed partials override the persisted value ONLY while that section is
+  // re-analyzing; once finished, the stored `data` (updated in onFinish) is the
+  // source of truth so it never fights an inline edit made afterwards.
+  const headline = traj.isLoading ? traj.object?.headline ?? data.headline : data.headline;
+
+  const streamedRiskNote = new Map<string, string>();
+  if (risksCtl.isLoading) {
+    for (const n of risksCtl.object?.riskNotes ?? []) {
+      if (n?.id && typeof n.interpretation === "string") streamedRiskNote.set(n.id, n.interpretation);
+    }
+  }
+
+  const bottomLine = acts.isLoading ? acts.object?.bottomLine ?? data.bottomLine : data.bottomLine;
+  let recommendations: CeoBriefRecommendation[] = data.recommendations ?? [];
+  if (acts.isLoading && acts.object?.recommendations) {
+    // Overlay streamed action/owner by index onto the stable list, guarding holes.
+    const streamed = acts.object.recommendations;
+    recommendations = recommendations.map((rec, i) => ({
+      ...rec,
+      action: typeof streamed[i]?.action === "string" ? (streamed[i]!.action as string) : rec.action,
+      owner: typeof streamed[i]?.owner === "string" ? (streamed[i]!.owner as string) : rec.owner,
+    }));
+  }
 
   return (
     <div className="space-y-7">
-      <QSection n={1} title={t("q1")}>
+      <QSection
+        n={1}
+        title={t("q1")}
+        error={traj.error ? t("sectionError") : null}
+        action={<ReanalyzeButton ctl={traj} t={t} disabled={busy} />}
+      >
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <Explained text={t("q1ScoreHelp")}>
             <div
@@ -160,7 +261,12 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
                 {t(`verdict.${data.verdict}`)}
               </span>
             </Explained>
-            <p className="text-sm leading-7 text-foreground/90" data-brief-field="headline">{data.headline}</p>
+            <p
+              className={cn("text-sm leading-7 text-foreground/90", traj.isLoading && "animate-pulse")}
+              data-brief-field="headline"
+            >
+              {headline}
+            </p>
           </div>
         </div>
 
@@ -189,7 +295,12 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
 
       <div className="border-t border-soft/60" />
 
-      <QSection n={2} title={t("q2")}>
+      <QSection
+        n={2}
+        title={t("q2")}
+        error={risksCtl.error ? t("sectionError") : null}
+        action={<ReanalyzeButton ctl={risksCtl} t={t} disabled={busy} />}
+      >
         {risks.length === 0 ? (
           <p className="rounded-xl bg-soft-1/40 px-4 py-5 text-center text-xs text-muted-foreground">
             {t("noRisks")}
@@ -198,6 +309,7 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
           <div className="space-y-2">
             {risks.map((r) => {
               const sev = SEVERITY[r.severity];
+              const interpretation = streamedRiskNote.get(r.id) ?? r.interpretation;
               return (
                 <div
                   key={r.id}
@@ -213,8 +325,14 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
                       <MetricInfo text={t("riskHelp")} label={t(`severity.${r.severity}`)} />
                     </div>
                     <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{r.metric}</p>
-                    <p className="mt-1.5 text-xs leading-relaxed text-foreground/85" data-brief-field={`risk:${r.id}`}>
-                      {r.interpretation}
+                    <p
+                      className={cn(
+                        "mt-1.5 text-xs leading-relaxed text-foreground/85",
+                        risksCtl.isLoading && "animate-pulse",
+                      )}
+                      data-brief-field={`risk:${r.id}`}
+                    >
+                      {interpretation}
                     </p>
                   </div>
                   {r.href && (
@@ -235,18 +353,28 @@ function BriefBody({ data, t }: { data: CeoBriefResult; t: T }) {
 
       <div className="border-t border-soft/60" />
 
-      <QSection n={3} title={t("q3")}>
+      <QSection
+        n={3}
+        title={t("q3")}
+        error={acts.error ? t("sectionError") : null}
+        action={<ReanalyzeButton ctl={acts} t={t} disabled={busy} />}
+      >
         <div className="space-y-3">
-          {data.bottomLine && (
+          {bottomLine && (
             <div className="rounded-xl border border-cyan/25 bg-cyan/[0.05] p-3.5">
               <p className="text-[11px] font-bold uppercase tracking-wide text-cyan">
                 {t("topPriority")}
               </p>
-              <p className="mt-1 text-sm leading-7 text-foreground/90" data-brief-field="bottomLine">{data.bottomLine}</p>
+              <p
+                className={cn("mt-1 text-sm leading-7 text-foreground/90", acts.isLoading && "animate-pulse")}
+                data-brief-field="bottomLine"
+              >
+                {bottomLine}
+              </p>
             </div>
           )}
-          {recommendations.length > 0 && (
-            <RecommendationsList data={data} t={t} />
+          {(recommendations.length > 0 || acts.isLoading) && (
+            <RecommendationsList recommendations={recommendations} t={t} />
           )}
         </div>
       </QSection>
@@ -267,12 +395,66 @@ function BriefSkeleton() {
 export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeoBrief | null }) {
   const t = useTranslations("Executive.brief");
   const locale = useLocale();
+  const router = useRouter();
   const [data, setData] = useState<CeoBriefResult | null>(initialBrief?.result ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(
     initialBrief?.completedAt ? new Date(initialBrief.completedAt) : null,
   );
+
+  // Per-section streaming re-analyze. Each hook streams its section's prose; the
+  // server persists it on finish, and onFinish here merges the final object into
+  // local state so the card stays in sync without a full reload. Errors are
+  // isolated per section (one failing leaves the other two intact).
+  // Each onFinish: optimistically apply the streamed AI prose for an instant
+  // update, then router.refresh() to reconcile with the freshly-persisted brief
+  // (which also carries the re-analyzed section's fresh code-computed fields —
+  // statusPct/changes/risk set — that the stream itself doesn't carry).
+  const trajObj = useObject({
+    api: "/api/ceo-brief/section/trajectory",
+    schema: SECTION_SCHEMA.trajectory,
+    onFinish: ({ object }) => {
+      if (!object) return;
+      setData((prev) => (prev ? applyTrajectory(prev, object) : prev));
+      router.refresh();
+    },
+  });
+  const risksObj = useObject({
+    api: "/api/ceo-brief/section/risks",
+    schema: SECTION_SCHEMA.risks,
+    onFinish: ({ object }) => {
+      if (!object) return;
+      setData((prev) =>
+        prev ? { ...prev, risks: overlayRiskNotes(prev.risks ?? [], object.riskNotes) } : prev,
+      );
+      router.refresh();
+    },
+  });
+  const actsObj = useObject({
+    api: "/api/ceo-brief/section/actions",
+    schema: SECTION_SCHEMA.actions,
+    onFinish: ({ object }) => {
+      if (!object) return;
+      setData((prev) => (prev ? applyActions(prev, object) : prev));
+      router.refresh();
+    },
+  });
+
+  const sectionBusy = trajObj.isLoading || risksObj.isLoading || actsObj.isLoading;
+
+  // After a section re-analyze persists + router.refresh(), the parent re-renders
+  // with a fresh initialBrief carrying the re-computed code fields (statusPct /
+  // changes / risk set). Adopt it when idle so the optimistic prose-only update
+  // is replaced by the authoritative persisted brief. Guarded so it never
+  // clobbers an in-flight stream or a pending full refresh.
+  const briefSig = JSON.stringify(initialBrief?.result ?? null);
+  useEffect(() => {
+    if (sectionBusy || loading) return;
+    setData((prev) => (JSON.stringify(prev) === briefSig ? prev : initialBrief?.result ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [briefSig, sectionBusy, loading]);
+
   // The global dashboard assistant broadcasts inline edits; apply them to local
   // state so the card re-renders instantly (the server already persisted them).
   useEffect(() => {
@@ -328,15 +510,9 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
     }
   }, [t]);
 
-  // A freshly-taught instruction marks the stored brief stale (migration 0197).
-  // Regenerate once on mount so the new lesson is reflected without a click.
-  const staleHandled = useRef(false);
-  useEffect(() => {
-    if (initialBrief?.stale && !staleHandled.current) {
-      staleHandled.current = true;
-      refresh(false);
-    }
-  }, [initialBrief?.stale, refresh]);
+  // NOTE: we intentionally do NOT auto-generate on mount (even when the brief is
+  // stale after a taught lesson). Generation only runs when the user clicks
+  // "refresh" / "force" or a per-section "re-analyze" button.
 
   const timeFmt = lastUpdated
     ? new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
@@ -370,7 +546,7 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
             variant="outline"
             size="sm"
             onClick={() => refresh(false)}
-            disabled={loading}
+            disabled={loading || sectionBusy}
             className="h-8 gap-2 text-xs"
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -381,7 +557,7 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
               variant="ghost"
               size="sm"
               onClick={() => refresh(true)}
-              disabled={loading}
+              disabled={loading || sectionBusy}
               className="h-8 text-[11px] text-muted-foreground"
               title={t("forceTitle")}
             >
@@ -419,7 +595,16 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
         </div>
       )}
 
-      {!loading && data && <BriefBody data={data} t={t} />}
+      {!loading && data && (
+        <BriefBody
+          data={data}
+          t={t}
+          traj={{ object: trajObj.object, isLoading: trajObj.isLoading, error: trajObj.error, run: () => trajObj.submit({}) }}
+          risksCtl={{ object: risksObj.object, isLoading: risksObj.isLoading, error: risksObj.error, run: () => risksObj.submit({}) }}
+          acts={{ object: actsObj.object, isLoading: actsObj.isLoading, error: actsObj.error, run: () => actsObj.submit({}) }}
+          busy={loading || sectionBusy}
+        />
+      )}
     </section>
   );
 }

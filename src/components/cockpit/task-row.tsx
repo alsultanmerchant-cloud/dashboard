@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { Flag } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
-import { TASK_STAGE_LABELS, TASK_STAGE_TONES, type TaskStage } from "@/lib/labels";
+import {
+  TASK_STAGE_LABELS,
+  TASK_STAGE_LABELS_EN,
+  TASK_STAGE_TONES,
+  type TaskStage,
+} from "@/lib/labels";
 
 // Strip emoji + keycap sequences (e.g. «… 4 مقالات 1️⃣») and collapse spaces so
 // imported Odoo titles read cleanly. Keeps Arabic + latin + digits + dashes.
@@ -16,14 +22,13 @@ export function cleanTaskTitle(raw: string): string {
     .trim();
 }
 
-const stageLabel = (s: string) => TASK_STAGE_LABELS[s as TaskStage] ?? s;
 const stageTone = (s: string) => TASK_STAGE_TONES[s as TaskStage] ?? "bg-soft-1 text-muted-foreground border-border";
 
-const PRIORITY: Record<string, { chip: string; flag: string; label: string }> = {
-  urgent: { chip: "bg-red-dim text-cc-red", flag: "text-cc-red", label: "عاجل" },
-  high: { chip: "bg-amber-dim text-amber", flag: "text-amber", label: "مرتفعة" },
-  medium: { chip: "bg-cyan-dim text-cyan", flag: "text-cyan", label: "متوسطة" },
-  low: { chip: "bg-soft-2 text-muted-foreground", flag: "text-muted-foreground", label: "منخفضة" },
+const PRIORITY: Record<string, { chip: string; flag: string }> = {
+  urgent: { chip: "bg-red-dim text-cc-red", flag: "text-cc-red" },
+  high: { chip: "bg-amber-dim text-amber", flag: "text-amber" },
+  medium: { chip: "bg-cyan-dim text-cyan", flag: "text-cyan" },
+  low: { chip: "bg-soft-2 text-muted-foreground", flag: "text-muted-foreground" },
 };
 
 const ACCENT: Record<string, string> = {
@@ -57,7 +62,14 @@ export function TaskRow({
   accent = "none",
   trailing,
 }: TaskRowProps) {
+  const locale = useLocale();
+  const t = useTranslations("AgentCockpit");
   const pri = priority ? PRIORITY[priority] ?? PRIORITY.medium : null;
+  const priorityLabel = priority ? t(`priority.${priority}`) : null;
+  const stageLabel =
+    locale === "en"
+      ? TASK_STAGE_LABELS_EN[stage as TaskStage] ?? stage
+      : TASK_STAGE_LABELS[stage as TaskStage] ?? stage;
   const clean = cleanTaskTitle(title);
   return (
     <Link
@@ -72,7 +84,7 @@ export function TaskRow({
             "flex size-9 shrink-0 items-center justify-center rounded-lg",
             pri ? pri.chip : "bg-soft-2 text-muted-foreground",
           )}
-          title={pri ? `أولوية ${pri.label}` : undefined}
+          title={priorityLabel ? t("priority.title", { priority: priorityLabel }) : undefined}
         >
           <Flag className="size-4" />
         </span>
@@ -97,7 +109,7 @@ export function TaskRow({
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {stage && (
             <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", stageTone(stage))}>
-              {stageLabel(stage)}
+              {stageLabel}
             </span>
           )}
           {trailing}

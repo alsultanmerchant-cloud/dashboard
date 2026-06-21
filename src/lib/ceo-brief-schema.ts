@@ -64,6 +64,37 @@ export const CeoBriefAiSchema = z.object({
 
 export type CeoBriefAi = z.infer<typeof CeoBriefAiSchema>;
 
+// ---- Per-section AI output schemas ---------------------------------------
+// The brief's AI prose is split across the three visual questions so each can
+// be generated / re-analyzed independently and streamed on its own. We reuse
+// the exact field definitions (and their Arabic .describe() text) from
+// CeoBriefAiSchema via .shape, so the per-section output is byte-identical to
+// the monolithic schema — no drift between the streaming and blocking paths.
+// These slices are client-safe (this file imports only zod + a type), so the
+// card can pass SECTION_SCHEMA[section] to experimental_useObject directly.
+export const TrajectoryAiSchema = z.object({ headline: CeoBriefAiSchema.shape.headline }); // Q1
+export const RisksAiSchema = z.object({ riskNotes: CeoBriefAiSchema.shape.riskNotes }); // Q2
+export const ActionsAiSchema = z.object({
+  recommendations: CeoBriefAiSchema.shape.recommendations,
+  bottomLine: CeoBriefAiSchema.shape.bottomLine,
+}); // Q3
+
+export type TrajectoryAi = z.infer<typeof TrajectoryAiSchema>;
+export type RisksAi = z.infer<typeof RisksAiSchema>;
+export type ActionsAi = z.infer<typeof ActionsAiSchema>;
+
+export const SECTION_SCHEMA = {
+  trajectory: TrajectoryAiSchema,
+  risks: RisksAiSchema,
+  actions: ActionsAiSchema,
+} as const;
+
+export type BriefSection = keyof typeof SECTION_SCHEMA;
+export const BRIEF_SECTIONS = ["trajectory", "risks", "actions"] as const;
+export function isBriefSection(v: string): v is BriefSection {
+  return v === "trajectory" || v === "risks" || v === "actions";
+}
+
 // The merged record stored in ceo_brief_runs.result_json and rendered by the
 // dashboard card: code-computed facts + AI narrative woven in.
 export interface CeoBriefRiskRendered extends Omit<BriefRisk, "weight"> {

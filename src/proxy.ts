@@ -11,15 +11,15 @@ export async function proxy(request: NextRequest) {
   const { supabase, response } = createMiddlewareClient(request);
   const { pathname } = request.nextUrl;
 
-  // Refresh session (important for token rotation)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Validates the access token locally against Supabase JWKS when possible,
+  // while still refreshing expired sessions through the cookie adapter.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
 
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   // Not logged in → redirect to login (unless already on a public path)
-  if (!user && !isPublicPath) {
+  if (!userId && !isPublicPath) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);

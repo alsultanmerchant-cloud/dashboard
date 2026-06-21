@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export type UploadBucket = "overdue" | "today" | "this_week" | "later";
@@ -25,7 +26,7 @@ export type UploadQueueRow = {
  * - Upload due = deadline - upload_offset_days_before_deadline (when set).
  * - Buckets are computed in TS against the Asia/Riyadh "today".
  */
-export async function listMyUploadQueue(
+async function _listMyUploadQueue(
   orgId: string,
   employeeId: string,
 ): Promise<UploadQueueRow[]> {
@@ -44,6 +45,7 @@ export async function listMyUploadQueue(
     .eq("task_assignees.role_type", "specialist")
     .eq("task_assignees.employee_id", employeeId)
     .neq("stage", "done")
+    .is("archived_at", null)
     .limit(500);
 
   if (error) throw error;
@@ -124,6 +126,8 @@ export async function listMyUploadQueue(
   rows.sort((a, b) => a.upload_due_date.localeCompare(b.upload_due_date));
   return rows;
 }
+
+export const listMyUploadQueue = cache(_listMyUploadQueue);
 
 function ksaToday(): Date {
   // Convert "now" to Asia/Riyadh and zero the time so all comparisons are date-only.

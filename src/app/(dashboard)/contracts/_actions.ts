@@ -11,6 +11,9 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
+import { listClientOptions } from "@/lib/data/clients";
+import { listContractTypes, listPackages } from "@/lib/data/contracts";
+import { listAccountManagers } from "@/lib/data/employees";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,10 +27,55 @@ function addDaysIso(iso: string, days: number): string {
 }
 
 export type ContractActionState = { ok: true; id?: string } | { error: string };
+export type NewContractOptions = {
+  clients: Array<{ id: string; name: string; external_id: string | null }>;
+  packages: Array<{ id: string; name_ar: string }>;
+  contractTypes: Array<{ id: string; key: string; label: string }>;
+  accountManagers: Array<{ id: string; full_name: string }>;
+};
 
 // Today's date in ISO (UTC) — shared by the hold/installment helpers.
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+export async function loadNewContractOptionsAction(): Promise<
+  { ok: true; options: NewContractOptions } | { error: string }
+> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+
+  const [types, accountManagers, packages, clients] = await Promise.all([
+    listContractTypes(session.orgId),
+    listAccountManagers(session.orgId),
+    listPackages(session.orgId),
+    listClientOptions(session.orgId),
+  ]);
+
+  return {
+    ok: true,
+    options: {
+      clients: clients.map((client) => ({
+        id: client.id,
+        name: client.name,
+        external_id: client.external_id,
+      })),
+      packages: packages.map((pkg) => ({ id: pkg.id, name_ar: pkg.name_ar })),
+      contractTypes: types.map((type) => ({
+        id: type.id,
+        key: type.key,
+        label: type.name_ar,
+      })),
+      accountManagers: accountManagers.map((manager) => ({
+        id: manager.id,
+        full_name: manager.full_name,
+      })),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

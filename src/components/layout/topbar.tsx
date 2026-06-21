@@ -146,11 +146,8 @@ export function Topbar({
             <QuickCreateTrigger className={primaryCreateClass} />
           </div>
 
-          {/* Calendar icon opens an inline mini-calendar popover with
-              day-highlights for the current user's scheduled activities.
-              Replaces the old plain Link to /my-activities so the user can
-              scan their week without leaving the current page. */}
-          <TopbarCalendarPopover className={iconChip} />
+          {/* Calendar shortcut to the current user's scheduled activities. */}
+          <TopbarCalendarPopover className={`sm:rounded-2xl ${iconChip}`} />
 
           <ThemeToggle className={iconChip} />
 

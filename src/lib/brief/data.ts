@@ -151,7 +151,21 @@ export async function buildCeoBriefData(orgId: string): Promise<CeoBriefData> {
       openTasks: r.openTasks,
     }));
 
-  const reviewers = accountability.reviewers
+  // accountability.reviewers is now split into two review stages (manager vs
+  // specialist — see migration 0196 / two-stage review rigor). Flatten both and
+  // dedupe by employee (a person can review at both stages), keeping their
+  // higher rework rate, before picking the worst rubber-stampers.
+  const reviewerById = new Map<string, (typeof accountability.reviewers.managerReview)[number]>();
+  for (const r of [
+    ...accountability.reviewers.managerReview,
+    ...accountability.reviewers.specialistReview,
+  ]) {
+    const prev = reviewerById.get(r.employeeId);
+    if (!prev || (r.reworkAfterPassRate ?? 0) > (prev.reworkAfterPassRate ?? 0)) {
+      reviewerById.set(r.employeeId, r);
+    }
+  }
+  const reviewers = [...reviewerById.values()]
     .filter((r) => r.confidence === "high" && (r.reworkAfterPassRate ?? 0) >= 20)
     .sort((a, b) => (b.reworkAfterPassRate ?? 0) - (a.reworkAfterPassRate ?? 0))
     .slice(0, 3)

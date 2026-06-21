@@ -9,30 +9,31 @@ import {
   getKnowledgeStamp,
   isStaleAgainstKnowledge,
 } from "@/lib/data/ai-knowledge";
+import type { z } from "zod";
 import {
-  CeoBriefAiSchema,
   sanitizeCeoBriefResult,
   type CeoBriefResult,
-  type CeoBriefRiskRendered,
   type StoredCeoBrief,
 } from "@/lib/ceo-brief-schema";
+import {
+  CEO_BRIEF_MODEL,
+  trajectorySection,
+  risksSection,
+  actionsSection,
+  type SectionDef,
+} from "@/lib/ceo-brief/sections";
+import {
+  mergeRisks,
+  applyTrajectory,
+  applyRisks,
+  applyActions,
+} from "@/lib/ceo-brief/merge";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-
-// The CEO brief synthesizes the richest, most connected pack in the app, so it
-// runs on a stronger tier than the shared GEMINI_MODEL — overridable via env,
-// and falls back to the shared model if the id is rejected.
-const CEO_BRIEF_MODEL = process.env.CEO_BRIEF_MODEL ?? "gemini-3.5-flash";
 
 // Clicking "تحديث" (or a second cron pass) within this window returns the
 // cached brief instead of burning a Gemini call. force=true bypasses.
 export const CEO_BRIEF_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-const VERDICT_AR = {
-  improving: "تتحسّن",
-  stable: "مستقرة",
-  declining: "تتراجع",
-} as const;
 
 type BriefRunRow = {
   id: string;
@@ -95,118 +96,107 @@ export async function generateAndStoreCeoBrief(
   const runId = inserted.id as string;
 
   try {
-    const [signals, knowledge] = await Promise.all([
+    const [signals, knowledge, prior] = await Promise.all([
       buildCeoBriefSignals(orgId),
       buildKnowledgeBlock(orgId),
+      getCurrentCeoBrief(orgId), // prior brief → graceful fallback per section
     ]);
+    const priorResult = prior?.result ?? null;
 
-    const facts = {
-      verdict: signals.verdict,
-      verdictArabic: VERDICT_AR[signals.verdict],
-      statusPct: signals.statusPct,
-      grade: signals.grade,
-      changes: signals.changes,
-      risks: signals.risks.map((r) => ({
-        id: r.id,
-        title: r.title,
-        severity: r.severity,
-        metric: r.metric,
-      })),
-      opportunities: signals.opportunities,
-      context: signals.context,
-      dataQuality: signals.dataQuality,
-    };
-
-    // Hard data-quality guardrail: the agency's Odoo-synced data has structural
-    // gaps (no due dates, no snapshot history, no timesheets). Without this, the
-    // model narrates unbacked metrics as confident facts — the #1 source of the
-    // "most analyses are wrong" complaint. Inject the live caveats as rules.
-    const caveats = signals.dataQuality.caveats;
-    const dataQualityBlock = caveats.length
-      ? `\n\n⚠️ قيود جودة البيانات (التزم بها حرفيًا):\n${caveats
-          .map((c) => `- ${c}`)
-          .join("\n")}\n- إن لم يكن الرقم مُعطى صراحةً في الحقائق أدناه، فلا تذكره. الأفضل عدم ذكر مؤشر على أن لا تذكره خاطئًا.`
-      : "";
-
-    const prompt = `أنت رئيس أركان (Chief of Staff) للرئيس التنفيذي لوكالة تسويق سعودية (رواسم).
-الرئيس التنفيذي لا يريد قراءة أرقام كثيرة — يريد إجابات عملية لثلاثة أسئلة فقط:
-١) هل الشركة تتحسّن أم تتراجع؟  ٢) أين الخطر؟  ٣) ماذا أفعل؟
-
-قواعد صارمة:
-- **لا تخترع أي رقم**. الأرقام كلها محسوبة مسبقًا في البيانات أدناه؛ مهمتك الصياغة وربط الأسباب فقط.
-- عربية فصحى، حاسمة وموجزة، موجّهة للقرار. لا تشجيع ولا حشو.
-- لا تعتبر مرحلة "new/جديدة" أو تراكم المهام فيها اختناقًا أو خطرًا أو إجراءً مطلوبًا. في رواسم هذا وضع طبيعي/أثر استيراد من Odoo، وليس مؤشرًا تشغيليًا مهمًا. ممنوع اقتراح "تحريك مهام جديدة" أو تقليل انتظار مرحلة جديدة.${dataQualityBlock}
-
-البيانات (الحقائق المحسوبة):
-\`\`\`json
-${JSON.stringify(facts)}
-\`\`\`
-
-استخدم **context** لتحديد جذور المشكلة وربط النقاط (وليس فقط سردها):
-- worstServices/bestService = أين يتركّز التراجع وأين القوة (مثال: الخدمة الأضعف التزامًا).
-- wip = هل التأخير مزمن (chronicOverdue ٣١-٩٠ يومًا) أم طارئ (freshOverdue)؟
-- satisfaction = الرضا والعملاء المعرّضون للفقد (topChurn) — البُعد التجاري/السمعة.
-- zeroOnTimePerformers/topPerformers/bestClients = أين الخلل البشري وما الذي ينجح.
-- discipline.staleTasks/slaCompliancePct و reworkRate = صحة الانضباط والعملية.
-
-التعليمات:
-- **headline**: جملة واحدة تجيب السؤال الأول وتُحدّد **أين** يتركّز التغيّر (الخدمة/المرحلة)، مستندةً إلى verdictArabic و statusPct و changes و context. مثال: "الوضع التشغيلي ${facts.verdictArabic} عند ${facts.statusPct}% — مدفوعًا بـ… وتتركّز المشكلة في…".
-- **riskNotes**: عنصر واحد لكل خطر في risks بنفس الـ id. interpretation = لماذا هذا خطر وأثره، مع **ربطه بجذر السبب من context** (مثلاً ربط التأخير بالخدمة الأضعف أو بكونه مزمنًا).
-- **recommendations**: خطة عمل من ٤ إلى ٦ بنود **متنوّعة المجالات** تعالج **جذور** المشكلة من risks و context و opportunities معًا — وجّه التركيز للخدمة الأضعف، أنقذ العملاء المعرّضين للفقد (topChurn)، أعد توزيع الحمل (overloaded/underutilized)، تابع التجديدات، عالج فريق zeroOnTimePerformers، واحمِ/استثمر ما ينجح (bestService/topPerformers/bestClients). لكل بند: category، action محدّد، owner (الدور المسؤول).
-- **bottomLine**: جملة واحدة فقط — أهم إجراء يعالج أخطر جذر سبب اليوم.${knowledge ? `\n\n${knowledge}` : ""}`;
-
-    // Prefer the stronger brief model; fall back to the shared model if the id
-    // is rejected (e.g. not yet available on this key).
-    let modelUsed = CEO_BRIEF_MODEL;
-    let object: Awaited<ReturnType<typeof generateObject<typeof CeoBriefAiSchema>>>["object"];
-    try {
-      ({ object } = await generateObject({
-        model: google(CEO_BRIEF_MODEL),
-        schema: CeoBriefAiSchema,
-        maxRetries: 2,
-        prompt,
-      }));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/model|not found|404|unsupported|invalid/i.test(msg) && CEO_BRIEF_MODEL !== GEMINI_MODEL) {
-        console.warn(`[ceo-brief] model "${CEO_BRIEF_MODEL}" rejected (${msg}); falling back to ${GEMINI_MODEL}`);
-        modelUsed = GEMINI_MODEL;
-        ({ object } = await generateObject({
-          model: google(GEMINI_MODEL),
-          schema: CeoBriefAiSchema,
+    // Each of the three visual questions is now its own Gemini call, built from
+    // the per-section prompt. They run in parallel; one failing no longer blanks
+    // the whole brief (the all-or-nothing crash) — a failed section keeps the
+    // prior value and the others still persist. runSection preserves the
+    // CEO_BRIEF_MODEL → GEMINI_MODEL fallback for a rejected model id.
+    async function runSection<S extends z.ZodTypeAny>(
+      def: SectionDef<S>,
+    ): Promise<{ object: z.infer<S>; model: string }> {
+      const prompt = def.buildPrompt(signals, knowledge);
+      try {
+        const { object } = await generateObject({
+          model: google(CEO_BRIEF_MODEL),
+          schema: def.schema,
           maxRetries: 2,
           prompt,
-        }));
-      } else {
+        });
+        return { object: object as z.infer<S>, model: CEO_BRIEF_MODEL };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/model|not found|404|unsupported|invalid/i.test(msg) && CEO_BRIEF_MODEL !== GEMINI_MODEL) {
+          console.warn(`[ceo-brief] model "${CEO_BRIEF_MODEL}" rejected (${msg}); falling back to ${GEMINI_MODEL}`);
+          const { object } = await generateObject({
+            model: google(GEMINI_MODEL),
+            schema: def.schema,
+            maxRetries: 2,
+            prompt,
+          });
+          return { object: object as z.infer<S>, model: GEMINI_MODEL };
+        }
         throw err;
       }
     }
 
-    // Merge code-computed risks with AI notes, keyed by id (robust to ordering).
-    const noteById = new Map(object.riskNotes.map((n) => [n.id, n]));
-    const risks: CeoBriefRiskRendered[] = signals.risks.map((r) => {
-      const note = noteById.get(r.id);
-      const { weight, ...rest } = r;
-      void weight;
-      return { ...rest, interpretation: note?.interpretation ?? r.metric };
-    });
+    const [trajRes, risksRes, actsRes] = await Promise.allSettled([
+      runSection(trajectorySection),
+      runSection(risksSection),
+      runSection(actionsSection),
+    ]);
 
-    const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
-    const result: CeoBriefResult = {
+    // Code-computed skeleton (identical to before); AI prose layered on below,
+    // falling back to the prior brief where a section failed.
+    let result: CeoBriefResult = {
       statusPct: signals.statusPct,
       grade: signals.grade,
       verdict: signals.verdict,
-      headline: oneLine(object.headline),
+      headline: priorResult?.headline ?? "",
       changes: signals.changes,
-      risks,
+      risks: mergeRisks(signals.risks, []),
       criticalEvents: signals.criticalEvents,
       timelineEvents: signals.timelineEvents,
-      recommendations: object.recommendations.map((r) => ({
-        category: r.category,
-        action: oneLine(r.action),
-        owner: oneLine(r.owner),
-      })),
-      bottomLine: oneLine(object.bottomLine),
+      recommendations: priorResult?.recommendations ?? [],
+      bottomLine: priorResult?.bottomLine ?? "",
+    };
+
+    let modelUsed = CEO_BRIEF_MODEL;
+    let anySucceeded = false;
+
+    if (trajRes.status === "fulfilled") {
+      result = applyTrajectory(result, trajRes.value.object);
+      modelUsed = trajRes.value.model;
+      anySucceeded = true;
+    }
+
+    if (risksRes.status === "fulfilled") {
+      result = applyRisks(result, signals.risks, risksRes.value.object);
+      anySucceeded = true;
+    } else if (priorResult?.risks?.length) {
+      // Keep prior interpretations, re-merged onto the CURRENT signal risks.
+      result = applyRisks(result, signals.risks, {
+        riskNotes: priorResult.risks.map((r) => ({ id: r.id, interpretation: r.interpretation })),
+      });
+    }
+
+    if (actsRes.status === "fulfilled") {
+      result = applyActions(result, actsRes.value.object);
+      anySucceeded = true;
+    }
+
+    // Preserve the old failure semantics: only mark the run failed if EVERY
+    // section failed (otherwise we have a usable, partially-fresh brief).
+    if (!anySucceeded) {
+      const rejected = [trajRes, risksRes, actsRes].find(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      );
+      throw rejected?.reason instanceof Error
+        ? rejected.reason
+        : new Error("فشل توليد جميع أقسام الموجز");
+    }
+
+    // snapshot_text parity: the union of the three sections' fact slices.
+    const facts = {
+      ...trajectorySection.pickSignals(signals),
+      ...risksSection.pickSignals(signals),
+      ...actionsSection.pickSignals(signals),
     };
 
     await supabaseAdmin

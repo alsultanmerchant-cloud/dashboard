@@ -30,6 +30,7 @@ export type FilterKey =
   | "done"
   | "mine"
   | "due_today"
+  | "due_week"
   | "behind"
   | "ahead"
   | "critical"
@@ -47,7 +48,7 @@ export type FilterKey =
   | "archived";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
-  "open", "all", "overdue", "done", "mine", "due_today", "behind", "ahead",
+  "open", "all", "overdue", "done", "mine", "due_today", "due_week", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
   "has_start_date", "has_end_date", "no_deadline",
   "unassigned", "over_timesheets", "near_timesheets",
@@ -176,6 +177,22 @@ export function buildTaskFiltersFromParams(
   const active = parseFilterKeys(sp.f, sp.filter);
   const dateFilters = parseDateFilters(sp.d);
   const search = sp.q?.trim() || undefined;
+
+  // "Due this week" drill-down (agent snapshot tile): a planned_date window from
+  // today through the next 7 days. planned_date is the real deadline field
+  // (due_date is empty org-wide) and is RPC-filterable as of migration 0205.
+  // Appended to dateFilters so it composes with `mine`/`open`; the RPC treats
+  // the window as [from, to) → `to` is +8 days.
+  const allDateFilters = (() => {
+    if (!active.has("due_week")) return dateFilters;
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 8);
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const week = { field: "planned_date" as DateField, from: iso(from), to: iso(to) };
+    return dateFilters ? [...dateFilters, week] : [week];
+  })();
   const searchFacets = parseSearchFacets(sp.sf);
 
   const stageFilter: string[] | undefined = (() => {
@@ -213,7 +230,7 @@ export function buildTaskFiltersFromParams(
     projectId: opts.projectId,
     search,
     searchFacets,
-    dateFilters,
+    dateFilters: allDateFilters,
   };
 
   return { filters, activeKeys: active, view };

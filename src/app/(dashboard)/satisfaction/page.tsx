@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listClientOptions } from "@/lib/data/clients";
+import { listClientOptions, getClientSearchKeywords } from "@/lib/data/clients";
 import {
   getSatisfactionRows,
   getClientSatisfactionDetail,
@@ -21,8 +21,9 @@ export default async function SatisfactionPage({
   const selectedId = sp.client ?? null;
   const selectedAnalysisId = sp.analysis ?? null;
 
-  const [clients, rows, detail, execution, financeMap] = await Promise.all([
+  const [clients, keywords, rows, detail, execution, financeMap] = await Promise.all([
     listClientOptions(session.orgId),
+    getClientSearchKeywords(session.orgId),
     getSatisfactionRows(session.orgId),
     selectedId
       ? getClientSatisfactionDetail(session.orgId, selectedId, selectedAnalysisId)
@@ -31,7 +32,13 @@ export default async function SatisfactionPage({
     getClientFinanceMap(session.orgId),
   ]);
 
-  const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
+  // Each option is findable by client name (label) OR any linked identifier —
+  // project / group / contract names (keywords). See [[project_clients_centralization]].
+  const options = clients.map((c) => ({
+    value: c.id as string,
+    label: c.name as string,
+    keywords: keywords.get(c.id as string) ?? null,
+  }));
 
   return (
     <div>

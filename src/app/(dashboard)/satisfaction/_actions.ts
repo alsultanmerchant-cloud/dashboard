@@ -283,7 +283,6 @@ export async function uploadChatImportAction(
 const MapSchema = z.object({
   chatId: z.string().min(3),
   clientId: z.string().uuid().nullable().optional(),
-  projectId: z.string().uuid().nullable().optional(),
   groupKind: z.enum(["client", "technical"]).nullable().optional(),
   isActive: z.boolean().optional(),
 });
@@ -293,7 +292,6 @@ export type MapState = { ok?: true; error?: string };
 export async function mapWaGroupAction(input: {
   chatId: string;
   clientId?: string | null;
-  projectId?: string | null;
   groupKind?: "client" | "technical" | null;
   isActive?: boolean;
 }): Promise<MapState> {
@@ -305,11 +303,10 @@ export async function mapWaGroupAction(input: {
   }
   const parsed = MapSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
-  const { chatId, clientId, projectId, groupKind, isActive } = parsed.data;
+  const { chatId, clientId, groupKind, isActive } = parsed.data;
 
   const update: Record<string, unknown> = {};
   if (clientId !== undefined) update.client_id = clientId;
-  if (projectId !== undefined) update.project_id = projectId;
   if (groupKind !== undefined) update.group_kind = groupKind;
   if (isActive !== undefined) update.is_active = isActive;
   if (Object.keys(update).length === 0) return { ok: true };
@@ -345,7 +342,181 @@ export async function mapWaGroupAction(input: {
     action: "wa_group.mapped",
     entityType: "wa_group_link",
     entityId: link?.id ?? null,
-    metadata: { chatId, clientId, projectId, groupKind, isActive },
+    metadata: { chatId, clientId, groupKind, isActive },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}
+
+// Keep wa_group_links.project_id (the legacy "primary" single project) in sync
+// with the wa_group_projects join table (0203): the oldest linked project wins,
+// or null when none remain. Lets single-project readers (e.g. the archived-
+// status resolver's fallback) keep working without knowing about the M2M.
+async function syncPrimaryProject(orgId: string, linkId: string) {
+  const { data } = await supabaseAdmin
+    .from("wa_group_projects")
+    .select("project_id")
+    .eq("organization_id", orgId)
+    .eq("group_link_id", linkId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  await supabaseAdmin
+    .from("wa_group_links")
+    .update({ project_id: data?.[0]?.project_id ?? null, updated_at: new Date().toISOString() })
+    .eq("organization_id", orgId)
+    .eq("id", linkId);
+}
+
+// ---- Replace the set of projects a group serves (0203 many-to-many) -------
+// A shared client group can cover several projects of a multi-contract client.
+// The mapping UI's project multi-select sends the full desired set; we diff it
+// against the current rows so concurrent edits never wipe the whole set.
+const SetProjectsSchema = z.object({
+  chatId: z.string().min(3),
+  projectIds: z.array(z.string().uuid()).max(50),
+});
+
+export async function setWaGroupProjectsAction(input: {
+  chatId: string;
+  projectIds: string[];
+}): Promise<MapState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const parsed = SetProjectsSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  const { chatId, projectIds } = parsed.data;
+  const want = new Set(projectIds);
+
+  const { data: link } = await supabaseAdmin
+    .from("wa_group_links")
+    .select("id")
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (!link) return { error: "المجموعة غير موجودة" };
+
+  const { data: current } = await supabaseAdmin
+    .from("wa_group_projects")
+    .select("project_id")
+    .eq("organization_id", session.orgId)
+    .eq("group_link_id", link.id);
+  const have = new Set((current ?? []).map((r) => r.project_id));
+
+  const toRemove = [...have].filter((p) => !want.has(p));
+  const toAdd = [...want].filter((p) => !have.has(p));
+
+  if (toRemove.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("wa_group_projects")
+      .delete()
+      .eq("organization_id", session.orgId)
+      .eq("group_link_id", link.id)
+      .in("project_id", toRemove);
+    if (error) return { error: error.message };
+  }
+  if (toAdd.length > 0) {
+    const { error } = await supabaseAdmin.from("wa_group_projects").insert(
+      toAdd.map((project_id) => ({
+        organization_id: session.orgId,
+        group_link_id: link.id,
+        project_id,
+      })),
+    );
+    if (error) return { error: error.message };
+  }
+
+  await syncPrimaryProject(session.orgId, link.id);
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.projects_set",
+    entityType: "wa_group_link",
+    entityId: link.id,
+    metadata: { chatId, projectIds, added: toAdd, removed: toRemove },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}
+
+// ---- Additively link a group to ONE project, stamping client/kind/active --
+// Used by the coverage panel's "link this group to the missing project" action,
+// which is inherently additive (never re-points an existing project).
+const AddProjectSchema = z.object({
+  chatId: z.string().min(3),
+  projectId: z.string().uuid(),
+  clientId: z.string().uuid().nullable().optional(),
+  groupKind: z.enum(["client", "technical"]).nullable().optional(),
+});
+
+export async function addWaGroupProjectAction(input: {
+  chatId: string;
+  projectId: string;
+  clientId?: string | null;
+  groupKind?: "client" | "technical" | null;
+}): Promise<MapState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const parsed = AddProjectSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  const { chatId, projectId, clientId, groupKind } = parsed.data;
+
+  // Stamp client/kind and (re)activate the group in one write, then add the
+  // project link. Mirrors mapWaGroupAction's PATCH + message backfill.
+  const update: Record<string, unknown> = { is_active: true, updated_at: new Date().toISOString() };
+  if (clientId !== undefined) update.client_id = clientId;
+  if (groupKind !== undefined) update.group_kind = groupKind;
+
+  const { data: link, error } = await supabaseAdmin
+    .from("wa_group_links")
+    .update(update)
+    .eq("organization_id", session.orgId)
+    .eq("chat_id", chatId)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!link) return { error: "المجموعة غير موجودة" };
+
+  const { error: insErr } = await supabaseAdmin
+    .from("wa_group_projects")
+    .upsert(
+      { organization_id: session.orgId, group_link_id: link.id, project_id: projectId },
+      { onConflict: "group_link_id,project_id", ignoreDuplicates: true },
+    );
+  if (insErr) return { error: insErr.message };
+
+  if (clientId !== undefined || groupKind !== undefined) {
+    const msgUpdate: Record<string, unknown> = {};
+    if (clientId !== undefined) msgUpdate.client_id = clientId;
+    if (groupKind !== undefined) msgUpdate.group_kind = groupKind;
+    await supabaseAdmin
+      .from("wa_messages")
+      .update(msgUpdate)
+      .eq("organization_id", session.orgId)
+      .eq("chat_id", chatId);
+  }
+
+  await syncPrimaryProject(session.orgId, link.id);
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.project_added",
+    entityType: "wa_group_link",
+    entityId: link.id,
+    metadata: { chatId, projectId, clientId, groupKind },
   });
 
   revalidatePath("/satisfaction/groups");
@@ -375,10 +546,16 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     supabaseAdmin
       .from("wa_group_links")
       .select(
-        "chat_id, chat_name, client_id, project_id, group_kind, suggested_client_id, suggestion_dismissed_at",
+        "id, chat_id, chat_name, client_id, project_id, group_kind, suggested_client_id, suggestion_dismissed_at",
       )
       .eq("organization_id", session.orgId),
-    supabaseAdmin.from("clients").select("id, name").eq("organization_id", session.orgId),
+    // Only canonical (non-merged) clients — never auto-link a group to a
+    // tombstoned duplicate that was folded into another client (0145).
+    supabaseAdmin
+      .from("clients")
+      .select("id, name")
+      .eq("organization_id", session.orgId)
+      .is("merged_into_client_id", null),
     supabaseAdmin
       .from("projects")
       .select("id, name, client_id, status")
@@ -448,6 +625,14 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
       .eq("organization_id", session.orgId)
       .eq("chat_id", m.chatId);
     if (error) continue;
+    // Mirror the auto-linked project into the M2M join table (0203) so coverage
+    // sees it. project_id above stays as the primary mirror.
+    if (willLink && m.projectId) {
+      await supabaseAdmin.from("wa_group_projects").upsert(
+        { organization_id: session.orgId, group_link_id: row.id, project_id: m.projectId },
+        { onConflict: "group_link_id,project_id", ignoreDuplicates: true },
+      );
+    }
     if (willLink) linked += 1;
     if (willClassify) classified += 1;
     if (willSuggest) suggested += 1;

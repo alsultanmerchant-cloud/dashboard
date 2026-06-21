@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   mapWaGroupAction,
+  setWaGroupProjectsAction,
+  addWaGroupProjectAction,
   syncWaGroupsAction,
   autoLinkWaProjectsAction,
   refreshWaMembersAction,
@@ -226,12 +228,15 @@ function GroupRow({
   onSaved: () => void;
 }) {
   const [clientId, setClientId] = useState(link.clientId ?? "");
-  const [projectId, setProjectId] = useState(link.projectId ?? "");
+  const [projectIds, setProjectIds] = useState<string[]>(link.projectIds);
   const [kind, setKind] = useState<GroupKind | "">(link.groupKind ?? "");
   const [active, setActive] = useState(link.isActive);
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const sameIds = (a: string[], b: string[]) =>
+    a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
   // Re-sync with server data after router.refresh() — without this, rows kept
   // showing (and on the next persist, WRITING BACK) values from page load,
@@ -240,13 +245,13 @@ function GroupRow({
   const [prevLink, setPrevLink] = useState(link);
   if (
     prevLink.clientId !== link.clientId ||
-    prevLink.projectId !== link.projectId ||
+    !sameIds(prevLink.projectIds, link.projectIds) ||
     prevLink.groupKind !== link.groupKind ||
     prevLink.isActive !== link.isActive
   ) {
     setPrevLink(link);
     setClientId(link.clientId ?? "");
-    setProjectId(link.projectId ?? "");
+    setProjectIds(link.projectIds);
     setKind(link.groupKind ?? "");
     setActive(link.isActive);
   }
@@ -256,12 +261,10 @@ function GroupRow({
   // out-of-date row can never overwrite the other columns.
   const persist = (patch: {
     clientId?: string;
-    projectId?: string;
     kind?: GroupKind | "";
     active?: boolean;
   }) => {
     if (patch.clientId !== undefined) setClientId(patch.clientId);
-    if (patch.projectId !== undefined) setProjectId(patch.projectId);
     if (patch.kind !== undefined) setKind(patch.kind);
     if (patch.active !== undefined) setActive(patch.active);
 
@@ -270,7 +273,6 @@ function GroupRow({
       const res = await mapWaGroupAction({
         chatId: link.chatId,
         ...(patch.clientId !== undefined ? { clientId: patch.clientId || null } : {}),
-        ...(patch.projectId !== undefined ? { projectId: patch.projectId || null } : {}),
         ...(patch.kind !== undefined ? { groupKind: (patch.kind || null) as GroupKind | null } : {}),
         ...(patch.active !== undefined ? { isActive: patch.active } : {}),
       });
@@ -278,9 +280,27 @@ function GroupRow({
         setError(res.error);
         // Revert the optimistic change on failure.
         setClientId(link.clientId ?? "");
-        setProjectId(link.projectId ?? "");
         setKind(link.groupKind ?? "");
         setActive(link.isActive);
+      } else {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1200);
+        onSaved();
+      }
+    });
+  };
+
+  // Projects are a many-to-many set (0203): the multi-select sends the full
+  // desired list, which we replace-set so one shared group can serve several
+  // projects of a multi-contract client.
+  const persistProjects = (next: string[]) => {
+    setProjectIds(next);
+    setError(null);
+    startTransition(async () => {
+      const res = await setWaGroupProjectsAction({ chatId: link.chatId, projectIds: next });
+      if (res.error) {
+        setError(res.error);
+        setProjectIds(link.projectIds);
       } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 1200);
@@ -338,15 +358,14 @@ function GroupRow({
       </td>
       <td className="p-3 min-w-[200px]">
         <SearchableSelect
-          value={projectId}
-          onValueChange={(v) => persist({ projectId: v })}
+          multi
+          value={projectIds}
+          onValueChange={persistProjects}
           options={projectOptions}
           placeholder={t("groups.unmappedProject")}
           searchPlaceholder={t("groups.searchProject")}
           emptyMessage={t("groups.noProjects")}
           ariaLabel={t("groups.col.project")}
-          clearable
-          clearLabel={t("groups.unmappedProject")}
         />
       </td>
       <td className="p-3 text-center">
@@ -548,16 +567,17 @@ function CoverageRow({
 
   // Link the chosen WhatsApp group to this project, stamping it with the
   // project's client + the slot's kind so it satisfies coverage immediately.
+  // Additive (0203): a shared group can cover several projects, so this ADDS
+  // the project link instead of re-pointing the group's single project.
   const linkGroup = (chatId: string, kind: GroupKind) => {
     if (!chatId) return;
     setError(null);
     startTransition(async () => {
-      const res = await mapWaGroupAction({
+      const res = await addWaGroupProjectAction({
         chatId,
         projectId: g.projectId,
         ...(g.clientId ? { clientId: g.clientId } : {}),
         groupKind: kind,
-        isActive: true,
       });
       if (res.error) setError(res.error);
       else onLinked();

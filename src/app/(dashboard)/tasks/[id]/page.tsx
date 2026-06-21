@@ -35,6 +35,7 @@ import { loadOrgChart } from "@/lib/data/org-chart";
 import { CommentComposer } from "../comment-composer";
 import { TaskSmartButtons } from "./task-smart-buttons";
 import { TaskStageOwnerEditor } from "./task-stage-owner-editor";
+import { TaskTechTip } from "@/components/tasks/task-tech-tip";
 
 const CommentsFeed = dynamic(
   () => import("./comments-feed").then((mod) => ({ default: mod.CommentsFeed })),
@@ -374,6 +375,10 @@ export default async function TaskDetailPage({
         <Suspense fallback={<div className="h-10" />}>
           <TaskSmartButtonsSection orgId={session.orgId} taskId={task.id} />
         </Suspense>
+      </div>
+
+      <div className="mb-6">
+        <TaskTechTip taskId={task.id} />
       </div>
 
       {(hasOpenException || canOpenException) && (

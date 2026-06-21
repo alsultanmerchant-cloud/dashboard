@@ -1,9 +1,13 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth-server";
 import { parseAccSheet, type ParseResult } from "@/lib/import/excel-parser";
 import { commitContractImportPayload } from "@/lib/import/commit-contract-import";
-import { syncContractsFromGoogleSheet } from "@/lib/import/google-sheets-sync";
+import {
+  syncContractsFromGoogleSheet,
+  syncSingleClientFromGoogleSheet,
+} from "@/lib/import/google-sheets-sync";
 
 export type ImportPreviewState =
   | { kind: "idle" }
@@ -162,6 +166,59 @@ export async function syncGoogleSheetAction(
       dashboardMonth: result.dashboard?.month ?? null,
       dashboardOnTarget: result.dashboard?.cntOnTarget ?? null,
       dashboardBuckets: result.dashboard?.bucketsWritten ?? 0,
+      warnings: result.warnings,
+    };
+  } catch (e) {
+    return { kind: "error", error: (e as Error).message };
+  }
+}
+
+export type SingleContractSyncState =
+  | { kind: "error"; error: string }
+  | {
+      kind: "ok";
+      clientExternalId: string;
+      matchedContracts: number;
+      contractsUpserted: number;
+      logsUpserted: number;
+      warnings: string[];
+    };
+
+/**
+ * Refresh a single client's contracts from the Google Sheet (the per-contract
+ * "Pull from Sheet" button on /contracts/[id]). Scoped to one client: it
+ * re-reads the workbook but commits only that client's rows + reruns the
+ * historical-cycle backfill for it. `clientExternalId` is the sheet ID like
+ * "C27" (derived from the contract Key's prefix).
+ */
+export async function syncSingleContractAction(
+  clientExternalId: string,
+): Promise<SingleContractSyncState> {
+  let session;
+  try {
+    session = await requirePermission("contract.manage");
+  } catch (e) {
+    return { kind: "error", error: (e as Error).message };
+  }
+
+  if (!clientExternalId || typeof clientExternalId !== "string") {
+    return { kind: "error", error: "معرّف العميل مفقود" };
+  }
+
+  try {
+    const result = await syncSingleClientFromGoogleSheet({
+      orgId: session.orgId,
+      actorUserId: session.userId,
+      clientExternalId,
+      auditAction: "contracts.sync_google_sheet_single",
+    });
+    revalidatePath("/contracts");
+    return {
+      kind: "ok",
+      clientExternalId: result.clientExternalId,
+      matchedContracts: result.matchedContracts,
+      contractsUpserted: result.contractsUpserted,
+      logsUpserted: result.logsUpserted,
       warnings: result.warnings,
     };
   } catch (e) {

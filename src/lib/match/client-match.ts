@@ -74,24 +74,57 @@ function skeletonScore(aSkel: string, bSkel: string): number {
   return diceRatio(aSkel, bSkel) * 0.85;
 }
 
-export type MatchClient = { id: string; name: string };
+// `aliases` are extra names that identify the SAME company through a different
+// surface — for an Odoo (delivery) client its PROJECT names, for a sheet
+// (accounting) client its WhatsApp GROUP names. The two populations often share
+// no client-name resemblance (e.g. «ايلاف التويجري» ↔ «ليب لوستر-فضية») while
+// the brand «lip luster» only appears in the project/group name. Matching the
+// alias sets recovers those splits. See [[project_clients_centralization]].
+export type MatchClient = { id: string; name: string; aliases?: string[] };
+
+// Catch-all placeholder clients that must NEVER be a merge target — merging a
+// real client into "unspecified client" would make the placeholder canonical
+// and silently absorb unrelated projects/groups.
+const PLACEHOLDER_NAMES = new Set([
+  "عميل غير محدد",
+  "غير محدد",
+  "unspecified",
+  "unspecified client",
+]);
+export function isPlaceholderClient(name: string | null | undefined): boolean {
+  return PLACEHOLDER_NAMES.has((name ?? "").trim().toLowerCase());
+}
+
+type Tok = { n: string; l: Set<string>; sk: string };
+function tok(s: string): Tok {
+  return { n: normName(s), l: latinTokens(s), sk: consonantSkeleton(s) };
+}
+function pairScore(a: Tok, b: Tok): number {
+  let score = diceRatio(a.n, b.n);
+  for (const l of a.l) if (b.l.has(l)) score = Math.max(score, 0.95);
+  score = Math.max(score, skeletonScore(a.sk, b.sk));
+  return score;
+}
 
 // Returns the best + second-best Odoo match for one sheet client, so callers
-// can require an unambiguous lead before auto-merging.
+// can require an unambiguous lead before auto-merging. Each side is scored as
+// its name PLUS its aliases (project/group names); the pair's score is the best
+// agreement across that cross-product, so a brand shared only via the project↔
+// group name still surfaces the match.
 export function bestClientMatch(
-  sheet: { name: string },
+  sheet: { name: string; aliases?: string[] },
   odoo: MatchClient[],
 ): { best: { client: MatchClient; score: number } | null; secondScore: number } {
-  const sn = normName(sheet.name);
-  const sl = latinTokens(sheet.name);
-  const sSkel = consonantSkeleton(sheet.name);
+  const sheetToks = [sheet.name, ...(sheet.aliases ?? [])].map(tok);
   let best: { client: MatchClient; score: number } | null = null;
   let second = 0;
   for (const o of odoo) {
-    let score = diceRatio(sn, normName(o.name));
-    const ol = latinTokens(o.name);
-    for (const l of sl) if (ol.has(l)) score = Math.max(score, 0.95);
-    score = Math.max(score, skeletonScore(sSkel, consonantSkeleton(o.name)));
+    const odooToks = [o.name, ...(o.aliases ?? [])].map(tok);
+    let score = 0;
+    for (const st of sheetToks) for (const ot of odooToks) {
+      const s = pairScore(st, ot);
+      if (s > score) score = s;
+    }
     if (!best || score > best.score) {
       second = best?.score ?? 0;
       best = { client: o, score };

@@ -2567,6 +2567,7 @@ export type Database = {
       }
       organizations: {
         Row: {
+          contracts_synced_at: string | null
           created_at: string
           default_locale: string
           id: string
@@ -2578,6 +2579,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          contracts_synced_at?: string | null
           created_at?: string
           default_locale?: string
           id?: string
@@ -2589,6 +2591,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          contracts_synced_at?: string | null
           created_at?: string
           default_locale?: string
           id?: string
@@ -6206,6 +6209,52 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_group_projects: {
+        Row: {
+          created_at: string
+          group_link_id: string
+          id: string
+          organization_id: string
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_link_id: string
+          id?: string
+          organization_id: string
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          group_link_id?: string
+          id?: string
+          organization_id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_group_projects_group_link_id_fkey"
+            columns: ["group_link_id"]
+            isOneToOne: false
+            referencedRelation: "wa_group_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_group_projects_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_group_projects_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

@@ -2,7 +2,12 @@ import "server-only";
 
 import { createPrivateKey, sign } from "node:crypto";
 import * as XLSX from "xlsx";
-import { parseAccSheet, parseLogsSheet } from "@/lib/import/excel-parser";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  parseAccSheet,
+  parseLogsSheet,
+  type ParseResult,
+} from "@/lib/import/excel-parser";
 import { commitSheetLogs } from "@/lib/import/commit-sheet-logs";
 import {
   commitContractImportPayload,
@@ -204,21 +209,17 @@ function valuesToWorkbookBuffer(sheets: Record<string, unknown[][]>): ArrayBuffe
   return XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 
-export async function syncContractsFromGoogleSheet({
-  orgId,
-  actorUserId,
-  auditAction,
-}: {
-  orgId: string;
-  actorUserId?: string | null;
-  auditAction: string;
-}): Promise<GoogleSheetSyncResult> {
-  const config = getGoogleSheetConfig();
+// Fetch + parse the workbook ONCE. Public path: a single XLSX export carries
+// every tab with correct date typing + merged-cell values. Private path:
+// assemble a workbook from the per-tab Sheets API reads. Returns the parsed
+// WorkBook (reused across contracts/logs/dashboard) plus whether it came from
+// the public export (the dashboard-tab reader branches on it). Shared by the
+// full sync and the per-contract refresh so they never drift.
+async function loadWorkbook(
+  config: SheetConfig,
+  warnings: string[],
+): Promise<{ workbook: XLSX.WorkBook; isPublicWorkbook: boolean }> {
   let workbookBuffer: ArrayBuffer;
-  const warnings: string[] = [];
-  // For the public sheet, one XLSX export carries every tab (raw + computed) with
-  // correct date typing and merged-cell values. parseAccSheet/parseLogsSheet read
-  // "Clients Contracts" / "💲Installments Tracker" / "Edits  Updates log" by name.
   let isPublicWorkbook = false;
   if (!config.clientEmail || !config.privateKey) {
     workbookBuffer = await fetchPublicWorkbook(config.spreadsheetId);
@@ -253,11 +254,25 @@ export async function syncContractsFromGoogleSheet({
     }
     workbookBuffer = valuesToWorkbookBuffer(privateSheets);
   }
-  // Parse the (multi-MB) workbook ONCE and reuse it for every tab — contracts,
-  // logs and the computed dashboard tabs. Re-running XLSX.read per consumer on a
-  // large export costs seconds each and was pushing the sync past the 60s
-  // serverless limit (FUNCTION_INVOCATION_TIMEOUT).
+  // Parse the (multi-MB) workbook ONCE and reuse it for every tab. Re-running
+  // XLSX.read per consumer on a large export costs seconds each and was pushing
+  // the sync past the 60s serverless limit (FUNCTION_INVOCATION_TIMEOUT).
   const workbook = XLSX.read(workbookBuffer, { type: "array", cellDates: true });
+  return { workbook, isPublicWorkbook };
+}
+
+export async function syncContractsFromGoogleSheet({
+  orgId,
+  actorUserId,
+  auditAction,
+}: {
+  orgId: string;
+  actorUserId?: string | null;
+  auditAction: string;
+}): Promise<GoogleSheetSyncResult> {
+  const config = getGoogleSheetConfig();
+  const warnings: string[] = [];
+  const { workbook, isPublicWorkbook } = await loadWorkbook(config, warnings);
   const payload = parseAccSheet(workbook);
   if (payload.contracts.length === 0) {
     throw new Error("Google Sheet sync found no valid contract rows.");
@@ -319,6 +334,8 @@ export async function syncContractsFromGoogleSheet({
     warnings.push(`Dashboard tabs sync skipped: ${(e as Error).message}`);
   }
 
+  await stampContractsSyncedAt(orgId);
+
   return {
     ...result,
     spreadsheetId: config.spreadsheetId,
@@ -329,5 +346,122 @@ export async function syncContractsFromGoogleSheet({
     logsUpserted,
     dashboard,
     warnings: [...payload.warnings, ...warnings],
+  };
+}
+
+// Stamp the org's "last pulled from sheet" time. Best-effort: a failure here
+// must never fail the sync itself, so swallow the error.
+async function stampContractsSyncedAt(orgId: string): Promise<void> {
+  try {
+    await supabaseAdmin
+      .from("organizations")
+      .update({ contracts_synced_at: new Date().toISOString() })
+      .eq("id", orgId);
+  } catch {
+    // non-fatal — the data is already committed
+  }
+}
+
+export type SingleClientSyncResult = {
+  clientExternalId: string;
+  matchedContracts: number;
+  clientsCreated: number;
+  clientsUpdated: number;
+  contractsUpserted: number;
+  installmentsUpserted: number;
+  logsUpserted: number;
+  errors: string[];
+  warnings: string[];
+};
+
+// Refresh ONE client's contracts from the sheet. The sheet has no per-row
+// endpoint for this layout (a contract spans the Clients-Contracts, Installments
+// and Logs tabs), so we still load the whole workbook — but we filter the parsed
+// payload to this client and commit only its rows. This scopes the write +
+// audit (no dashboard-month churn, no touching the other ~250 contracts) and
+// reruns the historical-cycle backfill for just this client. The month-level
+// CEO/target dashboard tabs are intentionally skipped — they're global, not
+// per-contract, and belong to the full sync.
+export async function syncSingleClientFromGoogleSheet({
+  orgId,
+  actorUserId,
+  clientExternalId,
+  auditAction,
+}: {
+  orgId: string;
+  actorUserId?: string | null;
+  clientExternalId: string;
+  auditAction: string;
+}): Promise<SingleClientSyncResult> {
+  const config = getGoogleSheetConfig();
+  const warnings: string[] = [];
+  const target = clientExternalId.trim().toUpperCase();
+  if (!/^C\d+$/.test(target)) {
+    throw new Error(`معرّف العميل غير صالح: ${clientExternalId}`);
+  }
+
+  const { workbook } = await loadWorkbook(config, warnings);
+  const full = parseAccSheet(workbook);
+
+  const clients = full.clients.filter(
+    (c) => c.externalId.toUpperCase() === target,
+  );
+  const contracts = full.contracts.filter(
+    (c) => c.clientExternalId.toUpperCase() === target,
+  );
+  if (contracts.length === 0) {
+    throw new Error(`لم يُعثر على العميل ${target} في الشيت.`);
+  }
+  const keySet = new Set(contracts.map((c) => c.externalKey));
+  const installments = full.installments.filter((i) =>
+    keySet.has(i.contractExternalKey),
+  );
+
+  const payload: ParseResult = {
+    clients,
+    contracts,
+    installments,
+    warnings: full.warnings,
+    stats: full.stats,
+  };
+
+  const result = await commitContractImportPayload({
+    payload,
+    orgId,
+    actorUserId: actorUserId ?? null,
+    auditAction,
+  });
+
+  // This client's logs only, so the cycle backfill (end date / duration /
+  // payment status / delays / AM) reruns for its historical cycles.
+  let logsUpserted = 0;
+  try {
+    const logsPayload = parseLogsSheet(workbook);
+    warnings.push(...logsPayload.warnings);
+    const clientLogs = logsPayload.logs.filter((l) => {
+      const ext = (
+        l.clientExternalId ?? l.contractKey.split("|")[0] ?? ""
+      ).toUpperCase();
+      return ext === target;
+    });
+    if (clientLogs.length > 0) {
+      const logsResult = await commitSheetLogs({ logs: clientLogs, orgId });
+      logsUpserted = logsResult.logsUpserted;
+      warnings.push(...logsResult.errors);
+    }
+  } catch (e) {
+    warnings.push(`Logs sync skipped: ${(e as Error).message}`);
+  }
+
+  return {
+    clientExternalId: target,
+    matchedContracts: contracts.length,
+    clientsCreated: result.clientsCreated,
+    clientsUpdated: result.clientsUpdated,
+    contractsUpserted: result.contractsUpserted,
+    installmentsUpserted: result.installmentsUpserted,
+    logsUpserted,
+    errors: result.errors,
+    warnings: [...full.warnings, ...warnings],
   };
 }

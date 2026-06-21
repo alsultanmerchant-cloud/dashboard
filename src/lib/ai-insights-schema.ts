@@ -152,6 +152,40 @@ export const InsightsSchema = z.object({
 
 export type InsightsResult = z.infer<typeof InsightsSchema>;
 
+// ---- Per-section AI output schemas (slices of InsightsSchema) -------------
+// Each maps to one visual block in the panel so it can be re-analyzed and
+// streamed independently. Reuses the exact field defs via .shape → no drift.
+// Client-safe (this file imports only zod), so the panel can pass these to
+// experimental_useObject directly.
+const S = InsightsSchema.shape;
+export const InsightSectionSchemas = {
+  summary: z.object({ executiveSummary: S.executiveSummary, overallHealth: S.overallHealth }),
+  priorities: z.object({ topPriorities: S.topPriorities }),
+  delivery: z.object({ deliveryTrend: S.deliveryTrend }),
+  people: z.object({ peoplePerformance: S.peoplePerformance }),
+  operations: z.object({
+    stageBottlenecks: S.stageBottlenecks,
+    serviceHealth: S.serviceHealth,
+    teamHotspots: S.teamHotspots,
+  }),
+  clients: z.object({ clientsAtRisk: S.clientsAtRisk }),
+  quickWins: z.object({ quickWins: S.quickWins }),
+} as const;
+
+export type InsightSection = keyof typeof InsightSectionSchemas;
+export const INSIGHT_SECTIONS = [
+  "summary",
+  "priorities",
+  "delivery",
+  "people",
+  "operations",
+  "clients",
+  "quickWins",
+] as const;
+export function isInsightSection(v: string): v is InsightSection {
+  return (INSIGHT_SECTIONS as readonly string[]).includes(v);
+}
+
 export type StoredInsightRun = {
   id: string;
   status: "running" | "ready" | "failed";

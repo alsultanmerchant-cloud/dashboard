@@ -64,6 +64,9 @@ export type TaskFilters = {
 
 export const DATE_FIELDS = [
   "due_date",
+  // planned_date is the app's real deadline (due_date is empty org-wide). The
+  // RPC's p_date_filters whitelists it as of migration 0205.
+  "planned_date",
   "actual_done_date",
   "stage_entered_at",
   "created_at",

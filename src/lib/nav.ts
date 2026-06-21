@@ -32,6 +32,7 @@ import {
   MessageCircle,
   Activity,
   ClipboardCheck,
+  Gauge,
   type LucideIcon,
 } from "lucide-react";
 
@@ -61,6 +62,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { labelKey: "aiAgent", href: "/agent", icon: BrainCircuit, perm: "reports.view" },
       { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles, perm: "reports.view" },
       { labelKey: "myDashboard", href: "/dashboard", icon: LayoutDashboard },
+      { labelKey: "myPerformance", href: "/my-performance", icon: Gauge, perm: "tasks.view" },
       { labelKey: "messages", href: "/messages", icon: MessageCircle, perm: "notifications.view" },
       { labelKey: "notifications", href: "/notifications", icon: Bell },
     ],
@@ -129,6 +131,7 @@ export const NAV_GROUPS: NavGroup[] = [
 export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: string }> = {
   "/": { titleKey: "dashboardTitle", subtitleKey: "dashboardSubtitle" },
   "/dashboard": { titleKey: "dashboardTitle", subtitleKey: "dashboardSubtitle" },
+  "/my-performance": { titleKey: "myPerformanceTitle", subtitleKey: "myPerformanceSubtitle" },
   "/uploads": { titleKey: "uploadsTitle", subtitleKey: "uploadsSubtitle" },
   "/notifications": { titleKey: "notificationsTitle", subtitleKey: "notificationsSubtitle" },
   "/ai-insights": { titleKey: "aiInsightsTitle", subtitleKey: "aiInsightsSubtitle" },

@@ -2,6 +2,22 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+// The moment the contracts Google-Sheet was last pulled (stamped at the end of
+// a successful full sync — see google-sheets-sync.ts). Shown next to the "Pull
+// from Sheet" button so the team knows how fresh the figures are. Returns the
+// ISO string, or null if the sheet has never been synced.
+export async function getContractsSyncedAt(
+  orgId: string,
+): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("organizations")
+    .select("contracts_synced_at")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (error || !data?.contracts_synced_at) return null;
+  return data.contracts_synced_at;
+}
+
 function splitPackageNames(packageName: string | null | undefined): string[] {
   if (!packageName) return [];
   const seen = new Set<string>();
@@ -195,21 +211,32 @@ function monthStartIso(d: Date): string {
     .slice(0, 10);
 }
 
-/**
- * Returns the dashboard totals for a month. If the month is NOT frozen
- * (current/future), recomputes live first so the figures are fresh.
- */
+/** Recompute both live dashboard stores once before reading a non-frozen month. */
+export async function refreshMonthlyDashboard(
+  orgId: string,
+  monthIso?: string,
+): Promise<void> {
+  const month = monthIso ?? monthStartIso(new Date());
+  const [dashboardResult, targetsResult] = await Promise.all([
+    supabaseAdmin.rpc("compute_monthly_dashboard", {
+      p_org: orgId,
+      p_month: month,
+    }),
+    supabaseAdmin.rpc("compute_am_monthly_targets", {
+      p_org: orgId,
+      p_month: month,
+    }),
+  ]);
+  if (dashboardResult.error) throw dashboardResult.error;
+  if (targetsResult.error) throw targetsResult.error;
+}
+
+/** Returns the already-prepared dashboard totals for a month. */
 export async function getMonthlyDashboard(
   orgId: string,
   monthIso?: string,
 ): Promise<MonthlyDashboard | null> {
   const month = monthIso ?? monthStartIso(new Date());
-
-  // Recompute live (the RPC is a no-op for frozen months).
-  await supabaseAdmin.rpc("compute_monthly_dashboard", {
-    p_org: orgId,
-    p_month: month,
-  });
 
   const { data, error } = await supabaseAdmin
     .from("monthly_dashboard_totals")
@@ -291,26 +318,12 @@ export type AmTargetRow = {
   } | null;
 };
 
-/** Per-AM target rollup for a month. Recomputes live for non-frozen months. */
+/** Per-AM target rollup for a month. */
 export async function getAmTargets(
   orgId: string,
   monthIso?: string,
 ): Promise<AmTargetRow[]> {
   const month = monthIso ?? monthStartIso(new Date());
-
-  // Only recompute when the month isn't frozen.
-  const { data: mdt } = await supabaseAdmin
-    .from("monthly_dashboard_totals")
-    .select("is_frozen")
-    .eq("organization_id", orgId)
-    .eq("month", month)
-    .maybeSingle();
-  if (!mdt?.is_frozen) {
-    await supabaseAdmin.rpc("compute_am_monthly_targets", {
-      p_org: orgId,
-      p_month: month,
-    });
-  }
 
   const { data, error } = await supabaseAdmin
     .from("am_targets")

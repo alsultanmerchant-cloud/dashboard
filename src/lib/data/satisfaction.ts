@@ -89,7 +89,7 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("wa_group_links")
-      .select("client_id, message_count, project_id")
+      .select("client_id, message_count, projects:wa_group_projects(project_id)")
       .eq("organization_id", orgId)
       .not("client_id", "is", null),
   ]);
@@ -127,12 +127,16 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     arr.push(p.status ?? "");
     ownedStatuses.set(p.client_id, arr);
   }
-  // Projects reached via each client's WhatsApp group links (may belong to a twin).
+  // Projects reached via each client's WhatsApp group links (may belong to a
+  // twin). 0203: a group can link to several projects, so union them all.
   const linkedProjectIds = new Map<string, Set<string>>();
-  for (const l of (linksRes.data ?? []) as Array<{ client_id: string | null; project_id: string | null }>) {
-    if (!l.client_id || !l.project_id) continue;
+  for (const l of (linksRes.data ?? []) as Array<{
+    client_id: string | null;
+    projects: { project_id: string }[] | null;
+  }>) {
+    if (!l.client_id || !l.projects?.length) continue;
     const s = linkedProjectIds.get(l.client_id) ?? new Set<string>();
-    s.add(l.project_id);
+    for (const pj of l.projects) s.add(pj.project_id);
     linkedProjectIds.set(l.client_id, s);
   }
 
@@ -735,9 +739,7 @@ export interface WaGroupLink {
   chatName: string | null;
   clientId: string | null;
   clientName: string | null;
-  projectId: string | null;
-  projectName: string | null;
-  projectCode: string | null;
+  projectIds: string[]; // all projects this group serves (0203 many-to-many)
   groupKind: GroupKind | null;
   isActive: boolean;
   messageCount: number;
@@ -751,15 +753,27 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
   const { data, error } = await supabaseAdmin
     .from("wa_group_links")
     .select(
-      // Pin both FKs: wa_group_links has a second relationship to each table
-      // (suggested_client_id / suggested_project_id, added with the link
-      // suggestions feature), so an implicit embed now fails with PGRST201
-      // and silently empties the whole list. See [[feedback_postgrest_ambiguous_embeds]].
-      "id, chat_id, chat_name, client_id, project_id, group_kind, is_active, message_count, member_count, admin_count, last_message_at, client:clients!wa_group_links_client_id_fkey(name), project:projects!wa_group_links_project_id_fkey(name, project_code)",
+      // Pin the client FK: wa_group_links has a second relationship to clients
+      // (suggested_client_id), so an implicit embed fails with PGRST201 and
+      // silently empties the whole list. See [[feedback_postgrest_ambiguous_embeds]].
+      "id, chat_id, chat_name, client_id, group_kind, is_active, message_count, member_count, admin_count, last_message_at, client:clients!wa_group_links_client_id_fkey(name)",
     )
     .eq("organization_id", orgId)
     .order("last_message_at", { ascending: false, nullsFirst: false });
   if (error || !data) return [];
+
+  // All group→project links (0203 many-to-many). One group can serve several
+  // projects of a multi-contract client, so we gather them per group_link_id.
+  const projectsByLink = new Map<string, string[]>();
+  const { data: gp } = await supabaseAdmin
+    .from("wa_group_projects")
+    .select("group_link_id, project_id")
+    .eq("organization_id", orgId);
+  for (const row of (gp ?? []) as Array<{ group_link_id: string; project_id: string }>) {
+    const arr = projectsByLink.get(row.group_link_id) ?? [];
+    arr.push(row.project_id);
+    projectsByLink.set(row.group_link_id, arr);
+  }
 
   // How many distinct connected numbers fed each group (provenance from 0200).
   const coverage = new Map<string, number>();
@@ -773,7 +787,6 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     chat_id: string;
     chat_name: string | null;
     client_id: string | null;
-    project_id: string | null;
     group_kind: GroupKind | null;
     is_active: boolean;
     message_count: number;
@@ -781,24 +794,17 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     admin_count: number | null;
     last_message_at: string | null;
     client: { name: string } | { name: string }[] | null;
-    project:
-      | { name: string; project_code: string | null }
-      | { name: string; project_code: string | null }[]
-      | null;
   };
 
   return (data as unknown as Row[]).map((r) => {
     const c = Array.isArray(r.client) ? r.client[0] : r.client;
-    const p = Array.isArray(r.project) ? r.project[0] : r.project;
     return {
       id: r.id,
       chatId: r.chat_id,
       chatName: r.chat_name,
       clientId: r.client_id,
       clientName: c?.name ?? null,
-      projectId: r.project_id,
-      projectName: p?.name ?? null,
-      projectCode: p?.project_code ?? null,
+      projectIds: projectsByLink.get(r.id) ?? [],
       groupKind: r.group_kind,
       isActive: r.is_active,
       messageCount: r.message_count,
@@ -891,11 +897,12 @@ export const getWaLinkSuggestions = cache(_getWaLinkSuggestions);
 
 // ---- Project group coverage (every project must have a client + team group)
 // The team's rule: each ACTIVE project needs BOTH a 💫 client group and a 📍
-// team group. Groups link client-centrically (client_id + optional project_id),
-// so we resolve a project's groups as: explicit project_id matches, PLUS the
-// client's project-less groups when the client has exactly one active project
-// (mirrors the matcher's own client→project resolution). The reverse (groups
-// with no project) is fine and intentionally ignored.
+// team group. A group serves a project when it is EXPLICITLY linked to it via
+// wa_group_projects (0203 many-to-many — one shared client group can now cover
+// every project of a multi-contract client). Fallback for groups not yet given
+// any explicit project: credit the client's groups when the client has exactly
+// one active project. The reverse (groups with no project) is intentionally
+// ignored.
 export interface ProjectCoverageGap {
   projectId: string;
   projectName: string;
@@ -907,7 +914,7 @@ export interface ProjectCoverageGap {
 }
 
 async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageGap[]> {
-  const [projectsRes, linksRes] = await Promise.all([
+  const [projectsRes, linksRes, gpRes] = await Promise.all([
     supabaseAdmin
       .from("projects")
       .select("id, name, project_code, client_id, status, client:clients(name)")
@@ -915,9 +922,13 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
       .neq("status", "archived"),
     supabaseAdmin
       .from("wa_group_links")
-      .select("client_id, project_id, group_kind, is_active")
+      .select("id, client_id, group_kind, is_active")
       .eq("organization_id", orgId)
       .eq("is_active", true),
+    supabaseAdmin
+      .from("wa_group_projects")
+      .select("group_link_id, project_id")
+      .eq("organization_id", orgId),
   ]);
   const projects = (projectsRes.data ?? []) as Array<{
     id: string;
@@ -928,13 +939,21 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
     client: { name: string } | { name: string }[] | null;
   }>;
   const links = (linksRes.data ?? []) as Array<{
+    id: string;
     client_id: string | null;
-    project_id: string | null;
     group_kind: GroupKind | null;
   }>;
 
-  // Active-project count per client → decides whether project-less client
-  // groups can be attributed to a single project unambiguously.
+  // group_link_id → set of explicitly linked project ids (0203).
+  const projSetByLink = new Map<string, Set<string>>();
+  for (const r of (gpRes.data ?? []) as Array<{ group_link_id: string; project_id: string }>) {
+    const s = projSetByLink.get(r.group_link_id) ?? new Set<string>();
+    s.add(r.project_id);
+    projSetByLink.set(r.group_link_id, s);
+  }
+
+  // Active-project count per client → decides whether a group that has no
+  // explicit project link yet can be attributed to a single project.
   const activeByClient = new Map<string, number>();
   for (const p of projects) {
     if (p.status === "active" && p.client_id)
@@ -947,9 +966,10 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
     let hasClient = false;
     let hasTech = false;
     for (const l of links) {
+      const projSet = projSetByLink.get(l.id);
       const belongs =
-        l.project_id === p.id ||
-        (!l.project_id && singleActive && l.client_id === p.client_id);
+        (!!projSet && projSet.has(p.id)) ||
+        (!projSet && singleActive && !!l.client_id && l.client_id === p.client_id);
       if (!belongs) continue;
       if (l.group_kind === "client") hasClient = true;
       else if (l.group_kind === "technical") hasTech = true;

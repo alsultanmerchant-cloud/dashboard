@@ -185,6 +185,24 @@ function SectionSkeleton({ h = 220 }: { h?: number }) {
   );
 }
 
+function AgentCockpitSkeleton() {
+  return (
+    <div>
+      <div className="mb-6 space-y-2">
+        <Skeleton className="h-7 w-56" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </div>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Skeleton key={index} className="h-[128px] rounded-2xl" />
+        ))}
+      </div>
+      <Skeleton className="mb-8 h-[340px] rounded-2xl" />
+      <Skeleton className="mb-8 h-[160px] rounded-2xl" />
+    </div>
+  );
+}
+
 // ---- Page ----------------------------------------------------------------
 
 export default async function DashboardPage({
@@ -200,7 +218,11 @@ export default async function DashboardPage({
   }
 
   if (scope.kind === "agent") {
-    return <AgentCockpit session={session} employeeId={scope.employeeId} />;
+    return (
+      <Suspense fallback={<AgentCockpitSkeleton />}>
+        <AgentCockpit session={session} employeeId={scope.employeeId} />
+      </Suspense>
+    );
   }
 
   const { month } = await searchParams;

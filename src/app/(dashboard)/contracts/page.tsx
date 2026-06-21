@@ -5,27 +5,22 @@ import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import {
   listContractsGrid,
   listContractTypes,
-  listPackages,
   getMonthlyDashboard,
   getContractsRoster,
   listDashboardMonths,
   getAmTargets,
   getMonthTargetBuckets,
   getCeoClientInsights,
+  getContractsSyncedAt,
+  refreshMonthlyDashboard,
   type GridContract,
 } from "@/lib/data/contracts";
 import { listAccountManagers } from "@/lib/data/employees";
-import { listClientOptions } from "@/lib/data/clients";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
-import { getTranslations } from "next-intl/server";
-import { ContractsGrid } from "./contracts-grid";
+import { getTranslations, getLocale } from "next-intl/server";
 import type { ContractGridFilters } from "./contracts-grid";
-import { NewContractButton } from "./new-contract-dialog";
-import { CeoDashboard } from "./ceo-dashboard";
-import { LogsSection } from "./logs-section";
-import { SheetSyncButton } from "./sheet-sync-button";
 
 // Contracts module — two sections on one page, switched by ?view=:
 //   • table     → the sheet-parity editable grid (default)
@@ -98,6 +93,22 @@ export default async function ContractsPage({
     redirect("/contracts?view=table");
   }
 
+  // "Last synced" shown beside the Pull-from-Sheet button. Format server-side in
+  // the agency's timezone (Vercel runs UTC, so an unzoned format would read ~3h
+  // behind Saudi local time) — a fixed string also avoids client hydration drift.
+  const locale = await getLocale();
+  const syncedIso =
+    view === "dashboard" && canEdit
+      ? await getContractsSyncedAt(session.orgId)
+      : null;
+  const lastSyncedLabel = syncedIso
+    ? new Intl.DateTimeFormat(locale, {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Asia/Riyadh",
+      }).format(new Date(syncedIso))
+    : null;
+
   const tabs = (
     <div className="inline-flex rounded-[var(--radius-md)] border border-border/80 bg-card/95 p-1 text-xs shadow-[var(--surface-elev)]">
       <Link
@@ -151,18 +162,13 @@ export default async function ContractsPage({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {tabs}
         {view === "table" && canEdit && (
-          <ContractsHeaderActions orgId={session.orgId} />
+          <ContractsHeaderActions />
         )}
         {view === "dashboard" && canEdit && (
-          <div className="flex items-center gap-2">
-            <SheetSyncButton />
-            <Link
-              href="/contracts/import"
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-border/80 bg-card/95 px-3 text-xs font-semibold text-muted-foreground shadow-[var(--surface-elev)] transition-colors hover:bg-muted hover:text-foreground"
-            >
-              {t("header.import")}
-            </Link>
-          </div>
+          <DashboardHeaderActions
+            lastSyncedLabel={lastSyncedLabel}
+            importLabel={t("header.import")}
+          />
         )}
       </div>
 
@@ -172,7 +178,7 @@ export default async function ContractsPage({
           month={typeof sp.m === "string" ? sp.m : undefined}
         />
       ) : view === "logs" ? (
-        <LogsSection orgId={session.orgId} searchParams={sp} />
+        <ContractLogsSection orgId={session.orgId} searchParams={sp} />
       ) : (
         <TableSection
           orgId={session.orgId}
@@ -198,7 +204,8 @@ async function TableSection({
   meEmployeeId: string | null;
   initialFilters: ContractGridFilters;
 }) {
-  const [rows, types, ams] = await Promise.all([
+  const [{ ContractsGrid }, rows, types, ams] = await Promise.all([
+    import("./contracts-grid"),
     listContractsGrid(orgId),
     listContractTypes(orgId),
     listAccountManagers(orgId),
@@ -231,21 +238,42 @@ async function TableSection({
   );
 }
 
-// New-contract button needs the client/package/type/AM option lists.
-async function ContractsHeaderActions({ orgId }: { orgId: string }) {
-  const [types, ams, packages, clients] = await Promise.all([
-    listContractTypes(orgId),
-    listAccountManagers(orgId),
-    listPackages(orgId),
-    listClientOptions(orgId),
-  ]);
+// The button bundle loads with the table, but its large option lists are fetched
+// only after the user opens the dialog.
+async function ContractsHeaderActions() {
+  const { NewContractButton } = await import("./new-contract-dialog");
+  return <NewContractButton />;
+}
+
+async function ContractLogsSection({
+  orgId,
+  searchParams,
+}: {
+  orgId: string;
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
+  const { LogsSection } = await import("./logs-section");
+  return <LogsSection orgId={orgId} searchParams={searchParams} />;
+}
+
+async function DashboardHeaderActions({
+  lastSyncedLabel,
+  importLabel,
+}: {
+  lastSyncedLabel: string | null;
+  importLabel: string;
+}) {
+  const { SheetSyncButton } = await import("./sheet-sync-button");
   return (
-    <NewContractButton
-      clients={clients.map((c) => ({ id: c.id, name: c.name, external_id: c.external_id }))}
-      packages={packages.map((p) => ({ id: p.id, name_ar: p.name_ar }))}
-      contractTypes={types.map((t) => ({ id: t.id, key: t.key, label: t.name_ar }))}
-      accountManagers={ams.map((a) => ({ id: a.id, full_name: a.full_name }))}
-    />
+    <div className="flex items-center gap-2">
+      <SheetSyncButton lastSyncedLabel={lastSyncedLabel} />
+      <Link
+        href="/contracts/import"
+        className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] border border-border/80 bg-card/95 px-3 text-xs font-semibold text-muted-foreground shadow-[var(--surface-elev)] transition-colors hover:bg-muted hover:text-foreground"
+      >
+        {importLabel}
+      </Link>
+    </div>
   );
 }
 
@@ -261,9 +289,18 @@ async function DashboardSection({
   const t = await getTranslations("ContractsPage");
   const months = await listDashboardMonths(orgId);
   const selected = month ?? months[0]?.month ?? undefined;
+  const selectedMonth = months.find((item) => item.month === selected);
 
-  const [dashboard, roster, amTargets, buckets, clientInsights] =
+  // Frozen months are immutable and need no write RPC during navigation.
+  // Live months run both recomputations once, in parallel, before their rows
+  // are read.
+  if (selected && !selectedMonth?.is_frozen) {
+    await refreshMonthlyDashboard(orgId, selected);
+  }
+
+  const [{ CeoDashboard }, dashboard, roster, amTargets, buckets, clientInsights] =
     await Promise.all([
+      import("./ceo-dashboard"),
       getMonthlyDashboard(orgId, selected),
       getContractsRoster(orgId),
       getAmTargets(orgId, selected),

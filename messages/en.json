@@ -564,7 +564,8 @@
     "targets": "Targets",
     "messages": "Chats",
     "teamActivity": "Team Pulse",
-    "accountability": "Accountability"
+    "accountability": "Accountability",
+    "myPerformance": "My performance"
   },
   "ProjectCard": {
     "storeName": "Store Name",
@@ -1159,6 +1160,11 @@
         "paid": "Paid",
         "activeNote": "active only"
       },
+      "pagination": {
+        "page": "Page {page} of {pages}",
+        "previous": "Previous",
+        "next": "Next"
+      },
       "headers": {
         "clientId": "Client ID",
         "client": "Client",
@@ -1542,7 +1548,8 @@
         "email": "Email",
         "review": "Review",
         "upload": "Upload",
-        "other": "Other"
+        "other": "Other",
+        "task": "Task"
       }
     }
   },
@@ -2669,7 +2676,9 @@
     "teamActivityTitle": "Team Pulse",
     "teamActivitySubtitle": "Per-employee activity vs duties",
     "accountabilityTitle": "Accountability Engine",
-    "accountabilitySubtitle": "Who owns each stage, where work stalls, and the evidence behind every number"
+    "accountabilitySubtitle": "Who owns each stage, where work stalls, and the evidence behind every number",
+    "myPerformanceTitle": "My performance",
+    "myPerformanceSubtitle": "Your scorecard, monthly history, and lessons from past misses"
   },
   "AccountabilityPage": {
     "title": "Accountability Engine",
@@ -3284,7 +3293,10 @@
       "retry": "Retry",
       "emptyTitle": "No brief generated yet",
       "emptyDescription": "The brief sums up company status in three practical answers, instead of reading every section.",
-      "generateFirst": "Generate first brief"
+      "generateFirst": "Generate first brief",
+      "reanalyzeSection": "Re-analyze",
+      "reanalyzingSection": "Analyzing…",
+      "sectionError": "Could not analyze this section"
     },
     "assistant": {
       "askAi": "Ask AI",
@@ -3716,7 +3728,8 @@
       "current": "Current",
       "viewingPast": "You're viewing a past analysis — it doesn't reflect the client's current status",
       "backToCurrent": "Back to current analysis"
-    }
+    },
+    "analyzing": "Analyzing…"
   },
   "ClientFinance": {
     "onTarget": "On target",
@@ -3778,6 +3791,274 @@
       "contracts": "Contracts",
       "active": "Active",
       "totalValue": "Total value"
+    }
+  },
+  "AgentCockpit": {
+    "welcome": "Welcome, {name}",
+    "description": "Your workspace: what needs your attention now",
+    "activeProjects": "Active projects",
+    "activeProjectsHint": "Projects containing my tasks",
+    "openTasks": "Open tasks",
+    "incomplete": "Not completed",
+    "overdue": "Overdue",
+    "pastDeadline": "Past their deadline",
+    "dueToday": "Due today",
+    "dueTodayHint": "Due today",
+    "thisWeek": "This week",
+    "withinDays": "Within {count} days",
+    "myTasks": "My tasks",
+    "startUrgent": "Start with the most urgent",
+    "noOpenTasks": "You have no open tasks right now 🎉",
+    "actionRequired": "Action required",
+    "actionRequiredDescription": "Items waiting for your direct input",
+    "uploadNeeded": "Needs upload or delivery",
+    "awaitingReview": "Waiting for your review",
+    "slaBreached": "SLA breached in your stage",
+    "hoursShort": "{count}h",
+    "scheduledActivities": "My scheduled activities",
+    "noScheduledActivities": "No scheduled activities.",
+    "allActivities": "All activities",
+    "mentionsAndChats": "Mentions and chats",
+    "noMentionsOrMessages": "No mentions or unread messages.",
+    "taskFallback": "Task",
+    "unreadMessages": "Unread messages",
+    "mySpace": "My workspace",
+    "refresh": "Refresh",
+    "relative": {
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "overdue": "{count}d overdue",
+      "inDays": "In {count}d"
+    },
+    "taskTabs": {
+      "overdue": "Overdue",
+      "today": "Due today",
+      "upcoming": "Upcoming"
+    },
+    "noTasksInCategory": "No tasks in this category",
+    "viewAll": "View all ({count})",
+    "priority": {
+      "title": "{priority} priority",
+      "urgent": "Urgent",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "priorities": {
+      "title": "Today's priorities",
+      "description": "Automatically ranked by AI",
+      "empty": "No priorities require immediate attention 🎯",
+      "ranked": "Automatically ranked by urgency",
+      "retry": "Analysis failed — try again",
+      "rerank": "Rank again",
+      "analyzing": "Analyzing…",
+      "slaOver": "SLA exceeded by {count}h",
+      "uploadDue": "Upload due",
+      "dependents": "{count} dependent",
+      "enhance": "Add AI insight"
+    },
+    "techTip": {
+      "title": "Technical tip",
+      "description": "Technical guidance tailored to your specialty",
+      "label": "Technical tip",
+      "retry": "Analysis failed — try again",
+      "newTip": "New tip",
+      "thinking": "Thinking…",
+      "analyzingTask": "Analyzing the task…",
+      "general": "General tip for {specialization}",
+      "preparing": "Preparing a tip…",
+      "generate": "Get a tip",
+      "idleHint": "Get a technical tip tailored to your current work."
+    },
+    "growth": {
+      "title": "My growth",
+      "description": "How you're doing this month, and how to get better",
+      "scorecardTitle": "My scorecard",
+      "score": "Performance score",
+      "onTime": "On-time",
+      "slaOnTime": "SLA on-time",
+      "turnaround": "Turnaround",
+      "rework": "Client revisions",
+      "vsLastMonth": "vs last month",
+      "noBaseline": "No comparison yet",
+      "lowSample": "Small sample",
+      "building": "Building",
+      "notEnoughData": "Not enough completed work yet to score reliably — keep going and it'll fill in.",
+      "businessHours": "business hrs",
+      "basedOn": {
+        "checks": "{count} on-time checks",
+        "intervals": "{count} intervals"
+      },
+      "tips": {
+        "score": "Your overall craft score (0–100). Blends on-time delivery (vs each task's deadline), the share of your board that isn't overdue, and how rarely your work comes back — each weighted by how much data backs it. Shown only when there's enough completed work.",
+        "slaOnTime": "Share of your work stages finished within their internal SLA time. Usually a small sample (only some stages have an SLA), so it's a side signal — the score uses on-time delivery instead.",
+        "turnaround": "Average working hours your tasks spend in your hands before moving on. Lower is better, compared to your own previous 30 days.",
+        "rework": "How many times your delivered work came back as client changes in the last 30 days. Lower is better."
+      },
+      "privacyNote": "Private to you. Compared only against your own past 30 days — not your colleagues.",
+      "updated": "Updated {ago}",
+      "reanalyse": "Re-analyse",
+      "coach": {
+        "label": "Growth coach",
+        "focus": "Focus this week",
+        "actions": "Action steps",
+        "analyzing": "Reviewing your numbers…",
+        "preparing": "Preparing…",
+        "thinking": "Thinking…",
+        "refresh": "New coaching",
+        "retry": "Analysis failed — try again",
+        "generate": "Generate coaching",
+        "idleHint": "Get private, specialty-specific coaching based on your scorecard."
+      }
+    }
+  },
+  "AIAgent": {
+    "title": "AI assistant",
+    "subtitle": "Ask about performance, the team, and projects from one clear workspace.",
+    "poweredByCompanyData": "Powered by company data",
+    "conversations": "Conversations",
+    "historyDescription": "Open a previous conversation or start a new one.",
+    "openConversations": "Open conversations",
+    "newConversation": "New conversation",
+    "newShort": "New",
+    "noConversations": "No previous conversations",
+    "untitledConversation": "Untitled conversation",
+    "empty": {
+      "title": "Hello, I’m your AI assistant",
+      "description": "I can analyze company data, monitor performance, and provide practical recommendations. Ask a direct question or choose one of these topics."
+    },
+    "prompts": {
+      "sales": {
+        "label": "Sales analysis",
+        "prompt": "Analyze this month’s sales performance and compare it with previous months"
+      },
+      "team": {
+        "label": "Team performance",
+        "prompt": "Who is performing best, and who needs support? Give me the details"
+      },
+      "support": {
+        "label": "Support status",
+        "prompt": "What is the status of support tickets, and how many urgent tickets do we have?"
+      },
+      "finance": {
+        "label": "Financial report",
+        "prompt": "Give me a summary of the company’s financial position, including ARR and MRR"
+      },
+      "targets": {
+        "label": "Target achievement",
+        "prompt": "How are we performing against our targets, and what gaps remain?"
+      },
+      "forecast": {
+        "label": "Next-quarter forecast",
+        "prompt": "Based on current data, what is your forecast for the next quarter?"
+      }
+    },
+    "userInitial": "Y",
+    "you": "You",
+    "tools": {
+      "webSearching": "Searching the web...",
+      "webSearched": "Web search completed",
+      "databaseQuerying": "Querying the database...",
+      "databaseQueried": "Database query completed",
+      "fetching": "Fetching {label}...",
+      "fetched": "Fetched {label}",
+      "labels": {
+        "odooProjects": "Odoo projects",
+        "odooProject": "Odoo project",
+        "odooClients": "Odoo clients",
+        "odooClient": "Odoo client",
+        "odooTasks": "Odoo tasks",
+        "odooTask": "Odoo task",
+        "taskMessages": "task messages",
+        "odooEmployees": "Odoo employees",
+        "odooEmployee": "Odoo employee",
+        "taskTimeline": "task timeline",
+        "projectActivity": "project activity"
+      }
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "thinking": "Thinking",
+    "close": "Close",
+    "placeholder": "Ask about sales, the team, support, or projects...",
+    "footer": "The AI assistant is powered by Gemini AI — answers are based on live company data",
+    "errors": {
+      "connection": "Could not connect to the AI assistant. Try again.",
+      "silentFinish": "The data was retrieved, but the model did not produce a text response. Rephrase the question or send it again."
+    }
+  },
+  "MyPerformance": {
+    "pageTitle": "My performance",
+    "pageSubtitle": "How you're doing, month by month — and how to get better",
+    "delivery": {
+      "sectionTitle": "Delivery commitment",
+      "sectionSubtitle": "How reliably you deliver on time and keep work moving",
+      "title": "Delivery commitment score",
+      "score": "Commitment score",
+      "building": "Building",
+      "notEnoughData": "Not enough deadline-bearing work yet to score reliably.",
+      "onTime": "On-time delivery",
+      "ofDeliveries": "{onTime}/{total} deliveries",
+      "noDeadlines": "No deadlines set",
+      "noBaseline": "No comparison yet",
+      "vsLastMonth": "vs last month",
+      "overdue": "Overdue",
+      "ofOpen": "of {count} open",
+      "avgLateness": "Avg lateness",
+      "days": "days",
+      "lateProjects": "Late projects",
+      "blocked": "Blocked",
+      "derived": "Estimated",
+      "note": "Deadlines come from each task's planned date; lateness is measured on tasks completed in the last 30 days. Blocked is estimated from task dependencies.",
+      "tips": {
+        "score": "0–100. How reliably you deliver on time and keep work moving. Blends on-time delivery (vs each task's deadline), the share of your board that isn't overdue, and how late your missed deliveries ran. Shown only with enough deadline-bearing work.",
+        "onTime": "Of the tasks you completed in the last 30 days that had a deadline, the share delivered on or before it. Deadline = the task's planned date. Compared to your previous 30 days.",
+        "overdue": "Your open tasks currently past their deadline, out of all your open tasks.",
+        "avgLateness": "On the deliveries you missed this month, the average number of days they ran late.",
+        "lateProjects": "Distinct projects you're working in that have at least one of your tasks overdue.",
+        "blocked": "Estimated: your open tasks waiting on another task (a dependency) that isn't finished yet. Derived from task links, so approximate."
+      }
+    },
+    "scorecard": {
+      "title": "My scorecard & coach",
+      "subtitle": "Your verified trend vs your own past 30 days, with AI coaching"
+    },
+    "monthly": {
+      "title": "Monthly history",
+      "subtitle": "Your closing figures, month by month",
+      "empty": "No monthly data yet",
+      "month": "Month",
+      "completed": "Completed",
+      "onTime": "On-time",
+      "overdue": "Overdue",
+      "revisions": "Revisions",
+      "designs": "Designs",
+      "achievement": "vs target",
+      "noTarget": "No target"
+    },
+    "failures": {
+      "title": "Learn from past misses",
+      "subtitle": "Recent tasks that slipped — click any one for the lesson and how to improve",
+      "empty": "No misses in the last 30 days — great work",
+      "kindOverdue": "Late",
+      "kindRework": "Reworked",
+      "kindSlow": "Slow",
+      "delayDays": "{n}d late",
+      "reworkTimes": "returned {n}×",
+      "dwellDays": "{n}d in stage",
+      "timeByStage": "Where the time went",
+      "daysShort": "{n}d",
+      "viewTask": "Open the task",
+      "lesson": {
+        "title": "Lesson & how to improve",
+        "rootCauses": "Likely causes",
+        "improvements": "How to improve",
+        "analyzing": "Reviewing this task…",
+        "refresh": "Regenerate",
+        "retry": "Failed — try again",
+        "failed": "Couldn't generate the lesson — try again",
+        "saved": "Saved"
+      }
     }
   }
 }
