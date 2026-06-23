@@ -18,6 +18,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Explained, MetricInfo } from "@/components/metric-info";
 import type { BriefChange } from "@/lib/data/ceo-brief-signals";
@@ -77,6 +78,68 @@ function changeDelta(c: BriefChange, t: T): string {
   const sign = c.value > 0 ? "+" : "";
   if (c.unit === "percent") return `${sign}${c.value}%`;
   return `${sign}${c.value} ${t(`units.${c.unit}`)}`;
+}
+
+// A single before/after value rendered with its unit (e.g. "82%", "11 مهمة").
+function changeValueText(c: BriefChange, n: number, t: T): string {
+  if (c.unit === "percent" || c.labelKey === "onTime") return `${n}%`;
+  return `${n} ${t(`units.${c.unit}`)}`;
+}
+
+// One trajectory pill. When the change carries `detail` (the before→after facts
+// behind the delta), the pill becomes a click target that opens a popover
+// explaining what the metric measures, how it moved, and a link to the records.
+function ChangePill({ c, t }: { c: BriefChange; t: T }) {
+  const Arrow = c.dir === "up" ? ArrowUpRight : c.dir === "down" ? ArrowDownRight : Minus;
+  const tone = c.good ? "bg-cc-green/[0.08] text-cc-green" : "bg-cc-red/[0.08] text-cc-red";
+  const body = (
+    <>
+      <Arrow className="size-3.5" />
+      <span className="text-foreground/75">{changeLabel(c, t)}</span>
+      <span className="font-semibold tabular-nums">{changeDelta(c, t)}</span>
+    </>
+  );
+
+  if (!c.detail) {
+    return (
+      <span className={cn("inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs", tone)}>
+        {body}
+      </span>
+    );
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          "inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-shadow hover:ring-1 hover:ring-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          tone,
+        )}
+      >
+        {body}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="gap-2 text-xs">
+        <p className="font-semibold text-foreground">{t("changeDetail.title")}</p>
+        <p className="leading-relaxed text-foreground/80">{t(`changeDetail.why.${c.labelKey}`)}</p>
+        <p className="flex items-center gap-1.5 font-semibold tabular-nums text-foreground">
+          {t("changeDetail.fromTo", {
+            from: changeValueText(c, c.detail.from, t),
+            to: changeValueText(c, c.detail.to, t),
+          })}
+        </p>
+        <p className="leading-relaxed text-muted-foreground">{t("changeDetail.period")}</p>
+        {c.detail.href && (
+          <Link
+            href={c.detail.href}
+            className="inline-flex w-fit items-center gap-0.5 font-medium text-cc-blue hover:underline"
+          >
+            {t("changeDetail.link")}
+            <ChevronLeft className="size-3.5" />
+          </Link>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /** Small "re-analyze this section" button shown in each section header. */
@@ -273,22 +336,9 @@ function BriefBody({
         {changes.length > 0 && (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <MetricInfo text={t("q1ChangesHelp")} label={t("q1")} />
-            {changes.map((c, i) => {
-              const Arrow = c.dir === "up" ? ArrowUpRight : c.dir === "down" ? ArrowDownRight : Minus;
-              return (
-                <span
-                  key={i}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs",
-                    c.good ? "bg-cc-green/[0.08] text-cc-green" : "bg-cc-red/[0.08] text-cc-red",
-                  )}
-                >
-                  <Arrow className="size-3.5" />
-                  <span className="text-foreground/75">{changeLabel(c, t)}</span>
-                  <span className="font-semibold tabular-nums">{changeDelta(c, t)}</span>
-                </span>
-              );
-            })}
+            {changes.map((c, i) => (
+              <ChangePill key={i} c={c} t={t} />
+            ))}
           </div>
         )}
       </QSection>

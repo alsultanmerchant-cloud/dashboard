@@ -145,6 +145,7 @@ const BRIEF_FILTER = "filename.ilike.%بريف%,filename.ilike.%brief%";
 const PROJECT_BRIEF_FILTER = `${BRIEF_FILTER},external_source.eq.manual_satisfaction_brief`;
 
 type AttRow = {
+  id: string;
   filename: string | null;
   source_url: string | null;
   storage_path: string | null;
@@ -153,8 +154,10 @@ type AttRow = {
 
 // Either a public Google Doc/Sheet (read via export URL) or a file uploaded to
 // the `attachments` bucket (read via storage download). Resolved lazily so an
-// unreadable candidate falls through to the next one.
-type Cand = { source: "project" | "task"; filename: string; url: string } & (
+// unreadable candidate falls through to the next one. `id` is the attachment
+// row id (in project_attachments or task_attachments per `source`) so callers
+// can delete/replace the wrong brief.
+type Cand = { id: string; source: "project" | "task"; filename: string; url: string } & (
   | { via: "google"; kind: "google_doc" | "google_sheet"; googleId: string }
   | { via: "storage"; storagePath: string; mimetype: string | null }
 );
@@ -162,12 +165,12 @@ type Cand = { source: "project" | "task"; filename: string; url: string } & (
 function toCand(source: "project" | "task", r: AttRow): Cand | null {
   const docId = extractGoogleDocId(r.source_url);
   if (docId)
-    return { source, filename: r.filename ?? "", url: r.source_url!, via: "google", kind: "google_doc", googleId: docId };
+    return { id: r.id, source, filename: r.filename ?? "", url: r.source_url!, via: "google", kind: "google_doc", googleId: docId };
   const sheetId = extractGoogleSheetId(r.source_url);
   if (sheetId)
-    return { source, filename: r.filename ?? "", url: r.source_url!, via: "google", kind: "google_sheet", googleId: sheetId };
+    return { id: r.id, source, filename: r.filename ?? "", url: r.source_url!, via: "google", kind: "google_sheet", googleId: sheetId };
   if (r.storage_path)
-    return { source, filename: r.filename ?? "", url: `storage:${r.storage_path}`, via: "storage", storagePath: r.storage_path, mimetype: r.mimetype };
+    return { id: r.id, source, filename: r.filename ?? "", url: `storage:${r.storage_path}`, via: "storage", storagePath: r.storage_path, mimetype: r.mimetype };
   return null;
 }
 
@@ -189,13 +192,13 @@ async function findBriefCandidates(orgId: string, clientId: string): Promise<Can
   const [projAtt, taskAtt] = await Promise.all([
     supabaseAdmin
       .from("project_attachments")
-      .select("filename, source_url, storage_path, mimetype")
+      .select("id, filename, source_url, storage_path, mimetype")
       .eq("organization_id", orgId)
       .in("project_id", projectIds)
       .or(PROJECT_BRIEF_FILTER),
     supabaseAdmin
       .from("task_attachments")
-      .select("filename, source_url, storage_path, mimetype, task:tasks!inner(project_id)")
+      .select("id, filename, source_url, storage_path, mimetype, task:tasks!inner(project_id)")
       .eq("organization_id", orgId)
       .in("task.project_id", projectIds)
       .or(BRIEF_FILTER),
@@ -224,7 +227,8 @@ async function findBriefCandidates(orgId: string, clientId: string): Promise<Can
 // mint a short-lived signed URL into the private `attachments` bucket; Google
 // Docs/Sheets keep their original shareable URL.
 export interface ClientBriefRef {
-  source: "project" | "task";
+  attachmentId: string; // row id in project_attachments / task_attachments
+  source: "project" | "task"; // which table the row lives in
   filename: string;
   href: string; // directly openable in the browser
   kind: "google_doc" | "google_sheet" | "file";
@@ -240,14 +244,14 @@ export async function getClientBriefRef(
 
   const filename = top.filename || "البريف";
   if (top.via === "google") {
-    return { source: top.source, filename, href: top.url, kind: top.kind };
+    return { attachmentId: top.id, source: top.source, filename, href: top.url, kind: top.kind };
   }
   // Uploaded file: sign a 1-hour URL so the operator can open/download it.
   const { data } = await supabaseAdmin.storage
     .from("attachments")
     .createSignedUrl(top.storagePath, 3600);
   if (!data?.signedUrl) return null;
-  return { source: top.source, filename, href: data.signedUrl, kind: "file" };
+  return { attachmentId: top.id, source: top.source, filename, href: data.signedUrl, kind: "file" };
 }
 
 export async function getClientBrief(

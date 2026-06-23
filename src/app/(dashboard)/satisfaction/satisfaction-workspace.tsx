@@ -75,6 +75,9 @@ interface Props {
   selectedId: string | null;
   selectedAnalysisId: string | null;
   financeMap: ClientFinanceMap;
+  // When true (linked from the dashboard at-risk stat), the overview opens
+  // pre-filtered to at-risk clients only.
+  initialRisk?: boolean;
 }
 
 function scoreTone(score: number | null) {
@@ -126,6 +129,7 @@ export function SatisfactionWorkspace({
   selectedId,
   selectedAnalysisId,
   financeMap,
+  initialRisk = false,
 }: Props) {
   const t = useTranslations("SatisfactionPage");
   const tStages = useTranslations("TasksPage.stages");
@@ -284,6 +288,7 @@ export function SatisfactionWorkspace({
             await analyzeClient(id);
             router.refresh();
           }}
+          initialRisk={initialRisk}
           t={t}
         />
       ) : detail ? (
@@ -426,6 +431,7 @@ function SatisfactionOverview({
   financeMap,
   onSelect,
   onAnalyze,
+  initialRisk = false,
   t,
 }: {
   rows: SatisfactionRow[];
@@ -433,19 +439,28 @@ function SatisfactionOverview({
   financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
+  initialRisk?: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const [view, setView] = useState<"board" | "table">("board");
   const [query, setQuery] = useState("");
   // Active clients (≥1 non-archived project) vs lost/archived relationships.
   // Defaults to "active" so the board isn't dominated by clients we've lost.
-  const [relation, setRelation] = useState<"active" | "lost" | "all">("active");
+  // When deep-linked from the dashboard at-risk stat, show "all" so no at-risk
+  // client is hidden by the relation default.
+  const [relation, setRelation] = useState<"active" | "lost" | "all">(
+    initialRisk ? "all" : "active",
+  );
+  // At-risk-only filter — toggled on when deep-linked from the dashboard
+  // "عملاء معرضون للفقد" stat. Matches isClientAtRisk: negative sentiment OR score < 55.
+  const [riskOnly, setRiskOnly] = useState(initialRisk);
 
   const counts = useMemo(
     () => ({
       active: rows.filter((r) => r.hasActiveProject).length,
       lost: rows.filter((r) => !r.hasActiveProject).length,
       all: rows.length,
+      risk: rows.filter((r) => bucketOf(r) === "atRisk").length,
     }),
     [rows],
   );
@@ -453,6 +468,7 @@ function SatisfactionOverview({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
+      if (riskOnly && bucketOf(r) !== "atRisk") return false;
       if (relation === "active" && !r.hasActiveProject) return false;
       if (relation === "lost" && r.hasActiveProject) return false;
       if (q) {
@@ -463,7 +479,7 @@ function SatisfactionOverview({
       }
       return true;
     });
-  }, [rows, query, relation, searchKeywords]);
+  }, [rows, query, relation, riskOnly, searchKeywords]);
 
   if (rows.length === 0) {
     return (
@@ -513,6 +529,23 @@ function SatisfactionOverview({
             text={t("metricTooltips.satisfaction_relationCounts")}
             label={t("relationFilter.all")}
           />
+          <button
+            type="button"
+            onClick={() => setRiskOnly((v) => !v)}
+            aria-pressed={riskOnly}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+              riskOnly
+                ? "border-cc-red/40 bg-cc-red/10 text-cc-red"
+                : "border-border bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ShieldAlert className="size-3.5" />
+            {t("riskFilter")}
+            <span className="rounded-full bg-soft-1 px-1.5 text-[10px] tabular-nums text-muted-foreground">
+              {counts.risk}
+            </span>
+          </button>
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">

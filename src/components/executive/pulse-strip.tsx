@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import type { PulseStats } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { MetricInfo } from "@/components/metric-info";
+import { SectionTitle } from "@/components/section-title";
 import { cn } from "@/lib/utils";
 
 function pct(curr: number, prev: number): { sign: string; tone: string; Dir: React.ElementType } {
@@ -71,6 +72,7 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
   const t = await getTranslations("Executive.pulse");
   return (
     <section className="mb-8">
+      <SectionTitle title={t("title")} description={t("description")} />
       <Card className="border-cyan/15 bg-gradient-to-r from-card to-card/60">
         <CardContent className="grid grid-cols-2 divide-x divide-border/40 p-0 md:grid-cols-4 rtl:divide-x-reverse">
           <Cell
@@ -108,9 +110,6 @@ export async function PulseStrip({ data }: { data: PulseStats }) {
           />
         </CardContent>
       </Card>
-      <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-        {t("caption")}
-      </p>
     </section>
   );
 }

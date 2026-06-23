@@ -35,6 +35,14 @@ export interface BriefChange {
   unit: "points" | "tasks" | "percent";
   dir: "up" | "down" | "flat";
   good: boolean; // did the business get better on this metric?
+  // The before→after numbers that produced `value`, plus where the CEO can drill
+  // into the underlying records. Drives the "why is this changing?" popover on
+  // each pill — no AI, just the snapshot facts behind the delta.
+  detail?: {
+    from: number; // previous-period value
+    to: number; // current-period value
+    href?: string; // deep link into the records behind this metric
+  };
 }
 
 export type RiskKind =
@@ -455,6 +463,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
         unit: "points",
         dir: d > 0 ? "up" : "down",
         good: d > 0,
+        detail: {
+          from: Math.round(snap.onTimePrev),
+          to: Math.round(snap.onTimeNow),
+          href: "/tasks?view=list&filter=overdue",
+        },
       });
   }
   if (snap) {
@@ -466,6 +479,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
         unit: "tasks",
         dir: od > 0 ? "up" : "down",
         good: od < 0, // fewer overdue is better
+        detail: {
+          from: snap.overduePrev,
+          to: snap.overdueNow,
+          href: "/tasks?view=list&filter=overdue",
+        },
       });
   }
   if (scores.stability.delta != null && scores.stability.delta !== 0) {
@@ -475,6 +493,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       unit: "points",
       dir: scores.stability.delta > 0 ? "up" : "down",
       good: scores.stability.delta > 0,
+      detail: {
+        from: Math.round(scores.stability.score - scores.stability.delta),
+        to: Math.round(scores.stability.score),
+        href: "/reports",
+      },
     });
   }
   if (completedShift !== 0) {
@@ -484,6 +507,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       unit: "tasks",
       dir: completedShift > 0 ? "up" : "down",
       good: completedShift > 0,
+      detail: {
+        from: pulse.completed.previous,
+        to: pulse.completed.current,
+        href: "/tasks?view=list",
+      },
     });
   }
 

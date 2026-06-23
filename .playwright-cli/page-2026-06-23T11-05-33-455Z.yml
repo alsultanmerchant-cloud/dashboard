@@ -1,0 +1,1459 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img "Sky Light" [ref=e7]
+        - generic:
+          - img "Sky Light"
+          - generic:
+            - paragraph: Skylight
+            - paragraph: Demo Workspace
+      - navigation [ref=e8]:
+        - generic [ref=e9]:
+          - generic: AI Workspace
+          - list [ref=e10]:
+            - listitem [ref=e11]:
+              - link "AI agent" [ref=e12] [cursor=pointer]:
+                - /url: /agent
+                - img [ref=e14]
+                - generic: AI agent
+            - listitem [ref=e26]:
+              - link "AI insights" [ref=e27] [cursor=pointer]:
+                - /url: /ai-insights
+                - img [ref=e29]
+                - generic: AI insights
+            - listitem [ref=e32]:
+              - link "My dashboard" [ref=e33] [cursor=pointer]:
+                - /url: /dashboard
+                - img [ref=e35]
+                - generic: My dashboard
+            - listitem [ref=e40]:
+              - link "My performance" [ref=e41] [cursor=pointer]:
+                - /url: /my-performance
+                - img [ref=e43]
+                - generic: My performance
+            - listitem [ref=e46]:
+              - link "Chats" [ref=e47] [cursor=pointer]:
+                - /url: /messages
+                - img [ref=e49]
+                - generic: Chats
+            - listitem [ref=e51]:
+              - link "Notifications" [ref=e52] [cursor=pointer]:
+                - /url: /notifications
+                - img [ref=e54]
+                - generic: Notifications
+        - generic [ref=e57]:
+          - generic: Project Delivery
+          - list [ref=e58]:
+            - listitem [ref=e59]:
+              - link "Projects" [ref=e60] [cursor=pointer]:
+                - /url: /projects
+                - img [ref=e62]
+                - generic: Projects
+            - listitem [ref=e64]:
+              - link "Tasks" [ref=e65] [cursor=pointer]:
+                - /url: /tasks
+                - img [ref=e67]
+                - generic: Tasks
+            - listitem [ref=e70]:
+              - link "My activities" [ref=e71] [cursor=pointer]:
+                - /url: /my-activities
+                - img [ref=e73]
+                - generic: My activities
+            - listitem [ref=e76]:
+              - link "Today — uploads" [ref=e77] [cursor=pointer]:
+                - /url: /uploads
+                - img [ref=e79]
+                - generic: Today — uploads
+            - listitem [ref=e82]:
+              - link "Clients" [ref=e83] [cursor=pointer]:
+                - /url: /clients
+                - img [ref=e85]
+                - generic: Clients
+            - listitem [ref=e89]:
+              - link "Task templates" [ref=e90] [cursor=pointer]:
+                - /url: /task-templates
+                - img [ref=e92]
+                - generic: Task templates
+            - listitem [ref=e95]:
+              - link "Service categories" [ref=e96] [cursor=pointer]:
+                - /url: /service-categories
+                - img [ref=e98]
+                - generic: Service categories
+        - generic [ref=e102]:
+          - generic: Handovers & Contracts
+          - list [ref=e103]:
+            - listitem [ref=e104]:
+              - link "Sales handover" [ref=e105] [cursor=pointer]:
+                - /url: /handover
+                - img [ref=e107]
+                - generic: Sales handover
+            - listitem [ref=e112]:
+              - link "Contracts" [ref=e113] [cursor=pointer]:
+                - /url: /contracts
+                - img [ref=e115]
+                - generic: Contracts
+        - generic [ref=e119]:
+          - generic: Monitoring & Control
+          - list [ref=e120]:
+            - listitem [ref=e121]:
+              - link "Escalations" [ref=e122] [cursor=pointer]:
+                - /url: /escalations
+                - img [ref=e124]
+                - generic: Escalations
+            - listitem [ref=e129]:
+              - link "Governance issues" [ref=e130] [cursor=pointer]:
+                - /url: /governance
+                - img [ref=e132]
+                - generic: Governance issues
+            - listitem [ref=e136]:
+              - link "Team Pulse" [ref=e137] [cursor=pointer]:
+                - /url: /team-activity
+                - img [ref=e139]
+                - generic: Team Pulse
+            - listitem [ref=e141]:
+              - link "Accountability" [ref=e142] [cursor=pointer]:
+                - /url: /accountability
+                - img [ref=e144]
+                - generic: Accountability
+            - listitem [ref=e148]:
+              - link "Attendance" [ref=e149] [cursor=pointer]:
+                - /url: /attendance
+                - img [ref=e151]
+                - generic: Attendance
+            - listitem [ref=e154]:
+              - link "Warnings" [ref=e155] [cursor=pointer]:
+                - /url: /warnings
+                - img [ref=e157]
+                - generic: Warnings
+            - listitem [ref=e159]:
+              - link "Client satisfaction" [ref=e160] [cursor=pointer]:
+                - /url: /satisfaction
+                - img [ref=e162]
+                - generic: Client satisfaction
+            - listitem [ref=e164]:
+              - link "Reports" [ref=e165] [cursor=pointer]:
+                - /url: /reports
+                - img [ref=e167]
+                - generic: Reports
+        - generic [ref=e169]:
+          - generic: Organization
+          - list [ref=e170]:
+            - listitem [ref=e171]:
+              - link "Agency chart" [ref=e172] [cursor=pointer]:
+                - /url: /organization/chart
+                - img [ref=e174]
+                - generic: Agency chart
+            - listitem [ref=e179]:
+              - link "Departments" [ref=e180] [cursor=pointer]:
+                - /url: /organization/departments
+                - img [ref=e182]
+                - generic: Departments
+            - listitem [ref=e185]:
+              - link "Employees" [ref=e186] [cursor=pointer]:
+                - /url: /organization/employees
+                - img [ref=e188]
+                - generic: Employees
+            - listitem [ref=e192]:
+              - link "Roles & permissions" [ref=e193] [cursor=pointer]:
+                - /url: /organization/roles
+                - img [ref=e195]
+                - generic: Roles & permissions
+        - generic [ref=e198]:
+          - generic: Administration
+          - list [ref=e199]:
+            - listitem [ref=e200]:
+              - link "Settings" [ref=e201] [cursor=pointer]:
+                - /url: /settings
+                - img [ref=e203]
+                - generic: Settings
+            - listitem [ref=e206]:
+              - link "Feature flags" [ref=e207] [cursor=pointer]:
+                - /url: /settings/feature-flags
+                - img [ref=e209]
+                - generic: Feature flags
+      - generic [ref=e211]:
+        - generic:
+          - generic [ref=e212]: Operational status
+          - generic [ref=e213]:
+            - button "Switch to Arabic" [ref=e214]:
+              - img [ref=e215]
+              - generic [ref=e219]: العربية
+            - generic [ref=e220]: Live
+        - generic [ref=e221]:
+          - generic [ref=e223]:
+            - img "السلطان" [ref=e224]
+            - generic [ref=e225]: ا
+          - generic:
+            - paragraph: السلطان
+            - paragraph: المالك
+          - button "Sign out"
+    - generic [ref=e226]:
+      - generic [ref=e228]:
+        - generic [ref=e229]:
+          - button "Open app switcher" [ref=e230]:
+            - img [ref=e231]
+          - generic [ref=e233]:
+            - heading "Welcome, السلطان" [level=2] [ref=e234]
+            - paragraph [ref=e235]: Executive summary for the agency. Four key indicators, then what needs your attention right now.
+        - generic [ref=e236]:
+          - generic [ref=e237]:
+            - button "Create new" [ref=e238]:
+              - img [ref=e239]
+              - generic [ref=e240]: New
+            - button "Search the system… ⌘ K" [ref=e241]:
+              - img [ref=e242]
+              - generic [ref=e245]: Search the system…
+              - generic [ref=e246]:
+                - generic [ref=e247]: ⌘
+                - generic [ref=e248]: K
+          - link "الأنشطة المجدولة" [ref=e249] [cursor=pointer]:
+            - /url: /my-activities
+            - img [ref=e250]
+            - generic [ref=e252]: الأنشطة المجدولة
+          - button "Switch to dark mode" [ref=e253]:
+            - img
+          - link "المحادثات" [ref=e254] [cursor=pointer]:
+            - /url: /messages
+            - img [ref=e255]
+          - button "50" [ref=e258]:
+            - img
+            - generic [ref=e259]: "50"
+      - main [ref=e260]:
+        - generic [ref=e261]:
+          - generic [ref=e262]:
+            - generic [ref=e263]:
+              - generic [ref=e264]:
+                - img [ref=e266]
+                - generic [ref=e269]:
+                  - paragraph [ref=e270]: Executive brief
+                  - paragraph [ref=e271]: Updated Jun 22, 10:28 AM
+              - generic [ref=e272]:
+                - button "Refresh" [ref=e273]:
+                  - img
+                  - text: Refresh
+                - button "Force" [ref=e274]
+            - generic [ref=e275]:
+              - generic [ref=e276]:
+                - generic [ref=e277]:
+                  - generic [ref=e278]:
+                    - generic [ref=e279]: "1"
+                    - heading "Is the company improving or declining?" [level=3] [ref=e280]
+                  - button "Re-analyze" [ref=e281]:
+                    - img
+                    - text: Re-analyze
+                - generic [ref=e282]:
+                  - generic [ref=e284]:
+                    - generic [ref=e285]: 54%
+                    - generic [ref=e286]: D
+                  - generic [ref=e287]:
+                    - generic [ref=e289]:
+                      - img [ref=e290]
+                      - text: Stable
+                    - paragraph [ref=e291]: استقر الأداء التشغيلي للشركة عند 54% نتيجة النجاح في تقليص المهام المتأخرة بمقدار 55 مهمة وزيادة المهام المنجزة، مع استمرار تركز ضغط المهام المتأخرة في خدمتي تجديد مواقع التواصل الاجتماعي والإعلانات المدفوعة.
+                - generic [ref=e292]:
+                  - button "Is the company improving or declining?" [ref=e293]:
+                    - img [ref=e294]
+                  - button "On-time delivery -4 pts" [ref=e296] [cursor=pointer]:
+                    - img [ref=e297]
+                    - generic [ref=e300]: On-time delivery
+                    - generic [ref=e301]: "-4 pts"
+                  - button "Overdue tasks -55 tasks" [ref=e302] [cursor=pointer]:
+                    - img [ref=e303]
+                    - generic [ref=e306]: Overdue tasks
+                    - generic [ref=e307]: "-55 tasks"
+                  - button "Operational stability -3 pts" [ref=e308] [cursor=pointer]:
+                    - img [ref=e309]
+                    - generic [ref=e312]: Operational stability
+                    - generic [ref=e313]: "-3 pts"
+                  - button "Weekly throughput +14 tasks" [ref=e314] [cursor=pointer]:
+                    - img [ref=e315]
+                    - generic [ref=e318]: Weekly throughput
+                    - generic [ref=e319]: +14 tasks
+              - generic [ref=e321]:
+                - generic [ref=e322]:
+                  - generic [ref=e323]:
+                    - generic [ref=e324]: "2"
+                    - heading "Where's the danger?" [level=3] [ref=e325]
+                  - button "Re-analyze" [ref=e326]:
+                    - img
+                    - text: Re-analyze
+                - generic [ref=e327]:
+                  - generic [ref=e328]:
+                    - generic [ref=e330]:
+                      - generic [ref=e331]:
+                        - paragraph [ref=e332]: تراجع الالتزام بالتسليم على مستوى الوكالة
+                        - generic [ref=e333]: Critical
+                        - button "Critical" [ref=e334]:
+                          - img [ref=e335]
+                      - paragraph [ref=e337]: 194 مهمة متأخرة في 51 مشروع · الالتزام 38% · متراجع 4 نقطة هذا الأسبوع · 15 تصعيد غير معالَج
+                      - paragraph [ref=e338]: انهيار الالتزام بالتسليم إلى 38% مدفوع بتراكم 134 مهمة متأخرة بشكل مزمن و325 مهمة راكدة، مع تركز الخلل في خدمات سيو بنسبة 21% وميديا باينج بنسبة 26%، بالإضافة إلى انعدام إنتاجية مريم الورداني ودينا سنجاب وحسام محمد بنسبة التزام صفري.
+                    - link "تراجع الالتزام بالتسليم على مستوى الوكالة" [ref=e339] [cursor=pointer]:
+                      - /url: /tasks?view=list&filter=overdue
+                      - img [ref=e340]
+                  - generic [ref=e342]:
+                    - generic [ref=e344]:
+                      - generic [ref=e345]:
+                        - paragraph [ref=e346]: مشروع saee (b2b)3 شهور نوفا متعثّر
+                        - generic [ref=e347]: Critical
+                        - button "Critical" [ref=e348]:
+                          - img [ref=e349]
+                      - paragraph [ref=e351]: 14 متأخرة من 30 مفتوحة · انزلاق 56% · saee
+                      - paragraph [ref=e352]: تعثر مشروع saee بانزلاق 56% و14 مهمة متأخرة من أصل 30 مفتوحة يمثل تهديداً حرجاً للاستمرارية بسبب تراكم المهام المعلقة وغياب إجراءات المعالجة الفورية.
+                    - link "مشروع saee (b2b)3 شهور نوفا متعثّر" [ref=e353] [cursor=pointer]:
+                      - /url: /tasks?view=list&projectId=2ddc5ef9-87f1-471f-b9b7-747638e2299f&filter=overdue
+                      - img [ref=e354]
+                  - generic [ref=e356]:
+                    - generic [ref=e358]:
+                      - generic [ref=e359]:
+                        - paragraph [ref=e360]: خطر فقدان عملاء
+                        - generic [ref=e361]: Critical
+                        - button "Critical" [ref=e362]:
+                          - img [ref=e363]
+                      - paragraph [ref=e365]: "18 من 61 عميلًا معرّضون للفقد · متوسط الرضا 65/100 · أبرزهم: مؤسسة الشاعر الذكي، محمد علي عسيري، غيث وفيه ابراهيم"
+                      - paragraph [ref=e366]: خطر خسارة 18 عميلاً مع تدني متوسط الرضا لـ 65%، يتركز حرجه في تصعيد قانوني من مؤسسة الشاعر الذكي لتأخر رد 2,329 ريال متجاوزاً المهلة بـ 5 أيام عمل، وطلب صريح للفسخ من محمد علي عسيري، وإيقاف حملات غيث وفيه ابراهيم بسبب ضعف جودة الجمهور.
+                    - link "خطر فقدان عملاء" [ref=e367] [cursor=pointer]:
+                      - /url: /satisfaction?client=a1e6af83-4645-4e71-ba28-bf1471fdc6cc
+                      - img [ref=e368]
+                  - generic [ref=e370]:
+                    - generic [ref=e372]:
+                      - generic [ref=e373]:
+                        - paragraph [ref=e374]: دفعات متأخرة التحصيل
+                        - generic [ref=e375]: High
+                        - button "High" [ref=e376]:
+                          - img [ref=e377]
+                      - paragraph [ref=e379]: 10 دفعة بقيمة 46,623 ريال
+                      - paragraph [ref=e380]: تعليق 10 دفعات مالية بقيمة 46,623 ريال يهدد التدفقات النقدية والسيولة المباشرة للوكالة، مما يستدعي إجراءات تحصيل فورية وصارمة.
+                    - link "دفعات متأخرة التحصيل" [ref=e381] [cursor=pointer]:
+                      - /url: /contracts?view=table&target=Overdue
+                      - img [ref=e382]
+                  - generic [ref=e384]:
+                    - generic [ref=e386]:
+                      - generic [ref=e387]:
+                        - paragraph [ref=e388]: العميل saee في منطقة الخطر
+                        - generic [ref=e389]: High
+                        - button "High" [ref=e390]:
+                          - img [ref=e391]
+                      - paragraph [ref=e393]: التزام 57.1% · 14 مهمة متأخرة
+                      - paragraph [ref=e394]: العميل saee في منطقة الخطر بالتزام متدني 57.1% نتيجة 14 مهمة متأخرة، وهو انعكاس مباشر للخلل التشغيلي وتراكم المتأخرات دون تفعيل خطة تصحيحية مخصصة.
+                    - link "العميل saee في منطقة الخطر" [ref=e395] [cursor=pointer]:
+                      - /url: /satisfaction?client=55351ced-452e-4f7d-9428-0614ba0e3d80
+                      - img [ref=e396]
+              - generic [ref=e399]:
+                - generic [ref=e400]:
+                  - generic [ref=e401]:
+                    - generic [ref=e402]: "3"
+                    - heading "What should I do?" [level=3] [ref=e403]
+                  - button "Re-analyze" [ref=e404]:
+                    - img
+                    - text: Re-analyze
+                - generic [ref=e405]:
+                  - generic [ref=e406]:
+                    - paragraph [ref=e407]: Top priority today
+                    - paragraph [ref=e408]: السيطرة الفورية على التصعيد المالي والتعاقدي لعميلي الشاعر الذكي وsaee، مع إعادة توازن العمل الفائقة من الـ 7 موظفين المضغوطين إلى الـ 17 المتاحين لوقف التراجع العام في الالتزام.
+                  - list [ref=e409]:
+                    - listitem [ref=e410]:
+                      - generic [ref=e411]:
+                        - generic [ref=e412]: "1"
+                        - generic [ref=e413]:
+                          - paragraph [ref=e414]: تسوية الإجراء القانوني المعلق مع مؤسسة الشاعر الذكي فوراً عبر رد المبلغ المتأخر (2,329 ريال) لتجاوز المهلة التعاقدية، والتواصل الشخصي العاجل مع العميل محمد علي عسيري لمحاولة ثنيه عن طلب الفسخ.
+                          - generic [ref=e415]:
+                            - generic [ref=e416]: Clients
+                            - generic [ref=e417]: "Owner: مدير إدارة حسابات العملاء"
+                    - listitem [ref=e418]:
+                      - generic [ref=e419]:
+                        - generic [ref=e420]: "2"
+                        - generic [ref=e421]:
+                          - paragraph [ref=e422]: استهداف الـ 14 مهمة متأخرة لمشروع العميل المتعثر saee لإنجازها فوراً، وإعادة ضبط الجمهور المستهدف لحملات العميل غيث وفيه ابراهيم لاستئناف حملاته الإعلانية المتوقفة.
+                          - generic [ref=e423]:
+                            - generic [ref=e424]: Delivery
+                            - generic [ref=e425]: "Owner: مدير العمليات التشغيلية"
+                    - listitem [ref=e426]:
+                      - generic [ref=e427]:
+                        - generic [ref=e428]: "3"
+                        - generic [ref=e429]:
+                          - paragraph [ref=e430]: إعادة توزيع المهام وتخفيف الضغط التشغيلي عن الـ 7 موظفين المثقلين بالمهام عبر تفويض الأعمال للـ 17 موظفاً غير المستغلين بكامل طاقتهم، مع تفعيل برنامج متابعة لصيق للثلاثي مريم الورداني ودينا سنجاب وحسام محمد.
+                          - generic [ref=e431]:
+                            - generic [ref=e432]: People
+                            - generic [ref=e433]: "Owner: مدير الموارد البشرية ورؤساء الأقسام"
+                    - listitem [ref=e434]:
+                      - generic [ref=e435]:
+                        - generic [ref=e436]: "4"
+                        - generic [ref=e437]:
+                          - paragraph [ref=e438]: تحصيل الـ 10 دفعات المتأخرة بقيمة 46,623 ريال لتعزيز السيولة، وبدء حملة تواصل استباقية لإغلاق الـ 30 فرصة تجديد عقود تبلغ قيمتها 169,720 ريال.
+                          - generic [ref=e439]:
+                            - generic [ref=e440]: Money
+                            - generic [ref=e441]: "Owner: المدير المالي"
+                    - listitem [ref=e442]:
+                      - generic [ref=e443]:
+                        - generic [ref=e444]: "5"
+                        - generic [ref=e445]:
+                          - paragraph [ref=e446]: توسيع مبيعات خدمات متاجر سلة وزد (Salla / Zid Store) لكونها الخدمة الأعلى أداءً، وتكليف الموظف الأكثر تميزاً محمد مسلماني بنقل المعرفة للفريق لرفع مستوى انضباط تسليم بقية الخدمات.
+                          - generic [ref=e447]:
+                            - generic [ref=e448]: Growth
+                            - generic [ref=e449]: "Owner: مدير تطوير الأعمال"
+          - generic [ref=e451]:
+            - generic [ref=e452]:
+              - img [ref=e453]
+              - generic [ref=e455]:
+                - paragraph [ref=e456]: نبض الفريق
+                - paragraph [ref=e457]: وسيط نشاط الموظفين مقابل واجباتهم
+            - generic [ref=e458]:
+              - generic [ref=e459]:
+                - paragraph [ref=e460]: 31.3%
+                - paragraph [ref=e461]: الوسيط
+              - generic [ref=e462]:
+                - paragraph [ref=e463]: "0"
+                - paragraph [ref=e464]: نشط
+              - generic [ref=e465]:
+                - paragraph [ref=e466]: "3"
+                - paragraph [ref=e467]: معرّض
+              - generic [ref=e468]:
+                - paragraph [ref=e469]: "0"
+                - paragraph [ref=e470]: خامل
+              - link "التفاصيل" [ref=e471] [cursor=pointer]:
+                - /url: /team-activity
+                - text: التفاصيل
+                - img [ref=e472]
+          - generic [ref=e481]:
+            - generic [ref=e482]:
+              - generic [ref=e483]:
+                - heading "CEO analysis" [level=2] [ref=e484]
+                - paragraph [ref=e485]: Accountability signals and contract revenue movement for the current month.
+              - generic [ref=e486]:
+                - link "Accountability" [ref=e487] [cursor=pointer]:
+                  - /url: /accountability
+                  - text: Accountability
+                  - img [ref=e488]
+                - link "Contracts" [ref=e491] [cursor=pointer]:
+                  - /url: /contracts?view=dashboard
+                  - text: Contracts
+                  - img [ref=e492]
+            - generic [ref=e495]:
+              - generic [ref=e496]:
+                - generic [ref=e497]:
+                  - generic [ref=e498]:
+                    - heading "Accountability" [level=3] [ref=e499]:
+                      - img [ref=e500]
+                      - text: Accountability
+                    - paragraph [ref=e504]: Operational ownership, SLA discipline, and AI-linked risk signals.
+                  - link "Open" [ref=e505] [cursor=pointer]:
+                    - /url: /accountability
+                - generic [ref=e506]:
+                  - generic [ref=e507]:
+                    - generic [ref=e508]:
+                      - text: Median score
+                      - button "How is this calculated?" [ref=e509]:
+                        - img [ref=e510]
+                    - generic [ref=e512]: 41%
+                  - generic [ref=e513]:
+                    - generic [ref=e514]:
+                      - text: High risk
+                      - button "How is this calculated?" [ref=e515]:
+                        - img [ref=e516]
+                    - generic [ref=e518]: "15"
+                  - generic [ref=e519]:
+                    - generic [ref=e520]:
+                      - text: Overdue tasks
+                      - button "How is this calculated?" [ref=e521]:
+                        - img [ref=e522]
+                    - generic [ref=e524]: "194"
+                  - generic [ref=e525]:
+                    - generic [ref=e526]:
+                      - text: AI risk
+                      - button "How is this calculated?" [ref=e527]:
+                        - img [ref=e528]
+                    - generic [ref=e530]: "12"
+                - generic [ref=e531]:
+                  - generic [ref=e532]:
+                    - generic [ref=e533]:
+                      - text: Lowest current scorecards
+                      - button "How is this calculated?" [ref=e534]:
+                        - img [ref=e535]
+                    - generic [ref=e537]:
+                      - text: 27 low confidence
+                      - button "How is this calculated?" [ref=e538]:
+                        - img [ref=e539]
+                  - generic [ref=e541]:
+                    - link "نورالدين كامل Agent · 5 samples · 5 overdue 7%" [ref=e542] [cursor=pointer]:
+                      - /url: /accountability?emp=32937da8-7ac3-4e8b-991d-45138ecfb24b
+                      - generic [ref=e543]:
+                        - generic [ref=e544]: نورالدين كامل
+                        - generic [ref=e545]: Agent · 5 samples · 5 overdue
+                      - generic [ref=e546]: 7%
+                    - link "اميرة محمد Agent · 27 samples · 8 overdue 15%" [ref=e547] [cursor=pointer]:
+                      - /url: /accountability?emp=31bba5d9-27e6-400c-a0d1-f5a1ed615ffa
+                      - generic [ref=e548]:
+                        - generic [ref=e549]: اميرة محمد
+                        - generic [ref=e550]: Agent · 27 samples · 8 overdue
+                      - generic [ref=e551]: 15%
+                    - link "غادة محمد Agent · 8 samples · 24 overdue 17%" [ref=e552] [cursor=pointer]:
+                      - /url: /accountability?emp=b5adfb3d-7c0b-4d37-a73d-b3b4325954bf
+                      - generic [ref=e553]:
+                        - generic [ref=e554]: غادة محمد
+                        - generic [ref=e555]: Agent · 8 samples · 24 overdue
+                      - generic [ref=e556]: 17%
+                    - link "احمد محمود Agent · 95 samples · 42 overdue 23%" [ref=e557] [cursor=pointer]:
+                      - /url: /accountability?emp=caa05a65-24be-4a24-8932-44fd52ae3fb9
+                      - generic [ref=e558]:
+                        - generic [ref=e559]: احمد محمود
+                        - generic [ref=e560]: Agent · 95 samples · 42 overdue
+                      - generic [ref=e561]: 23%
+              - generic [ref=e562]:
+                - generic [ref=e563]:
+                  - generic [ref=e564]:
+                    - heading "Contracts analysis" [level=3] [ref=e565]:
+                      - img [ref=e566]
+                      - text: Contracts analysis
+                    - paragraph [ref=e569]: Revenue target, renewal pool, installments, and account-manager movement.
+                  - link "Open" [ref=e570] [cursor=pointer]:
+                    - /url: /contracts?view=dashboard
+                - generic [ref=e571]:
+                  - generic [ref=e572]:
+                    - generic [ref=e573]:
+                      - text: Expected
+                      - button "How is this calculated?" [ref=e574]:
+                        - img [ref=e575]
+                    - generic [ref=e577]: 182,895 SR
+                  - generic [ref=e578]:
+                    - generic [ref=e579]:
+                      - text: Actual
+                      - button "How is this calculated?" [ref=e580]:
+                        - img [ref=e581]
+                    - generic [ref=e583]: 74,054 SR
+                  - generic [ref=e584]:
+                    - generic [ref=e585]:
+                      - text: Achievement
+                      - button "How is this calculated?" [ref=e586]:
+                        - img [ref=e587]
+                    - generic [ref=e589]: 40.5%
+                  - generic [ref=e590]:
+                    - generic [ref=e591]:
+                      - text: Due installments
+                      - button "How is this calculated?" [ref=e592]:
+                        - img [ref=e593]
+                    - generic [ref=e595]: 66,993 SR
+                - generic [ref=e596]:
+                  - generic [ref=e597]:
+                    - generic [ref=e598]:
+                      - generic [ref=e599]:
+                        - text: Monthly achievement
+                        - button "How is this calculated?" [ref=e600]:
+                          - img [ref=e601]
+                      - generic [ref=e603]: 2026-06-01
+                    - generic [ref=e606]:
+                      - generic [ref=e607]:
+                        - generic [ref=e608]: "9"
+                        - generic [ref=e609]:
+                          - text: New
+                          - button "How is this calculated?" [ref=e610]:
+                            - img [ref=e611]
+                      - generic [ref=e613]:
+                        - generic [ref=e614]: "1"
+                        - generic [ref=e615]:
+                          - text: Renewed
+                          - button "How is this calculated?" [ref=e616]:
+                            - img [ref=e617]
+                      - generic [ref=e619]:
+                        - generic [ref=e620]: "1"
+                        - generic [ref=e621]:
+                          - text: Lost
+                          - button "How is this calculated?" [ref=e622]:
+                            - img [ref=e623]
+                      - generic [ref=e625]:
+                        - generic [ref=e626]: "33"
+                        - generic [ref=e627]:
+                          - text: On target
+                          - button "How is this calculated?" [ref=e628]:
+                            - img [ref=e629]
+                      - generic [ref=e631]:
+                        - generic [ref=e632]: "9"
+                        - generic [ref=e633]:
+                          - text: Overdue
+                          - button "How is this calculated?" [ref=e634]:
+                            - img [ref=e635]
+                      - generic [ref=e637]:
+                        - generic [ref=e638]: "0"
+                        - generic [ref=e639]:
+                          - text: Hold
+                          - button "How is this calculated?" [ref=e640]:
+                            - img [ref=e641]
+                  - generic [ref=e643]:
+                    - generic [ref=e644]:
+                      - generic [ref=e645]:
+                        - text: Top account managers
+                        - button "How is this calculated?" [ref=e646]:
+                          - img [ref=e647]
+                      - generic [ref=e649]: 14 tracked
+                    - generic [ref=e650]:
+                      - generic [ref=e651]:
+                        - generic [ref=e652]:
+                          - generic [ref=e653]: مريم المغير
+                          - generic [ref=e654]: 13,750 SR / 4,500 SR
+                        - generic [ref=e655]: 306%
+                      - generic [ref=e656]:
+                        - generic [ref=e657]:
+                          - generic [ref=e658]: اية رضا
+                          - generic [ref=e659]: 2,609 SR / 2,609 SR
+                        - generic [ref=e660]: 100%
+                      - generic [ref=e661]:
+                        - generic [ref=e662]:
+                          - generic [ref=e663]: محمد حسين
+                          - generic [ref=e664]: 2,200 SR / 9,500 SR
+                        - generic [ref=e665]: 23%
+          - generic [ref=e666]:
+            - generic [ref=e667]:
+              - button "How is this calculated?" [ref=e669]:
+                - img [ref=e670]
+              - link "On-Time Delivery Last 30 days 41 % 551 delivered tasks Target 85%" [ref=e672] [cursor=pointer]:
+                - /url: /reports
+                - generic [ref=e673]:
+                  - generic [ref=e674]:
+                    - generic [ref=e675]: On-Time Delivery
+                    - paragraph [ref=e676]: Last 30 days
+                  - img [ref=e677]
+                - generic [ref=e680]:
+                  - generic [ref=e681]:
+                    - generic [ref=e682]: "41"
+                    - generic [ref=e683]: "%"
+                  - img [ref=e685]
+                - generic [ref=e689]:
+                  - generic [ref=e690]: 551 delivered tasks
+                  - generic [ref=e691]: Target 85%
+            - generic [ref=e692]:
+              - button "How is this calculated?" [ref=e694]:
+                - img [ref=e695]
+              - link "Overdue tasks 216 -14" [ref=e697] [cursor=pointer]:
+                - /url: /tasks?filter=overdue
+                - generic [ref=e698]:
+                  - generic [ref=e699]: Overdue tasks
+                  - img [ref=e701]
+                - generic [ref=e703]: "216"
+                - generic [ref=e705]:
+                  - img [ref=e706]
+                  - text: "-14"
+            - generic [ref=e709]:
+              - button "How is this calculated?" [ref=e711]:
+                - img [ref=e712]
+              - link "Stuck in review 22 Past 2 business days" [ref=e714] [cursor=pointer]:
+                - /url: /tasks?filter=stuck_in_review
+                - generic [ref=e715]:
+                  - generic [ref=e716]: Stuck in review
+                  - img [ref=e718]
+                - generic [ref=e721]: "22"
+                - generic [ref=e723]: Past 2 business days
+            - generic [ref=e724]:
+              - button "How is this calculated?" [ref=e726]:
+                - img [ref=e727]
+              - link "Client revisions 81 Stage entries · 30d" [ref=e729] [cursor=pointer]:
+                - /url: /tasks?filter=client_changes
+                - generic [ref=e730]:
+                  - generic [ref=e731]: Client revisions
+                  - img [ref=e733]
+                - generic [ref=e738]: "81"
+                - generic [ref=e740]: Stage entries · 30d
+          - generic [ref=e741]:
+            - generic [ref=e743]:
+              - heading "Weekly pulse" [level=2] [ref=e744]
+              - paragraph [ref=e745]: Work movement over the last 7 days versus the prior week
+            - generic [ref=e747]:
+              - generic [ref=e748]:
+                - img [ref=e750]
+                - generic [ref=e753]:
+                  - paragraph [ref=e754]:
+                    - text: Completed
+                    - button "How is this calculated?" [ref=e755]:
+                      - img [ref=e756]
+                  - generic [ref=e758]:
+                    - generic [ref=e759]: "198"
+                    - generic [ref=e760]:
+                      - img [ref=e761]
+                      - text: +17%
+              - generic [ref=e764]:
+                - img [ref=e766]
+                - generic [ref=e767]:
+                  - paragraph [ref=e768]:
+                    - text: Tasks added
+                    - button "How is this calculated?" [ref=e769]:
+                      - img [ref=e770]
+                  - generic [ref=e772]:
+                    - generic [ref=e773]: "73"
+                    - generic [ref=e774]:
+                      - img [ref=e775]
+                      - text: "-83%"
+              - generic [ref=e778]:
+                - img [ref=e780]
+                - generic [ref=e782]:
+                  - paragraph [ref=e783]:
+                    - text: Client changes
+                    - button "How is this calculated?" [ref=e784]:
+                      - img [ref=e785]
+                  - generic [ref=e787]:
+                    - generic [ref=e788]: "19"
+                    - generic [ref=e789]:
+                      - img [ref=e790]
+                      - text: "-21%"
+              - generic [ref=e793]:
+                - img [ref=e795]
+                - generic [ref=e798]:
+                  - paragraph [ref=e799]:
+                    - text: Approvals decided
+                    - button "How is this calculated?" [ref=e800]:
+                      - img [ref=e801]
+                  - generic [ref=e803]:
+                    - generic [ref=e804]: "0"
+                    - generic [ref=e805]:
+                      - img [ref=e806]
+                      - text: 0%
+          - generic [ref=e809]:
+            - generic [ref=e810]:
+              - generic [ref=e811]:
+                - heading "Client delivery health" [level=2] [ref=e812]
+                - paragraph [ref=e813]: Worst 5 and best 5 by overdue load and 30-day on-time rate
+              - link "All clients →" [ref=e815] [cursor=pointer]:
+                - /url: /clients
+            - generic [ref=e816]:
+              - generic [ref=e818]:
+                - generic [ref=e819]:
+                  - img [ref=e820]
+                  - text: Needs attention
+                - generic [ref=e822]:
+                  - link "saee 14 متأخّرة 57% on-time 14 late" [ref=e823] [cursor=pointer]:
+                    - /url: /clients/55351ced-452e-4f7d-9428-0614ba0e3d80
+                    - generic [ref=e824]:
+                      - paragraph [ref=e825]: saee
+                      - paragraph [ref=e826]: 14 متأخّرة
+                    - generic [ref=e827]:
+                      - generic [ref=e828]:
+                        - generic [ref=e829]: 57%
+                        - generic [ref=e830]: on-time
+                      - generic [ref=e831]:
+                        - generic [ref=e832]: "14"
+                        - generic [ref=e833]: late
+                  - link "هميم للتسويق العقاري 1 مشاريع · 12 مهام — on-time 9 late" [ref=e834] [cursor=pointer]:
+                    - /url: /clients/f50c0817-006c-496b-bbd1-9401668394d0
+                    - generic [ref=e835]:
+                      - paragraph [ref=e836]: هميم للتسويق العقاري
+                      - paragraph [ref=e837]: 1 مشاريع · 12 مهام
+                    - generic [ref=e838]:
+                      - generic [ref=e839]:
+                        - generic [ref=e840]: —
+                        - generic [ref=e841]: on-time
+                      - generic [ref=e842]:
+                        - generic [ref=e843]: "9"
+                        - generic [ref=e844]: late
+                  - link "مها 1 مشاريع · 12 مهام 17% on-time 9 late" [ref=e845] [cursor=pointer]:
+                    - /url: /clients/ab409757-bdb5-4891-b45d-f22a2686bce4
+                    - generic [ref=e846]:
+                      - paragraph [ref=e847]: مها
+                      - paragraph [ref=e848]: 1 مشاريع · 12 مهام
+                    - generic [ref=e849]:
+                      - generic [ref=e850]:
+                        - generic [ref=e851]: 17%
+                        - generic [ref=e852]: on-time
+                      - generic [ref=e853]:
+                        - generic [ref=e854]: "9"
+                        - generic [ref=e855]: late
+                  - link "Dipin donuts 1 مشاريع · 10 مهام 29% on-time 9 late" [ref=e856] [cursor=pointer]:
+                    - /url: /clients/5fcd38e4-873f-4668-9b57-cc3a355b2099
+                    - generic [ref=e857]:
+                      - paragraph [ref=e858]: Dipin donuts
+                      - paragraph [ref=e859]: 1 مشاريع · 10 مهام
+                    - generic [ref=e860]:
+                      - generic [ref=e861]:
+                        - generic [ref=e862]: 29%
+                        - generic [ref=e863]: on-time
+                      - generic [ref=e864]:
+                        - generic [ref=e865]: "9"
+                        - generic [ref=e866]: late
+                  - link "ثامر 1 مشاريع · 10 مهام 30% on-time 9 late" [ref=e867] [cursor=pointer]:
+                    - /url: /clients/ab1380a0-9980-4ca6-adc6-8b8a1e46157a
+                    - generic [ref=e868]:
+                      - paragraph [ref=e869]: ثامر
+                      - paragraph [ref=e870]: 1 مشاريع · 10 مهام
+                    - generic [ref=e871]:
+                      - generic [ref=e872]:
+                        - generic [ref=e873]: 30%
+                        - generic [ref=e874]: on-time
+                      - generic [ref=e875]:
+                        - generic [ref=e876]: "9"
+                        - generic [ref=e877]: late
+              - generic [ref=e879]:
+                - generic [ref=e880]:
+                  - img [ref=e881]
+                  - text: Top performers
+                - generic [ref=e884]:
+                  - link "خالد 1 مشاريع · 3 مهام 100% on-time 0 late" [ref=e885] [cursor=pointer]:
+                    - /url: /clients/fdf821da-1a90-4365-bf64-3edcb7a4915d
+                    - generic [ref=e886]:
+                      - paragraph [ref=e887]: خالد
+                      - paragraph [ref=e888]: 1 مشاريع · 3 مهام
+                    - generic [ref=e889]:
+                      - generic [ref=e890]:
+                        - generic [ref=e891]: 100%
+                        - generic [ref=e892]: on-time
+                      - generic [ref=e893]:
+                        - generic [ref=e894]: "0"
+                        - generic [ref=e895]: late
+                  - link "عبدالاله مشيب ثابت 1 مشاريع · 3 مهام 100% on-time 0 late" [ref=e896] [cursor=pointer]:
+                    - /url: /clients/d9970638-4686-42b8-bfa0-387ce6aa8c79
+                    - generic [ref=e897]:
+                      - paragraph [ref=e898]: عبدالاله مشيب ثابت
+                      - paragraph [ref=e899]: 1 مشاريع · 3 مهام
+                    - generic [ref=e900]:
+                      - generic [ref=e901]:
+                        - generic [ref=e902]: 100%
+                        - generic [ref=e903]: on-time
+                      - generic [ref=e904]:
+                        - generic [ref=e905]: "0"
+                        - generic [ref=e906]: late
+                  - link "velver 1 مشاريع · 3 مهام 91% on-time 1 late" [ref=e907] [cursor=pointer]:
+                    - /url: /clients/ce9f314a-abdc-41c1-931f-e309ddf2722c
+                    - generic [ref=e908]:
+                      - paragraph [ref=e909]: velver
+                      - paragraph [ref=e910]: 1 مشاريع · 3 مهام
+                    - generic [ref=e911]:
+                      - generic [ref=e912]:
+                        - generic [ref=e913]: 91%
+                        - generic [ref=e914]: on-time
+                      - generic [ref=e915]:
+                        - generic [ref=e916]: "1"
+                        - generic [ref=e917]: late
+                  - link "بيبرا هوم ستور 1 مشاريع · 4 مهام 90% on-time 2 late" [ref=e918] [cursor=pointer]:
+                    - /url: /clients/73dca5d6-89ac-484c-8d2e-92d1d095f9d8
+                    - generic [ref=e919]:
+                      - paragraph [ref=e920]: بيبرا هوم ستور
+                      - paragraph [ref=e921]: 1 مشاريع · 4 مهام
+                    - generic [ref=e922]:
+                      - generic [ref=e923]:
+                        - generic [ref=e924]: 90%
+                        - generic [ref=e925]: on-time
+                      - generic [ref=e926]:
+                        - generic [ref=e927]: "2"
+                        - generic [ref=e928]: late
+                  - link "Leora 1 مشاريع · 9 مهام 83% on-time 1 late" [ref=e929] [cursor=pointer]:
+                    - /url: /clients/bbd9523d-08b0-49e7-9973-1b64e09a8dc9
+                    - generic [ref=e930]:
+                      - paragraph [ref=e931]: Leora
+                      - paragraph [ref=e932]: 1 مشاريع · 9 مهام
+                    - generic [ref=e933]:
+                      - generic [ref=e934]:
+                        - generic [ref=e935]: 83%
+                        - generic [ref=e936]: on-time
+                      - generic [ref=e937]:
+                        - generic [ref=e938]: "1"
+                        - generic [ref=e939]: late
+          - generic [ref=e940]:
+            - generic [ref=e942]:
+              - heading "Service-line health" [level=2] [ref=e943]
+              - paragraph [ref=e944]: On-time rate, overdue load and revision pressure per service
+            - generic [ref=e946]:
+              - link "🟠SEO 87 open · 55 delivered 53% on-time 16 0.0" [ref=e947] [cursor=pointer]:
+                - /url: /tasks?service=c6e95e84-7c02-446e-9ced-f7469105e999
+                - generic [ref=e948]:
+                  - img [ref=e950]
+                  - generic [ref=e952]:
+                    - paragraph [ref=e954]: 🟠SEO
+                    - paragraph [ref=e955]: 87 open · 55 delivered
+                - img [ref=e958]
+                - generic [ref=e962]:
+                  - generic [ref=e963]: 53%
+                  - generic [ref=e964]: on-time
+                - generic [ref=e965]:
+                  - img [ref=e966]
+                  - generic [ref=e968]: "16"
+                - generic [ref=e969]:
+                  - img [ref=e970]
+                  - generic [ref=e975]: "0.0"
+              - link "🔵Social Media 75 open · 52 delivered 29% on-time 23 0.0" [ref=e976] [cursor=pointer]:
+                - /url: /tasks?service=c6a09bfc-b073-4ee3-a38d-3261d8046c97
+                - generic [ref=e977]:
+                  - img [ref=e979]
+                  - generic [ref=e981]:
+                    - paragraph [ref=e983]: 🔵Social Media
+                    - paragraph [ref=e984]: 75 open · 52 delivered
+                - img [ref=e987]
+                - generic [ref=e991]:
+                  - generic [ref=e992]: 29%
+                  - generic [ref=e993]: on-time
+                - generic [ref=e994]:
+                  - img [ref=e995]
+                  - generic [ref=e997]: "23"
+                - generic [ref=e998]:
+                  - img [ref=e999]
+                  - generic [ref=e1004]: "0.0"
+              - link "🔵Renewal Social Media 66 open · 47 delivered 28% on-time 23 0.0" [ref=e1005] [cursor=pointer]:
+                - /url: /tasks?service=d358a155-603f-44ed-8b90-d45b1368cf35
+                - generic [ref=e1006]:
+                  - img [ref=e1008]
+                  - generic [ref=e1010]:
+                    - paragraph [ref=e1012]: 🔵Renewal Social Media
+                    - paragraph [ref=e1013]: 66 open · 47 delivered
+                - img [ref=e1016]
+                - generic [ref=e1020]:
+                  - generic [ref=e1021]: 28%
+                  - generic [ref=e1022]: on-time
+                - generic [ref=e1023]:
+                  - img [ref=e1024]
+                  - generic [ref=e1026]: "23"
+                - generic [ref=e1027]:
+                  - img [ref=e1028]
+                  - generic [ref=e1033]: "0.0"
+              - link "🟢Media Buying 62 open · 23 delivered 26% on-time 18 0.0" [ref=e1034] [cursor=pointer]:
+                - /url: /tasks?service=9059673e-f6eb-48b9-a01b-82037402de7c
+                - generic [ref=e1035]:
+                  - img [ref=e1037]
+                  - generic [ref=e1039]:
+                    - paragraph [ref=e1041]: 🟢Media Buying
+                    - paragraph [ref=e1042]: 62 open · 23 delivered
+                - img [ref=e1045]
+                - generic [ref=e1049]:
+                  - generic [ref=e1050]: 26%
+                  - generic [ref=e1051]: on-time
+                - generic [ref=e1052]:
+                  - img [ref=e1053]
+                  - generic [ref=e1055]: "18"
+                - generic [ref=e1056]:
+                  - img [ref=e1057]
+                  - generic [ref=e1062]: "0.0"
+              - link "🟠Renewal SEO 44 open · 14 delivered 21% on-time 10 0.0" [ref=e1063] [cursor=pointer]:
+                - /url: /tasks?service=68923112-494d-4faa-b28d-8b2c5eec87dd
+                - generic [ref=e1064]:
+                  - img [ref=e1066]
+                  - generic [ref=e1068]:
+                    - paragraph [ref=e1070]: 🟠Renewal SEO
+                    - paragraph [ref=e1071]: 44 open · 14 delivered
+                - img [ref=e1074]
+                - generic [ref=e1078]:
+                  - generic [ref=e1079]: 21%
+                  - generic [ref=e1080]: on-time
+                - generic [ref=e1081]:
+                  - img [ref=e1082]
+                  - generic [ref=e1084]: "10"
+                - generic [ref=e1085]:
+                  - img [ref=e1086]
+                  - generic [ref=e1091]: "0.0"
+              - link "🟢Renewal Media Buying 28 open · 2 delivered 0% on-time 9 0.0" [ref=e1092] [cursor=pointer]:
+                - /url: /tasks?service=4a489a90-f991-47b4-8ed8-c42a9519dc20
+                - generic [ref=e1093]:
+                  - img [ref=e1095]
+                  - generic [ref=e1097]:
+                    - paragraph [ref=e1099]: 🟢Renewal Media Buying
+                    - paragraph [ref=e1100]: 28 open · 2 delivered
+                - img [ref=e1103]
+                - generic [ref=e1105]:
+                  - generic [ref=e1106]: 0%
+                  - generic [ref=e1107]: on-time
+                - generic [ref=e1108]:
+                  - img [ref=e1109]
+                  - generic [ref=e1111]: "9"
+                - generic [ref=e1112]:
+                  - img [ref=e1113]
+                  - generic [ref=e1118]: "0.0"
+              - link "⚪Account Manager 25 open · 72 delivered 60% on-time 8 0.0" [ref=e1119] [cursor=pointer]:
+                - /url: /tasks?service=51af252b-4e91-4d8b-ae1b-08116320182a
+                - generic [ref=e1120]:
+                  - img [ref=e1122]
+                  - generic [ref=e1124]:
+                    - paragraph [ref=e1126]: ⚪Account Manager
+                    - paragraph [ref=e1127]: 25 open · 72 delivered
+                - img [ref=e1130]
+                - generic [ref=e1134]:
+                  - generic [ref=e1135]: 60%
+                  - generic [ref=e1136]: on-time
+                - generic [ref=e1137]:
+                  - img [ref=e1138]
+                  - generic [ref=e1140]: "8"
+                - generic [ref=e1141]:
+                  - img [ref=e1142]
+                  - generic [ref=e1147]: "0.0"
+              - link "⚪Renewal of Acc Manager 16 open · 10 delivered 60% on-time 5 0.0" [ref=e1148] [cursor=pointer]:
+                - /url: /tasks?service=59d0d851-2492-485d-9d91-bd3ad3c4d674
+                - generic [ref=e1149]:
+                  - img [ref=e1151]
+                  - generic [ref=e1153]:
+                    - paragraph [ref=e1155]: ⚪Renewal of Acc Manager
+                    - paragraph [ref=e1156]: 16 open · 10 delivered
+                - img [ref=e1159]
+                - generic [ref=e1163]:
+                  - generic [ref=e1164]: 60%
+                  - generic [ref=e1165]: on-time
+                - generic [ref=e1166]:
+                  - img [ref=e1167]
+                  - generic [ref=e1169]: "5"
+                - generic [ref=e1170]:
+                  - img [ref=e1171]
+                  - generic [ref=e1176]: "0.0"
+              - link "🟤Salla / Zid Store 9 open · 8 delivered 88% on-time 7 0.0" [ref=e1177] [cursor=pointer]:
+                - /url: /tasks?service=d557aac4-bc71-4c55-92fe-d75f683fcb84
+                - generic [ref=e1178]:
+                  - img [ref=e1180]
+                  - generic [ref=e1182]:
+                    - paragraph [ref=e1184]: 🟤Salla / Zid Store
+                    - paragraph [ref=e1185]: 9 open · 8 delivered
+                - img [ref=e1188]
+                - generic [ref=e1192]:
+                  - generic [ref=e1193]: 88%
+                  - generic [ref=e1194]: on-time
+                - generic [ref=e1195]:
+                  - img [ref=e1196]
+                  - generic [ref=e1198]: "7"
+                - generic [ref=e1199]:
+                  - img [ref=e1200]
+                  - generic [ref=e1205]: "0.0"
+              - link "🟤Store Enhancement 5 open · 0 delivered — on-time 5 0.0" [ref=e1206] [cursor=pointer]:
+                - /url: /tasks?service=cd9cd517-37ac-40ae-a1c0-4d625e7cf3ad
+                - generic [ref=e1207]:
+                  - img [ref=e1209]
+                  - generic [ref=e1211]:
+                    - paragraph [ref=e1213]: 🟤Store Enhancement
+                    - paragraph [ref=e1214]: 5 open · 0 delivered
+                - img [ref=e1217]
+                - generic [ref=e1219]:
+                  - generic [ref=e1220]: —
+                  - generic [ref=e1221]: on-time
+                - generic [ref=e1222]:
+                  - img [ref=e1223]
+                  - generic [ref=e1225]: "5"
+                - generic [ref=e1226]:
+                  - img [ref=e1227]
+                  - generic [ref=e1232]: "0.0"
+              - link "⚫Company Profile 0 open · 3 delivered 67% on-time 0 0.0" [ref=e1233] [cursor=pointer]:
+                - /url: /tasks?service=f4003699-e39d-485d-af23-0c82480b060c
+                - generic [ref=e1234]:
+                  - img [ref=e1236]
+                  - generic [ref=e1238]:
+                    - paragraph [ref=e1240]: ⚫Company Profile
+                    - paragraph [ref=e1241]: 0 open · 3 delivered
+                - img [ref=e1244]
+                - generic [ref=e1248]:
+                  - generic [ref=e1249]: 67%
+                  - generic [ref=e1250]: on-time
+                - generic [ref=e1251]:
+                  - img [ref=e1252]
+                  - generic [ref=e1254]: "0"
+                - generic [ref=e1255]:
+                  - img [ref=e1256]
+                  - generic [ref=e1261]: "0.0"
+          - generic [ref=e1262]:
+            - generic [ref=e1264]:
+              - heading "Stage transition flow" [level=2] [ref=e1265]
+              - paragraph [ref=e1266]: Where work flows and where it bounces back — 1% of moves are backward
+            - generic [ref=e1268]:
+              - generic [ref=e1269]:
+                - img [ref=e1270]
+                - text: Top backward moves
+              - list [ref=e1273]:
+                - listitem [ref=e1274]:
+                  - link "تعديلات العميل جاهزة للإرسال 3" [ref=e1275] [cursor=pointer]:
+                    - /url: /tasks?sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22ready_to_send%22%7D%5D
+                    - generic [ref=e1276]:
+                      - generic [ref=e1277]: تعديلات العميل
+                      - img [ref=e1278]
+                      - generic [ref=e1280]: جاهزة للإرسال
+                    - generic [ref=e1281]:
+                      - generic [ref=e1282]: "3"
+                      - img [ref=e1283]
+                - listitem [ref=e1285]:
+                  - link "مراجعة المدير قيد التنفيذ 2" [ref=e1286] [cursor=pointer]:
+                    - /url: /tasks?sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22in_progress%22%7D%5D
+                    - generic [ref=e1287]:
+                      - generic [ref=e1288]: مراجعة المدير
+                      - img [ref=e1289]
+                      - generic [ref=e1291]: قيد التنفيذ
+                    - generic [ref=e1292]:
+                      - generic [ref=e1293]: "2"
+                      - img [ref=e1294]
+                - listitem [ref=e1296]:
+                  - link "قيد التنفيذ جديدة 1" [ref=e1297] [cursor=pointer]:
+                    - /url: /tasks?sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22new%22%7D%5D
+                    - generic [ref=e1298]:
+                      - generic [ref=e1299]: قيد التنفيذ
+                      - img [ref=e1300]
+                      - generic [ref=e1302]: جديدة
+                    - generic [ref=e1303]:
+                      - generic [ref=e1304]: "1"
+                      - img [ref=e1305]
+                - listitem [ref=e1307]:
+                  - link "مراجعة المتخصص قيد التنفيذ 1" [ref=e1308] [cursor=pointer]:
+                    - /url: /tasks?sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22in_progress%22%7D%5D
+                    - generic [ref=e1309]:
+                      - generic [ref=e1310]: مراجعة المتخصص
+                      - img [ref=e1311]
+                      - generic [ref=e1313]: قيد التنفيذ
+                    - generic [ref=e1314]:
+                      - generic [ref=e1315]: "1"
+                      - img [ref=e1316]
+              - paragraph [ref=e1318]: Last 90 days of stage transition history
+          - generic [ref=e1319]:
+            - generic [ref=e1321]:
+              - heading "Client Edits Indicator" [level=2] [ref=e1322]
+              - paragraph [ref=e1323]: Tasks currently waiting on client feedback, with weekly trend and service breakdown
+            - generic [ref=e1325]:
+              - link "Active edits now 19 Affected tasks this week 19 Weekly change -5" [ref=e1326] [cursor=pointer]:
+                - /url: /tasks?sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22client_changes%22%7D%5D
+                - generic [ref=e1328]:
+                  - img [ref=e1330]
+                  - img [ref=e1335]
+                - generic [ref=e1338]:
+                  - paragraph [ref=e1339]: Active edits now
+                  - generic [ref=e1340]:
+                    - generic [ref=e1341]: "19"
+                    - generic [ref=e1342]: Affected tasks
+                - generic [ref=e1343]:
+                  - generic [ref=e1344]:
+                    - paragraph [ref=e1345]: this week
+                    - paragraph [ref=e1346]: "19"
+                  - generic [ref=e1347]:
+                    - paragraph [ref=e1348]: Weekly change
+                    - generic [ref=e1349]:
+                      - img [ref=e1350]
+                      - generic [ref=e1353]: "-5"
+              - generic [ref=e1354]:
+                - generic [ref=e1355]:
+                  - generic [ref=e1356]:
+                    - paragraph [ref=e1357]: Breakdown by service
+                    - paragraph [ref=e1358]: Share of tasks currently in the client-edits stage
+                  - generic [ref=e1359]:
+                    - img [ref=e1360]
+                    - text: "19"
+                - list [ref=e1364]:
+                  - listitem [ref=e1365]:
+                    - generic [ref=e1366]:
+                      - img [ref=e1368]
+                      - paragraph [ref=e1373]: 🔵Renewal Social Media
+                    - generic [ref=e1376]:
+                      - paragraph [ref=e1377]: "11"
+                      - paragraph [ref=e1378]: 58%
+                  - listitem [ref=e1379]:
+                    - generic [ref=e1380]:
+                      - img [ref=e1382]
+                      - paragraph [ref=e1387]: 🔵Social Media
+                    - generic [ref=e1390]:
+                      - paragraph [ref=e1391]: "4"
+                      - paragraph [ref=e1392]: 21%
+                  - listitem [ref=e1393]:
+                    - generic [ref=e1394]:
+                      - img [ref=e1396]
+                      - paragraph [ref=e1401]: 🟠SEO
+                    - generic [ref=e1404]:
+                      - paragraph [ref=e1405]: "2"
+                      - paragraph [ref=e1406]: 11%
+                  - listitem [ref=e1407]:
+                    - generic [ref=e1408]:
+                      - img [ref=e1410]
+                      - paragraph [ref=e1415]: ⚪Account Manager
+                    - generic [ref=e1418]:
+                      - paragraph [ref=e1419]: "1"
+                      - paragraph [ref=e1420]: 5%
+                  - listitem [ref=e1421]:
+                    - generic [ref=e1422]:
+                      - img [ref=e1424]
+                      - paragraph [ref=e1429]: 🟤Salla / Zid Store
+                    - generic [ref=e1432]:
+                      - paragraph [ref=e1433]: "1"
+                      - paragraph [ref=e1434]: 5%
+          - generic [ref=e1435]:
+            - generic [ref=e1437]:
+              - heading "Delivery flow" [level=2] [ref=e1438]
+              - paragraph [ref=e1439]: Stages where overdue tasks are piling up — excludes New and Done
+            - generic [ref=e1440]:
+              - link "Most overdue tasks 15 قيد التنفيذ · of 42 open View tasks ←" [ref=e1441] [cursor=pointer]:
+                - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22in_progress%22%7D%5D
+                - generic [ref=e1442]:
+                  - paragraph [ref=e1443]: Most overdue tasks
+                  - paragraph [ref=e1444]:
+                    - text: 15 قيد التنفيذ
+                    - generic [ref=e1445]: · of 42 open
+                - generic [ref=e1446]: View tasks ←
+              - generic [ref=e1447]:
+                - link "1 قيد التنفيذ 36% of stage 15 ←" [ref=e1448] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22in_progress%22%7D%5D
+                  - generic [ref=e1449]: "1"
+                  - generic [ref=e1451]:
+                    - generic [ref=e1452]: قيد التنفيذ
+                    - generic [ref=e1453]: 36% of stage
+                  - generic [ref=e1456]: "15"
+                  - generic [ref=e1457]: ←
+                - link "2 أُرسلت للعميل 81% of stage 13 ←" [ref=e1458] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22sent_to_client%22%7D%5D
+                  - generic [ref=e1459]: "2"
+                  - generic [ref=e1461]:
+                    - generic [ref=e1462]: أُرسلت للعميل
+                    - generic [ref=e1463]: 81% of stage
+                  - generic [ref=e1466]: "13"
+                  - generic [ref=e1467]: ←
+                - link "3 تعديلات العميل 92% of stage 12 ←" [ref=e1468] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22client_changes%22%7D%5D
+                  - generic [ref=e1469]: "3"
+                  - generic [ref=e1471]:
+                    - generic [ref=e1472]: تعديلات العميل
+                    - generic [ref=e1473]: 92% of stage
+                  - generic [ref=e1476]: "12"
+                  - generic [ref=e1477]: ←
+                - link "4 مراجعة المتخصص 100% of stage 4 ←" [ref=e1478] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22specialist_review%22%7D%5D
+                  - generic [ref=e1479]: "4"
+                  - generic [ref=e1481]:
+                    - generic [ref=e1482]: مراجعة المتخصص
+                    - generic [ref=e1483]: 100% of stage
+                  - generic [ref=e1486]: "4"
+                  - generic [ref=e1487]: ←
+                - link "5 جاهزة للإرسال 67% of stage 2 ←" [ref=e1488] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22ready_to_send%22%7D%5D
+                  - generic [ref=e1489]: "5"
+                  - generic [ref=e1491]:
+                    - generic [ref=e1492]: جاهزة للإرسال
+                    - generic [ref=e1493]: 67% of stage
+                  - generic [ref=e1496]: "2"
+                  - generic [ref=e1497]: ←
+                - link "6 مراجعة المدير 13% of stage 1 ←" [ref=e1498] [cursor=pointer]:
+                  - /url: /tasks?f=overdue&sf=%5B%7B%22field%22%3A%22stage%22%2C%22value%22%3A%22manager_review%22%7D%5D
+                  - generic [ref=e1499]: "6"
+                  - generic [ref=e1501]:
+                    - generic [ref=e1502]: مراجعة المدير
+                    - generic [ref=e1503]: 13% of stage
+                  - generic [ref=e1506]: "1"
+                  - generic [ref=e1507]: ←
+          - generic [ref=e1508]:
+            - generic [ref=e1509]:
+              - generic [ref=e1510]:
+                - heading "Stuck projects" [level=2] [ref=e1511]
+                - paragraph [ref=e1512]: Top 5 projects by overdue load and worst slip
+              - link "All projects →" [ref=e1514] [cursor=pointer]:
+                - /url: /projects
+            - generic [ref=e1515]:
+              - link "PRJ-01789 saee (b2b)3 شهور نوفا saee 14 overdue / 30 +56% worst slip" [ref=e1516] [cursor=pointer]:
+                - /url: /projects/2ddc5ef9-87f1-471f-b9b7-747638e2299f
+                - generic [ref=e1517]:
+                  - generic [ref=e1518]:
+                    - generic [ref=e1519]: PRJ-01789
+                    - img [ref=e1520]
+                  - paragraph [ref=e1522]: saee (b2b)3 شهور نوفا
+                  - paragraph [ref=e1523]: saee
+                  - generic [ref=e1524]:
+                    - generic [ref=e1525]:
+                      - generic [ref=e1526]: "14"
+                      - generic [ref=e1527]: overdue / 30
+                    - generic [ref=e1528]:
+                      - generic [ref=e1529]: +56%
+                      - generic [ref=e1530]: worst slip
+              - link "PRJ-01820 Riza-4-شهورنوفا ثامر 9 overdue / 10 +100% worst slip" [ref=e1531] [cursor=pointer]:
+                - /url: /projects/2140c67a-2768-47bb-baec-df7fb0b1f8f1
+                - generic [ref=e1532]:
+                  - generic [ref=e1533]:
+                    - generic [ref=e1534]: PRJ-01820
+                    - img [ref=e1535]
+                  - paragraph [ref=e1537]: Riza-4-شهورنوفا
+                  - paragraph [ref=e1538]: ثامر
+                  - generic [ref=e1539]:
+                    - generic [ref=e1540]:
+                      - generic [ref=e1541]: "9"
+                      - generic [ref=e1542]: overdue / 10
+                    - generic [ref=e1543]:
+                      - generic [ref=e1544]: +100%
+                      - generic [ref=e1545]: worst slip
+              - link "PRJ-01797 Dipin donuts - ٣ شهور حملات وسوشيال Dipin donuts 9 overdue / 10 +100% worst slip" [ref=e1546] [cursor=pointer]:
+                - /url: /projects/e18aaafc-9719-4903-b219-d839237ea0a6
+                - generic [ref=e1547]:
+                  - generic [ref=e1548]:
+                    - generic [ref=e1549]: PRJ-01797
+                    - img [ref=e1550]
+                  - paragraph [ref=e1552]: Dipin donuts - ٣ شهور حملات وسوشيال
+                  - paragraph [ref=e1553]: Dipin donuts
+                  - generic [ref=e1554]:
+                    - generic [ref=e1555]:
+                      - generic [ref=e1556]: "9"
+                      - generic [ref=e1557]: overdue / 10
+                    - generic [ref=e1558]:
+                      - generic [ref=e1559]: +100%
+                      - generic [ref=e1560]: worst slip
+              - link "PRJ-01788 هميم للتسويق العقاري -3شهور سوشيال وحملات هميم للتسويق العقاري 9 overdue / 12 +58% worst slip" [ref=e1561] [cursor=pointer]:
+                - /url: /projects/a1e67110-6074-44fe-956f-d8a717117096
+                - generic [ref=e1562]:
+                  - generic [ref=e1563]:
+                    - generic [ref=e1564]: PRJ-01788
+                    - img [ref=e1565]
+                  - paragraph [ref=e1567]: هميم للتسويق العقاري -3شهور سوشيال وحملات
+                  - paragraph [ref=e1568]: هميم للتسويق العقاري
+                  - generic [ref=e1569]:
+                    - generic [ref=e1570]:
+                      - generic [ref=e1571]: "9"
+                      - generic [ref=e1572]: overdue / 12
+                    - generic [ref=e1573]:
+                      - generic [ref=e1574]: +58%
+                      - generic [ref=e1575]: worst slip
+              - link "PRJ-01815 ARTDECO -نوفا 3 شهور مها 9 overdue / 12 +52% worst slip" [ref=e1576] [cursor=pointer]:
+                - /url: /projects/d596e57b-bb8b-474b-915d-839974e52200
+                - generic [ref=e1577]:
+                  - generic [ref=e1578]:
+                    - generic [ref=e1579]: PRJ-01815
+                    - img [ref=e1580]
+                  - paragraph [ref=e1582]: ARTDECO -نوفا 3 شهور
+                  - paragraph [ref=e1583]: مها
+                  - generic [ref=e1584]:
+                    - generic [ref=e1585]:
+                      - generic [ref=e1586]: "9"
+                      - generic [ref=e1587]: overdue / 12
+                    - generic [ref=e1588]:
+                      - generic [ref=e1589]: +52%
+                      - generic [ref=e1590]: worst slip
+          - generic [ref=e1591]:
+            - generic [ref=e1592]:
+              - generic [ref=e1593]:
+                - heading "Upcoming deadlines" [level=2] [ref=e1594]
+                - paragraph [ref=e1595]: 98 tasks due in the next 7 days
+              - link "All tasks →" [ref=e1597] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+            - generic [ref=e1599]:
+              - link "Today 06-23 35 الاجتماع الشهري للسوشيال تطبيق الواجهة برمجيا" [ref=e1600] [cursor=pointer]:
+                - /url: /tasks?f=due_today
+                - generic [ref=e1601]:
+                  - generic [ref=e1602]: Today
+                  - generic [ref=e1603]: 06-23
+                - generic [ref=e1604]: "35"
+                - generic [ref=e1607]:
+                  - paragraph [ref=e1608]: الاجتماع الشهري للسوشيال
+                  - paragraph [ref=e1609]: تطبيق الواجهة برمجيا
+              - link "الأربعاء 06-24 21 الخطة الشهرية للسيو الانتهاء من الواجهة" [ref=e1610] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1611]:
+                  - generic [ref=e1612]: الأربعاء
+                  - generic [ref=e1613]: 06-24
+                - generic [ref=e1614]: "21"
+                - generic [ref=e1617]:
+                  - paragraph [ref=e1618]: الخطة الشهرية للسيو
+                  - paragraph [ref=e1619]: الانتهاء من الواجهة
+              - link "الخميس 06-25 12 محتوى الاسبوع الثاني للسوشيال الاجتماع مع العميل" [ref=e1620] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1621]:
+                  - generic [ref=e1622]: الخميس
+                  - generic [ref=e1623]: 06-25
+                - generic [ref=e1624]: "12"
+                - generic [ref=e1627]:
+                  - paragraph [ref=e1628]: محتوى الاسبوع الثاني للسوشيال
+                  - paragraph [ref=e1629]: الاجتماع مع العميل
+              - link "الجمعة 06-26 0 —" [ref=e1630] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1631]:
+                  - generic [ref=e1632]: الجمعة
+                  - generic [ref=e1633]: 06-26
+                - generic [ref=e1634]: "0"
+                - paragraph [ref=e1637]: —
+              - link "السبت 06-27 0 —" [ref=e1638] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1639]:
+                  - generic [ref=e1640]: السبت
+                  - generic [ref=e1641]: 06-27
+                - generic [ref=e1642]: "0"
+                - paragraph [ref=e1645]: —
+              - link "الأحد 06-28 15 تصميم بنرات المقالات الكلمات المفتاحية 30 منتج" [ref=e1646] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1647]:
+                  - generic [ref=e1648]: الأحد
+                  - generic [ref=e1649]: 06-28
+                - generic [ref=e1650]: "15"
+                - generic [ref=e1653]:
+                  - paragraph [ref=e1654]: تصميم بنرات المقالات
+                  - paragraph [ref=e1655]: الكلمات المفتاحية 30 منتج
+              - link "الاثنين 06-29 15 تصاميم الاسبوع الثالث للسوشيال المرحلة الاولي لكتابة 4 مقالات 1️⃣" [ref=e1656] [cursor=pointer]:
+                - /url: /tasks?f=due_week
+                - generic [ref=e1657]:
+                  - generic [ref=e1658]: الاثنين
+                  - generic [ref=e1659]: 06-29
+                - generic [ref=e1660]: "15"
+                - generic [ref=e1663]:
+                  - paragraph [ref=e1664]: تصاميم الاسبوع الثالث للسوشيال
+                  - paragraph [ref=e1665]: المرحلة الاولي لكتابة 4 مقالات 1️⃣
+          - generic [ref=e1666]:
+            - generic [ref=e1668]:
+              - heading "Team & capacity" [level=2] [ref=e1669]
+              - paragraph [ref=e1670]: Specialist load and on-time performance
+            - generic [ref=e1671]:
+              - generic [ref=e1673]:
+                - generic [ref=e1674]: Most loaded specialists
+                - generic [ref=e1675]:
+                  - generic [ref=e1676]:
+                    - generic [ref=e1678]: نوران أيمن
+                    - generic [ref=e1681]: "27"
+                  - generic [ref=e1682]:
+                    - generic [ref=e1684]: روان محسن
+                    - generic [ref=e1687]: "20"
+                  - generic [ref=e1688]:
+                    - generic [ref=e1690]: سماء مصباح
+                    - generic [ref=e1693]: "19"
+                  - generic [ref=e1694]:
+                    - generic [ref=e1696]: علية غنيم
+                    - generic [ref=e1699]: "11"
+                  - generic [ref=e1700]:
+                    - generic [ref=e1702]: اسما صلاح
+                    - generic [ref=e1705]: "9"
+                  - generic [ref=e1706]:
+                    - generic [ref=e1708]: مريم الورداني
+                    - generic [ref=e1711]: "7"
+                  - generic [ref=e1712]:
+                    - generic [ref=e1714]: عبدالله غيث
+                    - generic [ref=e1717]: "7"
+                  - generic [ref=e1718]:
+                    - generic [ref=e1720]: احمد محمود
+                    - generic [ref=e1723]: "6"
+              - generic [ref=e1724]:
+                - generic [ref=e1726]:
+                  - generic [ref=e1727]:
+                    - img [ref=e1728]
+                    - text: Top performers
+                  - generic [ref=e1734]:
+                    - generic [ref=e1735]:
+                      - generic [ref=e1736]: محمد مسلماني
+                      - generic [ref=e1737]:
+                        - generic [ref=e1738]: 63%
+                        - generic [ref=e1739]: n=8
+                    - generic [ref=e1740]:
+                      - generic [ref=e1741]: اسراء اسامه
+                      - generic [ref=e1742]:
+                        - generic [ref=e1743]: 57%
+                        - generic [ref=e1744]: n=21
+                    - generic [ref=e1745]:
+                      - generic [ref=e1746]: هاجر طارق
+                      - generic [ref=e1747]:
+                        - generic [ref=e1748]: 50%
+                        - generic [ref=e1749]: n=8
+                - generic [ref=e1751]:
+                  - generic [ref=e1752]:
+                    - img [ref=e1753]
+                    - text: Needs support
+                  - generic [ref=e1756]:
+                    - generic [ref=e1757]:
+                      - generic [ref=e1758]: مريم الورداني
+                      - generic [ref=e1759]:
+                        - generic [ref=e1760]: 0%
+                        - generic [ref=e1761]: n=7
+                    - generic [ref=e1762]:
+                      - generic [ref=e1763]: دينا سنجاب
+                      - generic [ref=e1764]:
+                        - generic [ref=e1765]: 0%
+                        - generic [ref=e1766]: n=10
+                    - generic [ref=e1767]:
+                      - generic [ref=e1768]: حسام محمد
+                      - generic [ref=e1769]:
+                        - generic [ref=e1770]: 0%
+                        - generic [ref=e1771]: n=7
+    - complementary "Power-user shortcuts":
+      - generic [ref=e1772]:
+        - button "Bookmark panel" [disabled] [ref=e1773]:
+          - img [ref=e1774]
+        - link "Favorite" [ref=e1776] [cursor=pointer]:
+          - /url: /projects?onlyFavorites=1
+          - img [ref=e1777]
+        - button "Search (⌘K)" [ref=e1779]:
+          - img [ref=e1780]
+        - button "Enter fullscreen" [ref=e1783]:
+          - img [ref=e1784]
+        - button "Add bookmark" [disabled] [ref=e1789]:
+          - img [ref=e1790]
+    - button [ref=e1792]:
+      - img [ref=e1793]
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e1806] [cursor=pointer]:
+    - img [ref=e1807]
+  - alert [ref=e1810]

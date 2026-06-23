@@ -57,6 +57,14 @@ export const DELAY_OWNERS = ["client", "account_manager", "team", "department", 
 export const ACCOUNT_HEALTH = ["healthy", "watch", "at_risk", "critical"] as const;
 export const RESPONSE_SPEEDS = ["fast", "medium", "slow", "unknown"] as const;
 
+// One example message behind a request/approval count — a real client quote or
+// faithful summary so the UI can show WHAT the count is made of (click a count →
+// see the actual messages), not just a number.
+const SignalExampleSchema = z.object({
+  text: z.string(), // Arabic, one line — real quote or faithful summary
+  date: z.string().nullable().catch(null), // YYYY-MM-DD if identifiable
+});
+
 const IndicatorSchema = z.object({
   code: z.enum(INDICATOR_CODES),
   // red = relationship risk, yellow = operational blocker. Derived from `code`.
@@ -149,11 +157,33 @@ export const SatisfactionSchema = z.object({
           noResponse: z.number().int().min(0).catch(0),
         })
         .default({ approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 }),
+      // The actual client messages behind each request count, so clicking a
+      // count in the UI reveals what it's made of. count = examples.length.
+      requestExamples: z
+        .object({
+          new: z.array(SignalExampleSchema).max(12).default([]),
+          edit: z.array(SignalExampleSchema).max(12).default([]),
+          complaint: z.array(SignalExampleSchema).max(12).default([]),
+          inquiry: z.array(SignalExampleSchema).max(12).default([]),
+          approval: z.array(SignalExampleSchema).max(12).default([]),
+        })
+        .default({ new: [], edit: [], complaint: [], inquiry: [], approval: [] }),
+      // The actual messages behind each approval-outcome count.
+      approvalExamples: z
+        .object({
+          approved: z.array(SignalExampleSchema).max(12).default([]),
+          rejected: z.array(SignalExampleSchema).max(12).default([]),
+          changesRequested: z.array(SignalExampleSchema).max(12).default([]),
+          noResponse: z.array(SignalExampleSchema).max(12).default([]),
+        })
+        .default({ approved: [], rejected: [], changesRequested: [], noResponse: [] }),
       responseSpeed: z.enum(RESPONSE_SPEEDS).catch("unknown"),
     })
     .default({
       requests: { new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 },
       approvals: { approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 },
+      requestExamples: { new: [], edit: [], complaint: [], inquiry: [], approval: [] },
+      approvalExamples: { approved: [], rejected: [], changesRequested: [], noResponse: [] },
       responseSpeed: "unknown",
     }),
 

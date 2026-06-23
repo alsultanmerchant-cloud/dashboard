@@ -151,6 +151,8 @@ export async function syncGoogleSheetAction(
       actorUserId: session.userId,
       auditAction: "contracts.sync_google_sheet",
     });
+    revalidatePath("/contracts");
+    revalidatePath("/dashboard");
     return {
       kind: "ok",
       clientsCreated: result.clientsCreated,

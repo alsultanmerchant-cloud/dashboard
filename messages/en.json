@@ -327,7 +327,11 @@
     "acknowledgedAt": "Acknowledged",
     "noExceptions": "No exceptions",
     "noEscalations": "No escalations",
-    "noEscalationsDescription": "Escalations directed to you will appear here automatically when an SLA is breached."
+    "noEscalationsDescription": "Escalations directed to you will appear here automatically when an SLA is breached.",
+    "autoSlaTitle": "Auto SLA breaches",
+    "autoSlaSummary": "{n} open deadline breaches were raised automatically by the SLA rule. They're machine-generated, not human escalations — review them as overdue tasks instead.",
+    "autoSlaLink": "View overdue tasks",
+    "realExceptionsHint": "Human-raised exceptions only — auto SLA noise is summarized above."
   },
   "NotificationsList": {
     "filterAll": "All",
@@ -3017,6 +3021,8 @@
         "dashboard_pulseClientChanges": "New client-change (revision) requests in the last 7 days, versus the prior 7. Up is worse.",
         "dashboard_pulseApprovals": "Approval decisions resolved in the last 7 days, versus the prior 7."
       },
+      "title": "Weekly pulse",
+      "description": "Work movement over the last 7 days versus the prior week",
       "completed": "Completed",
       "tasksAdded": "Tasks added",
       "clientChanges": "Client changes",
@@ -3044,9 +3050,13 @@
     "flow": {
       "title": "Delivery flow",
       "description": "Task distribution across the 8 stages and average dwell time per stage",
-      "worstStageLabel": "Highest pressure",
+      "overdueDesc": "Stages where overdue tasks are piling up — excludes New and Done",
+      "worstStageLabel": "Most overdue tasks",
       "avgDwell": "avg dwell",
-      "openStage": "Open this stage",
+      "openStage": "View tasks",
+      "ofTotal": "of {total} open",
+      "ofStage": "of stage",
+      "noOverdue": "No overdue tasks across active stages",
       "bottlenecksTitle": "Review bottlenecks",
       "bottlenecksEmpty": "No tasks stuck in review"
     },
@@ -3114,7 +3124,19 @@
       "description": "Top 5 tasks bounced back to \"client changes\" in the last 90 days",
       "revisions": "revs",
       "emptyTitle": "No recent revisions",
-      "emptyDescription": "Tasks that get revised repeatedly will appear here"
+      "emptyDescription": "Tasks that get revised repeatedly will appear here",
+      "indicatorTitle": "Client Edits Indicator",
+      "indicatorDesc": "Tasks currently waiting on client feedback, with weekly trend and service breakdown",
+      "activeNow": "Active edits now",
+      "vsLastWeek": "vs last week",
+      "thisWeek": "this week",
+      "weeklyChange": "Weekly change",
+      "byService": "Breakdown by service",
+      "serviceDistributionHint": "Share of tasks currently in the client-edits stage",
+      "totalEvents": "Total revisions",
+      "affectedTasks": "Affected tasks",
+      "avgRevisions": "Avg per task",
+      "threePlus": "3+ revisions"
     },
     "scores": {
       "title": "Executive Indicators",
@@ -3178,7 +3200,8 @@
         "riskProjects": "At-risk projects",
         "escalations": "Unanswered escalations",
         "critical": "Critical delays",
-        "atRiskClients": "At-risk clients"
+        "atRiskClients": "At-risk clients",
+        "fullReport": "Full report"
       },
       "naSourceSatisfaction": "Import client chats on the Satisfaction page",
       "naSourceBrief": "No readable project brief has been analyzed yet",
@@ -3296,7 +3319,21 @@
       "generateFirst": "Generate first brief",
       "reanalyzeSection": "Re-analyze",
       "reanalyzingSection": "Analyzing…",
-      "sectionError": "Could not analyze this section"
+      "sectionError": "Could not analyze this section",
+      "changeDetail": {
+        "title": "Why is this changing?",
+        "fromTo": "Was {from} → now {to}",
+        "period": "Last 7 days vs the prior 7, taken from the nightly metrics snapshot.",
+        "link": "View records",
+        "why": {
+          "onTime": "Share of tasks delivered on time. Higher means better deadline discipline.",
+          "overdue": "Number of tasks past their due date. Lower is better.",
+          "stability": "Overall operational-stability index (delivery, quality and discipline combined).",
+          "completed": "Tasks completed during the week. Higher means more throughput.",
+          "delivery": "How well projects are delivered by their committed deadlines.",
+          "service": "This service line's on-time delivery performance."
+        }
+      }
     },
     "assistant": {
       "askAi": "Ask AI",
@@ -3392,6 +3429,11 @@
     "briefFileSaved": "Brief file “{name}” uploaded and saved to project documents.",
     "briefFileHint": "Readable formats: text (txt), CSV, Excel (xlsx). PDFs and images are not read — use a Google Doc link instead.",
     "briefSavedPrompt": "The brief was saved to the project documents. Re-analyze now to score brief adherence?",
+    "replaceBrief": "Replace brief",
+    "replaceBriefHint": "Attach the correct brief — it replaces the one above. Re-analyze afterwards to rescore brief adherence.",
+    "deleteBrief": "Delete",
+    "deleteBriefConfirm": "Remove this brief document?",
+    "cancel": "Cancel",
     "reanalyzeNow": "Re-analyze now",
     "later": "Later",
     "or": "or",
@@ -3545,7 +3587,7 @@
     "emptyOverview": "No synced chats yet. Connect WhatsApp groups to get started.",
     "viewBoard": "Board",
     "viewTable": "Table",
-    "search": "Search clients…",
+    "search": "Search by client, contract, or group…",
     "clientsCount": "{n} clients",
     "relationFilter": {
       "active": "Active",
@@ -3553,6 +3595,7 @@
       "all": "All",
       "lostBadge": "Archived"
     },
+    "riskFilter": "At-risk",
     "openClient": "Open",
     "board": {
       "atRisk": "At risk",
@@ -3705,7 +3748,12 @@
       "backfilling": "Pulling history…",
       "backfillDone": "Added {count} messages",
       "backfillMore": "More history pending — click again",
-      "stale": "No recent activity — may have stopped syncing"
+      "stale": "No recent activity — may have stopped syncing",
+      "resyncWebhooks": "Re-register webhooks",
+      "resyncing": "Re-registering…",
+      "resyncHint": "Make sure every connected number streams live messages into the dashboard (run after adding or adopting a number).",
+      "resyncDone": "Webhooks registered for {count}/{total} numbers",
+      "resyncFail": "Could not register webhooks"
     },
     "analyzeWeek": "Analyze current week",
     "analyzeAll": "Analyze all time",

@@ -60,6 +60,10 @@
   --color-cc-blue: var(--accent-blue);
   --color-blue-dim: var(--accent-blue-dim);
   --color-pink: var(--accent-pink);
+  --color-status-info: var(--status-info);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-danger: var(--status-danger);
 
   /* Rwasem-specific brand tokens */
   --color-brand-indigo: var(--brand-indigo);
@@ -130,6 +134,10 @@
   --accent-blue: #007bff;
   --accent-blue-dim: rgba(0, 123, 255, 0.14);
   --accent-pink: #e83e8c;
+  --status-info: #3f33a8;
+  --status-success: #176b31;
+  --status-warning: #7a5200;
+  --status-danger: #a51f2d;
 
   /* Surfaces — Odoo-style flat shadows */
   --surface-elev: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -190,6 +198,10 @@
   --accent-blue: #7da6ff;
   --accent-blue-dim: rgba(125, 166, 255, 0.14);
   --accent-pink: #EC4899;
+  --status-info: #7da6ff;
+  --status-success: #34d399;
+  --status-warning: #fbbf24;
+  --status-danger: #fb7185;
 
   --surface-elev: 0 0 20px rgba(0, 212, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --surface-elev-strong: 0 0 30px rgba(0, 212, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);

@@ -45,28 +45,32 @@ export async function listMyActivities(
       task:tasks!task_activities_task_id_fkey (
         task_code,
         title,
+        archived_at,
         project_id,
-        project:projects ( id, name )
+        project:projects ( id, name, status )
       )
     `)
     .eq("organization_id", orgId)
     .eq("assignee_id", employeeId)
+    .is("task.archived_at", null)
     .or(`completed_at.is.null,completed_at.gte.${cutoff.toISOString()}`)
     .order("due_date", { ascending: true, nullsFirst: false })
     .limit(500);
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => {
+  return (data ?? []).flatMap((row) => {
     const t = (Array.isArray(row.task) ? row.task[0] : row.task) as
       | { task_code: string | null; title: string; project_id: string | null; project: unknown }
       | null;
     const rawProject = (t?.project ?? null) as unknown;
     const project =
       Array.isArray(rawProject)
-        ? ((rawProject[0] ?? null) as { id: string; name: string } | null)
-        : (rawProject as { id: string; name: string } | null);
-    return {
+        ? ((rawProject[0] ?? null) as { id: string; name: string; status: string } | null)
+        : (rawProject as { id: string; name: string; status: string } | null);
+    // Skip activities on tasks belonging to archived projects (dropped clients).
+    if (project && project.status === "archived") return [];
+    return [{
       id: row.id as string,
       task_id: row.task_id as string,
       task_code: (t?.task_code as string | null) ?? null,
@@ -78,7 +82,7 @@ export async function listMyActivities(
       due_date: (row.due_date as string | null) ?? null,
       completed_at: (row.completed_at as string | null) ?? null,
       created_at: row.created_at as string,
-    };
+    }];
   });
 }
 
@@ -100,28 +104,32 @@ async function _listMyOpenActivities(
       task:tasks!task_activities_task_id_fkey (
         task_code,
         title,
+        archived_at,
         project_id,
-        project:projects ( id, name )
+        project:projects ( id, name, status )
       )
     `)
     .eq("organization_id", orgId)
     .eq("assignee_id", employeeId)
+    .is("task.archived_at", null)
     .is("completed_at", null)
     .order("due_date", { ascending: true, nullsFirst: false })
     .limit(limit);
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => {
+  return (data ?? []).flatMap((row) => {
     const task = (Array.isArray(row.task) ? row.task[0] : row.task) as
       | { task_code: string | null; title: string; project_id: string | null; project: unknown }
       | null;
     const rawProject = task?.project ?? null;
     const project = Array.isArray(rawProject)
-      ? ((rawProject[0] ?? null) as { id: string; name: string } | null)
-      : (rawProject as { id: string; name: string } | null);
+      ? ((rawProject[0] ?? null) as { id: string; name: string; status: string } | null)
+      : (rawProject as { id: string; name: string; status: string } | null);
+    // Skip activities on archived-project tasks (dropped clients).
+    if (project && project.status === "archived") return [];
 
-    return {
+    return [{
       id: row.id as string,
       task_id: row.task_id as string,
       task_code: task?.task_code ?? null,
@@ -133,7 +141,7 @@ async function _listMyOpenActivities(
       due_date: (row.due_date as string | null) ?? null,
       completed_at: null,
       created_at: row.created_at as string,
-    };
+    }];
   });
 }
 
@@ -160,13 +168,19 @@ export async function listMyTaskDeadlines(
         planned_date,
         due_date,
         stage,
+        archived_at,
         project_id,
-        project:projects ( id, name )
+        project:projects ( id, name, status )
       )
     `)
     .eq("organization_id", orgId)
     .eq("employee_id", employeeId)
     .neq("task.stage", "done")
+    // Exclude archived tasks (mirrors the cockpit's getMyWork) and tasks that
+    // belong to archived projects — Sky Light feedback: /my-activities was
+    // surfacing scheduled work for clients dropped long ago (their projects
+    // are archived but the planned_date deadlines lingered here).
+    .is("task.archived_at", null)
     .not("task.planned_date", "is", null)
     .limit(800);
 
@@ -187,11 +201,14 @@ export async function listMyTaskDeadlines(
         }
       | null;
     if (!t || seen.has(t.id)) continue;
-    seen.add(t.id);
     const rawProject = (t.project ?? null) as unknown;
     const project = Array.isArray(rawProject)
-      ? ((rawProject[0] ?? null) as { id: string; name: string } | null)
-      : (rawProject as { id: string; name: string } | null);
+      ? ((rawProject[0] ?? null) as { id: string; name: string; status: string } | null)
+      : (rawProject as { id: string; name: string; status: string } | null);
+    // Drop tasks whose project is archived (dropped/lost clients). Tasks with
+    // no project are kept (personal/unlinked work).
+    if (project && project.status === "archived") continue;
+    seen.add(t.id);
     const due = t.planned_date ?? t.due_date ?? null;
     rows.push({
       id: `task-${t.id}`,

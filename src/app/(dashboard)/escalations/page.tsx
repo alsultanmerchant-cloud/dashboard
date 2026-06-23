@@ -62,6 +62,14 @@ export default async function EscalationsPage({
   const sPage = Math.max(1, Number(sp.spage) || 1);
   const seeAll = hasPermission(session, "escalation.view_all");
 
+  // The stage-guard SLA cron raises a machine "exception" every time a task
+  // breaches its SLA — hundreds of `… (global_rule)` deadline rows with a null
+  // opener. They're noise, not human escalations, so we exclude them from the
+  // card list + kind counts and instead surface a single summary strip that
+  // points to the overdue-tasks view (where they're actionable). See the
+  // `AUTO_SLA_MARKER` filter below.
+  const AUTO_SLA_MARKER = "%global_rule%";
+
   const eFrom = (ePage - 1) * EXC_PAGE_SIZE;
   const eTo = eFrom + EXC_PAGE_SIZE - 1;
   let exceptionsQuery = supabaseAdmin
@@ -71,6 +79,7 @@ export default async function EscalationsPage({
       { count: "exact" },
     )
     .eq("organization_id", session.orgId)
+    .not("reason", "ilike", AUTO_SLA_MARKER)
     .order("opened_at", { ascending: false })
     .range(eFrom, eTo);
   if (kindFilter) exceptionsQuery = exceptionsQuery.eq("kind", kindFilter);
@@ -81,11 +90,23 @@ export default async function EscalationsPage({
     .from("exceptions")
     .select("kind")
     .eq("organization_id", session.orgId)
+    .not("reason", "ilike", AUTO_SLA_MARKER)
     .is("resolved_at", null);
   if (!seeAll) kindCountsQuery = kindCountsQuery.eq("opened_by", session.userId);
   const { data: openKindRows } = await kindCountsQuery;
   const counts: Record<string, number> = { client: 0, deadline: 0, quality: 0, resource: 0 };
   for (const r of openKindRows ?? []) counts[r.kind] = (counts[r.kind] ?? 0) + 1;
+
+  // Count the auto SLA-breach exceptions separately so we can show them as one
+  // collapsed summary instead of hundreds of redundant cards.
+  let autoSlaQuery = supabaseAdmin
+    .from("exceptions")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", session.orgId)
+    .ilike("reason", AUTO_SLA_MARKER)
+    .is("resolved_at", null);
+  if (!seeAll) autoSlaQuery = autoSlaQuery.eq("opened_by", session.userId);
+  const { count: autoSlaCount } = await autoSlaQuery;
 
   const sFrom = (sPage - 1) * ESC_PAGE_SIZE;
   const sTo = sFrom + ESC_PAGE_SIZE - 1;
@@ -120,8 +141,35 @@ export default async function EscalationsPage({
 
       <EscalationsToolbar activeKind={kindFilter} />
 
+      {(autoSlaCount ?? 0) > 0 && (
+        <Card className="mb-6 border-amber/30 bg-amber/[0.04]">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-dim text-amber">
+                <ShieldAlert className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">
+                  {t("autoSlaTitle")} · {autoSlaCount}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {t("autoSlaSummary", { n: autoSlaCount ?? 0 })}
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/tasks?f=overdue"
+              className="shrink-0 rounded-lg border border-amber/40 px-3 py-1.5 text-xs font-medium text-amber transition-colors hover:bg-amber/10"
+            >
+              {t("autoSlaLink")} ←
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
       <section className="mb-10">
-        <h2 className="mb-3 text-base font-semibold">{t("exceptions")}</h2>
+        <h2 className="mb-1 text-base font-semibold">{t("exceptions")}</h2>
+        <p className="mb-3 text-[11px] text-muted-foreground">{t("realExceptionsHint")}</p>
         {(exceptions ?? []).length === 0 ? (
           <EmptyState
             icon={<ShieldAlert className="size-6" />}

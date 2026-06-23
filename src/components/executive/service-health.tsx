@@ -52,7 +52,14 @@ export async function ServiceHealthSection({ rows }: { rows: ServiceHealthRow[] 
                     <Activity className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{s.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="truncate text-sm font-semibold">{s.name}</p>
+                      {s.includesRenewals && (
+                        <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium bg-soft-2 text-muted-foreground">
+                          + تجديد
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
                       {s.openCount} {t("openTasks")} · {s.delivered30d} {t("delivered")}
                     </p>

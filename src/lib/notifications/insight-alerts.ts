@@ -110,10 +110,14 @@ export async function generateInsightAlerts(
   // avoid spamming a contract with several missed payments.
   const { data: overdue } = await supabaseAdmin
     .from("installments")
-    .select("id, contract_id, expected_amount, expected_date, contract:contracts(contract_code, client:clients(name))")
+    // Inner-join + status filter: only alert on receivables for LIVE contracts.
+    // Closed/lost/expired contracts carry uncollectible installments that are
+    // not a real collection threat.
+    .select("id, contract_id, expected_amount, expected_date, contract:contracts!inner(contract_code, status, client:clients(name))")
     .eq("organization_id", orgId)
     .lt("expected_date", today)
-    .or("actual_amount.is.null,actual_amount.eq.0");
+    .or("actual_amount.is.null,actual_amount.eq.0")
+    .in("contract.status", ["active", "hold"]);
   const byContract = new Map<string, { count: number; amount: number; code: string | null; client: string | null }>();
   for (const i of (overdue ?? []) as Array<{
     contract_id: string | null;

@@ -33,7 +33,7 @@ function delta(current: number, weekAgo: number, lowerIsBetter = true) {
 
 // Compute a sparkline mini-series from current+previous totals — keeps API
 // flexible if/when we later feed a true daily series for the secondary cards.
-function fakeSparkFromTrend(_current: number, _previous: number): number[] {
+function fakeSparkFromTrend(): number[] {
   return [];
 }
 
@@ -52,57 +52,57 @@ export async function ExecutiveHeroRow({
   // big-3 stats with delta chips, no spark, to avoid faking data.
 
   return (
-    <section className="mb-8 grid gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
+    <section className="mb-8 grid items-stretch gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
       {/* HERO */}
-      <div className="relative">
-      <span className="absolute end-10 top-5 z-10">
-        <MetricInfo text={t("metricTooltips.dashboard_heroOnTime")} />
-      </span>
-      <Link
-        href="/reports"
-        className={cn(
-          "group relative overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/40 p-6 transition-all",
-          "hover:shadow-[0_0_40px_rgba(0,212,255,0.08)]",
-          tone.border,
-        )}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-              {t("onTimeLabel")}
+      <div className="relative h-full">
+        <span className="absolute end-10 top-5 z-10">
+          <MetricInfo text={t("metricTooltips.dashboard_heroOnTime")} />
+        </span>
+        <Link
+          href="/reports"
+          className={cn(
+            "group relative flex h-full min-h-[180px] flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/40 p-6 transition-all",
+            "hover:shadow-[0_0_40px_rgba(0,212,255,0.08)]",
+            tone.border,
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                {t("onTimeLabel")}
+              </div>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                {t("onTimeRange")}
+              </p>
             </div>
-            <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
-              {t("onTimeRange")}
-            </p>
+            <Timer className="size-4 text-cyan" />
           </div>
-          <Timer className="size-4 text-cyan" />
-        </div>
 
-        <div className="mt-5 flex items-end justify-between gap-4">
-          <div className="flex items-baseline gap-1">
-            <span className={cn("text-7xl font-bold tabular-nums leading-none", tone.value)}>
-              {data.onTime.pct === null ? "—" : data.onTime.pct}
+          <div className="mt-5 flex items-end justify-between gap-4">
+            <div className="flex items-baseline gap-1">
+              <span className={cn("text-7xl font-bold tabular-nums leading-none", tone.value)}>
+                {data.onTime.pct === null ? "—" : data.onTime.pct}
+              </span>
+              {data.onTime.pct !== null && (
+                <span className={cn("text-3xl font-semibold", tone.value)}>%</span>
+              )}
+            </div>
+            <div className={cn("w-32 shrink-0 opacity-90", tone.sparkClass)}>
+              <Sparkline data={sparkData} width={128} height={44} reference={85} fill="currentColor" stroke="currentColor" />
+            </div>
+          </div>
+
+          <div className="mt-auto flex items-center justify-between gap-3 pt-4 text-[11px] text-muted-foreground">
+            <span>
+              {data.onTime.sample > 0
+                ? t("onTimeSample", { sample: data.onTime.sample })
+                : t("onTimeNoSample")}
             </span>
-            {data.onTime.pct !== null && (
-              <span className={cn("text-3xl font-semibold", tone.value)}>%</span>
-            )}
+            <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-70">
+              {t("benchmark")}
+            </span>
           </div>
-          <div className={cn("w-32 shrink-0 opacity-90", tone.sparkClass)}>
-            <Sparkline data={sparkData} width={128} height={44} reference={85} fill="currentColor" stroke="currentColor" />
-          </div>
-        </div>
-
-        <div className="mt-4 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>
-            {data.onTime.sample > 0
-              ? t("onTimeSample", { sample: data.onTime.sample })
-              : t("onTimeNoSample")}
-          </span>
-          <span className="text-[10px] uppercase tracking-wider opacity-70">
-            {t("benchmark")}
-          </span>
-        </div>
-      </Link>
+        </Link>
       </div>
 
       {/* Secondary */}
@@ -113,7 +113,7 @@ export async function ExecutiveHeroRow({
         href="/tasks?filter=overdue"
         accent={data.overdue.current > 50 ? "danger" : data.overdue.current > 0 ? "warning" : "neutral"}
         deltaInfo={overdueDelta}
-        sparkData={fakeSparkFromTrend(data.overdue.current, data.overdue.weekAgo)}
+        sparkData={fakeSparkFromTrend()}
         tip={t("metricTooltips.dashboard_heroOverdue")}
       />
 
@@ -183,48 +183,48 @@ function SecondaryCard({
         : "border-cyan/15";
 
   return (
-    <div className="relative">
-    {tip ? (
-      <span className="absolute end-12 top-4 z-10">
-        <MetricInfo text={tip} />
-      </span>
-    ) : null}
-    <Link
-      href={href}
-      className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-card p-4 transition-all hover:border-cyan/35",
-        borderTone,
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </div>
-        <span className={cn("flex size-8 items-center justify-center rounded-lg", iconTone)}>
-          {icon}
+    <div className="relative h-full">
+      {tip ? (
+        <span className="absolute end-12 top-4 z-10">
+          <MetricInfo text={tip} />
         </span>
-      </div>
-
-      <div className={cn("mt-3 text-4xl font-bold tabular-nums leading-none", valueTone)}>
-        {value}
-      </div>
-
-      <div className="mt-3 flex items-center justify-between gap-2 text-[11px]">
-        {deltaInfo ? (
-          <span className={cn("inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 font-medium", deltaInfo.tone)}>
-            <deltaInfo.DirIcon className="size-3" />
-            {deltaInfo.sign}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">{hint}</span>
+      ) : null}
+      <Link
+        href={href}
+        className={cn(
+          "group relative flex h-full min-h-[180px] flex-col overflow-hidden rounded-2xl border bg-card p-4 transition-all hover:border-cyan/35",
+          borderTone,
         )}
-        {sparkData.length > 0 && (
-          <div className={cn("w-16 opacity-70", valueTone)}>
-            <Sparkline data={sparkData} width={64} height={20} stroke="currentColor" />
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            {label}
           </div>
-        )}
-      </div>
-    </Link>
+          <span className={cn("flex size-8 items-center justify-center rounded-lg", iconTone)}>
+            {icon}
+          </span>
+        </div>
+
+        <div className={cn("mt-4 text-4xl font-bold tabular-nums leading-none", valueTone)}>
+          {value}
+        </div>
+
+        <div className="mt-auto flex min-h-6 items-end justify-between gap-2 pt-4 text-[11px]">
+          {deltaInfo ? (
+            <span className={cn("inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 font-medium", deltaInfo.tone)}>
+              <deltaInfo.DirIcon className="size-3" />
+              {deltaInfo.sign}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{hint}</span>
+          )}
+          {sparkData.length > 0 && (
+            <div className={cn("w-16 opacity-70", valueTone)}>
+              <Sparkline data={sparkData} width={64} height={20} stroke="currentColor" />
+            </div>
+          )}
+        </div>
+      </Link>
     </div>
   );
 }

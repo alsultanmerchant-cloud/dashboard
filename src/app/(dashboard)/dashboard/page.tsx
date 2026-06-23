@@ -12,8 +12,6 @@ import { DepartmentDashboard } from "@/components/department/department-dashboar
 import { AgentCockpit } from "@/components/cockpit/agent-cockpit";
 import { getTeamActivityOverview } from "@/lib/data/activity-scores";
 import { ActivityPulseBand } from "@/components/activity/activity-pulse-band";
-import { getCeoDashboardData, currentMonthIso } from "@/lib/data/ceo-dashboard";
-import { FinancialSummary } from "@/components/executive/financial-summary";
 import { getExecutiveScores } from "@/lib/data/executive-scores";
 import { getAccountabilityOverview } from "@/lib/data/accountability";
 import {
@@ -37,7 +35,6 @@ import {
   getServiceLineHealth,
   getTopStuckProjects,
   getUpcomingDeadlines,
-  getWipAging,
   getStageFlowMatrix,
   getTopRevisedTasks,
 } from "@/lib/data/executive";
@@ -55,7 +52,6 @@ import { TeamCapacitySection } from "@/components/executive/team-capacity";
 import { ServiceHealthSection } from "@/components/executive/service-health";
 import { StuckProjectsSection } from "@/components/executive/stuck-projects";
 import { UpcomingDeadlinesSection } from "@/components/executive/upcoming-deadlines";
-import { WipAgingSection } from "@/components/executive/wip-aging";
 import { StageFlowMatrixSection } from "@/components/executive/stage-flow-matrix";
 import { TopRevisedTasksSection } from "@/components/executive/top-revised";
 import { cn } from "@/lib/utils";
@@ -99,11 +95,6 @@ async function ServiceHealth({ orgId }: { orgId: string }) {
   return <ServiceHealthSection rows={rows} />;
 }
 
-async function WipAging({ orgId }: { orgId: string }) {
-  const rows = await getWipAging(orgId);
-  return <WipAgingSection rows={rows} />;
-}
-
 async function StageFlow({ orgId }: { orgId: string }) {
   const data = await getStageFlowMatrix(orgId);
   return <StageFlowMatrixSection {...data} />;
@@ -138,11 +129,6 @@ async function TeamCapacity({ orgId }: { orgId: string }) {
     getPerformerLeaderboard(orgId),
   ]);
   return <TeamCapacitySection specialists={specialists} performers={performers} />;
-}
-
-async function FinancialSummarySection({ orgId }: { orgId: string }) {
-  const data = await getCeoDashboardData(orgId, currentMonthIso());
-  return <FinancialSummary data={data} />;
 }
 
 // ---- Skeletons -----------------------------------------------------------
@@ -270,12 +256,6 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
       </Suspense>
 
-      {canFinance && (
-        <Suspense fallback={<SectionSkeleton h={200} />}>
-          <FinancialSummarySection orgId={orgId} />
-        </Suspense>
-      )}
-
       <Suspense fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />
       </Suspense>
@@ -290,10 +270,6 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
 
       <Suspense fallback={<SectionSkeleton h={200} />}>
         <ServiceHealth orgId={orgId} />
-      </Suspense>
-
-      <Suspense fallback={<SectionSkeleton h={180} />}>
-        <WipAging orgId={orgId} />
       </Suspense>
 
       <Suspense fallback={<SectionSkeleton h={320} />}>
@@ -494,7 +470,7 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Scale className="size-4 text-violet-300" />
+            <Scale className="size-4 text-status-info" />
             Accountability
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -574,7 +550,7 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <BadgeDollarSign className="size-4 text-emerald-300" />
+            <BadgeDollarSign className="size-4 text-status-success" />
             Contracts analysis
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -649,7 +625,7 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
                       {fmtSR(am.achieved_total)} / {fmtSR(am.expected_total)}
                     </span>
                   </span>
-                  <Explained text={t("metricTooltips.dashboard_amAchievementPct")} className="self-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 font-semibold tabular-nums text-emerald-300">
+                  <Explained text={t("metricTooltips.dashboard_amAchievementPct")} className="self-center rounded-md border border-cc-green/25 bg-green-dim px-2 py-1 font-semibold tabular-nums text-status-success">
                     {am.achievement_pct.toFixed(0)}%
                   </Explained>
                 </div>
@@ -686,10 +662,10 @@ function AnalysisStat({
   tip?: React.ReactNode;
 }) {
   const toneCls = {
-    info: "border-sky-500/25 bg-sky-500/5 text-sky-200",
-    success: "border-emerald-500/25 bg-emerald-500/5 text-emerald-200",
-    warning: "border-amber-500/25 bg-amber-500/5 text-amber-200",
-    danger: "border-rose-500/25 bg-rose-500/5 text-rose-200",
+    info: "border-cc-blue/25 bg-blue-dim text-status-info",
+    success: "border-cc-green/25 bg-green-dim text-status-success",
+    warning: "border-amber/25 bg-amber-dim text-status-warning",
+    danger: "border-cc-red/25 bg-red-dim text-status-danger",
   }[tone];
   return (
     <div className={cn("rounded-xl border p-3", toneCls)}>
@@ -732,9 +708,9 @@ function scoreTone(score: number | null, confidence: "high" | "low"): string {
   if (score === null || confidence === "low") {
     return "border-soft bg-soft-1 text-muted-foreground";
   }
-  if (score >= 70) return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
-  if (score >= 50) return "border-amber-500/25 bg-amber-500/10 text-amber-300";
-  return "border-rose-500/25 bg-rose-500/10 text-rose-300";
+  if (score >= 70) return "border-cc-green/25 bg-green-dim text-status-success";
+  if (score >= 50) return "border-amber/25 bg-amber-dim text-status-warning";
+  return "border-cc-red/25 bg-red-dim text-status-danger";
 }
 
 function roleLabel(role: string): string {

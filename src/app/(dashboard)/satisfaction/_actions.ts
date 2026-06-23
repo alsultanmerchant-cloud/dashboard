@@ -6,7 +6,13 @@ import { requirePermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, createNotification } from "@/lib/audit";
 import { parseWhatsAppChat } from "@/lib/whatsapp/parse";
-import { listGroups, waConfigured, getGroupsMeta, fetchChatHistory } from "@/lib/wa/openwa-client";
+import {
+  listGroups,
+  waConfigured,
+  getGroupsMeta,
+  fetchChatHistoryViaSessions,
+  isOwnSession,
+} from "@/lib/wa/openwa-client";
 import { matchGroups, detectGroupKind } from "@/lib/wa/match-groups";
 import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
 
@@ -200,6 +206,85 @@ export async function uploadClientBriefFileAction(
   revalidatePath("/satisfaction");
   revalidatePath(`/projects/${project.id}`);
   return { ok: true, projectId: project.id, filename: file.name };
+}
+
+// Detach a wrongly-attached brief: delete the project/task attachment row and,
+// for uploaded files, remove the underlying storage object so no litter is left.
+// Lets the operator fix a mistaken upload/link (then re-attach the correct one).
+const DeleteBriefSchema = z.object({
+  clientId: z.string().uuid("اختر عميلًا"),
+  attachmentId: z.string().uuid("معرّف غير صالح"),
+  source: z.enum(["project", "task"]),
+});
+
+export type DeleteBriefState = { ok?: true; error?: string };
+
+export async function deleteClientBriefAction(input: {
+  clientId: string;
+  attachmentId: string;
+  source: "project" | "task";
+}): Promise<DeleteBriefState> {
+  let session;
+  try {
+    session = await requirePermission("projects.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = DeleteBriefSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  const { clientId, attachmentId, source } = parsed.data;
+  const table = source === "project" ? "project_attachments" : "task_attachments";
+
+  // Fetch first (org-scoped) so we can clean up the storage object and audit it.
+  // project_attachments carries project_id directly; task_attachments links via
+  // its task, so resolve the project through the tasks join there.
+  const selectCols =
+    source === "project"
+      ? "id, filename, storage_path, project_id"
+      : "id, filename, storage_path, task:tasks!inner(project_id)";
+  const { data: row, error: fetchErr } = await supabaseAdmin
+    .from(table)
+    .select(selectCols)
+    .eq("organization_id", session.orgId)
+    .eq("id", attachmentId)
+    .maybeSingle();
+  if (fetchErr) return { error: fetchErr.message };
+  if (!row) return { error: "المستند غير موجود أو تم حذفه مسبقًا" };
+
+  const r = row as {
+    filename?: string | null;
+    storage_path?: string | null;
+    project_id?: string | null;
+    task?: { project_id?: string | null } | null;
+  };
+  const projectId = source === "project" ? r.project_id ?? null : r.task?.project_id ?? null;
+
+  const { error: delErr } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq("organization_id", session.orgId)
+    .eq("id", attachmentId);
+  if (delErr) return { error: delErr.message };
+
+  // Remove the underlying file once the row is gone (best effort — a leftover
+  // object is harmless, but a deleted row pointing at live storage is litter).
+  if (r.storage_path) {
+    await supabaseAdmin.storage.from("attachments").remove([r.storage_path]);
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "client.brief_deleted",
+    entityType: "project",
+    entityId: projectId,
+    metadata: { clientId, attachmentId, source, filename: r.filename ?? null },
+  });
+
+  revalidatePath("/satisfaction");
+  if (projectId) revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
 }
 
 export async function uploadChatImportAction(
@@ -912,6 +997,24 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
   }
   const orgId = session.orgId; // captured for use inside the worker closure
 
+  // Every enrolled number's session — a group may be served by ANY of the
+  // agency's numbers, so backfill must try each until one that is a member of
+  // the group returns its history (single-session fetch silently missed groups
+  // the primary number wasn't in). Most-recently-seen first as a cheap heuristic.
+  const { data: accounts } = await supabaseAdmin
+    .from("wa_accounts")
+    .select("session_id, last_seen_at")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .order("last_seen_at", { ascending: false, nullsFirst: false });
+  // Tenant isolation: only read history from OUR sessions on the shared gateway.
+  const sessionNames = (accounts ?? [])
+    .map((a) => a.session_id as string)
+    .filter((name) => isOwnSession(name));
+  if (sessionNames.length === 0) {
+    return { error: "لا توجد أرقام واتساب مفعّلة — أضف رقمًا من صفحة الربط" };
+  }
+
   // Target: mapped (client_id set) + active groups not yet history-seeded.
   // Keyed on history_imported_at (not message_count) so groups that only got a
   // stray live webhook message still get a full backfill — see migration 0155.
@@ -936,13 +1039,15 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
     while (cursor < queue.length) {
       const { chatId, chatName } = queue[cursor++];
       try {
-        const hist = await fetchChatHistory(chatId, HISTORY_LIMIT);
-        const msgs: NormalMessage[] = hist
+        // Whichever enrolled number is actually in this group serves its history.
+        const hit = await fetchChatHistoryViaSessions(chatId, sessionNames, HISTORY_LIMIT);
+        const msgs: NormalMessage[] = (hit?.messages ?? [])
           .filter((m) => m.body && m.body.trim().length > 0)
           .map((m) => ({
             chatId,
             chatName,
             waMessageId: m.id,
+            waRawId: m.id ?? null, // history endpoint already returns the bare id
             sender: null,
             senderId: m.from,
             body: m.body,
@@ -951,12 +1056,17 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
             sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
           }));
         if (msgs.length > 0) {
-          const res = await ingestWaMessages(msgs);
+          const res = await ingestWaMessages(msgs, hit?.sessionName ?? null);
           imported += res.ingested;
         }
-        // Successful fetch (even if the store returned nothing) → mark seeded so
-        // the group isn't re-attempted forever. A thrown gateway error skips the
-        // stamp below, leaving it null to retry on the next run.
+        // Mark seeded ONLY when a member number actually served this group (even
+        // if its store was empty). If NO enrolled number is a member yet (hit
+        // null), leave history_imported_at null so the group is retried once the
+        // covering number is enrolled — never strand it as falsely "seeded".
+        if (hit === null) {
+          done += 1;
+          continue;
+        }
         await supabaseAdmin
           .from("wa_group_links")
           .update({ history_imported_at: new Date().toISOString() })

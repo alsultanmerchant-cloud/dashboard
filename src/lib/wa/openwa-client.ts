@@ -31,6 +31,17 @@ export function waConfigured(): boolean {
   return !!process.env.WA_API_URL;
 }
 
+// Tenant isolation: the OpenWA gateway is shared across tenants on the same VPS,
+// so its session list includes OTHER tenants' numbers. This dashboard must only
+// ever touch its OWN sessions — the primary (WA_SESSION_ID) and the numbers it
+// created via Connect, which are named `${WA_SESSION_ID}-<hex>`. Anything else
+// (e.g. `dash-org-…`) belongs to a different tenant and must never be enrolled,
+// webhooked, or read from here.
+export function isOwnSession(sessionName: string | null | undefined): boolean {
+  if (!sessionName) return false;
+  return sessionName === WA_SESSION_ID || sessionName.startsWith(`${WA_SESSION_ID}-`);
+}
+
 function base(): string {
   return (process.env.WA_API_URL ?? "").replace(/\/$/, "");
 }
@@ -207,28 +218,113 @@ export async function startSession(
     if (!started.ok && started.status !== 409) {
       return { ok: false, error: `start HTTP ${started.status}` };
     }
-    // Best-effort webhook registration (idempotent on the OpenWA side).
-    // Tag the URL with ?account=<sessionName> so the webhook can attribute each
-    // inbound event to the right wa_accounts row (provenance), independent of
-    // whatever session field the OpenWA payload may or may not carry.
-    const webhookUrl = process.env.WA_PUBLIC_WEBHOOK_URL;
-    if (webhookUrl) {
-      const taggedUrl = `${webhookUrl}${webhookUrl.includes("?") ? "&" : "?"}account=${encodeURIComponent(sessionName)}`;
-      await call(`/api/sessions/${uuid}/webhooks`, {
-        method: "POST",
-        body: JSON.stringify({
-          url: taggedUrl,
-          // OpenWA gateway event names: incoming messages = "message.received"
-          // (NOT "message", which it silently ignores). See docs/06-api-spec.
-          events: ["message.received", "session.status"],
-          secret: process.env.WA_WEBHOOK_SECRET ?? undefined,
-        }),
-      }).catch(() => {});
-    }
+    await registerSessionWebhook(uuid, sessionName);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+// Register the dashboard webhook on ONE session. Idempotent + self-cleaning:
+// the gateway's POST /webhooks is NOT idempotent (repeated calls pile up
+// duplicate rows → duplicate deliveries), so we first DELETE any existing
+// webhooks that point at THIS app's webhook path, then create exactly one.
+// Tag the URL with ?account=<sessionName> so inbound events attribute to the
+// right wa_accounts row (provenance). Returns false (no throw) when no public
+// URL is configured, or when the session isn't ours (tenant isolation).
+export async function registerSessionWebhook(
+  uuid: string,
+  sessionName: string,
+): Promise<boolean> {
+  const webhookUrl = process.env.WA_PUBLIC_WEBHOOK_URL;
+  if (!webhookUrl) return false;
+  if (!isOwnSession(sessionName)) return false; // never webhook a foreign tenant's session
+  const basePath = webhookUrl.split("?")[0]; // our /api/wa/webhook, sans query
+  const taggedUrl = `${webhookUrl}${webhookUrl.includes("?") ? "&" : "?"}account=${encodeURIComponent(sessionName)}`;
+
+  // Remove our own stale/duplicate webhooks first (match by our base path only,
+  // so we never touch another app's webhook registered on the same session).
+  const existing = await listSessionWebhooks(uuid);
+  for (const w of existing) {
+    if (w.url.split("?")[0] === basePath) {
+      await call(`/api/sessions/${uuid}/webhooks/${w.id}`, { method: "DELETE" }).catch(() => {});
+    }
+  }
+
+  const res = await call(`/api/sessions/${uuid}/webhooks`, {
+    method: "POST",
+    body: JSON.stringify({
+      // OpenWA gateway event names: incoming messages = "message.received"
+      // (NOT "message", which it silently ignores). See docs/06-api-spec.
+      url: taggedUrl,
+      events: ["message.received", "session.status"],
+      secret: process.env.WA_WEBHOOK_SECRET ?? undefined,
+    }),
+  }).catch(() => ({ ok: false }) as { ok: boolean });
+  return res.ok;
+}
+
+// The webhooks currently registered on a session (id + url, for de-duplication).
+export async function listSessionWebhooks(
+  uuid: string,
+): Promise<Array<{ id: string; url: string }>> {
+  const { ok, json } = await call(`/api/sessions/${uuid}/webhooks`);
+  if (!ok) return [];
+  const list = Array.isArray(json)
+    ? json
+    : ((json as { data?: unknown }).data ?? (json as { webhooks?: unknown }).webhooks ?? []);
+  return (list as Array<Record<string, unknown>>)
+    .map((w) => ({ id: (w.id as string) ?? "", url: (w.url as string) ?? "" }))
+    .filter((w) => w.id && w.url);
+}
+
+export interface WaSessionRow {
+  name: string;
+  uuid: string;
+  phone: string | null;
+  status: WaSessionStatus;
+}
+
+// All sessions the gateway knows about, normalised. Lets the dashboard span
+// every connected number (not just WA_SESSION_ID) — a client's group may be
+// served by any of the agency's numbers, and we must ingest from whichever one
+// is actually a member.
+export async function listSessions(): Promise<WaSessionRow[]> {
+  if (!waConfigured()) return [];
+  const { ok, json } = await call("/api/sessions");
+  if (!ok) return [];
+  const list = Array.isArray(json)
+    ? json
+    : ((json as { data?: unknown }).data ?? (json as { sessions?: unknown }).sessions ?? []);
+  return (list as Array<Record<string, unknown>>)
+    .map((s) => ({
+      name: (s.name as string) ?? "",
+      uuid: (s.id as string) ?? "",
+      phone: (s.phone as string) ?? (s.me as string) ?? null,
+      status: extractStatus(s) ?? "INITIALIZING",
+    }))
+    .filter((s) => s.name && s.uuid);
+}
+
+// Fetch a chat's history from whichever of the given sessions is actually a
+// member of the group — try each in turn, return the first that yields
+// messages (plus the session that served them, for ingest provenance). Groups
+// are served by different numbers, so a single-session fetch silently misses
+// any group that number isn't in.
+export async function fetchChatHistoryViaSessions(
+  chatId: string,
+  sessionNames: string[],
+  limit = 1000,
+): Promise<{ messages: WaHistoryMessage[]; sessionName: string } | null> {
+  for (const sessionName of sessionNames) {
+    try {
+      const messages = await fetchChatHistory(chatId, limit, sessionName);
+      if (messages.length > 0) return { messages, sessionName };
+    } catch {
+      /* try the next session */
+    }
+  }
+  return null;
 }
 
 export async function logoutSession(

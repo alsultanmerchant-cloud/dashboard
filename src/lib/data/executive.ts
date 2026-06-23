@@ -131,14 +131,19 @@ export const FUNNEL_STAGE_ORDER: TaskStage[] = [
 export interface FunnelStageRow {
   stage: TaskStage;
   openCount: number;
+  overdueCount: number;
   avgDwellHours: number;
 }
+
+// Stages excluded from the "where are overdue tasks piling up?" view.
+// "new" hasn't started yet; "done" is finished.
+const FUNNEL_EXCLUDE = new Set<TaskStage>(["new", "done"]);
 
 async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
   const [stagesRes, dwellRes] = await Promise.all([
     supabaseAdmin
       .from("tasks")
-      .select("stage")
+      .select("stage, is_overdue")
       .eq("organization_id", orgId)
       .is("archived_at", null),
     supabaseAdmin
@@ -151,9 +156,12 @@ async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
   if (dwellRes.error) throw dwellRes.error;
 
   const counts = new Map<TaskStage, number>();
+  const overdueCounts = new Map<TaskStage, number>();
   for (const r of stagesRes.data ?? []) {
-    const s = (r as { stage: TaskStage }).stage;
+    const s = (r as { stage: TaskStage; is_overdue: boolean }).stage;
+    const overdue = (r as { stage: TaskStage; is_overdue: boolean }).is_overdue;
     counts.set(s, (counts.get(s) ?? 0) + 1);
+    if (overdue) overdueCounts.set(s, (overdueCounts.get(s) ?? 0) + 1);
   }
 
   const dwellSums = new Map<TaskStage, { total: number; n: number }>();
@@ -172,6 +180,7 @@ async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
     return {
       stage,
       openCount: counts.get(stage) ?? 0,
+      overdueCount: overdueCounts.get(stage) ?? 0,
       avgDwellHours: d ? d.total / d.n / 3600 : 0,
     };
   });
@@ -539,6 +548,16 @@ export interface ServiceHealthRow {
   avgRevisions: number;
   // 30-point rolling 7-day on-time pct, ending today (for sparkline).
   trend: Array<number | null>;
+  // True when this row is a merge of the base service + its Renewal variant.
+  includesRenewals?: boolean;
+}
+
+// Strip the "Renewal " / "renewal " prefix that the sheet writes for contracts
+// where a client is in their first month or renewing. "Renewal Social Media"
+// and "Social Media" are the same service type; we group them together so the
+// health section doesn't show double rows.
+function baseServiceName(name: string): string {
+  return name.replace(/^renewal\s+/i, "").trim();
 }
 
 async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]> {
@@ -636,26 +655,31 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
     days37.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
   }
 
-  const rows: ServiceHealthRow[] = (servicesRes.data ?? []).map((s) => {
-    const v = agg.get(s.id as string);
-    const trend: Array<number | null> = [];
-    if (v) {
-      for (let i = 7; i < days37.length; i++) {
-        let total = 0;
-        let onTime = 0;
-        for (let j = i - 6; j <= i; j++) {
-          const d = v.daily.get(days37[j]);
-          if (d) {
-            total += d.total;
-            onTime += d.onTime;
-          }
-        }
-        trend.push(total === 0 ? null : Math.round((onTime / total) * 100));
-      }
-    } else {
-      for (let i = 7; i < days37.length; i++) trend.push(null);
-    }
+  // Build one row per physical service, then group by base name so
+  // "Renewal Social Media" merges into "Social Media".
+  type RawRow = ServiceHealthRow & {
+    _onTimeCount: number;
+    _deliveredCount: number;
+    _revisionsSum: number;
+    _revisionsN: number;
+    _dailyTotals: Array<{ total: number; onTime: number }>;
+  };
 
+  const rawRows: RawRow[] = (servicesRes.data ?? []).map((s) => {
+    const v = agg.get(s.id as string);
+    const dailyTotals: Array<{ total: number; onTime: number }> = [];
+    for (let i = 7; i < days37.length; i++) {
+      let total = 0;
+      let onTime = 0;
+      for (let j = i - 6; j <= i; j++) {
+        const d = v?.daily.get(days37[j]);
+        if (d) { total += d.total; onTime += d.onTime; }
+      }
+      dailyTotals.push({ total, onTime });
+    }
+    const trend: Array<number | null> = dailyTotals.map((d) =>
+      d.total === 0 ? null : Math.round((d.onTime / d.total) * 100),
+    );
     return {
       serviceId: s.id as string,
       name: s.name as string,
@@ -666,6 +690,60 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
       onTimePct30d: v && v.delivered > 0 ? Math.round((v.onTime / v.delivered) * 100) : null,
       avgRevisions: v && v.revisionsN > 0 ? Math.round((v.revisions / v.revisionsN) * 10) / 10 : 0,
       trend,
+      _onTimeCount: v?.onTime ?? 0,
+      _deliveredCount: v?.delivered ?? 0,
+      _revisionsSum: v?.revisions ?? 0,
+      _revisionsN: v?.revisionsN ?? 0,
+      _dailyTotals: dailyTotals,
+    };
+  });
+
+  // Group by canonical (base) name. The first non-Renewal row wins for serviceId/slug.
+  const grouped = new Map<string, RawRow>();
+  for (const row of rawRows) {
+    const base = baseServiceName(row.name);
+    const isRenewal = base !== row.name;
+    const existing = grouped.get(base);
+    if (!existing) {
+      grouped.set(base, { ...row, name: base, includesRenewals: isRenewal });
+    } else {
+      // Merge stats into the existing canonical row.
+      existing.openCount += row.openCount;
+      existing.overdueCount += row.overdueCount;
+      existing._deliveredCount += row._deliveredCount;
+      existing._onTimeCount += row._onTimeCount;
+      existing._revisionsSum += row._revisionsSum;
+      existing._revisionsN += row._revisionsN;
+      existing.includesRenewals = true;
+      // Merge daily buckets for combined trend.
+      for (let i = 0; i < existing._dailyTotals.length; i++) {
+        existing._dailyTotals[i].total += row._dailyTotals[i].total;
+        existing._dailyTotals[i].onTime += row._dailyTotals[i].onTime;
+      }
+      // Prefer the non-Renewal row's serviceId/slug for linking.
+      if (!isRenewal) {
+        existing.serviceId = row.serviceId;
+        existing.slug = row.slug;
+      }
+    }
+  }
+
+  // Re-derive onTimePct30d, avgRevisions, and trend from merged buckets.
+  const rows: ServiceHealthRow[] = Array.from(grouped.values()).map((r) => {
+    const trend: Array<number | null> = r._dailyTotals.map((d) =>
+      d.total === 0 ? null : Math.round((d.onTime / d.total) * 100),
+    );
+    return {
+      serviceId: r.serviceId,
+      name: r.name,
+      slug: r.slug,
+      openCount: r.openCount,
+      overdueCount: r.overdueCount,
+      delivered30d: r._deliveredCount,
+      onTimePct30d: r._deliveredCount > 0 ? Math.round((r._onTimeCount / r._deliveredCount) * 100) : null,
+      avgRevisions: r._revisionsN > 0 ? Math.round((r._revisionsSum / r._revisionsN) * 10) / 10 : 0,
+      trend,
+      includesRenewals: r.includesRenewals,
     };
   });
 
@@ -776,25 +854,29 @@ async function _getUpcomingDeadlines(orgId: string): Promise<UpcomingDeadlineDay
   const todayIso = today.toISOString().slice(0, 10);
   const end = new Date(today.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
 
+  // Use COALESCE(due_date, planned_date) as the effective deadline.
+  // Fetch tasks where due_date is in range, OR (due_date is null AND planned_date is in range).
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "id, title, due_date, priority, archived_at, stage, project:projects!inner(id, name)",
+      "id, title, due_date, planned_date, priority, archived_at, stage, project:projects!inner(id, name)",
     )
     .eq("organization_id", orgId)
     .is("archived_at", null)
     .neq("stage", "done")
-    .gte("due_date", todayIso)
-    .lt("due_date", end)
-    .order("due_date", { ascending: true })
-    .order("priority", { ascending: false })
+    .or(
+      `and(due_date.gte.${todayIso},due_date.lt.${end}),` +
+      `and(due_date.is.null,planned_date.gte.${todayIso},planned_date.lt.${end})`,
+    )
+    .order("due_date", { ascending: true, nullsFirst: false })
     .limit(200);
   if (error) throw error;
 
   type Row = {
     id: string;
     title: string;
-    due_date: string;
+    due_date: string | null;
+    planned_date: string | null;
     priority: string;
     project: { name: string } | { name: string }[] | null;
   };
@@ -811,7 +893,9 @@ async function _getUpcomingDeadlines(orgId: string): Promise<UpcomingDeadlineDay
     });
   }
   for (const r of (data ?? []) as unknown as Row[]) {
-    const b = buckets.get(r.due_date);
+    const effectiveDate = r.due_date ?? r.planned_date;
+    if (!effectiveDate) continue;
+    const b = buckets.get(effectiveDate);
     if (!b) continue;
     b.count += 1;
     if (b.highlights.length < 2) {
@@ -945,7 +1029,6 @@ async function _getStageFlowMatrix(orgId: string): Promise<{
   const topBackward = cells
     .filter((c) => c.isBackward && c.count > 0)
     .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
     .map(({ from, to, count }) => ({ from, to, count }));
 
   return { cells, topBackward, totalForward, totalBackward };
@@ -953,86 +1036,84 @@ async function _getStageFlowMatrix(orgId: string): Promise<{
 
 export const getStageFlowMatrix = cache(_getStageFlowMatrix);
 
-// ---- Top revised tasks ---------------------------------------------------
+// ---- Client-edits indicator ----------------------------------------------
 
-export interface RevisedTaskRow {
-  taskId: string;
-  title: string;
-  revisionCount: number;
-  stage: TaskStage;
-  projectName: string | null;
-  clientName: string | null;
-  updatedAt: string;
+export interface ClientEditsMetrics {
+  // Tasks currently sitting at client_changes right now.
+  activeNow: number;
+  // Tasks that ENTERED client_changes in the last 7 days (new requests).
+  enteredThisWeek: number;
+  // Same window the prior week — for the trend arrow.
+  enteredLastWeek: number;
+  // Per-service breakdown of tasks currently at client_changes.
+  byService: Array<{ name: string; slug: string; count: number }>;
 }
 
-async function _getTopRevisedTasks(orgId: string): Promise<RevisedTaskRow[]> {
-  // `tasks.revision_count` isn't populated by the Odoo sync. Use the live
-  // truth: count task_stage_history rows where to_stage='client_changes' per
-  // task over the last 90 days. Each such row = the client kicked the work
-  // back for another revision.
-  const since = daysAgoIso(90);
-  const { data, error } = await supabaseAdmin
-    .from("task_stage_history")
-    .select("task_id, entered_at")
-    .eq("organization_id", orgId)
-    .eq("to_stage", "client_changes")
-    .gte("entered_at", since);
-  if (error) throw error;
+async function _getTopRevisedTasks(orgId: string): Promise<ClientEditsMetrics> {
+  const now7 = daysAgoIso(7);
+  const now14 = daysAgoIso(14);
 
-  const counts = new Map<string, { count: number; lastEnteredAt: string }>();
-  for (const r of (data ?? []) as Array<{ task_id: string; entered_at: string }>) {
-    const cur = counts.get(r.task_id) ?? { count: 0, lastEnteredAt: r.entered_at };
-    cur.count += 1;
-    if (r.entered_at > cur.lastEnteredAt) cur.lastEnteredAt = r.entered_at;
-    counts.set(r.task_id, cur);
+  const [liveRes, histRes, servicesRes] = await Promise.all([
+    // Tasks currently at client_changes with their service.
+    supabaseAdmin
+      .from("tasks")
+      .select("id, service_id")
+      .eq("organization_id", orgId)
+      .eq("stage", "client_changes")
+      .is("archived_at", null),
+
+    // Tasks that entered client_changes in the last 14 days (for week comparison).
+    supabaseAdmin
+      .from("task_stage_history")
+      .select("task_id, entered_at")
+      .eq("organization_id", orgId)
+      .eq("to_stage", "client_changes")
+      .gte("entered_at", now14),
+
+    // Service name map.
+    supabaseAdmin
+      .from("services")
+      .select("id, name, slug")
+      .eq("organization_id", orgId)
+      .eq("is_active", true),
+  ]);
+
+  if (liveRes.error) throw liveRes.error;
+  if (histRes.error) throw histRes.error;
+
+  type LiveRow = { id: string; service_id: string | null };
+  const live = (liveRes.data ?? []) as LiveRow[];
+  const activeNow = live.length;
+
+  type HistRow = { task_id: string; entered_at: string };
+  const hist = (histRes.data ?? []) as HistRow[];
+  const enteredThisWeek = hist.filter((r) => r.entered_at >= now7).length;
+  const enteredLastWeek = hist.filter((r) => r.entered_at < now7).length;
+
+  // Count active tasks per service.
+  const svcCount = new Map<string, number>();
+  for (const t of live) {
+    if (t.service_id) svcCount.set(t.service_id, (svcCount.get(t.service_id) ?? 0) + 1);
   }
 
-  const top = Array.from(counts.entries())
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5);
-  if (top.length === 0) return [];
+  type SvcRow = { id: string; name: string; slug: string };
+  const svcMap = new Map<string, { name: string; slug: string }>();
+  for (const s of (servicesRes.data ?? []) as SvcRow[]) svcMap.set(s.id, { name: s.name, slug: s.slug });
 
-  const taskIds = top.map(([id]) => id);
-  const { data: tasksData, error: tErr } = await supabaseAdmin
-    .from("tasks")
-    .select(
-      "id, title, stage, updated_at, archived_at, project:projects!inner(name, client:clients!inner(name))",
-    )
-    .eq("organization_id", orgId)
-    .in("id", taskIds);
-  if (tErr) throw tErr;
+  // Merge Renewal variants: strip "Renewal " prefix so they group with the base service.
+  const byServiceMerged = new Map<string, { name: string; slug: string; count: number }>();
+  for (const [svcId, count] of svcCount.entries()) {
+    const svc = svcMap.get(svcId);
+    if (!svc) continue;
+    const baseName = svc.name.replace(/^renewal\s+/i, "").trim();
+    const existing = byServiceMerged.get(baseName);
+    if (existing) existing.count += count;
+    else byServiceMerged.set(baseName, { name: baseName, slug: svc.slug, count });
+  }
 
-  type TRow = {
-    id: string;
-    title: string;
-    stage: TaskStage;
-    updated_at: string;
-    project:
-      | { name: string; client: { name: string } | { name: string }[] | null }
-      | { name: string; client: { name: string } | { name: string }[] | null }[]
-      | null;
-  };
+  const byService = Array.from(byServiceMerged.values()).sort((a, b) => b.count - a.count);
 
-  const byId = new Map<string, TRow>();
-  for (const r of (tasksData ?? []) as unknown as TRow[]) byId.set(r.id, r);
-
-  return top
-    .map(([id, agg]) => {
-      const r = byId.get(id);
-      if (!r) return null;
-      const proj = Array.isArray(r.project) ? r.project[0] : r.project;
-      const client = proj && (Array.isArray(proj.client) ? proj.client[0] : proj.client);
-      return {
-        taskId: r.id,
-        title: r.title,
-        revisionCount: agg.count,
-        stage: r.stage,
-        projectName: proj?.name ?? null,
-        clientName: client?.name ?? null,
-        updatedAt: agg.lastEnteredAt,
-      };
-    })
-    .filter((x): x is RevisedTaskRow => x !== null);
+  return { activeNow, enteredThisWeek, enteredLastWeek, byService };
 }
 
 export const getTopRevisedTasks = cache(_getTopRevisedTasks);

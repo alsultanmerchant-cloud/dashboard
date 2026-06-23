@@ -91,10 +91,14 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
       .lte("end_date", horizon),
     supabaseAdmin
       .from("installments")
-      .select("expected_amount", { count: "exact" })
+      // Only count receivables on LIVE contracts. Installments left on
+      // closed/lost/expired contracts aren't collectible cash — they're stale
+      // rows that wrongly inflated the "overdue collection" cash-threat figure.
+      .select("expected_amount, contract:contracts!inner(status)", { count: "exact" })
       .eq("organization_id", orgId)
       .lt("expected_date", today)
-      .or("actual_amount.is.null,actual_amount.eq.0"),
+      .or("actual_amount.is.null,actual_amount.eq.0")
+      .in("contract.status", ["active", "hold"]),
     supabaseAdmin
       .from("installments")
       .select("actual_amount")

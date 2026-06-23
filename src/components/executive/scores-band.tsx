@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import {
   Activity,
   AlertTriangle,
+  ChevronLeft,
   Gauge,
   ShieldCheck,
   Sparkles,
@@ -214,10 +215,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
 
       <div className="grid gap-3 lg:grid-cols-[1.15fr_2fr]">
         {/* Operational Stability — hero */}
-        <Link
-          href="/reports"
+        <div
           className={cn(
-            "relative overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/40 p-5 transition-all hover:shadow-[0_0_40px_rgba(0,212,255,0.08)]",
+            "relative overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/40 p-5",
             stabilityTone.border,
           )}
         >
@@ -254,47 +254,67 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center sm:grid-cols-4">
-            <div>
-              <p className="text-base font-semibold tabular-nums text-amber">
+            <Link
+              href="/tasks?f=overdue"
+              className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
+            >
+              <p className="text-base font-semibold tabular-nums text-amber group-hover:underline">
                 {stability.riskProjects}
               </p>
               <p className="text-[9px] text-muted-foreground">{t("stability.riskProjects")}</p>
-            </div>
-            <div>
+            </Link>
+            <Link
+              href="/satisfaction?risk=1"
+              className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
+            >
               <p
                 className={cn(
-                  "text-base font-semibold tabular-nums",
+                  "text-base font-semibold tabular-nums group-hover:underline",
                   stability.atRiskClients > 0 ? "text-cc-red" : "text-muted-foreground",
                 )}
               >
                 {stability.atRiskClients}
               </p>
               <p className="text-[9px] text-muted-foreground">{t("stability.atRiskClients")}</p>
-            </div>
-            <div>
+            </Link>
+            <Link
+              href="/escalations"
+              className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
+            >
               <p
                 className={cn(
-                  "text-base font-semibold tabular-nums",
+                  "text-base font-semibold tabular-nums group-hover:underline",
                   stability.unackEscalations > 0 ? "text-cc-red" : "text-muted-foreground",
                 )}
               >
                 {stability.unackEscalations}
               </p>
               <p className="text-[9px] text-muted-foreground">{t("stability.escalations")}</p>
-            </div>
-            <div>
+            </Link>
+            <Link
+              href="/tasks?f=critical"
+              className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
+            >
               <p
                 className={cn(
-                  "text-base font-semibold tabular-nums",
+                  "text-base font-semibold tabular-nums group-hover:underline",
                   stability.criticalOverdue > 0 ? "text-cc-red" : "text-muted-foreground",
                 )}
               >
                 {stability.criticalOverdue}
               </p>
               <p className="text-[9px] text-muted-foreground">{t("stability.critical")}</p>
-            </div>
+            </Link>
           </div>
-        </Link>
+
+          <Link
+            href="/reports"
+            className="mt-3 flex items-center justify-end gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground"
+          >
+            {t("stability.fullReport")}
+            <ChevronLeft className="size-3 ltr:rotate-180" />
+          </Link>
+        </div>
 
         {/* Four contributing indices */}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -351,7 +371,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(quality.score))}
             scoreHelp={t("scoreTooltips.quality")}
-            href="/tasks?filter=client_changes"
+            href="/satisfaction"
             metrics={[
               {
                 label: t("quality.rework"),
@@ -411,7 +431,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
             deltaLabel={t("vsPrev")}
             gradeLabel={grade(gradeFor(discipline.score))}
             scoreHelp={t("scoreTooltips.discipline")}
-            href="/tasks"
+            href="/tasks?f=behind"
             metrics={[
               discipline.activeMembers === null
                 ? { label: t("discipline.active"), value: t("na"), tone: "na", hint: t("naSource") }

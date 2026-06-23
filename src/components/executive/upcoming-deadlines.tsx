@@ -26,7 +26,7 @@ export async function UpcomingDeadlinesSection({ days }: { days: UpcomingDeadlin
         title={t("title")}
         description={t("description", { total })}
         actions={
-          <Link href="/tasks?filter=due_soon" className="text-xs text-cyan hover:underline">
+          <Link href="/tasks?f=due_week" className="text-xs text-cyan hover:underline">
             {t("viewAll")}
           </Link>
         }
@@ -41,7 +41,7 @@ export async function UpcomingDeadlinesSection({ days }: { days: UpcomingDeadlin
             return (
               <Link
                 key={d.date}
-                href={`/tasks?due_date=${d.date}`}
+                href={isToday ? `/tasks?f=due_today` : `/tasks?f=due_week`}
                 className={cn(
                   "group relative flex flex-col rounded-xl border bg-card p-2 transition-colors hover:bg-soft-1",
                   tone.ring,

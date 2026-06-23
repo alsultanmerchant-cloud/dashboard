@@ -255,7 +255,7 @@ export function DashboardShell({
                 }
               />
               <ModuleTabs />
-              <main className="px-4 sm:px-6 pb-12 pt-4" data-dashboard-root>
+              <main className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 pb-12 pt-4" data-dashboard-root>
                 {children}
               </main>
             </div>

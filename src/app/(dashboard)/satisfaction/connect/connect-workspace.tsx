@@ -55,6 +55,8 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
   const [error, setError] = useState<string | null>(null);
   const [backfilling, setBackfilling] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState<Record<string, string>>({});
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncNote, setResyncNote] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(0);
 
   const poll = useCallback(async () => {
@@ -158,6 +160,34 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
     }
   };
 
+  // (Re)register the dashboard webhook on every enrolled number's gateway
+  // session, so live group messages stream in no matter which number is a
+  // member of a group. Only works from production (public webhook URL).
+  const resyncWebhooks = async () => {
+    setError(null);
+    setResyncNote(null);
+    setResyncing(true);
+    try {
+      const res = await fetch("/api/wa/webhooks/resync", { method: "POST" });
+      const data = (await res.json()) as {
+        registered?: number;
+        total?: number;
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        setError(data.error ?? t("resyncFail"));
+      } else {
+        setResyncNote(
+          t("resyncDone", { count: data.registered ?? 0, total: data.total ?? 0 }),
+        );
+      }
+    } catch {
+      setError(t("resyncFail"));
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   const remove = async (session: string) => {
     if (!window.confirm(t("removeConfirm"))) return;
     setBusy(session);
@@ -238,10 +268,22 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
         ))
       )}
 
-      <Button onClick={addNumber} disabled={adding} variant="outline">
-        {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-        {adding ? t("adding") : t("addNumber")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={addNumber} disabled={adding} variant="outline">
+          {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+          {adding ? t("adding") : t("addNumber")}
+        </Button>
+        <Button onClick={resyncWebhooks} disabled={resyncing} variant="outline">
+          {resyncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          {resyncing ? t("resyncing") : t("resyncWebhooks")}
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{t("resyncHint")}</p>
+      {resyncNote && (
+        <p className="flex items-center gap-2 rounded-lg bg-green-dim px-3 py-2 text-sm text-cc-green">
+          <CheckCircle2 className="size-4" /> {resyncNote}
+        </p>
+      )}
 
       {error && (
         <p className="flex items-center gap-2 rounded-lg bg-red-dim px-3 py-2 text-sm text-cc-red">
