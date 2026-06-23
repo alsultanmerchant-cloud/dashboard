@@ -420,8 +420,13 @@ export async function commitContractImportPayload({
     actorUserId: actorUserId ?? null,
     action: auditAction,
     entityType: "import",
-    entityId: ACC_SHEET_SOURCE,
+    // audit_logs.entity_id is a uuid column — a source label here ("excel-acc-sheet")
+    // fails the cast and silently drops the audit row. This is a source-level
+    // sync with no single entity, so leave entityId null and record the source
+    // in metadata instead.
+    entityId: null,
     metadata: {
+      source: ACC_SHEET_SOURCE,
       clientsCreated,
       clientsUpdated,
       contractsUpserted,
