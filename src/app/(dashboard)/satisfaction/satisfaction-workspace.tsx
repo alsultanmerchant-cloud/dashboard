@@ -40,10 +40,13 @@ import {
   MinusCircle,
   HelpCircle,
   ClipboardList,
+  Trash2,
+  Pencil,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
   uploadClientBriefFileAction,
+  deleteClientBriefAction,
   setClientArchivedAction,
 } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -52,6 +55,7 @@ import { MetricInfo, Explained } from "@/components/metric-info";
 import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type {
   AnalysisHistoryItem,
@@ -62,6 +66,9 @@ import type {
 
 interface Props {
   options: { value: string; label: string; keywords?: string | null }[];
+  // clientId → space-joined project / group / contract names, so the overview
+  // search matches a client by ANY identifier, not just its display name.
+  searchKeywords: Record<string, string>;
   rows: SatisfactionRow[];
   detail: ClientSatisfactionDetail | null;
   execution: ClientExecutionSnapshot | null;
@@ -112,6 +119,7 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
 
 export function SatisfactionWorkspace({
   options,
+  searchKeywords,
   rows,
   detail,
   execution,
@@ -152,7 +160,10 @@ export function SatisfactionWorkspace({
   };
 
   // Board cards always analyze the current week (the headline status).
-  const analyzeClient = async (clientId: string, windowKind: "week" | "all" = "week") => {
+  const analyzeClient = async (
+    clientId: string,
+    windowKind: "week" | "all" = "week",
+  ): Promise<string | null> => {
     const res = await fetch("/api/satisfaction/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -163,7 +174,7 @@ export function SatisfactionWorkspace({
     // so parse defensively — otherwise res.json() throws a cryptic
     // "Unexpected token 'A'…" instead of a readable message.
     const raw = await res.text();
-    let data: { error?: string } = {};
+    let data: { error?: string; analysisId?: string } = {};
     try {
       data = raw ? JSON.parse(raw) : {};
     } catch {
@@ -177,7 +188,7 @@ export function SatisfactionWorkspace({
             : `تعذر التحليل (${res.status})`),
       );
     }
-    router.refresh();
+    return data.analysisId ?? null;
   };
 
   const analyze = async (windowKind: "week" | "all") => {
@@ -185,10 +196,18 @@ export function SatisfactionWorkspace({
     setError(null);
     setAnalyzing(windowKind);
     try {
-      await analyzeClient(selectedId, windowKind);
-      // After re-analyzing, drop any historical-snapshot selection so the
-      // freshly stored result (current week, or the new all-time row) shows.
-      if (selectedAnalysisId) router.push(`/satisfaction?client=${selectedId}`);
+      const newId = await analyzeClient(selectedId, windowKind);
+      // Show the freshly stored result. A weekly run is is_current, so the
+      // default view picks it up on refresh. An all-time run is NOT current —
+      // navigate straight to its snapshot id so the operator actually sees it
+      // (otherwise the board keeps showing the older current-week analysis).
+      if (windowKind === "all" && newId) {
+        router.push(`/satisfaction?client=${selectedId}&analysis=${newId}`);
+      } else if (selectedAnalysisId) {
+        router.push(`/satisfaction?client=${selectedId}`);
+      } else {
+        router.refresh();
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -256,7 +275,17 @@ export function SatisfactionWorkspace({
       </div>
 
       {!selectedId ? (
-        <SatisfactionOverview rows={rows} financeMap={financeMap} onSelect={select} onAnalyze={analyzeClient} t={t} />
+        <SatisfactionOverview
+          rows={rows}
+          searchKeywords={searchKeywords}
+          financeMap={financeMap}
+          onSelect={select}
+          onAnalyze={async (id) => {
+            await analyzeClient(id);
+            router.refresh();
+          }}
+          t={t}
+        />
       ) : detail ? (
         <div className="space-y-6">
           {error && (
@@ -393,12 +422,14 @@ function bucketOf(r: SatisfactionRow): BucketKey {
 
 function SatisfactionOverview({
   rows,
+  searchKeywords,
   financeMap,
   onSelect,
   onAnalyze,
   t,
 }: {
   rows: SatisfactionRow[];
+  searchKeywords: Record<string, string>;
   financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
@@ -424,10 +455,15 @@ function SatisfactionOverview({
     return rows.filter((r) => {
       if (relation === "active" && !r.hasActiveProject) return false;
       if (relation === "lost" && r.hasActiveProject) return false;
-      if (q && !r.clientName.toLowerCase().includes(q)) return false;
+      if (q) {
+        // Match the client name OR any linked identifier (project / group /
+        // contract names + codes), mirroring the top picker.
+        const kw = searchKeywords[r.clientId]?.toLowerCase() ?? "";
+        if (!r.clientName.toLowerCase().includes(q) && !kw.includes(q)) return false;
+      }
       return true;
     });
-  }, [rows, query, relation]);
+  }, [rows, query, relation, searchKeywords]);
 
   if (rows.length === 0) {
     return (
@@ -1202,13 +1238,18 @@ function AnalysisView({
                   label={t("briefAdherence")}
                 />
               </p>
-              {briefMissing ? (
+              {brief ? (
+                <BriefManager
+                  brief={brief}
+                  clientId={clientId}
+                  activeProjects={activeProjects}
+                  t={t}
+                />
+              ) : briefMissing ? (
                 <p className="mt-1 text-[11px] font-medium text-amber">
                   {t("briefMissingShort")}
                 </p>
-              ) : (
-                brief && <BriefLink brief={brief} />
-              )}
+              ) : null}
             </div>
           </div>
           <p className="min-w-[12rem] flex-1 text-sm leading-relaxed text-muted-foreground">
@@ -1218,7 +1259,7 @@ function AnalysisView({
         </CardContent>
       </Card>
 
-      {briefMissing && (
+      {briefMissing && !brief && (
         <MissingBriefPanel clientId={clientId} activeProjects={activeProjects} t={t} />
       )}
 
@@ -1449,10 +1490,17 @@ const ACCOUNT_HEALTH_TONE: Record<string, string> = {
   critical: "border-cc-red/50 bg-red-dim text-cc-red",
 };
 
+// Keyed on the raw contracts-sheet `target` strings. The sheet stores
+// 'On Target' (space) / 'Sales Deposit' / 'Closed'; the hyphenated 'On-Target'
+// and 'Renewed' are kept for legacy/derived rows. Unknown values fall back to
+// the neutral border at the call site.
 const CONTRACT_TARGET_TONE: Record<string, string> = {
+  "On Target": "border-cc-green/30 bg-green-dim text-cc-green",
   "On-Target": "border-cc-green/30 bg-green-dim text-cc-green",
+  "Sales Deposit": "border-cyan/30 bg-cyan/10 text-cyan",
   Renewed: "border-cyan/30 bg-cyan/10 text-cyan",
   Overdue: "border-amber/30 bg-amber/10 text-amber",
+  Closed: "border-border bg-soft-2 text-muted-foreground",
   Lost: "border-cc-red/30 bg-red-dim text-cc-red",
 };
 
@@ -1623,6 +1671,65 @@ function IndicatorsPanel({
   );
 }
 
+// One request/approval count chip. When the analysis carries the underlying
+// messages (examples), the chip becomes a button that opens a popover listing
+// the actual client quotes behind the number — clicking a count shows WHAT it's
+// made of, not just the figure. Older analyses with no examples stay plain.
+function SignalCountBadge({
+  label,
+  count,
+  examples,
+}: {
+  label: string;
+  count: number;
+  examples: { text: string; date: string | null }[];
+}) {
+  const hasExamples = examples.length > 0;
+  const chipClass =
+    "inline-flex items-center gap-1 rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px]";
+  const inner = (
+    <>
+      {label}
+      <span className="font-semibold tabular-nums">{count}</span>
+    </>
+  );
+  if (!hasExamples) {
+    return <span className={chipClass}>{inner}</span>;
+  }
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          chipClass,
+          "cursor-pointer transition-colors hover:border-cyan/50 hover:bg-cyan/10",
+        )}
+      >
+        {inner}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 gap-2">
+        <p className="text-[11px] font-semibold text-foreground">
+          {label} · {count}
+        </p>
+        <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+          {examples.map((ex, i) => (
+            <li
+              key={i}
+              className="rounded-md border border-border bg-soft-1 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground"
+            >
+              <span className="text-foreground">{ex.text}</span>
+              {ex.date && (
+                <span className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/70">
+                  {ex.date}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // Client group 💫: requests breakdown, approvals breakdown, response speed.
 function ClientSignalsPanel({
   signals,
@@ -1649,13 +1756,12 @@ function ClientSignalsPanel({
           </p>
           <div className="flex flex-wrap gap-1.5">
             {reqKeys.map((k) => (
-              <span
+              <SignalCountBadge
                 key={k}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px]"
-              >
-                {t(`signals.req.${k}`)}
-                <span className="font-semibold tabular-nums">{signals.requests[k]}</span>
-              </span>
+                label={t(`signals.req.${k}`)}
+                count={signals.requests[k]}
+                examples={signals.requestExamples?.[k] ?? []}
+              />
             ))}
           </div>
         </div>
@@ -1669,13 +1775,12 @@ function ClientSignalsPanel({
           </p>
           <div className="flex flex-wrap gap-1.5">
             {apprKeys.map((k) => (
-              <span
+              <SignalCountBadge
                 key={k}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-soft-1 px-2 py-0.5 text-[11px]"
-              >
-                {t(`signals.appr.${k}`)}
-                <span className="font-semibold tabular-nums">{signals.approvals[k]}</span>
-              </span>
+                label={t(`signals.appr.${k}`)}
+                count={signals.approvals[k]}
+                examples={signals.approvalExamples?.[k] ?? []}
+              />
             ))}
           </div>
         </div>
@@ -2021,7 +2126,7 @@ function BriefLink({
       target="_blank"
       rel="noopener noreferrer"
       title={brief.filename}
-      className="mt-1 inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:border-cyan/40"
+      className="inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:border-cyan/40"
     >
       <Icon className="size-3.5 shrink-0" />
       <span className="truncate">{brief.filename}</span>
@@ -2030,7 +2135,141 @@ function BriefLink({
   );
 }
 
+// The attached brief + its manage controls: open it, replace it (reveals the
+// attach forms), or delete a wrongly-uploaded doc. Replacing first removes the
+// old row so a different filename/URL can't leave the wrong brief lingering.
+function BriefManager({
+  brief,
+  clientId,
+  activeProjects,
+  t,
+}: {
+  brief: NonNullable<ClientSatisfactionDetail["brief"]>;
+  clientId: string;
+  activeProjects: ClientSatisfactionDetail["activeProjects"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await deleteClientBriefAction({
+        clientId,
+        attachmentId: brief.attachmentId,
+        source: brief.source,
+      });
+      if (res.error) {
+        setError(res.error);
+        setBusy(false);
+      } else {
+        router.refresh();
+      }
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 space-y-1.5">
+      <div className="flex items-center gap-1">
+        <BriefLink brief={brief} />
+        <button
+          type="button"
+          onClick={() => {
+            setEditing((v) => !v);
+            setConfirming(false);
+          }}
+          title={t("replaceBrief")}
+          className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-cyan/40 hover:text-cyan"
+        >
+          <Pencil className="size-3" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setConfirming(true);
+            setEditing(false);
+          }}
+          title={t("deleteBrief")}
+          className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:border-cc-red/40 hover:text-cc-red"
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
+
+      {confirming && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-cc-red/30 bg-cc-red/5 px-2 py-1.5 text-[11px]">
+          <span className="text-cc-red">{t("deleteBriefConfirm")}</span>
+          <Button size="sm" variant="destructive" onClick={remove} disabled={busy}>
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            {t("deleteBrief")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
+            {t("cancel")}
+          </Button>
+        </div>
+      )}
+
+      {error && <p className="text-[11px] text-cc-red">{error}</p>}
+
+      {editing && (
+        <div className="rounded-lg border border-border bg-soft-1 p-3">
+          <p className="mb-2 text-[11px] font-medium text-muted-foreground">{t("replaceBriefHint")}</p>
+          <BriefAttachForms clientId={clientId} activeProjects={activeProjects} t={t} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MissingBriefPanel({
+  clientId,
+  activeProjects,
+  t,
+}: {
+  clientId: string;
+  activeProjects: ClientSatisfactionDetail["activeProjects"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <Card className="border-amber/30 bg-amber/5">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber">
+              <FileQuestion className="size-4" /> {t("briefMissingTitle")}
+            </p>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              {t("briefMissingDescription")}
+            </p>
+          </div>
+          {activeProjects[0] && (
+            <Link
+              href={`/projects/${activeProjects[0].id}`}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-cyan hover:border-cyan/40"
+            >
+              {t("openProject")}
+              <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
+            </Link>
+          )}
+        </div>
+        <BriefAttachForms clientId={clientId} activeProjects={activeProjects} t={t} />
+      </CardContent>
+    </Card>
+  );
+}
+
+// The shared brief attach UI (project picker + Google link + file upload + the
+// post-save "re-analyze now / later" prompt). Used both when no brief exists
+// (MissingBriefPanel) and when replacing a wrong one (BriefManager).
+function BriefAttachForms({
   clientId,
   activeProjects,
   t,
@@ -2110,28 +2349,7 @@ function MissingBriefPanel({
   };
 
   return (
-    <Card className="border-amber/30 bg-amber/5">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber">
-              <FileQuestion className="size-4" /> {t("briefMissingTitle")}
-            </p>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              {t("briefMissingDescription")}
-            </p>
-          </div>
-          {activeProjects[0] && (
-            <Link
-              href={`/projects/${activeProjects[0].id}`}
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-cyan hover:border-cyan/40"
-            >
-              {t("openProject")}
-              <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
-            </Link>
-          )}
-        </div>
-
+    <div className="space-y-3">
         {saved ? (
           // Success prompt — explicit "re-analyze now" vs "later" (no auto run).
           <div className="rounded-lg border border-cc-green/30 bg-green-dim/40 p-3">
@@ -2217,8 +2435,7 @@ function MissingBriefPanel({
         )}
 
         {error && <p className="text-xs text-cc-red">{error}</p>}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 

@@ -89,10 +89,6 @@ export async function buildSatisfactionInput(
   opts?: AnalyzeOptions,
 ): Promise<SatisfactionInput> {
   const windowKind = opts?.windowKind ?? "week";
-  const sinceDays = windowKind === "week" ? CURRENT_WINDOW_DAYS : undefined;
-  const windowStart = sinceDays
-    ? new Date(Date.now() - sinceDays * 86_400_000).toISOString()
-    : null;
   const windowEnd = new Date().toISOString();
 
   const { data: client } = await supabaseAdmin
@@ -103,10 +99,35 @@ export async function buildSatisfactionInput(
     .maybeSingle();
   if (!client) throw new Error("العميل غير موجود");
 
-  const transcripts = await buildClientTranscripts(orgId, clientId, { sinceDays });
+  // A weekly ("current status") run normally reads the last 7 days. But when the
+  // groups have been quiet (no new messages because traffic genuinely paused, or
+  // the live feed lagged), a strict 7-day window dead-ends with NoRecentActivity
+  // on every click. So progressively WIDEN the window until we find the latest
+  // available conversation — the operator gets a real analysis of the most recent
+  // activity instead of an error, with effectiveDays recording what was used.
+  let effectiveDays: number | undefined =
+    windowKind === "week" ? CURRENT_WINDOW_DAYS : undefined;
+  let transcripts = await buildClientTranscripts(orgId, clientId, { sinceDays: effectiveDays });
+  if (windowKind === "week" && !transcripts.client && !transcripts.technical) {
+    for (const d of [30, 90, 180]) {
+      transcripts = await buildClientTranscripts(orgId, clientId, { sinceDays: d });
+      if (transcripts.client || transcripts.technical) {
+        effectiveDays = d;
+        break;
+      }
+    }
+    // Last resort: all available history (also folds in the one-time .txt seed).
+    if (!transcripts.client && !transcripts.technical) {
+      transcripts = await buildClientTranscripts(orgId, clientId);
+      effectiveDays = undefined;
+    }
+  }
   if (!transcripts.client && !transcripts.technical) {
     throw windowKind === "week" ? new NoRecentActivityError() : new NoTranscriptError();
   }
+  const windowStart = effectiveDays
+    ? new Date(Date.now() - effectiveDays * 86_400_000).toISOString()
+    : null;
 
   const clientBlock = transcripts.client || "(لم تتوفر محادثة مع العميل)";
   const technicalBlock = transcripts.technical || "(لم تتوفر محادثة الفريق التقني)";
@@ -155,10 +176,22 @@ export async function buildSatisfactionInput(
         )
         .join("\n")}`
     : "";
+  // A client commonly holds SEVERAL contracts at once (one per service/project).
+  // List every live contract, then give the portfolio aggregate, so the
+  // commercial dimension reflects the whole relationship — not one row.
+  const contractLines =
+    contract && contract.contracts.length
+      ? contract.contracts
+          .map(
+            (c, i) =>
+              `  ${i + 1}) ${c.contractCode ? `[${c.contractCode}] ` : ""}الوضع: ${c.target} — الحالة: ${c.status} — القيمة: ${c.totalValue} (مدفوع ${c.paidValue}، متبقّي ${c.totalValue - c.paidValue}) — من ${c.startDate}${c.endDate ? ` إلى ${c.endDate}` : ""}`,
+          )
+          .join("\n")
+      : "";
   const contractBlock = contract
-    ? `\n\n=== حالة العقد ===\nالوضع (target): ${contract.target} — الحالة (status): ${contract.status}\nالقيمة الإجمالية: ${contract.totalValue} — المدفوع: ${contract.paidValue} — المتبقّي: ${
+    ? `\n\n=== حالة العقد (${contract.contractCount} عقد${contract.contractCount > 1 ? " — محفظة العميل" : ""}) ===\n${contractLines}\nالإجمالي عبر العقود: القيمة ${contract.totalValue} — المدفوع ${contract.paidValue} — المتبقّي ${
         contract.totalValue - contract.paidValue
-      }\nتاريخ البداية: ${contract.startDate}${contract.endDate ? ` — تاريخ الانتهاء: ${contract.endDate}` : ""}${activityBlock}`
+      } — أسوأ وضع (target): ${contract.target} — الحالة الغالبة: ${contract.status}${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
@@ -166,9 +199,13 @@ export async function buildSatisfactionInput(
   const makePrompt = (budget: number) =>
     `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
 ${
-  windowKind === "week"
-    ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
-    : `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
+  windowKind !== "week"
+    ? `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
+    : effectiveDays === CURRENT_WINDOW_DAYS
+      ? `\n⏱️ النطاق الزمني: آخر ٧ أيام فقط (الوضع الحالي للعميل). قيّم بناءً على هذه الفترة الأخيرة فقط — لا تُحمّل التقييم بشكاوى أو أحداث أقدم من ذلك.\n`
+      : effectiveDays
+        ? `\n⏱️ النطاق الزمني: آخر ${effectiveDays} يومًا (لا توجد رسائل في آخر ٧ أيام، فتم توسيع النطاق لأحدث محادثة متاحة). قيّم الوضع الحالي بناءً على أحدث تواصل متوفر.\n`
+        : `\n⏱️ النطاق الزمني: كامل تاريخ التعامل المتاح (لا توجد محادثة حديثة، استُخدم كامل السجل لأحدث صورة ممكنة).\n`
 }
 وصف المصادر:
 1) "مجموعة العميل 💫" — التواصل المباشر مع العميل (الرضا، الشكاوى، التعديلات، الاعتمادات، نبرة العميل).
@@ -200,6 +237,8 @@ ${briefInstruction}
 — clientGroupSignals (من مجموعة العميل فقط) —
 - requests: عدّ {new, edit, complaint, inquiry, approval}.
 - approvals: عدّ {approved, rejected, changesRequested, noResponse}.
+- requestExamples: لكل نوع من أنواع الطلبات، أدرج الرسائل الفعلية التي عددتها — اقتباس حقيقي من العميل أو تلخيص أمين، مع التاريخ إن أمكن ({text, date}). يجب أن يساوي عدد العناصر في كل نوع العدد المذكور في requests لنفس النوع (حتى ١٢ مثالاً لكل نوع كحد أقصى). لا تخترع رسائل.
+- approvalExamples: نفس القاعدة لنتائج الاعتماد {approved, rejected, changesRequested, noResponse} — أدرج الرسائل الفعلية خلف كل عدد بحيث يطابق عددها approvals.
 - responseSpeed: fast/medium/slow/unknown (متوسط سرعة تعاون/رد العميل).
 
 — technicalGroupSignals (من مجموعة الفريق التقني + التاسكات) —

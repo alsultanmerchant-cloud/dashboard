@@ -247,6 +247,8 @@ const EMPTY_BIG_PICTURE: SatisfactionResult["bigPicture"] = {
 const EMPTY_CLIENT_SIGNALS: SatisfactionResult["clientGroupSignals"] = {
   requests: { new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 },
   approvals: { approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 },
+  requestExamples: { new: [], edit: [], complaint: [], inquiry: [], approval: [] },
+  approvalExamples: { approved: [], rejected: [], changesRequested: [], noResponse: [] },
   responseSpeed: "unknown",
 };
 const EMPTY_TECH_SIGNALS: SatisfactionResult["technicalGroupSignals"] = {
@@ -426,6 +428,67 @@ function renderWaLine(sentAt: string | null, sender: string | null, body: string
   return `[${ts}] ${sender ?? "—"}: ${body}`;
 }
 
+// Resolve the FULL set of WhatsApp groups that belong to a client from the
+// CURRENT link graph — never the per-message client_id stamp (which is frozen
+// at ingest and goes stale/empty when a group is re-linked, a new number joins
+// an already-linked group, or the same brand is split across duplicate client
+// records). A group counts for the client when it is linked to the client
+// directly OR to any of the client's projects (the wa_group_projects M2M or the
+// legacy wa_group_links.project_id mirror). This is what makes re-analyze reach
+// the right messages for multi-project / multi-contract / shared-chat clients.
+// Returns chat_id → the group's CURRENT kind (client / technical / null).
+async function resolveClientGroupChats(
+  orgId: string,
+  clientId: string,
+): Promise<Map<string, GroupKind | null>> {
+  const { data: projects } = await supabaseAdmin
+    .from("projects")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId);
+  const projectIds = (projects ?? []).map((p) => p.id as string);
+
+  const [directRes, m2mRes, legacyRes] = await Promise.all([
+    supabaseAdmin
+      .from("wa_group_links")
+      .select("chat_id, group_kind")
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId),
+    projectIds.length
+      ? supabaseAdmin
+          .from("wa_group_projects")
+          .select("wa_group_links(chat_id, group_kind)")
+          .eq("organization_id", orgId)
+          .in("project_id", projectIds)
+      : Promise.resolve({ data: [] as Array<{ wa_group_links: { chat_id: string; group_kind: GroupKind | null } | null }> }),
+    projectIds.length
+      ? supabaseAdmin
+          .from("wa_group_links")
+          .select("chat_id, group_kind")
+          .eq("organization_id", orgId)
+          .in("project_id", projectIds)
+      : Promise.resolve({ data: [] as Array<{ chat_id: string; group_kind: GroupKind | null }> }),
+  ]);
+
+  const out = new Map<string, GroupKind | null>();
+  // First-seen wins, but a concrete kind upgrades a previously-null entry so a
+  // group classified on any of its link rows is never left unclassified.
+  const add = (chatId: string | null | undefined, kind: GroupKind | null) => {
+    if (!chatId) return;
+    if (!out.has(chatId)) out.set(chatId, kind ?? null);
+    else if (out.get(chatId) == null && kind != null) out.set(chatId, kind);
+  };
+  for (const r of (directRes.data ?? []) as Array<{ chat_id: string; group_kind: GroupKind | null }>)
+    add(r.chat_id, r.group_kind);
+  for (const r of (m2mRes.data ?? []) as Array<{
+    wa_group_links: { chat_id: string; group_kind: GroupKind | null } | null;
+  }>)
+    add(r.wa_group_links?.chat_id, r.wa_group_links?.group_kind ?? null);
+  for (const r of (legacyRes.data ?? []) as Array<{ chat_id: string; group_kind: GroupKind | null }>)
+    add(r.chat_id, r.group_kind);
+  return out;
+}
+
 async function _buildClientTranscripts(
   orgId: string,
   clientId: string,
@@ -440,14 +503,21 @@ async function _buildClientTranscripts(
       ? new Date(Date.now() - opts.sinceDays * 86_400_000).toISOString()
       : null;
 
-  let waQuery = supabaseAdmin
-    .from("wa_messages")
-    .select("group_kind, sender, body, sent_at, message_type")
-    .eq("organization_id", orgId)
-    .eq("client_id", clientId)
-    .order("sent_at", { ascending: true })
-    .limit(8000);
-  if (since) waQuery = waQuery.gte("sent_at", since);
+  // The client's groups resolved from the live link graph (chat_id → kind).
+  const chatKinds = await resolveClientGroupChats(orgId, clientId);
+  const chatIds = Array.from(chatKinds.keys());
+
+  // Gather messages by GROUP (chat_id), not by the frozen message client_id.
+  let waQuery = chatIds.length
+    ? supabaseAdmin
+        .from("wa_messages")
+        .select("chat_id, group_kind, sender, body, sent_at, message_type")
+        .eq("organization_id", orgId)
+        .in("chat_id", chatIds)
+        .order("sent_at", { ascending: true })
+        .limit(8000)
+    : null;
+  if (waQuery && since) waQuery = waQuery.gte("sent_at", since);
 
   const [importsRes, waRes] = await Promise.all([
     since
@@ -458,7 +528,7 @@ async function _buildClientTranscripts(
           .eq("organization_id", orgId)
           .eq("client_id", clientId)
           .order("created_at", { ascending: false }),
-    waQuery,
+    waQuery ?? Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
   ]);
 
   // Latest one-time import per kind (historical seed; empty for windowed runs).
@@ -467,20 +537,22 @@ async function _buildClientTranscripts(
     if (!importByKind[r.group_kind]) importByKind[r.group_kind] = r.transcript ?? "";
   }
 
-  // Live messages per kind (text only, non-empty). Messages linked to this
-  // client but whose group_kind is still unclassified (null) default to the
-  // CLIENT block — they're this client's conversation and dropping them
+  // Live messages per kind (text only, non-empty). The group's CURRENT kind
+  // (from the link graph) wins; we fall back to the message's stored kind and
+  // finally to the CLIENT block for still-unclassified groups — dropping them
   // silently skewed satisfaction scores too rosy (whole groups vanished).
   const liveByKind: Record<GroupKind, string[]> = { client: [], technical: [] };
   const counts: Record<GroupKind, number> = { client: 0, technical: 0 };
   for (const r of (waRes.data ?? []) as Array<{
+    chat_id: string | null;
     group_kind: GroupKind | null;
     sender: string | null;
     body: string | null;
     sent_at: string | null;
     message_type: string | null;
   }>) {
-    const kind: GroupKind = r.group_kind ?? "client";
+    const kind: GroupKind =
+      (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
     const type = r.message_type ?? "chat";
     if (type !== "chat" && type !== "text") continue;
     const body = (r.body ?? "").trim();
@@ -597,6 +669,47 @@ async function _getClientExecutionSnapshot(
 }
 export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);
 
+// ---- Client identity bridge (canonical client ↔ merged sheet twins) ------
+// A real brand often exists as TWO+ client rows: the canonical (Odoo) row that
+// carries the project + WhatsApp chats, and one or more SHEET rows that carry
+// the contracts. They are tied by clients.merged_into_client_id (set sheet→Odoo
+// at merge time) but the sheet row is never repointed, so a contract keyed on
+// the sheet client_id is invisible to a lookup that uses only the canonical id.
+// This is why ~76% of satisfaction analyses ran with an empty "حالة العقد" block
+// even though the contract existed. These helpers resolve the FULL set of client
+// ids whose contracts/activity belong to the same real client so the commercial
+// dimension reaches the model.
+
+// child clientId → canonical (merged_into) clientId, for every merged row.
+async function _getClientMergeMap(orgId: string): Promise<Map<string, string>> {
+  const { data } = await supabaseAdmin
+    .from("clients")
+    .select("id, merged_into_client_id")
+    .eq("organization_id", orgId)
+    .not("merged_into_client_id", "is", null);
+  const m = new Map<string, string>();
+  for (const r of (data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
+    if (r.merged_into_client_id) m.set(r.id, r.merged_into_client_id);
+  }
+  return m;
+}
+export const getClientMergeMap = cache(_getClientMergeMap);
+
+// Every client id that shares this client's commercial identity: itself, the
+// rows merged INTO it (sheet twins), and — if it is itself a merged sheet row —
+// its canonical parent plus that parent's other children (siblings). Contracts /
+// activity logs are gathered across this whole set.
+async function _getClientContractIdentity(orgId: string, clientId: string): Promise<string[]> {
+  const merge = await getClientMergeMap(orgId);
+  const canonical = merge.get(clientId) ?? clientId; // walk up one hop to the parent
+  const ids = new Set<string>([clientId, canonical]);
+  for (const [child, parent] of merge) {
+    if (parent === canonical) ids.add(child); // siblings + direct children
+  }
+  return Array.from(ids);
+}
+export const getClientContractIdentity = cache(_getClientContractIdentity);
+
 // ---- Client contract context (commercial dimension of the big picture) ----
 // The client's current contract health, fed to the model so relationship +
 // execution signals get weighed against the money on the line (a tense client
@@ -611,14 +724,40 @@ export interface ContractActivityEvent {
   accountManager: string | null;
 }
 
-export interface ClientContractContext {
-  target: "On-Target" | "Overdue" | "Lost" | "Renewed";
-  status: "active" | "hold" | "lost" | "closed" | "renewed";
+// Free-form strings as stored in the contracts sheet — real values include
+// 'On Target', 'Overdue', 'Sales Deposit', 'Closed' (target) and
+// active/hold/closed/expired/renewed/lost (status). NOT a fixed enum.
+export type ContractTarget = string;
+export type ContractStatus = string;
+
+// One contract in the client's portfolio. A client commonly holds SEVERAL
+// contracts at once (one per service/project) and renews into new rows over
+// time, so the commercial picture is a portfolio — not a single contract.
+export interface ContractLine {
+  contractCode: string | null;
+  target: ContractTarget;
+  status: ContractStatus;
   totalValue: number;
   paidValue: number;
   startDate: string;
   endDate: string | null;
-  // Recent contract activity-log events (newest first), when available.
+}
+
+export interface ClientContractContext {
+  // ---- Top-level fields = the MOST-RECENT live contract (kept for the UI pill +
+  // back-compat with analyses stored before multi-contract support). The numeric
+  // values, however, are the PORTFOLIO SUM so totals reflect all live contracts. ----
+  target: ContractTarget; // most-recent live contract's target (drives the pill)
+  status: ContractStatus; // most-recent live contract's status
+  totalValue: number; // SUM across the live contracts
+  paidValue: number; // SUM across the live contracts
+  startDate: string; // earliest start across the portfolio
+  endDate: string | null; // latest end across the portfolio
+  // ---- The actual portfolio the model reads ----
+  contractCount: number; // number of contracts in `contracts`
+  contracts: ContractLine[]; // all LIVE contracts (active/hold); else the most-recent one
+  // Recent contract activity-log events (newest first), across ALL the client's
+  // contracts, when available.
   recentActivity?: ContractActivityEvent[];
 }
 
@@ -626,32 +765,61 @@ async function _getClientContractContext(
   orgId: string,
   clientId: string,
 ): Promise<ClientContractContext | null> {
-  // Most-recent contract for the client (a client may renew into several rows;
-  // the newest start_date is the live one).
+  // ALL of the client's contracts across its full identity set — the contracts
+  // usually live on a merged sheet twin, not the canonical (project/chat-bearing)
+  // row the analysis is keyed on. A client may hold several at once AND have
+  // renewed into older rows, so we never collapse to a single contract.
+  const ids = await getClientContractIdentity(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contracts")
-    .select("target, status, total_value, paid_value, start_date, end_date")
+    .select("contract_code, target, status, total_value, paid_value, start_date, end_date")
     .eq("organization_id", orgId)
-    .eq("client_id", clientId)
-    .order("start_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
-  const r = data as {
-    target: ClientContractContext["target"] | null;
-    status: ClientContractContext["status"] | null;
+    .in("client_id", ids)
+    .order("start_date", { ascending: false });
+  if (error || !data || data.length === 0) return null;
+
+  type Row = {
+    contract_code: string | null;
+    target: ContractTarget | null;
+    status: ContractStatus | null;
     total_value: number | null;
     paid_value: number | null;
     start_date: string;
     end_date: string | null;
   };
-  return {
+  const rows = data as Row[];
+  const toLine = (r: Row): ContractLine => ({
+    contractCode: r.contract_code,
     target: r.target ?? "On-Target",
     status: r.status ?? "active",
     totalValue: r.total_value ?? 0,
     paidValue: r.paid_value ?? 0,
     startDate: r.start_date,
     endDate: r.end_date,
+  });
+
+  // The live portfolio = currently-running contracts (active/hold). If none are
+  // live (all closed/lost), keep the most-recent single row so a churned client
+  // still carries commercial context for the model.
+  const live = rows.filter((r) => r.status === "active" || r.status === "hold").map(toLine);
+  const contracts = live.length ? live : [toLine(rows[0])];
+
+  // `contracts` is ordered newest-first (start_date desc), so contracts[0] is the
+  // most-recent live contract — its target/status drive the UI pill exactly as
+  // before. Numeric fields aggregate the whole live portfolio.
+  const primary = contracts[0];
+  const starts = contracts.map((c) => c.startDate).sort();
+  const ends = contracts.map((c) => c.endDate).filter((e): e is string => !!e).sort();
+
+  return {
+    target: primary.target,
+    status: primary.status,
+    totalValue: contracts.reduce((s, c) => s + c.totalValue, 0),
+    paidValue: contracts.reduce((s, c) => s + c.paidValue, 0),
+    startDate: starts[0],
+    endDate: ends.length ? ends[ends.length - 1] : null,
+    contractCount: contracts.length,
+    contracts,
   };
 }
 export const getClientContractContext = cache(_getClientContractContext);
@@ -663,11 +831,12 @@ async function _getClientContractActivity(
   orgId: string,
   clientId: string,
 ): Promise<ContractActivityEvent[]> {
+  const ids = await getClientContractIdentity(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contract_sheet_logs")
     .select("log_type, log_time, notes, account_manager, contract:contracts!inner(client_id)")
     .eq("organization_id", orgId)
-    .eq("contract.client_id", clientId)
+    .in("contract.client_id", ids)
     .order("log_time", { ascending: false, nullsFirst: false })
     .limit(15);
   if (error || !data) return [];
@@ -703,21 +872,63 @@ export function isClientAtRisk(score: number | null, sentiment: string | null): 
   return false;
 }
 
+// Client IDs that still represent a LIVE commercial relationship — an
+// active/hold contract OR an active project. Satisfaction/churn signals must be
+// scoped to these: a frozen analysis on an already-lost client (closed/lost
+// contract, no live work) otherwise keeps surfacing as "at risk of being lost",
+// which is exactly backwards — they're already gone. Used by the churn-risk
+// card, the Quality executive index, and the per-client churn notifications.
+async function _getLiveClientIds(orgId: string): Promise<Set<string>> {
+  const [contracts, projects, merge] = await Promise.all([
+    supabaseAdmin
+      .from("contracts")
+      .select("client_id")
+      .eq("organization_id", orgId)
+      .in("status", ["active", "hold"])
+      .not("client_id", "is", null),
+    supabaseAdmin
+      .from("projects")
+      .select("client_id")
+      .eq("organization_id", orgId)
+      .eq("status", "active")
+      .not("client_id", "is", null),
+    getClientMergeMap(orgId),
+  ]);
+  // Analyses are keyed on the canonical (project/chat-bearing) client row, but a
+  // live contract usually sits on the merged sheet twin. Canonicalize every id
+  // through the merge map so a client that is "live" only via its contract twin
+  // still matches its analysis row (otherwise it is wrongly dropped as non-live).
+  const canon = (id: string) => merge.get(id) ?? id;
+  const ids = new Set<string>();
+  for (const r of (contracts.data ?? []) as Array<{ client_id: string | null }>)
+    if (r.client_id) ids.add(canon(r.client_id));
+  for (const r of (projects.data ?? []) as Array<{ client_id: string | null }>)
+    if (r.client_id) ids.add(canon(r.client_id));
+  return ids;
+}
+export const getLiveClientIds = cache(_getLiveClientIds);
+
 async function _getOrgSatisfactionAggregate(orgId: string): Promise<SatisfactionAggregate> {
-  const { data, error } = await supabaseAdmin
-    .from("client_satisfaction_analyses")
-    .select("satisfaction_score, brief_adherence_score, sentiment")
-    .eq("organization_id", orgId)
-    .eq("is_current", true);
+  const [{ data, error }, liveIds] = await Promise.all([
+    supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select("client_id, satisfaction_score, brief_adherence_score, sentiment")
+      .eq("organization_id", orgId)
+      .eq("is_current", true),
+    getLiveClientIds(orgId),
+  ]);
   if (error || !data || data.length === 0) {
     return { avgSatisfaction: null, avgBriefAdherence: null, analyzedClients: 0, atRiskClients: 0 };
   }
 
-  const rows = data as Array<{
+  // Drop analyses for clients that are no longer a live relationship — they
+  // skew the average down and inflate the at-risk count with already-lost names.
+  const rows = (data as Array<{
+    client_id: string | null;
     satisfaction_score: number | null;
     brief_adherence_score: number | null;
     sentiment: string | null;
-  }>;
+  }>).filter((r) => r.client_id != null && liveIds.has(r.client_id));
   const sat = rows.map((r) => r.satisfaction_score).filter((v): v is number => v !== null);
   const brief = rows.map((r) => r.brief_adherence_score).filter((v): v is number => v !== null);
   const avg = (xs: number[]) =>
@@ -1006,11 +1217,14 @@ export interface AtRiskClient {
 }
 
 async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
-  const { data, error } = await supabaseAdmin
-    .from("client_satisfaction_analyses")
-    .select("client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)")
-    .eq("organization_id", orgId)
-    .eq("is_current", true);
+  const [{ data, error }, liveIds] = await Promise.all([
+    supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select("client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)")
+      .eq("organization_id", orgId)
+      .eq("is_current", true),
+    getLiveClientIds(orgId),
+  ]);
   if (error || !data) return [];
 
   type Row = {
@@ -1022,6 +1236,7 @@ async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
   };
 
   return (data as unknown as Row[])
+    .filter((r) => r.client_id != null && liveIds.has(r.client_id))
     .filter((r) => isClientAtRisk(r.satisfaction_score, r.sentiment))
     .map((r) => {
       const c = Array.isArray(r.client) ? r.client[0] : r.client;
