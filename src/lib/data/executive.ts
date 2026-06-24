@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isLeadershipPosition } from "@/lib/data/leadership";
+import { getLiveClientIds } from "@/lib/data/satisfaction";
 import {
   getDashboardOdooMetrics,
   type DashboardOdooMetrics,
@@ -565,7 +566,11 @@ function serviceGroupKey(name: string): string {
     .replace(/^[^\p{L}\p{N}]+/u, "") // leading emoji / symbols
     .replace(/^renewal\s+(of\s+)?/i, "") // "Renewal " / "Renewal of "
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    // Source data abbreviates some renewal variants: "Renewal of Acc Manager"
+    // is the same service as "Account Manager". Expand known abbreviations so
+    // they collapse onto the same key.
+    .replace(/\bacc\b/g, "account");
 }
 
 // True when the name is the Renewal variant (after any leading emoji).
