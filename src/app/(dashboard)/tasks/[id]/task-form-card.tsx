@@ -8,6 +8,7 @@ import { avatarUrlFor } from "@/lib/utils-format";
 import { cn } from "@/lib/utils";
 import { DesignCountsRow } from "./design-counts-row";
 import { DeadlineEditor } from "./deadline-editor";
+import { UploadDeadlineEditor } from "./upload-deadline-editor";
 
 type Project = {
   id: string;
@@ -32,6 +33,7 @@ type TaskFormData = {
   due_date: string | null;
   completed_at: string | null;
   actual_done_date: string | null;
+  upload_due_date: string | null;
   allocated_time_minutes: number | null;
   progress_percent: number | string | null;
   expected_progress_percent: number | string | null;
@@ -260,6 +262,17 @@ export function TaskFormCard({
               taskId={task.id}
               initialDate={task.planned_date ?? task.due_date ?? null}
               overdue={overdue}
+              canEdit={canEditDeadline}
+            />
+          </Row>
+          <Row label={t("uploadDeadline")}>
+            <UploadDeadlineEditor
+              taskId={task.id}
+              initialDate={task.upload_due_date ?? null}
+              overdue={
+                !!task.upload_due_date &&
+                task.upload_due_date < new Date().toISOString().slice(0, 10)
+              }
               canEdit={canEditDeadline}
             />
           </Row>

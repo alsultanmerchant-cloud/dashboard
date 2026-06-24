@@ -40,8 +40,9 @@ export function Sidebar({ open, onClose, onDesktopExpandedChange }: SidebarProps
   }, [desktopExpanded, onDesktopExpandedChange]);
 
   const isItemVisible = (item: NavItem) => {
-    if (!user) return !item.perm;
+    if (!user) return !item.perm && !item.ownerOnly;
     if (user.isOwner) return true;
+    if (item.ownerOnly) return false;
     if (!item.perm) return true;
     return hasPermission(item.perm);
   };

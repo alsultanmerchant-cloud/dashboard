@@ -42,6 +42,8 @@ export type NavItem = {
   href: string;
   icon: LucideIcon;
   perm?: string;
+  /** Owner-only item — hidden for every non-owner regardless of permissions. */
+  ownerOnly?: boolean;
   comingSoon?: boolean;
   /** When true, item appears in nav but is unauthenticated/disabled visually. */
   disabled?: boolean;
@@ -59,10 +61,10 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       // Routes server-side to the role's home page (specialist→/uploads,
       // AM→/am/<id>/dashboard, head/admin/owner→/dashboard, etc).
-      { labelKey: "aiAgent", href: "/agent", icon: BrainCircuit, perm: "reports.view" },
+      // The AI Copilot (/agent) is owner-only — the API rejects non-owners.
+      { labelKey: "aiAgent", href: "/agent", icon: BrainCircuit, ownerOnly: true },
       { labelKey: "aiInsights", href: "/ai-insights", icon: Sparkles, perm: "reports.view" },
       { labelKey: "myDashboard", href: "/dashboard", icon: LayoutDashboard },
-      { labelKey: "myPerformance", href: "/my-performance", icon: Gauge, perm: "tasks.view" },
       { labelKey: "messages", href: "/messages", icon: MessageCircle, perm: "notifications.view" },
       { labelKey: "notifications", href: "/notifications", icon: Bell },
     ],
@@ -131,7 +133,6 @@ export const NAV_GROUPS: NavGroup[] = [
 export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: string }> = {
   "/": { titleKey: "dashboardTitle", subtitleKey: "dashboardSubtitle" },
   "/dashboard": { titleKey: "dashboardTitle", subtitleKey: "dashboardSubtitle" },
-  "/my-performance": { titleKey: "myPerformanceTitle", subtitleKey: "myPerformanceSubtitle" },
   "/uploads": { titleKey: "uploadsTitle", subtitleKey: "uploadsSubtitle" },
   "/notifications": { titleKey: "notificationsTitle", subtitleKey: "notificationsSubtitle" },
   "/ai-insights": { titleKey: "aiInsightsTitle", subtitleKey: "aiInsightsSubtitle" },

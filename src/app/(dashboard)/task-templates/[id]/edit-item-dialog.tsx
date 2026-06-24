@@ -99,6 +99,7 @@ export type EditableTemplateItem = {
   default_department_id: string | null;
   offset_days_from_project_start: number;
   duration_days: number;
+  upload_offset_days_before_deadline: number | null;
   priority: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions: Record<string, string | null> | null;
   stage_sla_overrides: Record<string, number | null> | null;
@@ -141,6 +142,11 @@ export function EditTemplateItemDialog({
     String(item.offset_days_from_project_start),
   );
   const [duration, setDuration] = useState<string>(String(item.duration_days));
+  const [uploadOffset, setUploadOffset] = useState<string>(
+    item.upload_offset_days_before_deadline == null
+      ? ""
+      : String(item.upload_offset_days_before_deadline),
+  );
   const [priority, setPriority] = useState<(typeof PRIORITY_KEYS)[number]>(
     item.priority,
   );
@@ -173,6 +179,11 @@ export function EditTemplateItemDialog({
     setDepartmentId(item.default_department_id ?? "");
     setOffset(String(item.offset_days_from_project_start));
     setDuration(String(item.duration_days));
+    setUploadOffset(
+      item.upload_offset_days_before_deadline == null
+        ? ""
+        : String(item.upload_offset_days_before_deadline),
+    );
     setPriority(item.priority);
     setStageOwners(seedStageOwners());
     setStageSla(seedStageSla());
@@ -194,6 +205,8 @@ export function EditTemplateItemDialog({
         default_department_id: departmentId || null,
         offset_days_from_project_start: Number(offset) || 0,
         duration_days: Math.max(0, Number(duration) || 0),
+        upload_offset_days_before_deadline:
+          uploadOffset.trim() === "" ? null : Math.max(0, Number(uploadOffset) || 0),
         priority,
         stage_owner_positions: Object.fromEntries(
           STAGES.map((s) => [s.key, stageOwners[s.key] || null]),
@@ -340,6 +353,22 @@ export function EditTemplateItemDialog({
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit_item_upload_offset">موعد الرفع — أيام قبل الموعد النهائي</Label>
+              <Input
+                id="edit_item_upload_offset"
+                type="number"
+                min={0}
+                value={uploadOffset}
+                onChange={(e) => setUploadOffset(e.target.value)}
+                disabled={pending}
+                dir="ltr"
+                placeholder="بدون موعد رفع"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                عند تعبئته، تُنشأ المهمة بموعد رفع = الموعد النهائي ناقص هذا العدد، فتظهر في «رفع المهام». اتركه فارغًا للمهام التي لا تتطلب رفعًا.
+              </p>
             </div>
             <div className="space-y-1.5 rounded-lg border border-soft bg-soft-1/40 p-3">
               <Label>الدور المسؤول و SLA لكل مرحلة</Label>

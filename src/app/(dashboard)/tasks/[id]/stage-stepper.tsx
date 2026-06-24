@@ -46,6 +46,7 @@ export function StageStepper({
   currentStage,
   stageEnteredAt,
   stageDwellSeconds,
+  readOnly = false,
 }: {
   taskId: string;
   currentStage: TaskStage;
@@ -53,6 +54,8 @@ export function StageStepper({
   /** Summed dwell seconds per stage, from task_stage_history. Past stages
    *  display this value; the current stage shows a live-counting label. */
   stageDwellSeconds?: Record<string, number>;
+  /** View-only (agent migration phase): show the pipeline but block changes. */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const locale = useLocale();
@@ -105,7 +108,7 @@ export function StageStepper({
               type="button"
               role="tab"
               aria-selected={isCurrent}
-              disabled={pending || isPast}
+              disabled={pending || isPast || readOnly}
               onClick={() => handleClick(stage)}
               className={cn(
                 "group relative inline-flex min-w-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors",

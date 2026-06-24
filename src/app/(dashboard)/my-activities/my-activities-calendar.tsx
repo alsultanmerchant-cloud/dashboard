@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { ChevronLeft, ChevronRight, Phone, Mail, Eye, Upload, ListTodo, CheckCircle2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Phone, Mail, Eye, Upload, ListTodo, CheckCircle2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MyActivityRow } from "@/lib/data/my-activities";
 
@@ -27,6 +27,17 @@ function daysFromSaturday(jsDay: number): number {
   return (jsDay + 1) % 7;
 }
 
+// Format an ISO date ("YYYY-MM-DD" or full timestamp) as DD/MM/YYYY without
+// going through Intl — the Arabic locale injects RTL marks between segments
+// that scramble into "172026/06/" when the span is forced dir="ltr". Slicing
+// the ISO string also dodges the timezone off-by-one from `new Date(iso)`.
+function formatDmy(iso: string): string {
+  const parts = iso.slice(0, 10).split("-");
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts;
+  return `${d}/${m}/${y}`;
+}
+
 export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
   const t = useTranslations("MyActivitiesPage.calendar");
   const locale = useLocale();
@@ -35,6 +46,9 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
     year: today.getFullYear(),
     month: today.getMonth(),
   });
+  // Clicking a day opens its tasks inline (just under the grid) instead of
+  // forcing the user to scroll down to the full list. Sky Light feedback.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const monthFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
@@ -44,8 +58,8 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
     () => new Intl.DateTimeFormat(locale, { weekday: "long" }),
     [locale],
   );
-  const shortDateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }),
+  const longDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }),
     [locale],
   );
   const dayNames = useMemo(() => {
@@ -117,6 +131,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
   }, [rows]);
 
   function shiftMonth(delta: number) {
+    setSelectedDay(null);
     setCursor((c) => {
       const m = c.month + delta;
       const year = c.year + Math.floor(m / 12);
@@ -124,6 +139,8 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
       return { year, month };
     });
   }
+
+  const selectedItems = selectedDay ? byDay.get(selectedDay) ?? [] : [];
 
   return (
     <div className="space-y-4">
@@ -183,16 +200,34 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
             }
             const items = byDay.get(c.key) ?? [];
             const isToday = c.key === todayKey;
+            const isSelected = c.key === selectedDay;
+            const hasItems = items.length > 0;
             const isPast =
               c.date.getTime() < new Date(todayKey + "T00:00:00").getTime();
             const visible = items.slice(0, 3);
             const more = items.length - visible.length;
+            const dayKey = c.key;
             return (
               <div
                 key={c.key}
+                role={hasItems ? "button" : undefined}
+                tabIndex={hasItems ? 0 : undefined}
+                onClick={hasItems ? () => setSelectedDay((s) => (s === dayKey ? null : dayKey)) : undefined}
+                onKeyDown={
+                  hasItems
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedDay((s) => (s === dayKey ? null : dayKey));
+                        }
+                      }
+                    : undefined
+                }
                 className={cn(
                   "flex min-h-[6.5rem] flex-col gap-1 bg-card/80 p-1.5",
+                  hasItems && "cursor-pointer transition-colors hover:bg-muted/50",
                   isToday && "ring-1 ring-cyan/60",
+                  isSelected && "ring-2 ring-cyan",
                 )}
               >
                 <div
@@ -215,6 +250,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
                       key={a.id}
                       href={`/tasks/${a.task_id}#activities`}
                       title={`${a.summary} — ${a.task_title}`}
+                      onClick={(e) => e.stopPropagation()}
                       className={cn(
                         "inline-flex items-center gap-1 truncate rounded border border-soft/60 px-1.5 py-0.5 text-[10px] hover:bg-muted/60",
                         done
@@ -240,6 +276,63 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
             );
           })}
         </div>
+
+        {selectedDay && (
+          <div className="mt-3 rounded-xl border border-cyan/30 bg-cyan-dim/30 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">
+                {t("selectedDayTitle", {
+                  date: longDateFormatter.format(new Date(selectedDay + "T00:00:00")),
+                  count: selectedItems.length,
+                })}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setSelectedDay(null)}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-soft hover:bg-muted/60"
+                aria-label={t("closeDay")}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+            <ul className="divide-y divide-soft/40">
+              {selectedItems.map((a) => {
+                const Icon = TYPE_ICON[a.activity_type as keyof typeof TYPE_ICON] ?? ListTodo;
+                const done = !!a.completed_at;
+                const overdue =
+                  !done && a.due_date && new Date(a.due_date) < new Date(todayKey + "T00:00:00");
+                return (
+                  <li key={a.id} className="flex items-center gap-2 py-2 text-xs">
+                    <Icon
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        done ? "text-emerald-500" : overdue ? "text-red-500" : "text-cyan",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        done && "line-through text-muted-foreground",
+                      )}
+                    >
+                      {a.summary}
+                    </span>
+                    <span className="hidden text-muted-foreground sm:inline">
+                      {activityTypeLabel(a.activity_type)}
+                    </span>
+                    <Link
+                      href={`/tasks/${a.task_id}`}
+                      className="shrink-0 truncate rounded border border-soft px-2 py-0.5 text-[11px] text-cyan hover:bg-cyan-dim/40"
+                      title={a.task_title}
+                    >
+                      {a.task_code ?? a.task_title.slice(0, 30)}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {undated.length > 0 && (
           <p className="mt-3 text-[11px] text-muted-foreground">
@@ -292,7 +385,7 @@ export function MyActivitiesCalendar({ rows }: { rows: MyActivityRow[] }) {
                     )}
                     dir="ltr"
                   >
-                    {a.due_date ? shortDateFormatter.format(new Date(a.due_date)) : "—"}
+                    {a.due_date ? formatDmy(a.due_date) : "—"}
                   </span>
                 </li>
               );

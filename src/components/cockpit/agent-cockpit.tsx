@@ -41,6 +41,8 @@ import { AutoRefresh } from "@/components/cockpit/auto-refresh";
 import { TodayPriorities, type PriorityItem } from "@/components/cockpit/today-priorities";
 import { TechTipCard } from "@/components/cockpit/tech-tip-card";
 import { GrowthSection } from "@/components/cockpit/growth-section";
+import { DeliveryCommitmentCard } from "@/components/performance/delivery-commitment-card";
+import { MonthlyHistorySection } from "@/components/performance/monthly-history-section";
 
 // ---- Section 1: Work Snapshot --------------------------------------------
 
@@ -378,9 +380,23 @@ export async function AgentCockpit({ session, employeeId }: { session: ServerSes
       </section>
 
       <section className="mb-8">
+        <SectionTitle title={t("delivery.title")} description={t("delivery.description")} />
+        <Suspense fallback={<Skeleton className="h-[220px] rounded-2xl" />}>
+          <DeliveryCommitmentCard orgId={orgId} employeeId={employeeId} />
+        </Suspense>
+      </section>
+
+      <section className="mb-8">
         <SectionTitle title={t("growth.title")} description={t("growth.description")} />
         <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
           <GrowthSection orgId={orgId} employeeId={employeeId} />
+        </Suspense>
+      </section>
+
+      <section className="mb-8">
+        <SectionTitle title={t("monthlyHistory.title")} description={t("monthlyHistory.description")} />
+        <Suspense fallback={<Skeleton className="h-[200px] rounded-2xl" />}>
+          <MonthlyHistorySection orgId={orgId} employeeId={employeeId} />
         </Suspense>
       </section>
 

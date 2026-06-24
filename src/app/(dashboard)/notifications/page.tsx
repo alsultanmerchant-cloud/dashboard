@@ -1,6 +1,6 @@
 import { Inbox } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { requirePagePermission } from "@/lib/auth-server";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -29,7 +29,17 @@ export default async function NotificationsPage({
   const page = Math.max(1, Number(sp.page) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
-  const activeCategory = (NOTIFICATION_CATEGORIES as string[]).includes(sp.category ?? "")
+
+  // The "money" (financial) category only applies to finance-facing roles —
+  // hide it for everyone else (e.g. specialists/agents) so the tab list stays
+  // relevant. Sky Light feedback.
+  const canSeeMoney =
+    hasPermission(session, "finance.view") || hasPermission(session, "contract.view");
+  const visibleCategories = NOTIFICATION_CATEGORIES.filter(
+    (c) => c !== "money" || canSeeMoney,
+  );
+
+  const activeCategory = (visibleCategories as string[]).includes(sp.category ?? "")
     ? (sp.category as NotificationCategory)
     : null;
 
@@ -58,12 +68,15 @@ export default async function NotificationsPage({
   const list = data ?? [];
   const total = count ?? 0;
 
-  // Bucket unread counts by category for the chips + header.
+  // Bucket unread counts by category for the chips + header. Only the visible
+  // categories are tallied so hidden ones (e.g. money for non-finance roles)
+  // don't inflate the totals.
   const summary = Object.fromEntries(
-    NOTIFICATION_CATEGORIES.map((c) => [c, 0]),
+    visibleCategories.map((c) => [c, 0]),
   ) as Record<NotificationCategory, number>;
   for (const r of (summaryRows ?? []) as Array<{ type: string }>) {
-    summary[categoryOf(r.type)] += 1;
+    const cat = categoryOf(r.type);
+    if (cat in summary) summary[cat] += 1;
   }
   const totalUnread = Object.values(summary).reduce((a, b) => a + b, 0);
 
@@ -84,6 +97,7 @@ export default async function NotificationsPage({
             summary={summary}
             totalUnread={totalUnread}
             activeCategory={activeCategory}
+            categories={visibleCategories}
           />
           <div className="mt-4">
             <Pagination total={total} pageSize={PAGE_SIZE} currentPage={page} />

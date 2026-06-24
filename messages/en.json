@@ -1554,7 +1554,9 @@
         "upload": "Upload",
         "other": "Other",
         "task": "Task"
-      }
+      },
+      "selectedDayTitle": "Activities for {date} ({count})",
+      "closeDay": "Close"
     }
   },
   "MessagesPage": {
@@ -1897,7 +1899,8 @@
       "actualDoneDate": "Actual completion date",
       "completedAt": "Completed at",
       "delayDays": "Delay days",
-      "holdReason": "Hold reason"
+      "holdReason": "Hold reason",
+      "uploadDeadline": "Upload deadline"
     },
     "descriptionTab": {
       "empty": "No description."
@@ -2240,6 +2243,18 @@
     "priorityStar": {
       "setHigh": "Mark as high priority",
       "unsetHigh": "Unmark high priority"
+    },
+    "uploadDeadlineEditor": {
+      "save": "Save",
+      "cancel": "Cancel",
+      "remove": "Remove",
+      "none": "No upload date",
+      "add": "Set upload date",
+      "edit": "Edit upload date"
+    },
+    "viewOnly": {
+      "notice": "View-only — make edits in Rwasem during the migration period.",
+      "openInRwasem": "Open in Rwasem"
     }
   },
   "TaskLabels": {
@@ -3958,6 +3973,14 @@
         "generate": "Generate coaching",
         "idleHint": "Get private, specialty-specific coaching based on your scorecard."
       }
+    },
+    "delivery": {
+      "title": "Delivery Commitment",
+      "description": "How well you deliver on time and keep work flowing"
+    },
+    "monthlyHistory": {
+      "title": "Monthly history",
+      "description": "Your month-by-month closing numbers"
     }
   },
   "AIAgent": {

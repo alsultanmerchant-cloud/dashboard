@@ -37,11 +37,14 @@ export function NotificationsList({
   summary,
   totalUnread,
   activeCategory,
+  categories = NOTIFICATION_CATEGORIES,
 }: {
   notifications: Notification[];
   summary: Record<NotificationCategory, number>;
   totalUnread: number;
   activeCategory: NotificationCategory | null;
+  // Categories visible to this user (e.g. "money" hidden for non-finance roles).
+  categories?: NotificationCategory[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -98,7 +101,7 @@ export function NotificationsList({
     <div className="space-y-4">
       {/* Summary tiles */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {NOTIFICATION_CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(activeCategory === cat ? null : cat)}
@@ -152,7 +155,7 @@ export function NotificationsList({
         />
       ) : grouped ? (
         <div className="space-y-5">
-          {NOTIFICATION_CATEGORIES.map((cat) => {
+          {categories.map((cat) => {
             const rows = list.filter((n) => categoryOf(n.type) === cat);
             if (rows.length === 0) return null;
             return (
@@ -215,7 +218,24 @@ function Row({
                 {unread && <span className="size-2 rounded-full bg-cyan animate-pulse" aria-hidden />}
               </div>
             </div>
-            {n.body && <p className="mt-1 text-xs text-muted-foreground line-clamp-2 leading-relaxed">{n.body}</p>}
+            {n.body && (
+              <p className="mt-1 text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                {(() => {
+                  // For delay/overdue alerts the body ends with the reason that
+                  // triggered it ("… — تجاوزت موعد التسليم (131 يوم)" / "متأخر").
+                  // Surface that trailing segment in red so the cause stands out.
+                  const isAlert = n.type === "TASK_OVERDUE" || n.type === "TASK_ACTIVITY_DUE";
+                  const idx = isAlert ? n.body.lastIndexOf(" — ") : -1;
+                  if (idx === -1) return n.body;
+                  return (
+                    <>
+                      {n.body.slice(0, idx + 3)}
+                      <span className="font-medium text-cc-red">{n.body.slice(idx + 3)}</span>
+                    </>
+                  );
+                })()}
+              </p>
+            )}
             <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span>{relativeTimeAr(n.created_at)}</span>
               {href && (

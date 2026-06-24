@@ -58,6 +58,10 @@ export interface ListProjectsPagedOpts {
    *  AND across distinct fields, OR within the same field — enforced by the
    *  RPC (migration 0132). Mirrors the tasks `searchFacets` shape. */
   searchFacets?: ProjectSearchFacet[];
+  /** Hard scope (agent migration phase): restrict results to these project ids
+   *  (projects the agent is assigned in or follows). Intersected with any custom
+   *  filter. Empty array → no results. undefined/null → unscoped. */
+  restrictToProjectIds?: string[] | null;
 }
 
 export type ProjectSearchFacetField =
@@ -189,7 +193,18 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   let customIds: string[] | null = null;
   if (opts.customFilter) {
     customIds = await resolveCustomFilterIds(opts.organizationId, opts.customFilter);
-    // Empty array = filter compiled but matched zero rows; shortcut the RPC.
+  }
+
+  // Agent scope: intersect the whitelist with the projects the agent may see.
+  if (opts.restrictToProjectIds != null) {
+    const allowed = new Set(opts.restrictToProjectIds);
+    customIds = customIds == null
+      ? [...allowed]
+      : customIds.filter((id) => allowed.has(id));
+  }
+
+  {
+    // Empty array = filter (or scope) compiled but matched zero rows; shortcut.
     if (customIds && customIds.length === 0) {
       return {
         rows: [],

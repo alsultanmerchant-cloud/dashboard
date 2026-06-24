@@ -15,6 +15,7 @@ import {
   loadTasksPageForGlobalView,
 } from "./_loaders";
 import { BALANCEABLE_PARTITIONS, BALANCED_BOARD_LIMIT } from "@/lib/data/tasks";
+import { getAgentTaskScopeIds } from "@/lib/data/viewer-scope";
 import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getTaskField } from "@/lib/custom-filter/tasks-fields";
@@ -146,6 +147,11 @@ export default async function TasksPage({
           queryString={queryString}
           resolvedProjectId={resolvedProjectId ?? null}
           noDeadlineActive={noDeadlineActive}
+          agentScope={
+            scope.kind === "agent"
+              ? { employeeId: session.employeeId, userId: session.userId }
+              : null
+          }
         />
       </Suspense>
     </div>
@@ -183,6 +189,7 @@ async function TasksBoardSection({
   queryString,
   resolvedProjectId,
   noDeadlineActive,
+  agentScope,
 }: {
   orgId: string;
   view: "kanban" | "list" | "calendar" | "pivot";
@@ -194,6 +201,8 @@ async function TasksBoardSection({
   queryString: string;
   resolvedProjectId: string | null;
   noDeadlineActive: boolean;
+  // Non-null only for agents: scope the board to their own tasks (assigned ∪ followed).
+  agentScope: { employeeId: string | null; userId: string | null } | null;
 }) {
   const t = await getTranslations("TasksPage");
 
@@ -216,7 +225,18 @@ async function TasksBoardSection({
   })();
 
   const customFilterTaskIds = await customFilterPromise;
-  const effectiveFilters = { ...taskFilters, customFilterTaskIds };
+  // Agent scope: restrict to the viewer's own tasks (assigned ∪ followed). We
+  // resolve the id set once and reuse it for both the board filter (intersected
+  // with any custom filter) and the toolbar KPI counts.
+  const agentTaskIds = agentScope
+    ? await getAgentTaskScopeIds(orgId, agentScope.employeeId, agentScope.userId)
+    : null;
+  const scopedTaskIds = agentTaskIds
+    ? (customFilterTaskIds
+        ? customFilterTaskIds.filter((id) => new Set(agentTaskIds).has(id))
+        : agentTaskIds)
+    : customFilterTaskIds;
+  const effectiveFilters = { ...taskFilters, customFilterTaskIds: scopedTaskIds };
 
   // Balanced kanban load: when grouping by a server-partitionable dimension,
   // fetch the newest N per column so every column is populated up front instead
@@ -253,6 +273,7 @@ async function TasksBoardSection({
           <TasksToolbarMeta
             orgId={orgId}
             projectId={resolvedProjectId}
+            restrictTaskIds={agentTaskIds}
             filteredTotalCount={filteredTotalCount}
             noDeadlineActive={noDeadlineActive}
             noDeadlineHref={noDeadlineActive ? "/tasks" : "/tasks?f=no_deadline"}
@@ -353,6 +374,7 @@ async function ProjectScopeBanner({
 async function TasksToolbarMeta({
   orgId,
   projectId,
+  restrictTaskIds,
   filteredTotalCount,
   noDeadlineActive,
   noDeadlineHref,
@@ -362,6 +384,8 @@ async function TasksToolbarMeta({
 }: {
   orgId: string;
   projectId: string | null;
+  // Agent scope: when non-null, count only these task ids (the viewer's own).
+  restrictTaskIds: string[] | null;
   filteredTotalCount: number;
   noDeadlineActive: boolean;
   noDeadlineHref: string;
@@ -369,29 +393,43 @@ async function TasksToolbarMeta({
   kpiNoDeadlineHintLabel: string;
   kpiNoDeadlineLabel: string;
 }) {
-  const baseTaskQuery = () =>
-    supabaseAdmin
+  // `kind`: "total" = all non-archived; "noDeadline" = open + no dates.
+  const buildScope = (kind: "total" | "noDeadline", ids?: string[]) => {
+    let q = supabaseAdmin
       .from("tasks")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .is("archived_at", null);
+    if (projectId) q = q.eq("project_id", projectId);
+    if (kind === "noDeadline") {
+      q = q.neq("stage", "done").is("planned_date", null).is("due_date", null);
+    }
+    if (ids) q = q.in("id", ids);
+    return q;
+  };
 
-  let totalScope = baseTaskQuery();
-  if (projectId) totalScope = totalScope.eq("project_id", projectId);
+  // Agent scope counts via chunked `.in()` — a single 676-id IN blows the GET
+  // URL limit (returns 0). null restrict → one unscoped count.
+  const countScoped = async (kind: "total" | "noDeadline"): Promise<number | null> => {
+    if (restrictTaskIds == null) {
+      const res = await buildScope(kind);
+      return res.error ? null : res.count ?? 0;
+    }
+    if (restrictTaskIds.length === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < restrictTaskIds.length; i += 100) {
+      const res = await buildScope(kind, restrictTaskIds.slice(i, i + 100));
+      if (res.error) return null;
+      sum += res.count ?? 0;
+    }
+    return sum;
+  };
 
-  let noDeadlineScope = baseTaskQuery()
-    .neq("stage", "done")
-    .is("planned_date", null)
-    .is("due_date", null);
-  if (projectId) noDeadlineScope = noDeadlineScope.eq("project_id", projectId);
-
-  const [totalRes, noDeadlineRes] = await Promise.all([
-    totalScope,
-    noDeadlineScope,
+  const [totalCountRaw, noDeadlineCount] = await Promise.all([
+    countScoped("total"),
+    countScoped("noDeadline"),
   ]);
-
-  const totalCount = totalRes.count ?? 0;
-  const noDeadlineCount = noDeadlineRes.error ? null : noDeadlineRes.count ?? 0;
+  const totalCount = totalCountRaw ?? 0;
   const trailingText =
     filteredTotalCount !== totalCount ? `من أصل ${totalCount}` : null;
 

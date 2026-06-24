@@ -110,6 +110,8 @@ export function AddTemplateItemDialog({
   const [departmentId, setDepartmentId] = useState<string>("");
   const [offset, setOffset] = useState<string>("0");
   const [duration, setDuration] = useState<string>("1");
+  // Empty = task generated from this item has no upload (موعد الرفع).
+  const [uploadOffset, setUploadOffset] = useState<string>("");
   const [priority, setPriority] =
     useState<(typeof PRIORITY_KEYS)[number]>("medium");
   const [stageOwners, setStageOwners] = useState<Record<string, string>>({});
@@ -121,6 +123,7 @@ export function AddTemplateItemDialog({
     setDepartmentId("");
     setOffset("0");
     setDuration("1");
+    setUploadOffset("");
     setPriority("medium");
     setStageOwners({});
   };
@@ -141,6 +144,8 @@ export function AddTemplateItemDialog({
         default_department_id: departmentId || null,
         offset_days_from_project_start: Number(offset) || 0,
         duration_days: Math.max(0, Number(duration) || 0),
+        upload_offset_days_before_deadline:
+          uploadOffset.trim() === "" ? null : Math.max(0, Number(uploadOffset) || 0),
         priority,
         // Omit entirely when untouched so the column default applies.
         stage_owner_positions: STAGES.some((s) => stageOwners[s.key])
@@ -285,6 +290,22 @@ export function AddTemplateItemDialog({
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="item_upload_offset">موعد الرفع — أيام قبل الموعد النهائي</Label>
+              <Input
+                id="item_upload_offset"
+                type="number"
+                min={0}
+                value={uploadOffset}
+                onChange={(e) => setUploadOffset(e.target.value)}
+                disabled={pending}
+                dir="ltr"
+                placeholder="بدون موعد رفع"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                عند تعبئته، تُنشأ المهمة بموعد رفع = الموعد النهائي ناقص هذا العدد، فتظهر في «رفع المهام». اتركه فارغًا للمهام التي لا تتطلب رفعًا.
+              </p>
             </div>
             <div className="space-y-1.5 rounded-lg border border-soft bg-soft-1/40 p-3">
               <Label>الدور المسؤول عن كل مرحلة</Label>

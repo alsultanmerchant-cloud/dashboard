@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FailuresSection } from "@/components/performance/failures-section";
 import type { ServerSession, DashboardScope } from "@/lib/auth-server";
 import {
   getDepartmentTeamSummary,
@@ -199,6 +200,21 @@ export function DepartmentDashboard({
           <SectionTitle title="الإقفال الشهري" description="ملخص شهري لكل موظف مع المقارنة بالأهداف" />
           <Suspense fallback={<Skeleton className="h-[260px] rounded-2xl" />}>
             <MonthlyClosingSection scope={deptScope} month={selectedMonth} />
+          </Suspense>
+        </section>
+      )}
+
+      {/* Section D — Learn from your delays (heads/leads only). The AI lesson
+          analysis is token-heavy per person, so it's reserved for managers who
+          oversee many tasks rather than every agent. */}
+      {session.employeeId && (
+        <section className="mb-10">
+          <SectionTitle
+            title="تعلّم من تأخيراتك"
+            description="تحليل لأسباب تأخر مهامك السابقة ودروس مستفادة"
+          />
+          <Suspense fallback={<Skeleton className="h-[200px] rounded-2xl" />}>
+            <FailuresSection orgId={session.orgId} employeeId={session.employeeId} />
           </Suspense>
         </section>
       )}

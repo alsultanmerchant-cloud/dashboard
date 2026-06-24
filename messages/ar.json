@@ -1554,7 +1554,9 @@
         "upload": "رفع",
         "other": "أخرى",
         "task": "مهمة"
-      }
+      },
+      "selectedDayTitle": "أنشطة {date} ({count})",
+      "closeDay": "إغلاق"
     }
   },
   "MessagesPage": {
@@ -1897,7 +1899,8 @@
       "actualDoneDate": "اليوم الفعلي للإنجاز",
       "completedAt": "تم الإنجاز في",
       "delayDays": "أيام التأخير",
-      "holdReason": "سبب الإيقاف"
+      "holdReason": "سبب الإيقاف",
+      "uploadDeadline": "موعد الرفع"
     },
     "descriptionTab": {
       "empty": "لا يوجد وصف."
@@ -2240,6 +2243,18 @@
     "priorityStar": {
       "setHigh": "وضع كأولوية عالية",
       "unsetHigh": "إلغاء الأولوية العالية"
+    },
+    "uploadDeadlineEditor": {
+      "save": "حفظ",
+      "cancel": "إلغاء",
+      "remove": "إزالة",
+      "none": "لا يوجد موعد رفع",
+      "add": "تحديد موعد الرفع",
+      "edit": "تعديل موعد الرفع"
+    },
+    "viewOnly": {
+      "notice": "وضع العرض فقط — التعديلات تتم في رواسم خلال فترة الانتقال.",
+      "openInRwasem": "افتح في رواسم"
     }
   },
   "TaskLabels": {
@@ -3958,6 +3973,14 @@
         "generate": "ابدأ التدريب",
         "idleHint": "احصل على إرشاد خاص بك بناءً على بطاقة أدائك."
       }
+    },
+    "delivery": {
+      "title": "الالتزام بالتسليم",
+      "description": "مدى التزامك بالتسليم في الموعد والحفاظ على سير العمل"
+    },
+    "monthlyHistory": {
+      "title": "السجل الشهري",
+      "description": "أرقام إقفالك شهرًا بشهر"
     }
   },
   "AIAgent": {

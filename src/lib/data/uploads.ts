@@ -30,46 +30,29 @@ async function _listMyUploadQueue(
   orgId: string,
   employeeId: string,
 ): Promise<UploadQueueRow[]> {
-  // Tasks where the current user is the assignee in the specialist slot,
-  // not done. We pull the template item to read upload_offset_days_before_deadline.
+  // Fully manual (Sky Light): a task is in the upload queue ONLY when someone
+  // has explicitly set its upload date (tasks.upload_due_date, migration 0210).
+  // No auto-detection by task type — the specialist activates "موعد الرفع" per
+  // task. Execution-role assignments only ('agent' is the Odoo-synced specialist
+  // slot, 'specialist' the native one), not done, not archived.
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(`
-      id, title, status, stage, priority, due_date, planned_date,
-      created_from_template_item_id,
+      id, title, status, stage, priority, due_date, planned_date, upload_due_date,
       project:projects ( id, name, client:clients ( name ) ),
       service:services ( id, name, slug ),
       task_assignees!inner ( role_type, employee_id )
     `)
     .eq("organization_id", orgId)
-    .eq("task_assignees.role_type", "specialist")
+    .in("task_assignees.role_type", ["specialist", "agent"])
     .eq("task_assignees.employee_id", employeeId)
     .neq("stage", "done")
     .is("archived_at", null)
+    .not("upload_due_date", "is", null)
     .limit(500);
 
   if (error) throw error;
   if (!data || data.length === 0) return [];
-
-  // Look up upload offsets for the referenced template items in one shot.
-  const templateItemIds = Array.from(
-    new Set(
-      data
-        .map((t) => t.created_from_template_item_id)
-        .filter((v): v is string => !!v),
-    ),
-  );
-  const offsetByItemId = new Map<string, number | null>();
-  if (templateItemIds.length > 0) {
-    const { data: tti, error: ttiErr } = await supabaseAdmin
-      .from("task_template_items")
-      .select("id, upload_offset_days_before_deadline")
-      .in("id", templateItemIds);
-    if (ttiErr) throw ttiErr;
-    for (const row of tti ?? []) {
-      offsetByItemId.set(row.id, row.upload_offset_days_before_deadline);
-    }
-  }
 
   // Use Asia/Riyadh "today" so bucket boundaries match the cron in 0016.
   const today = ksaToday();
@@ -81,18 +64,9 @@ async function _listMyUploadQueue(
     const project = Array.isArray(t.project) ? t.project[0] : t.project;
     const clientRaw = project?.client && (Array.isArray(project.client) ? project.client[0] : project.client);
     const service = Array.isArray(t.service) ? t.service[0] : t.service;
-    const offset = t.created_from_template_item_id
-      ? (offsetByItemId.get(t.created_from_template_item_id) ?? null)
-      : null;
+    if (!t.upload_due_date) continue; // guard (query already filters)
 
-    const deadline = t.due_date ?? t.planned_date;
-    if (!deadline) continue; // can't compute upload date without a deadline
-
-    const deadlineDate = parseDateOnly(deadline);
-    const uploadDue = offset != null
-      ? new Date(deadlineDate.getTime() - offset * dayMs)
-      : deadlineDate;
-
+    const uploadDue = parseDateOnly(t.upload_due_date);
     const daysDelta = Math.round((uploadDue.getTime() - todayMs) / dayMs);
 
     let bucket: UploadBucket;
@@ -110,7 +84,7 @@ async function _listMyUploadQueue(
       due_date: t.due_date,
       planned_date: t.planned_date,
       upload_due_date: toIsoDateOnly(uploadDue),
-      upload_offset_days: offset,
+      upload_offset_days: null,
       days_delta: daysDelta,
       bucket,
       project: project ? {

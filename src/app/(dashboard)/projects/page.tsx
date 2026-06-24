@@ -11,7 +11,8 @@ import {
   Tags,
 } from "lucide-react";
 import Link from "next/link";
-import { requirePagePermission } from "@/lib/auth-server";
+import { requirePagePermission, getDashboardScope } from "@/lib/auth-server";
+import { getAgentProjectScopeIds } from "@/lib/data/viewer-scope";
 import {
   getProjectSmartBadgeData,
   getProjectTotals,
@@ -101,8 +102,16 @@ export default async function ProjectsPage({
   const searchFacets = decodeProjectFacets(
     typeof sp.sf === "string" ? sp.sf : null,
   );
+  // Agent migration scope: agents only see projects they're assigned in or
+  // follow; managers/heads/owner see all.
+  const scope = await getDashboardScope(session);
+  const restrictToProjectIds =
+    scope.kind === "agent"
+      ? await getAgentProjectScopeIds(session.orgId, session.employeeId, session.userId)
+      : null;
   const { rows: projects, total } = await listProjectsPaged({
     organizationId: session.orgId,
+    restrictToProjectIds,
     page: 1,
     pageSize: PAGE_SIZE,
     includeTotals: false,
@@ -131,8 +140,9 @@ export default async function ProjectsPage({
         description="كل مشاريع الوكالة، العملاء، فريق التنفيذ، وعدد المهام."
       />
 
-      {/* Analytics overview */}
-      {total > 0 ? (
+      {/* Analytics overview — org-wide KPIs, hidden for agents (view-only,
+          scoped to their own projects). */}
+      {total > 0 && scope.kind !== "agent" ? (
         <Suspense fallback={<ProjectsOverviewBadgesSkeleton />}>
           <ProjectsOverviewBadges total={total} orgId={session.orgId} searchParams={sp} />
         </Suspense>

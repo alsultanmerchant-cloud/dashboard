@@ -262,7 +262,9 @@ export function DashboardShell({
 
             <RightRail />
 
-            {!isAgentPage && (
+            {/* AI Copilot is owner-only (the /agent API rejects non-owners) —
+                only show the launcher to owners. */}
+            {!isAgentPage && initialUser.isOwner && (
               <AIChatFAB onClick={() => router.push("/agent")} />
             )}
             <DeferredDashboardSelectionAssistant />

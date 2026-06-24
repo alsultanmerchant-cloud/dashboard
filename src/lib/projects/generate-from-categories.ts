@@ -120,6 +120,10 @@ export async function generateTasksFromCategories(args: {
     priority: g.priority,
     due_date: g.deadline,
     planned_date: g.deadline,
+    // Template upload offset → concrete upload date on the generated task, so
+    // it lands in the specialist's /uploads queue. null when the template item
+    // has no upload offset (the task simply has no upload date).
+    upload_due_date: g.uploadDue,
     created_from_template_item_id: g.templateItemId ?? null,
     created_by: args.createdByUserId ?? null,
     status: "todo" as const,

@@ -164,7 +164,14 @@ export function TodayPriorities({
                       <Link href={`/tasks/${it.taskId}`} className="text-sm font-semibold hover:text-cyan">
                         {cleanTaskTitle(it.title)}
                       </Link>
-                      {it.taskCode ? (
+                      {it.projectName ? (
+                        <span
+                          className="max-w-[14rem] truncate rounded bg-cyan-dim px-1.5 py-0.5 text-[10px] text-cyan"
+                          title={it.taskCode ? `${it.projectName} · ${it.taskCode}` : it.projectName}
+                        >
+                          {it.projectName}
+                        </span>
+                      ) : it.taskCode ? (
                         <span className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-foreground/70 ltr">
                           {it.taskCode}
                         </span>

@@ -3,8 +3,9 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { AlertTriangle } from "lucide-react";
-import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import { AlertTriangle, Eye, ExternalLink } from "lucide-react";
+import { requirePagePermission, hasPermission, getDashboardScope } from "@/lib/auth-server";
+import { rwasemTaskUrl } from "@/lib/rwasem";
 import { getTaskSummary } from "@/lib/data/tasks";
 import { getTaskActivityFeed } from "@/lib/data/task-activity";
 import {
@@ -19,6 +20,7 @@ import { SectionTitle } from "@/components/section-title";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import type { TaskStage } from "@/lib/labels";
+import { TASK_STATUS_LABELS, type TaskStatus } from "@/lib/labels";
 import { TaskStatusSelect } from "../task-status-select";
 import { TaskStarToggle } from "./task-star-toggle";
 import { TaskPriorityStar } from "./task-priority-star";
@@ -154,7 +156,18 @@ export default async function TaskDetailPage({
     positions.map((p) => [p.slug, p.role]),
   );
   const hasOpenException = (openExc ?? []).length > 0;
-  const canOpenException = hasPermission(session, "exception.open");
+
+  // Migration phase: agents (specialists) use this dashboard for visibility only
+  // — every in-task action is disabled so they don't work here instead of
+  // Rwasem. Managers/heads/owner keep full edit. A "افتح في رواسم" deep-link
+  // is offered instead. Keyed off the dashboard scope (kind 'agent').
+  const viewOnly = (await getDashboardScope(session)).kind === "agent";
+  const rwasemUrl = rwasemTaskUrl(
+    (task as { external_id?: string | null }).external_id ?? null,
+    (task as { external_source?: string | null }).external_source ?? null,
+  );
+
+  const canOpenException = !viewOnly && hasPermission(session, "exception.open");
 
   const roleSlots = (task.task_assignees ?? [])
     .map((ta) => {
@@ -301,8 +314,29 @@ export default async function TaskDetailPage({
             }
             return m;
           })()}
+          readOnly={viewOnly}
         />
       </div>
+
+      {viewOnly && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan/30 bg-cyan-dim/40 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <Eye className="size-4 shrink-0 text-cyan" />
+            <span>{t("viewOnly.notice")}</span>
+          </div>
+          {rwasemUrl && (
+            <a
+              href={rwasemUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-cyan px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-cyan/90"
+            >
+              <ExternalLink className="size-3.5" />
+              {t("viewOnly.openInRwasem")}
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Odoo-style form header — ★ favorite, project/code line, title, and
           the kanban-state button on the right. No badges/stat panel: stage
@@ -335,16 +369,25 @@ export default async function TaskDetailPage({
               <h1 className="text-2xl font-semibold leading-tight text-foreground text-pretty">
                 {task.title}
               </h1>
-              {/* §TASK-INFO-2 — Odoo's inline "High priority" star. */}
-              <TaskPriorityStar
-                taskId={task.id}
-                initialPriority={(task.priority as "low" | "medium" | "high") ?? "medium"}
-              />
+              {/* §TASK-INFO-2 — Odoo's inline "High priority" star. Hidden in
+                  view-only mode (it mutates priority). */}
+              {!viewOnly && (
+                <TaskPriorityStar
+                  taskId={task.id}
+                  initialPriority={(task.priority as "low" | "medium" | "high") ?? "medium"}
+                />
+              )}
             </div>
           </div>
         </div>
         <div className="shrink-0">
-          <TaskStatusSelect taskId={task.id} currentStatus={task.status} />
+          {viewOnly ? (
+            <span className="inline-flex items-center rounded-lg border border-soft bg-soft px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {TASK_STATUS_LABELS[task.status as TaskStatus] ?? task.status}
+            </span>
+          ) : (
+            <TaskStatusSelect taskId={task.id} currentStatus={task.status} />
+          )}
         </div>
       </div>
 
@@ -358,14 +401,16 @@ export default async function TaskDetailPage({
           }))}
           tags={taskTags}
           canEditCounts={
-            task.created_by === session.userId ||
-            hasPermission(session, "tasks.manage") ||
-            hasPermission(session, "task.view_all")
+            !viewOnly &&
+            (task.created_by === session.userId ||
+              hasPermission(session, "tasks.manage") ||
+              hasPermission(session, "task.view_all"))
           }
           canEditDeadline={
-            task.created_by === session.userId ||
-            hasPermission(session, "tasks.manage") ||
-            hasPermission(session, "task.view_all")
+            !viewOnly &&
+            (task.created_by === session.userId ||
+              hasPermission(session, "tasks.manage") ||
+              hasPermission(session, "task.view_all"))
           }
           locale={locale}
         />
@@ -407,6 +452,7 @@ export default async function TaskDetailPage({
         </Card>
       )}
 
+      {!viewOnly && (
       <div className="mb-6">
         <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.approvals")}</CardContent></Card>}>
           <TaskApprovalSection
@@ -422,13 +468,15 @@ export default async function TaskDetailPage({
             approvalRequestedAt={(task as { approval_requested_at?: string | null }).approval_requested_at ?? null}
             approvalDecidedAt={(task as { approval_decided_at?: string | null }).approval_decided_at ?? null}
             canManage={
-              task.created_by === session.userId ||
-              hasPermission(session, "tasks.manage") ||
-              hasPermission(session, "task.view_all")
+              !viewOnly &&
+              (task.created_by === session.userId ||
+                hasPermission(session, "tasks.manage") ||
+                hasPermission(session, "task.view_all"))
             }
           />
         </Suspense>
       </div>
+      )}
 
       {(() => {
         // Stage-owner widget: shows whose POSITION owns the current stage
@@ -520,9 +568,10 @@ export default async function TaskDetailPage({
         title={t("sections.assignees.title")}
         description={t("sections.assignees.description")}
         actions={
-          task.created_by === session.userId ||
-          hasPermission(session, "tasks.manage") ||
-          hasPermission(session, "task.view_all") ? (
+          !viewOnly &&
+          (task.created_by === session.userId ||
+            hasPermission(session, "tasks.manage") ||
+            hasPermission(session, "task.view_all")) ? (
             <TaskStageOwnerEditor
               taskId={task.id}
               positions={positions.map((p) => ({ slug: p.slug, name: p.name }))}
@@ -541,9 +590,10 @@ export default async function TaskDetailPage({
               orgId={session.orgId}
               taskId={task.id}
               canManage={
-                task.created_by === session.userId ||
-                hasPermission(session, "tasks.manage") ||
-                hasPermission(session, "task.view_all")
+                !viewOnly &&
+                (task.created_by === session.userId ||
+                  hasPermission(session, "tasks.manage") ||
+                  hasPermission(session, "task.view_all"))
               }
               currentStage={task.stage ?? null}
               stageOwnerPositions={
@@ -643,9 +693,10 @@ export default async function TaskDetailPage({
               projectId={(task as { project_id?: string | null }).project_id ?? null}
               currentUserId={session.userId}
               canManage={
-                task.created_by === session.userId ||
-                hasPermission(session, "task.view_all") ||
-                hasPermission(session, "task.manage_followers")
+                !viewOnly &&
+                (task.created_by === session.userId ||
+                  hasPermission(session, "task.view_all") ||
+                  hasPermission(session, "task.manage_followers"))
               }
             />
           </Suspense>
@@ -662,8 +713,9 @@ export default async function TaskDetailPage({
             currentStage={task.stage}
             description={task.description ?? null}
             activeTab={activeTab}
-            canManageTasks={hasPermission(session, "tasks.manage")}
-            canEnterTimesheets={!!session.employeeId}
+            canManageTasks={!viewOnly && hasPermission(session, "tasks.manage")}
+            viewOnly={viewOnly}
+            canEnterTimesheets={!viewOnly && !!session.employeeId}
             projectId={(task as { project_id?: string | null }).project_id ?? null}
           />
         </Suspense>
@@ -1137,6 +1189,8 @@ function TaskFormSection({
         completed_at: task.completed_at ?? null,
         actual_done_date:
           (task as { actual_done_date?: string | null }).actual_done_date ?? null,
+        upload_due_date:
+          (task as { upload_due_date?: string | null }).upload_due_date ?? null,
         allocated_time_minutes:
           (task as { allocated_time_minutes?: number | null }).allocated_time_minutes ?? null,
         progress_percent:
@@ -1219,6 +1273,7 @@ async function TaskTabPanelSection({
   canManageTasks,
   canEnterTimesheets,
   projectId,
+  viewOnly,
 }: {
   orgId: string;
   taskId: string;
@@ -1229,6 +1284,7 @@ async function TaskTabPanelSection({
   canManageTasks: boolean;
   canEnterTimesheets: boolean;
   projectId: string | null;
+  viewOnly: boolean;
 }) {
   const t = await getTranslations("TaskDetailPage");
 
@@ -1539,13 +1595,15 @@ async function TaskTabPanelSection({
       <Suspense fallback={<Card><CardContent className="p-4 text-sm text-muted-foreground">{t("loading.activityFeed")}</CardContent></Card>}>
         <TaskActivityFeedSection orgId={orgId} taskId={taskId} />
       </Suspense>
-      <Suspense fallback={null}>
-        <TaskCommentComposerSection
-          orgId={orgId}
-          taskId={taskId}
-          currentStage={currentStage}
-        />
-      </Suspense>
+      {!viewOnly && (
+        <Suspense fallback={null}>
+          <TaskCommentComposerSection
+            orgId={orgId}
+            taskId={taskId}
+            currentStage={currentStage}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

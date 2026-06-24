@@ -240,6 +240,9 @@ function TemplateDetail({
                         offset_days_from_project_start:
                           it.offset_days_from_project_start,
                         duration_days: it.duration_days,
+                        upload_offset_days_before_deadline:
+                          (it as { upload_offset_days_before_deadline?: number | null })
+                            .upload_offset_days_before_deadline ?? null,
                         priority: it.priority,
                         stage_owner_positions:
                           (it as {

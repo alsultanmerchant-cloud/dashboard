@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession, hasPermission } from "@/lib/auth-server";
+import { getServerSession, hasPermission, getDashboardScope } from "@/lib/auth-server";
+import { applyAgentTaskScope } from "@/lib/data/viewer-scope";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { decodeFilterFromUrl } from "@/lib/custom-filter/url-state";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
@@ -87,6 +88,17 @@ export async function GET(request: NextRequest) {
         ? []
         : (data ?? []).map((r) => r.id as string);
     }
+  }
+
+  // Agent scope: "load more" must stay restricted to the viewer's own tasks
+  // (assigned ∪ followed), mirroring the first-page scope in the Tasks page.
+  const scope = await getDashboardScope(session);
+  if (scope.kind === "agent") {
+    filters.customFilterTaskIds = await applyAgentTaskScope(
+      session.orgId,
+      filters.customFilterTaskIds ?? null,
+      { employeeId: session.employeeId, userId: session.userId },
+    );
   }
 
   const mode = sp.get("mode") === "board" ? "board" : "list";

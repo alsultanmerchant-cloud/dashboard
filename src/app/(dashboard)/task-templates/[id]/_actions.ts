@@ -83,6 +83,15 @@ const CreateItemSchema = z.object({
     .transform((v) => v ?? null),
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
   duration_days: z.coerce.number().int().min(0).max(3650),
+  // Upload deadline = deadline − this many days. null = task has no upload.
+  upload_offset_days_before_deadline: z
+    .number()
+    .int()
+    .min(0)
+    .max(3650)
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
   stage_sla_overrides: StageSlaMapSchema,
@@ -100,6 +109,7 @@ export async function createTaskTemplateItemAction(input: {
   default_department_id?: string | null;
   offset_days_from_project_start: number;
   duration_days: number;
+  upload_offset_days_before_deadline?: number | null;
   priority?: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions?: Record<string, string | null> | null;
   stage_sla_overrides?: Record<string, number | null> | null;
@@ -119,6 +129,8 @@ export async function createTaskTemplateItemAction(input: {
     default_department_id: input.default_department_id ?? null,
     offset_days_from_project_start: input.offset_days_from_project_start,
     duration_days: input.duration_days,
+    upload_offset_days_before_deadline:
+      input.upload_offset_days_before_deadline ?? null,
     priority: input.priority ?? "medium",
     stage_owner_positions: input.stage_owner_positions ?? undefined,
     stage_sla_overrides: input.stage_sla_overrides ?? undefined,
@@ -166,6 +178,7 @@ export async function createTaskTemplateItemAction(input: {
       default_department_id: parsed.data.default_department_id,
       offset_days_from_project_start: parsed.data.offset_days_from_project_start,
       duration_days: parsed.data.duration_days,
+      upload_offset_days_before_deadline: parsed.data.upload_offset_days_before_deadline,
       priority: parsed.data.priority,
       order_index: nextOrder,
       ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
@@ -220,6 +233,14 @@ const UpdateItemSchema = z.object({
     .transform((v) => v ?? null),
   offset_days_from_project_start: z.coerce.number().int().min(0).max(3650),
   duration_days: z.coerce.number().int().min(0).max(3650),
+  upload_offset_days_before_deadline: z
+    .number()
+    .int()
+    .min(0)
+    .max(3650)
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
   priority: z.enum(PRIORITY_KEYS).default("medium"),
   stage_owner_positions: StageOwnerMapSchema,
   stage_sla_overrides: StageSlaMapSchema,
@@ -233,6 +254,7 @@ export async function updateTaskTemplateItemAction(input: {
   default_department_id?: string | null;
   offset_days_from_project_start: number;
   duration_days: number;
+  upload_offset_days_before_deadline?: number | null;
   priority?: (typeof PRIORITY_KEYS)[number];
   stage_owner_positions?: Record<string, string | null> | null;
   stage_sla_overrides?: Record<string, number | null> | null;
@@ -252,6 +274,8 @@ export async function updateTaskTemplateItemAction(input: {
     default_department_id: input.default_department_id ?? null,
     offset_days_from_project_start: input.offset_days_from_project_start,
     duration_days: input.duration_days,
+    upload_offset_days_before_deadline:
+      input.upload_offset_days_before_deadline ?? null,
     priority: input.priority ?? "medium",
     stage_owner_positions: input.stage_owner_positions ?? undefined,
     stage_sla_overrides: input.stage_sla_overrides ?? undefined,
@@ -287,6 +311,7 @@ export async function updateTaskTemplateItemAction(input: {
       default_department_id: parsed.data.default_department_id,
       offset_days_from_project_start: parsed.data.offset_days_from_project_start,
       duration_days: parsed.data.duration_days,
+      upload_offset_days_before_deadline: parsed.data.upload_offset_days_before_deadline,
       priority: parsed.data.priority,
       ...(stageOwners ? { stage_owner_positions: stageOwners } : {}),
       ...(stageSla ? { stage_sla_overrides: stageSla } : {}),

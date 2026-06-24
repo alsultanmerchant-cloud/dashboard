@@ -224,5 +224,74 @@ export async function listMyTaskDeadlines(
       created_at: due ?? "",
     });
   }
+
+  // Also include tasks the employee COMPLETED in the last 30 days. The open
+  // query above filters out stage=done, so finished work never appeared and
+  // the "مكتملة (آخر 30 يوم)" tile read 0 even when Odoo showed June closures
+  // (Sky Light feedback). `actual_done_date` (0059) is populated on every done
+  // task — the most reliable completion date — so we land them on the calendar
+  // on their completion day with a ✓ and count them as completed.
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 30);
+  const cutoffYmd = cutoffDate.toISOString().slice(0, 10);
+
+  const { data: doneData, error: doneError } = await supabaseAdmin
+    .from("task_assignees")
+    .select(`
+      task:tasks!inner (
+        id,
+        task_code,
+        title,
+        completed_at,
+        actual_done_date,
+        archived_at,
+        project_id,
+        project:projects ( id, name, status )
+      )
+    `)
+    .eq("organization_id", orgId)
+    .eq("employee_id", employeeId)
+    .eq("task.stage", "done")
+    .is("task.archived_at", null)
+    .gte("task.actual_done_date", cutoffYmd)
+    .limit(500);
+
+  if (doneError) throw doneError;
+
+  for (const r of doneData ?? []) {
+    const t = (Array.isArray(r.task) ? r.task[0] : r.task) as
+      | {
+          id: string;
+          task_code: string | null;
+          title: string;
+          completed_at: string | null;
+          actual_done_date: string | null;
+          project_id: string | null;
+          project: unknown;
+        }
+      | null;
+    if (!t || seen.has(t.id)) continue;
+    const rawProject = (t.project ?? null) as unknown;
+    const project = Array.isArray(rawProject)
+      ? ((rawProject[0] ?? null) as { id: string; name: string; status: string } | null)
+      : (rawProject as { id: string; name: string; status: string } | null);
+    if (project && project.status === "archived") continue;
+    seen.add(t.id);
+    const doneOn = t.actual_done_date ?? (t.completed_at ? t.completed_at.slice(0, 10) : null);
+    rows.push({
+      id: `task-${t.id}`,
+      task_id: t.id,
+      task_code: t.task_code ?? null,
+      task_title: t.title ?? "—",
+      project_id: project?.id ?? null,
+      project_name: project?.name ?? null,
+      activity_type: "task",
+      summary: t.title ?? "—",
+      due_date: doneOn,
+      completed_at: t.completed_at ?? (doneOn ? `${doneOn}T00:00:00+00:00` : null),
+      created_at: doneOn ?? "",
+    });
+  }
+
   return rows;
 }
