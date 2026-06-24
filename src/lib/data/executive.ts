@@ -552,12 +552,30 @@ export interface ServiceHealthRow {
   includesRenewals?: boolean;
 }
 
-// Strip the "Renewal " / "renewal " prefix that the sheet writes for contracts
-// where a client is in their first month or renewing. "Renewal Social Media"
-// and "Social Media" are the same service type; we group them together so the
-// health section doesn't show double rows.
-function baseServiceName(name: string): string {
-  return name.replace(/^renewal\s+/i, "").trim();
+// Service names from the sheet carry a leading colour emoji (🔵, 🟠, 🟢, ⚪…)
+// and a "Renewal " / "Renewal of " prefix for contracts where the client is in
+// their first month or renewing. "🔵Renewal Social Media" and "🔵Social Media"
+// are the SAME service type — only the contract phase differs — so we group them
+// together and the health section shows one row per service, not double.
+//
+// serviceGroupKey() is the merge key: it drops the leading emoji/symbols AND the
+// Renewal prefix and lowercases, so all variants of a service collapse to one key.
+function serviceGroupKey(name: string): string {
+  return name
+    .replace(/^[^\p{L}\p{N}]+/u, "") // leading emoji / symbols
+    .replace(/^renewal\s+(of\s+)?/i, "") // "Renewal " / "Renewal of "
+    .trim()
+    .toLowerCase();
+}
+
+// True when the name is the Renewal variant (after any leading emoji).
+function isRenewalName(name: string): boolean {
+  return /^[^\p{L}\p{N}]*\s*renewal\s+/iu.test(name);
+}
+
+// Human display name: keep the leading emoji, drop the Renewal word that follows.
+function displayServiceName(name: string): string {
+  return name.replace(/^([^\p{L}\p{N}]*)renewal\s+(of\s+)?/iu, "$1").trim();
 }
 
 async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]> {
@@ -698,14 +716,15 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
     };
   });
 
-  // Group by canonical (base) name. The first non-Renewal row wins for serviceId/slug.
+  // Group by canonical key (emoji- and Renewal-stripped). The non-Renewal row
+  // wins for the display name / serviceId / slug used to link the row.
   const grouped = new Map<string, RawRow>();
   for (const row of rawRows) {
-    const base = baseServiceName(row.name);
-    const isRenewal = base !== row.name;
-    const existing = grouped.get(base);
+    const key = serviceGroupKey(row.name);
+    const isRenewal = isRenewalName(row.name);
+    const existing = grouped.get(key);
     if (!existing) {
-      grouped.set(base, { ...row, name: base, includesRenewals: isRenewal });
+      grouped.set(key, { ...row, name: displayServiceName(row.name), includesRenewals: isRenewal });
     } else {
       // Merge stats into the existing canonical row.
       existing.openCount += row.openCount;
@@ -720,8 +739,9 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
         existing._dailyTotals[i].total += row._dailyTotals[i].total;
         existing._dailyTotals[i].onTime += row._dailyTotals[i].onTime;
       }
-      // Prefer the non-Renewal row's serviceId/slug for linking.
+      // Prefer the non-Renewal row's display name + serviceId/slug for linking.
       if (!isRenewal) {
+        existing.name = displayServiceName(row.name);
         existing.serviceId = row.serviceId;
         existing.slug = row.slug;
       }

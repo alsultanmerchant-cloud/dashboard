@@ -53,6 +53,7 @@ import {
 } from "@/lib/custom-filter/url-state";
 import { formatFilterTree } from "@/lib/custom-filter/format-pill";
 import type { FilterTree } from "@/lib/custom-filter/types";
+import { TASK_STAGES } from "@/lib/labels";
 
 type FilterKey =
   | "open"
@@ -284,6 +285,18 @@ export function SmartSearchBar({
   const facetFieldLabel = useCallback(
     (field: FacetField) => t(`facets.fields.${field}`),
     [t],
+  );
+  // Stage facets arriving from the executive dashboard drill-downs carry the
+  // raw stage enum (e.g. "client_changes") as their value. Render the
+  // localized stage label in the chip instead of the bare enum; leave
+  // free-text facet values (title/assignee/…) untouched.
+  const tStages = useTranslations("TasksBoard");
+  const facetValueLabel = useCallback(
+    (field: FacetField, value: string) =>
+      field === "stage" && (TASK_STAGES as readonly string[]).includes(value)
+        ? tStages(`stages.${value}`)
+        : value,
+    [tStages],
   );
   const monthFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
@@ -668,12 +681,12 @@ export function SmartSearchBar({
               {facetFieldLabel(facet.field)}
             </span>
             <span className="flex h-full items-center gap-1.5 bg-white px-2.5 text-primary rtl:flex-row-reverse">
-              <span className="max-w-[10rem] truncate">{facet.value}</span>
+              <span className="max-w-[10rem] truncate">{facetValueLabel(facet.field, facet.value)}</span>
               <button
                 type="button"
                 onClick={() => removeFacet(i)}
                 aria-label={t("aria.removeChip", {
-                  label: `${facetFieldLabel(facet.field)}: ${facet.value}`,
+                  label: `${facetFieldLabel(facet.field)}: ${facetValueLabel(facet.field, facet.value)}`,
                 })}
                 className="text-primary/60 hover:text-primary"
               >
