@@ -7,6 +7,7 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { OdooClient } from "./client";
 import { fetchOdooUsersWithAvatars, odooAvatarDataUrl } from "./avatars";
+import { syncStageHistory } from "./syncs/stage-history";
 import {
   OdooMany2one,
   OdooPartner,
@@ -25,9 +26,76 @@ const SOURCE = "odoo";
 const UNASSIGNED_CLIENT_NAME = "عميل غير محدد";
 const UNASSIGNED_CLIENT_EXTERNAL_ID = -1;
 
+// "full"        — re-pull everything + run delete-reconciliation (Odoo is the
+//                 source of truth). Used by the manual `sync:odoo` script and
+//                 the nightly cron, which is the only place stale/deleted rows
+//                 get reaped.
+// "incremental" — pull only rows changed since the stored watermark, skip the
+//                 reconciliation deletes (an incremental fetch never returns
+//                 the unchanged rows, so reconciliation would wipe them).
+export type SyncMode = "full" | "incremental";
+
+// Floor used the first time an incremental phase runs and no watermark exists
+// yet — pulls the full history once to bootstrap.
+const WATERMARK_FLOOR = "2000-01-01 00:00:00";
+// Re-query window subtracted from the stored write_date watermark. Covers rows
+// that were written during the previous run (after we read them) and clock
+// skew. Safe because every write is an idempotent upsert.
+const WATERMARK_OVERLAP_MINUTES = 10;
+
+// Subtract `minutes` and return Odoo's UTC-naive format ("YYYY-MM-DD HH:MM:SS")
+// for use in a domain filter. Accepts both Odoo-naive input (treated as UTC)
+// and Postgres timestamptz ISO ("...T...+00:00") — the watermark column round-
+// trips as the latter, the WATERMARK_FLOOR constant as the former.
+function odooDateMinus(input: string, minutes: number): string {
+  const trimmed = input.trim();
+  const hasTz = /[zZ]$|[+-]\d\d:?\d\d$/.test(trimmed);
+  const iso = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  const d = new Date(hasTz ? iso : `${iso}Z`);
+  d.setUTCMinutes(d.getUTCMinutes() - minutes);
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
+
+async function getWatermark(
+  ctx: ImportContext,
+  entityType: string,
+): Promise<{ lastWriteDate: string | null; lastMessageId: number | null }> {
+  const { data } = await supabaseAdmin
+    .from("sync_watermarks")
+    .select("last_write_date, last_message_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("entity_type", entityType)
+    .maybeSingle();
+  return {
+    lastWriteDate: (data?.last_write_date as string | null) ?? null,
+    lastMessageId:
+      data?.last_message_id != null ? Number(data.last_message_id) : null,
+  };
+}
+
+async function saveWatermark(
+  ctx: ImportContext,
+  entityType: string,
+  patch: { lastWriteDate?: string | null; lastMessageId?: number | null },
+): Promise<void> {
+  const row: Record<string, unknown> = {
+    organization_id: ctx.organizationId,
+    entity_type: entityType,
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.lastWriteDate !== undefined) row.last_write_date = patch.lastWriteDate;
+  if (patch.lastMessageId !== undefined) row.last_message_id = patch.lastMessageId;
+  const { error } = await supabaseAdmin
+    .from("sync_watermarks")
+    .upsert(row, { onConflict: "organization_id,entity_type" });
+  if (error) console.warn(`[odoo-import] save watermark ${entityType}: ${error.message}`);
+}
+
 export interface ImportContext {
   organizationId: string;
   odoo: OdooClient;
+  /** "full" re-pulls everything + reconciles deletes; "incremental" pulls deltas only. */
+  mode: SyncMode;
   /** Cache of Odoo id → Supabase uuid, populated as we go. */
   employeeIdMap: Map<number, string>;
   clientIdMap: Map<number, string>;
@@ -552,6 +620,165 @@ const ALLOWED_TARGETS = new Set([
   "renewed",
 ]);
 
+// Odoo project.project fields pulled for both the bulk import and the
+// single-project on-demand pull. One source of truth so they never diverge.
+const PROJECT_FIELDS = [
+  "id",
+  "name",
+  "active",
+  "write_date",
+  "sequence",
+  "partner_id",
+  "user_id",
+  "date_start",
+  "date",
+  "description",
+  "store_name",
+  "account_manager_id",
+  "social_specialist_id",
+  "media_specialist_id",
+  "seo_specialist_id",
+  "target",
+  "color",
+  "is_favorite",
+  "tag_ids",
+  "category_ids",
+  "favorite_user_ids",
+  "last_update_status",
+  "last_update_color",
+  "site_address",
+  "site_address_display",
+  "site_latitude",
+  "site_longitude",
+  "financial_info",
+  "total_progress",
+  "document_count",
+  "has_active_category",
+  "ks_project_start",
+  "ks_project_end",
+  "task_count",
+  "open_task_count",
+  "closed_task_count",
+  "privacy_visibility",
+];
+
+// Odoo project.task fields pulled for both the bulk import and the single-task
+// on-demand pull. One source of truth so they never diverge.
+const TASK_FIELDS = [
+  "id",
+  "name",
+  "active",
+  "write_date",
+  "sequence",
+  "project_id",
+  "stage_id",
+  "state",
+  "user_ids",
+  "date_deadline",
+  "create_date",
+  "date_end",
+  "description",
+  "priority",
+  "progress_percentage",
+  "expected_progress",
+  "progress_slip",
+  "category_id",
+  "date_assign",
+  "date_start",
+  "duration_days",
+  "current_stage_duration",
+  "working_days_open",
+  "working_days_close",
+  "duration_tracking",
+  "actual_done_date",
+  "delay_days",
+  "is_overdue",
+  "design_count",
+  "document_count",
+  "email_cc",
+  "tag_ids",
+  "ks_mark_important",
+];
+
+// Map an Odoo project.project → Supabase `projects` row. Shared by the bulk
+// importProjects loop and the single-project on-demand pull (syncOneProject)
+// so the field mapping (status, dates, specialists, counters) never drifts.
+// `clientUuid` is resolved by the caller (real partner or unassigned fallback).
+function buildProjectRow(
+  ctx: ImportContext,
+  p: OdooProject,
+  clientUuid: string,
+): Record<string, unknown> {
+  const projectManagerUuid =
+    p.user_id && ctx.employeeIdMap.get(p.user_id[0])
+      ? ctx.employeeIdMap.get(p.user_id[0])!
+      : null;
+  const accountManagerUuid =
+    p.account_manager_id && ctx.employeeIdMap.get(p.account_manager_id[0])
+      ? ctx.employeeIdMap.get(p.account_manager_id[0])!
+      : null;
+  const socialSpecialistUuid =
+    p.social_specialist_id && ctx.employeeIdMap.get(p.social_specialist_id[0])
+      ? ctx.employeeIdMap.get(p.social_specialist_id[0])!
+      : null;
+  const mediaSpecialistUuid =
+    p.media_specialist_id && ctx.employeeIdMap.get(p.media_specialist_id[0])
+      ? ctx.employeeIdMap.get(p.media_specialist_id[0])!
+      : null;
+  const seoSpecialistUuid =
+    p.seo_specialist_id && ctx.employeeIdMap.get(p.seo_specialist_id[0])
+      ? ctx.employeeIdMap.get(p.seo_specialist_id[0])!
+      : null;
+  const targetRaw = typeof p.target === "string" ? p.target : null;
+  const target = targetRaw && ALLOWED_TARGETS.has(targetRaw) ? targetRaw : null;
+  return {
+    organization_id: ctx.organizationId,
+    external_source: SOURCE,
+    external_id: p.id,
+    name: p.name,
+    sequence: typeof p.sequence === "number" ? p.sequence : 10,
+    client_id: clientUuid,
+    project_manager_employee_id: projectManagerUuid,
+    account_manager_employee_id: accountManagerUuid,
+    social_specialist_id: socialSpecialistUuid,
+    media_specialist_id: mediaSpecialistUuid,
+    seo_specialist_id: seoSpecialistUuid,
+    // Sky Light uses ks_project_start/end (Ksolves Gantt) as primary contract
+    // dates; date_start/date are filled on only a few projects. Prefer ks_*.
+    start_date:
+      (typeof p.ks_project_start === "string" && p.ks_project_start
+        ? p.ks_project_start.slice(0, 10)
+        : null) ?? nullable(p.date_start),
+    end_date:
+      (typeof p.ks_project_end === "string" && p.ks_project_end
+        ? p.ks_project_end.slice(0, 10)
+        : null) ?? nullable(p.date),
+    description: nullable(p.description),
+    // Only Odoo's `active` flag drives archive status.
+    status: p.active === false ? "archived" : "active",
+    priority: "medium",
+    store_name: nullable(p.store_name),
+    target,
+    color: typeof p.color === "number" ? p.color : 0,
+    is_favorite: Boolean(p.is_favorite),
+    last_update_status: nullable(p.last_update_status),
+    last_update_color: typeof p.last_update_color === "number" ? p.last_update_color : null,
+    site_address: nullable(p.site_address),
+    site_address_display: nullable(p.site_address_display),
+    site_latitude: typeof p.site_latitude === "number" ? p.site_latitude : null,
+    site_longitude: typeof p.site_longitude === "number" ? p.site_longitude : null,
+    financial_info: nullable(p.financial_info),
+    total_progress: typeof p.total_progress === "number" ? p.total_progress : 0,
+    document_count: typeof p.document_count === "number" ? p.document_count : 0,
+    has_active_category: Boolean(p.has_active_category),
+    // Mirror Odoo's "PRJ-" + lpad(odoo_id, 5, '0') code format.
+    project_code: `PRJ-${String(p.id).padStart(5, "0")}`,
+    odoo_task_count: typeof p.task_count === "number" ? p.task_count : null,
+    odoo_open_task_count: typeof p.open_task_count === "number" ? p.open_task_count : null,
+    odoo_closed_task_count: typeof p.closed_task_count === "number" ? p.closed_task_count : null,
+  };
+}
+
 async function importProjects(ctx: ImportContext): Promise<number> {
   // Pull both active and archived projects so the chatter on completed
   // engagements remains accessible in the dashboard. Archived rows get
@@ -560,55 +787,22 @@ async function importProjects(ctx: ImportContext): Promise<number> {
   // that were active when last synced and have since been deactivated.
   // The default Odoo ORM context applies `active_test=true` which would
   // otherwise drop archived rows even when the domain includes them.
+  // Incremental: pull only projects whose Odoo write_date advanced past the
+  // stored watermark (minus an overlap window). First incremental run with no
+  // watermark falls back to the floor, i.e. a full pull to bootstrap.
+  const projWm = ctx.mode === "incremental" ? await getWatermark(ctx, "projects") : null;
+  const projDomain: unknown[] = [["active", "in", [true, false]]];
+  if (ctx.mode === "incremental") {
+    const since = odooDateMinus(
+      projWm?.lastWriteDate ?? WATERMARK_FLOOR,
+      WATERMARK_OVERLAP_MINUTES,
+    );
+    projDomain.push(["write_date", ">", since]);
+  }
   const projects = await ctx.odoo.searchRead<OdooProject>(
     "project.project",
-    [["active", "in", [true, false]]],
-    [
-      "id",
-      "name",
-      "active",
-      "sequence",
-      "partner_id",
-      "user_id",
-      "date_start",
-      "date",
-      "description",
-      // Rwasem custom fields used by the projects list UI
-      "store_name",
-      "account_manager_id",
-      "social_specialist_id",
-      "media_specialist_id",
-      "seo_specialist_id",
-      "target",
-      "color",
-      "is_favorite",
-      "tag_ids",
-      "category_ids",
-      "favorite_user_ids",
-      "last_update_status",
-      "last_update_color",
-      // gap-fill from migration 0070
-      "site_address",
-      "site_address_display",
-      "site_latitude",
-      "site_longitude",
-      "financial_info",
-      "total_progress",
-      "document_count",
-      "has_active_category",
-      // Sky Light fills these in on every project; date_start/date are mostly blank.
-      "ks_project_start",
-      "ks_project_end",
-      // Odoo's computed task counters. We store these on the project row so
-      // the dashboard card mirrors Rwasem exactly (B5: count parity).
-      "task_count",
-      "open_task_count",
-      "closed_task_count",
-      // Rwasem operator list hides non-employee-visibility projects
-      // (the default "Internal" portal project, mostly). Read it so we
-      // can mirror the same archive behaviour locally.
-      "privacy_visibility",
-    ],
+    projDomain,
+    PROJECT_FIELDS,
     // active_test=false bypasses the implicit `active=true` filter Odoo
     // applies to every model with an `active` column.
     { limit: 5000, context: { active_test: false } },
@@ -626,89 +820,7 @@ async function importProjects(ctx: ImportContext): Promise<number> {
       clientUuid = await ensureUnassignedClient(ctx);
     }
 
-    // Odoo user_id is the project manager; account_manager_id is the
-    // separate Rwasem custom field. They were previously conflated.
-    const projectManagerUuid =
-      p.user_id && ctx.employeeIdMap.get(p.user_id[0])
-        ? ctx.employeeIdMap.get(p.user_id[0])!
-        : null;
-    const accountManagerUuid =
-      p.account_manager_id && ctx.employeeIdMap.get(p.account_manager_id[0])
-        ? ctx.employeeIdMap.get(p.account_manager_id[0])!
-        : null;
-    const socialSpecialistUuid =
-      p.social_specialist_id && ctx.employeeIdMap.get(p.social_specialist_id[0])
-        ? ctx.employeeIdMap.get(p.social_specialist_id[0])!
-        : null;
-    const mediaSpecialistUuid =
-      p.media_specialist_id && ctx.employeeIdMap.get(p.media_specialist_id[0])
-        ? ctx.employeeIdMap.get(p.media_specialist_id[0])!
-        : null;
-    const seoSpecialistUuid =
-      p.seo_specialist_id && ctx.employeeIdMap.get(p.seo_specialist_id[0])
-        ? ctx.employeeIdMap.get(p.seo_specialist_id[0])!
-        : null;
-
-    const targetRaw = typeof p.target === "string" ? p.target : null;
-    const target = targetRaw && ALLOWED_TARGETS.has(targetRaw) ? targetRaw : null;
-
-    const row = {
-      organization_id: ctx.organizationId,
-      external_source: SOURCE,
-      external_id: p.id,
-      name: p.name,
-      // Odoo's manual kanban-sort field — keeps the dashboard list order in
-      // sync with `project.project._order` = `sequence, name, id`.
-      sequence: typeof p.sequence === "number" ? p.sequence : 10,
-      client_id: clientUuid,
-      project_manager_employee_id: projectManagerUuid,
-      account_manager_employee_id: accountManagerUuid,
-      social_specialist_id: socialSpecialistUuid,
-      media_specialist_id: mediaSpecialistUuid,
-      seo_specialist_id: seoSpecialistUuid,
-      // Date fields: Sky Light uses ks_project_start/end (Ksolves Gantt
-      // addon) as their primary contract dates. date_start/date are
-      // filled on only 8/75 active projects. Prefer the ks_* values when
-      // present, fall back to the standard fields. ks_* are datetimes —
-      // slice to YYYY-MM-DD for our `date` column.
-      start_date:
-        (typeof p.ks_project_start === "string" && p.ks_project_start
-          ? p.ks_project_start.slice(0, 10)
-          : null) ?? nullable(p.date_start),
-      end_date:
-        (typeof p.ks_project_end === "string" && p.ks_project_end
-          ? p.ks_project_end.slice(0, 10)
-          : null) ?? nullable(p.date),
-      description: nullable(p.description),
-      // Mirror Odoo's archive flag. The earlier rule also archived any
-      // project with privacy_visibility != 'employees' (assumed to be just
-      // the demo "Internal" project), but the live Skylight tenant has
-      // ALL projects set to 'portal', so that rule hid everything from the
-      // operator list. Only Odoo's `active` flag drives archive status now.
-      status: p.active === false ? "archived" : "active",
-      priority: "medium",
-      store_name: nullable(p.store_name),
-      target,
-      color: typeof p.color === "number" ? p.color : 0,
-      is_favorite: Boolean(p.is_favorite),
-      last_update_status: nullable(p.last_update_status),
-      last_update_color: typeof p.last_update_color === "number" ? p.last_update_color : null,
-      // 0070 fields
-      site_address: nullable(p.site_address),
-      site_address_display: nullable(p.site_address_display),
-      site_latitude: typeof p.site_latitude === "number" ? p.site_latitude : null,
-      site_longitude: typeof p.site_longitude === "number" ? p.site_longitude : null,
-      financial_info: nullable(p.financial_info),
-      total_progress: typeof p.total_progress === "number" ? p.total_progress : 0,
-      document_count: typeof p.document_count === "number" ? p.document_count : 0,
-      has_active_category: Boolean(p.has_active_category),
-      // Sky Light's Odoo prints project_code as "PRJ-" + lpad(odoo_id, 5, '0').
-      // We mirror the same format so screenshots line up between systems.
-      project_code: `PRJ-${String(p.id).padStart(5, "0")}`,
-      odoo_task_count: typeof p.task_count === "number" ? p.task_count : null,
-      odoo_open_task_count: typeof p.open_task_count === "number" ? p.open_task_count : null,
-      odoo_closed_task_count: typeof p.closed_task_count === "number" ? p.closed_task_count : null,
-    };
+    const row = buildProjectRow(ctx, p, clientUuid);
     const { data, error } = await supabaseAdmin
       .from("projects")
       .upsert(row, {
@@ -734,6 +846,19 @@ async function importProjects(ctx: ImportContext): Promise<number> {
     imported++;
   }
 
+  // Advance the incremental watermark to the newest write_date we saw. If this
+  // run returned nothing new, keep the existing mark (don't regress).
+  if (ctx.mode === "incremental") {
+    const maxWriteDate = projects.reduce<string | null>((acc, p) => {
+      const wd = (p as { write_date?: string | false }).write_date;
+      return typeof wd === "string" && (!acc || wd > acc) ? wd : acc;
+    }, projWm?.lastWriteDate ?? null);
+    if (maxWriteDate) await saveWatermark(ctx, "projects", { lastWriteDate: maxWriteDate });
+    console.log(`[odoo-import] projects incremental: ${imported} changed`);
+    return imported;
+  }
+
+  // ── Reconciliation (full mode only) — Odoo is the source of truth ─────────
   // Archive any previously-imported project whose Odoo source has been
   // hard-deleted since the last sync. The `active=false` (archived) case is
   // now handled directly in the insert above; this only catches genuine
@@ -916,6 +1041,63 @@ async function loadStages(ctx: ImportContext): Promise<void> {
   for (const s of stages) ctx.stageNameById.set(s.id, s.name);
 }
 
+// Map an Odoo project.task → Supabase `tasks` row. Shared by the bulk
+// importTasks staging loop and the single-task on-demand pull (syncOneTask) so
+// the 30+ field mapping never drifts between the two paths. Does NOT set
+// task_code — the caller owns sequencing.
+function buildTaskRow(
+  ctx: ImportContext,
+  t: OdooTask,
+  projectUuid: string,
+): Record<string, unknown> {
+  const stageName = t.stage_id ? ctx.stageNameById.get(t.stage_id[0]) : "New";
+  // Odoo's `state` field is the source of truth for done-ness — independent of
+  // the kanban stage_id, so a task can be done while parked in any column.
+  const stage = t.state === "1_done" ? "done" : mapStageName(stageName);
+  const serviceUuid =
+    t.category_id ? ctx.serviceIdMap.get(t.category_id[0]) ?? null : null;
+  return {
+    organization_id: ctx.organizationId,
+    external_source: SOURCE,
+    external_id: t.id,
+    project_id: projectUuid,
+    service_id: serviceUuid,
+    title: t.name,
+    sequence: typeof t.sequence === "number" ? t.sequence : 10,
+    description: nullable(t.description),
+    stage,
+    planned_date: nullable(t.date_deadline),
+    progress_percent: t.progress_percentage ?? 0,
+    expected_progress_percent: t.expected_progress ?? 0,
+    progress_slip_percent: t.progress_slip ?? 0,
+    status: stage === "done" ? "done" : "in_progress",
+    priority: t.priority === "1" ? "high" : "medium",
+    completed_at: stage === "done" ? nullable(t.date_end) : null,
+    date_assign: nullable(t.date_assign),
+    start_date: nullable(t.date_start),
+    duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
+    current_stage_duration:
+      typeof t.current_stage_duration === "string" ? t.current_stage_duration : null,
+    working_days_open:
+      typeof t.working_days_open === "number" ? t.working_days_open : null,
+    working_days_close:
+      typeof t.working_days_close === "number" ? t.working_days_close : null,
+    duration_tracking:
+      t.duration_tracking && typeof t.duration_tracking === "object"
+        ? t.duration_tracking
+        : null,
+    actual_done_date:
+      typeof t.actual_done_date === "string" ? t.actual_done_date.slice(0, 10) : null,
+    delay_days: typeof t.delay_days === "number" ? t.delay_days : null,
+    is_overdue: typeof t.is_overdue === "boolean" ? t.is_overdue : null,
+    design_count: typeof t.design_count === "number" ? t.design_count : 0,
+    document_count: typeof t.document_count === "number" ? t.document_count : 0,
+    email_cc: nullable(t.email_cc),
+    is_important: t.ks_mark_important === true,
+    archived_at: t.active === false ? new Date().toISOString() : null,
+  };
+}
+
 async function importTasks(ctx: ImportContext): Promise<number> {
   await loadStages(ctx);
 
@@ -977,41 +1159,13 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   // Batch the project filter to keep each RPC well under Odoo's read timeout.
   // A single `project_id IN (76 ids)` request was returning >2 MB and timing
   // out on the Rwasem instance.
-  const TASK_FIELDS = [
-    "id",
-    "name",
-    "active",
-    "sequence",
-    "project_id",
-    "stage_id",
-    "state",
-    "user_ids",
-    "date_deadline",
-    "create_date",
-    "date_end",
-    "description",
-    "priority",
-    "progress_percentage",
-    "expected_progress",
-    "progress_slip",
-    "category_id",
-    // 0069 gap-fill
-    "date_assign",
-    "date_start",
-    "duration_days",
-    "current_stage_duration",
-    "working_days_open",
-    "working_days_close",
-    "duration_tracking",
-    "actual_done_date",
-    "delay_days",
-    "is_overdue",
-    "design_count",
-    "document_count",
-    "email_cc",
-    "tag_ids",
-    "ks_mark_important",
-  ];
+  // Incremental: restrict every batch to tasks changed since the watermark.
+  const taskWm = ctx.mode === "incremental" ? await getWatermark(ctx, "tasks") : null;
+  const taskSince =
+    ctx.mode === "incremental"
+      ? odooDateMinus(taskWm?.lastWriteDate ?? WATERMARK_FLOOR, WATERMARK_OVERLAP_MINUTES)
+      : null;
+
   const PROJECTS_PER_BATCH = 10;
   const tasks: OdooTask[] = [];
   // Odoo project ids whose task fetch succeeded — only these are eligible
@@ -1021,9 +1175,11 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   for (let i = 0; i < projectOdooIds.length; i += PROJECTS_PER_BATCH) {
     const slice = projectOdooIds.slice(i, i + PROJECTS_PER_BATCH);
     try {
+      const taskDomain: unknown[] = [["project_id", "in", slice]];
+      if (taskSince) taskDomain.push(["write_date", ">", taskSince]);
       const rows = await ctx.odoo.searchRead<OdooTask>(
         "project.task",
-        [["project_id", "in", slice]],
+        taskDomain,
         TASK_FIELDS,
         // active_test=false bypasses Odoo's implicit `active=true` filter so
         // archived tasks under archived projects flow through too.
@@ -1063,65 +1219,10 @@ async function importTasks(ctx: ImportContext): Promise<number> {
     const projectUuid = ctx.projectIdMap.get(t.project_id[0]);
     if (!projectUuid) continue;
 
-    const stageName = t.stage_id ? ctx.stageNameById.get(t.stage_id[0]) : "New";
-    // Odoo's `state` field is the source of truth for done-ness — it's
-    // independent of the kanban `stage_id`, so a task can be marked done
-    // (`state = '1_done'`) while parked in any column. Trust state first;
-    // fall back to the stage-name mapping for everything else.
-    const stage = t.state === "1_done" ? "done" : mapStageName(stageName);
-    const serviceUuid =
-      t.category_id ? ctx.serviceIdMap.get(t.category_id[0]) ?? null : null;
-
     stagedRows.push({
       odoo_id: t.id,
       projectUuid,
-      row: {
-        organization_id: ctx.organizationId,
-        external_source: SOURCE,
-        external_id: t.id,
-        project_id: projectUuid,
-        service_id: serviceUuid,
-        title: t.name,
-        // Odoo's manual kanban-sort field — keeps in-column card order in
-        // sync with Rwasem (`project.task._order` = sequence, deadline, …).
-        sequence: typeof t.sequence === "number" ? t.sequence : 10,
-        description: nullable(t.description),
-        stage,
-        planned_date: nullable(t.date_deadline),
-        progress_percent: t.progress_percentage ?? 0,
-        expected_progress_percent: t.expected_progress ?? 0,
-        progress_slip_percent: t.progress_slip ?? 0,
-        status: stage === "done" ? "done" : "in_progress",
-        priority: t.priority === "1" ? "high" : "medium",
-        completed_at: stage === "done" ? nullable(t.date_end) : null,
-        date_assign: nullable(t.date_assign),
-        start_date: nullable(t.date_start),
-        duration_days: typeof t.duration_days === "number" ? t.duration_days : null,
-        // Odoo's pre-formatted "Xd Yh Zm" string — shown verbatim on cards.
-        current_stage_duration:
-          typeof t.current_stage_duration === "string"
-            ? t.current_stage_duration
-            : null,
-        working_days_open:
-          typeof t.working_days_open === "number" ? t.working_days_open : null,
-        working_days_close:
-          typeof t.working_days_close === "number" ? t.working_days_close : null,
-        duration_tracking:
-          t.duration_tracking && typeof t.duration_tracking === "object"
-            ? t.duration_tracking
-            : null,
-        actual_done_date:
-          typeof t.actual_done_date === "string"
-            ? t.actual_done_date.slice(0, 10)
-            : null,
-        delay_days: typeof t.delay_days === "number" ? t.delay_days : null,
-        is_overdue: typeof t.is_overdue === "boolean" ? t.is_overdue : null,
-        design_count: typeof t.design_count === "number" ? t.design_count : 0,
-        document_count: typeof t.document_count === "number" ? t.document_count : 0,
-        email_cc: nullable(t.email_cc),
-        is_important: t.ks_mark_important === true,
-        archived_at: t.active === false ? new Date().toISOString() : null,
-      },
+      row: buildTaskRow(ctx, t, projectUuid),
       agentEmployeeIds: (Array.isArray(t.user_ids) ? t.user_ids : [])
         .map((uid) => ctx.odooUserToEmployee.get(uid))
         .filter((x): x is string => Boolean(x)),
@@ -1383,7 +1484,21 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   }
   console.log(`[odoo-import] task_tag_assignments inserted: ${tagsInserted}`);
 
-  // ── Reconciliation — Odoo is the source of truth ──────────────────────
+  // Advance the incremental watermark and skip delete-reconciliation: an
+  // incremental fetch only returns CHANGED tasks, so the "delete anything not
+  // in the result set" pass below would wipe every unchanged task. Deletions
+  // are reaped by the nightly full run instead.
+  if (ctx.mode === "incremental") {
+    const maxWriteDate = tasks.reduce<string | null>((acc, t) => {
+      const wd = (t as { write_date?: string | false }).write_date;
+      return typeof wd === "string" && (!acc || wd > acc) ? wd : acc;
+    }, taskWm?.lastWriteDate ?? null);
+    if (maxWriteDate) await saveWatermark(ctx, "tasks", { lastWriteDate: maxWriteDate });
+    console.log(`[odoo-import] tasks incremental: ${stagedRows.length} changed`);
+    return stagedRows.length;
+  }
+
+  // ── Reconciliation (full mode only) — Odoo is the source of truth ──────
   // Hard-delete dashboard task rows that should no longer exist:
   //   (a) Odoo-sourced tasks whose Odoo id was NOT returned this run — they
   //       were deleted/unlinked in Odoo. Scoped to projects whose task
@@ -1459,28 +1574,48 @@ async function importTasks(ctx: ImportContext): Promise<number> {
 
 // Mirror Odoo task chatter (mail.message) into task_comments so notes are
 // searchable and cached locally. Idempotent on (org, external_source, external_id).
-async function importTaskComments(ctx: ImportContext): Promise<number> {
+async function importTaskComments(
+  ctx: ImportContext,
+  opts: { onlyOdooTaskIds?: number[] } = {},
+): Promise<number> {
   // Build Odoo task id → Supabase task uuid map by hydrating from the DB.
   // Page through the task map: PostgREST caps a single select at ~1000 rows,
   // and there are far more synced tasks than that. Without paging, messages
   // for every task past the cap silently drop (their res_id never resolves).
+  // When opts.onlyOdooTaskIds is set (single-task on-demand pull) we scope to
+  // just those tasks instead of paging the whole table.
   const taskUuidByOdooId = new Map<number, string>();
-  const TASK_PAGE = 1000;
-  for (let from = 0; ; from += TASK_PAGE) {
+  if (opts.onlyOdooTaskIds && opts.onlyOdooTaskIds.length > 0) {
     const { data: taskRows } = await supabaseAdmin
       .from("tasks")
       .select("id, external_id")
       .eq("organization_id", ctx.organizationId)
       .eq("external_source", SOURCE)
-      .range(from, from + TASK_PAGE - 1);
-    if (!taskRows || taskRows.length === 0) break;
-    for (const r of taskRows) {
+      .in("external_id", opts.onlyOdooTaskIds.map(String));
+    for (const r of taskRows ?? []) {
       if (r.external_id != null) {
         const n = Number(r.external_id);
         if (Number.isFinite(n)) taskUuidByOdooId.set(n, r.id as string);
       }
     }
-    if (taskRows.length < TASK_PAGE) break;
+  } else {
+    const TASK_PAGE = 1000;
+    for (let from = 0; ; from += TASK_PAGE) {
+      const { data: taskRows } = await supabaseAdmin
+        .from("tasks")
+        .select("id, external_id")
+        .eq("organization_id", ctx.organizationId)
+        .eq("external_source", SOURCE)
+        .range(from, from + TASK_PAGE - 1);
+      if (!taskRows || taskRows.length === 0) break;
+      for (const r of taskRows) {
+        if (r.external_id != null) {
+          const n = Number(r.external_id);
+          if (Number.isFinite(n)) taskUuidByOdooId.set(n, r.id as string);
+        }
+      }
+      if (taskRows.length < TASK_PAGE) break;
+    }
   }
   if (taskUuidByOdooId.size === 0) return 0;
 
@@ -1529,11 +1664,18 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
   // newest notes vanish). Keyset-paginate on `id` (`id > lastId`) rather than
   // `offset` — deep offsets force Odoo/Postgres to scan and discard every
   // preceding row, which blows past the JSON-RPC timeout on a busy chunk.
+  // Incremental: mail.message is append-only with monotonically increasing
+  // ids, so a single global id watermark lets every chunk skip already-synced
+  // messages (`id > watermark`). Track the max id seen to advance it.
+  const tcWm = ctx.mode === "incremental" ? await getWatermark(ctx, "task_comments") : null;
+  const startId = tcWm?.lastMessageId ?? 0;
+  let maxSeenMsgId = startId;
+
   const MSG_PAGE = 2000;
   for (let i = 0; i < odooTaskIds.length; i += CHUNK) {
     const slice = odooTaskIds.slice(i, i + CHUNK);
     const messages: OdooMessage[] = [];
-    let lastId = 0;
+    let lastId = startId;
     for (;;) {
       const page = await ctx.odoo.searchRead<OdooMessage>(
         "mail.message",
@@ -1552,6 +1694,10 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
         { limit: MSG_PAGE, order: "id asc" },
       );
       messages.push(...page);
+      if (page.length > 0) {
+        const pageMax = page[page.length - 1].id;
+        if (pageMax > maxSeenMsgId) maxSeenMsgId = pageMax;
+      }
       if (page.length < MSG_PAGE) break;
       lastId = page[page.length - 1].id;
     }
@@ -1820,6 +1966,11 @@ async function importTaskComments(ctx: ImportContext): Promise<number> {
     }
   }
 
+  if (ctx.mode === "incremental" && maxSeenMsgId > startId) {
+    await saveWatermark(ctx, "task_comments", { lastMessageId: maxSeenMsgId });
+    console.log(`[odoo-import] task_comments incremental: ${imported} new, watermark→${maxSeenMsgId}`);
+  }
+
   return imported;
 }
 
@@ -1864,13 +2015,18 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
     attachment_ids: number[] | false;
   };
 
+  // Incremental: single global id watermark (append-only), same as task comments.
+  const pcWm = ctx.mode === "incremental" ? await getWatermark(ctx, "project_comments") : null;
+  const startId = pcWm?.lastMessageId ?? 0;
+  let maxSeenMsgId = startId;
+
   // Keyset-paginate messages so a busy chunk is neither truncated by a fixed
   // cap nor slowed by deep offsets.
   const MSG_PAGE = 2000;
   for (let i = 0; i < odooProjectIds.length; i += CHUNK) {
     const slice = odooProjectIds.slice(i, i + CHUNK);
     const messages: OdooMessage[] = [];
-    let lastId = 0;
+    let lastId = startId;
     for (;;) {
       const page = await ctx.odoo.searchRead<OdooMessage>(
         "mail.message",
@@ -1889,6 +2045,10 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
         { limit: MSG_PAGE, order: "id asc" },
       );
       messages.push(...page);
+      if (page.length > 0) {
+        const pageMax = page[page.length - 1].id;
+        if (pageMax > maxSeenMsgId) maxSeenMsgId = pageMax;
+      }
       if (page.length < MSG_PAGE) break;
       lastId = page[page.length - 1].id;
     }
@@ -2062,6 +2222,11 @@ async function importProjectComments(ctx: ImportContext): Promise<number> {
     }
   }
 
+  if (ctx.mode === "incremental" && maxSeenMsgId > startId) {
+    await saveWatermark(ctx, "project_comments", { lastMessageId: maxSeenMsgId });
+    console.log(`[odoo-import] project_comments incremental: ${imported} new, watermark→${maxSeenMsgId}`);
+  }
+
   return imported;
 }
 
@@ -2080,11 +2245,13 @@ export async function runImport(
   odoo: OdooClient,
   organizationSlug: string,
   phases: ImportPhase[] = ALL_IMPORT_PHASES,
+  mode: SyncMode = "full",
 ): Promise<ImportSummary> {
   const organizationId = await resolveOrganizationId(organizationSlug);
   const ctx: ImportContext = {
     organizationId,
     odoo,
+    mode,
     employeeIdMap: new Map(),
     clientIdMap: new Map(),
     projectIdMap: new Map(),
@@ -2188,6 +2355,402 @@ export async function runImport(
   return summary;
 }
 
+function newImportContext(organizationId: string, odoo: OdooClient): ImportContext {
+  return {
+    organizationId,
+    odoo,
+    mode: "full",
+    employeeIdMap: new Map(),
+    clientIdMap: new Map(),
+    projectIdMap: new Map(),
+    serviceIdMap: new Map(),
+    tagIdMap: new Map(),
+    departmentIdMap: new Map(),
+    stageNameById: new Map(),
+    unassignedClientId: null,
+    odooUserToEmployee: new Map(),
+    assigneeCount: 0,
+  };
+}
+
+// On-demand single-project pull (the "Pull from Rwasem" button on a project).
+// Refreshes that one project's row — status, dates, specialists, counters,
+// tags, services, members — without touching anything else.
+export async function syncOneProject(
+  odoo: OdooClient,
+  organizationSlug: string,
+  odooProjectId: number,
+): Promise<{ ok: boolean; error?: string; projectId?: string }> {
+  const organizationId = await resolveOrganizationId(organizationSlug);
+  const ctx = newImportContext(organizationId, odoo);
+  await hydrateExistingMaps(ctx);
+  // Tag + service maps drive the project's chip links.
+  try {
+    await importProjectTags(ctx);
+  } catch (e) {
+    console.warn(`syncOneProject tags: ${(e as Error).message}`);
+  }
+  try {
+    await importServices(ctx);
+  } catch (e) {
+    console.warn(`syncOneProject services: ${(e as Error).message}`);
+  }
+
+  const rows = await odoo.searchRead<OdooProject>(
+    "project.project",
+    [["id", "=", odooProjectId]],
+    PROJECT_FIELDS,
+    { context: { active_test: false } },
+  );
+  if (rows.length === 0) {
+    return { ok: false, error: `لم يُعثر على المشروع ${odooProjectId} في Rwasem` };
+  }
+  const p = rows[0];
+
+  let clientUuid: string | undefined;
+  if (p.partner_id) clientUuid = ctx.clientIdMap.get(p.partner_id[0]);
+  if (!clientUuid) clientUuid = await ensureUnassignedClient(ctx);
+
+  const { data, error } = await supabaseAdmin
+    .from("projects")
+    .upsert(buildProjectRow(ctx, p, clientUuid), {
+      onConflict: "organization_id,external_source,external_id",
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { ok: false, error: error?.message ?? "upsert failed" };
+  ctx.projectIdMap.set(p.id, data.id);
+
+  await syncProjectTagAssignments(ctx, data.id, Array.isArray(p.tag_ids) ? p.tag_ids : []);
+  await syncProjectServiceLinks(ctx, data.id, Array.isArray(p.category_ids) ? p.category_ids : []);
+  await syncProjectMembers(ctx, data.id, Array.isArray(p.favorite_user_ids) ? p.favorite_user_ids : []);
+
+  console.log(`[odoo-pull] project ${odooProjectId} → ${data.id}`);
+  return { ok: true, projectId: data.id };
+}
+
+// On-demand single-task pull (the "Pull from Rwasem" button on a task).
+// Refreshes the task record (stage/fields), its assignees, tags, comments and
+// stage-transition history — the things that actually change on a task.
+export async function syncOneTask(
+  odoo: OdooClient,
+  organizationSlug: string,
+  odooTaskId: number,
+): Promise<{ ok: boolean; error?: string; taskId?: string; comments?: number }> {
+  const organizationId = await resolveOrganizationId(organizationSlug);
+  const ctx = newImportContext(organizationId, odoo);
+  await hydrateExistingMaps(ctx);
+  await loadStages(ctx);
+  try {
+    await importProjectTags(ctx);
+  } catch (e) {
+    console.warn(`syncOneTask tags: ${(e as Error).message}`);
+  }
+
+  const rows = await odoo.searchRead<OdooTask>(
+    "project.task",
+    [["id", "=", odooTaskId]],
+    TASK_FIELDS,
+    { context: { active_test: false } },
+  );
+  if (rows.length === 0) {
+    return { ok: false, error: `لم يُعثر على المهمة ${odooTaskId} في Rwasem` };
+  }
+  const t = rows[0];
+  if (!t.project_id) return { ok: false, error: "المهمة بدون مشروع" };
+
+  // Parent project must be synced first so the task's project_id resolves.
+  let projectUuid = ctx.projectIdMap.get(t.project_id[0]);
+  if (!projectUuid) {
+    const pr = await syncOneProject(odoo, organizationSlug, t.project_id[0]);
+    if (!pr.ok || !pr.projectId) {
+      return { ok: false, error: `تعذّر مزامنة المشروع الأب: ${pr.error}` };
+    }
+    projectUuid = pr.projectId;
+    ctx.projectIdMap.set(t.project_id[0], projectUuid);
+  }
+
+  // Build the row; preserve existing task_code or assign the next per-project
+  // number (mirrors the sequencing in importTasks).
+  const row = buildTaskRow(ctx, t, projectUuid);
+  const { data: existing } = await supabaseAdmin
+    .from("tasks")
+    .select("task_code, code_seq")
+    .eq("organization_id", organizationId)
+    .eq("external_source", SOURCE)
+    .eq("external_id", String(odooTaskId))
+    .maybeSingle();
+  if (existing?.task_code) {
+    row.task_code = existing.task_code;
+    row.code_seq = existing.code_seq;
+  } else {
+    let maxNum = 0;
+    const { data: sib } = await supabaseAdmin
+      .from("tasks")
+      .select("task_code, code_seq")
+      .eq("organization_id", organizationId)
+      .eq("project_id", projectUuid);
+    for (const r of sib ?? []) {
+      const suffix = (r.task_code as string | null)?.match(/-(\d+)$/);
+      const num = Math.max(
+        typeof r.code_seq === "number" ? r.code_seq : 0,
+        suffix ? Number(suffix[1]) : 0,
+      );
+      if (num > maxNum) maxNum = num;
+    }
+    const { data: proj } = await supabaseAdmin
+      .from("projects")
+      .select("project_code")
+      .eq("id", projectUuid)
+      .maybeSingle();
+    const pcode = (proj?.project_code as string) ?? "PRJ-?";
+    row.task_code = `${pcode}-${String(maxNum + 1).padStart(3, "0")}`;
+    row.code_seq = maxNum + 1;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .upsert(row, { onConflict: "organization_id,external_source,external_id" })
+    .select("id")
+    .single();
+  if (error || !data) return { ok: false, error: error?.message ?? "upsert failed" };
+  const taskUuid = data.id as string;
+
+  // Assignees — wipe agents, re-insert from user_ids; AM from the project.
+  // team_manager_employee_id mirrors each employee's own قائد الفريق.
+  await supabaseAdmin
+    .from("task_assignees")
+    .delete()
+    .eq("task_id", taskUuid)
+    .eq("role_type", "agent");
+  const agentIds = (Array.isArray(t.user_ids) ? t.user_ids : [])
+    .map((uid) => ctx.odooUserToEmployee.get(uid))
+    .filter((x): x is string => Boolean(x));
+  const leaderByEmp = new Map<string, string | null>();
+  const { data: projRole } = await supabaseAdmin
+    .from("projects")
+    .select("account_manager_employee_id")
+    .eq("id", projectUuid)
+    .maybeSingle();
+  const amId = (projRole?.account_manager_employee_id as string | null) ?? null;
+  const leaderLookupIds = [...new Set([...agentIds, ...(amId ? [amId] : [])])];
+  if (leaderLookupIds.length > 0) {
+    const { data: lr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id, team_leader_employee_id")
+      .in("id", leaderLookupIds);
+    for (const r of lr ?? []) {
+      leaderByEmp.set(r.id as string, (r.team_leader_employee_id as string | null) ?? null);
+    }
+  }
+  const leaderFor = (eid: string): string | null => {
+    const l = leaderByEmp.get(eid) ?? null;
+    return l && l !== eid ? l : null;
+  };
+  const assigneeInserts: {
+    organization_id: string;
+    task_id: string;
+    employee_id: string;
+    role_type: "agent" | "account_manager";
+    team_manager_employee_id: string | null;
+  }[] = [];
+  for (const eid of agentIds) {
+    if (amId && eid === amId) continue;
+    assigneeInserts.push({
+      organization_id: organizationId,
+      task_id: taskUuid,
+      employee_id: eid,
+      role_type: "agent",
+      team_manager_employee_id: leaderFor(eid),
+    });
+  }
+  if (amId) {
+    const { data: hasAm } = await supabaseAdmin
+      .from("task_assignees")
+      .select("id")
+      .eq("task_id", taskUuid)
+      .eq("role_type", "account_manager")
+      .maybeSingle();
+    if (!hasAm) {
+      assigneeInserts.push({
+        organization_id: organizationId,
+        task_id: taskUuid,
+        employee_id: amId,
+        role_type: "account_manager",
+        team_manager_employee_id: leaderFor(amId),
+      });
+    }
+  }
+  if (assigneeInserts.length > 0) {
+    const { error: aerr } = await supabaseAdmin.from("task_assignees").insert(assigneeInserts);
+    if (aerr) console.warn(`syncOneTask assignees: ${aerr.message}`);
+  }
+
+  // Tags — wipe + re-insert.
+  await supabaseAdmin.from("task_tag_assignments").delete().eq("task_id", taskUuid);
+  const tagInserts = (Array.isArray(t.tag_ids) ? t.tag_ids : [])
+    .map((tid) => ctx.tagIdMap.get(tid))
+    .filter((x): x is string => Boolean(x))
+    .map((tagUuid) => ({
+      organization_id: organizationId,
+      task_id: taskUuid,
+      tag_id: tagUuid,
+    }));
+  if (tagInserts.length > 0) {
+    const { error: terr } = await supabaseAdmin.from("task_tag_assignments").insert(tagInserts);
+    if (terr) console.warn(`syncOneTask tags: ${terr.message}`);
+  }
+
+  // Comments + stage-transition history for this single task.
+  let comments = 0;
+  try {
+    comments = await importTaskComments(ctx, { onlyOdooTaskIds: [odooTaskId] });
+  } catch (e) {
+    console.warn(`syncOneTask comments: ${(e as Error).message}`);
+  }
+  try {
+    await syncStageHistory(odoo, organizationSlug, { onlyOdooTaskIds: [odooTaskId] });
+  } catch (e) {
+    console.warn(`syncOneTask stage-history: ${(e as Error).message}`);
+  }
+
+  console.log(`[odoo-pull] task ${odooTaskId} → ${taskUuid} (${comments} comments)`);
+  return { ok: true, taskId: taskUuid, comments };
+}
+
+// Lightweight delete-reconciliation, decoupled from the slow full re-import.
+//
+// The every-2h incremental runs upsert only CHANGED rows and never delete, so
+// rows hard-deleted in Odoo would linger forever. Running the old "full" import
+// nightly to catch them is not viable — re-upserting all 200 projects alone
+// takes ~20min (4 RPCs/project) and would time out on Vercel exactly like
+// before. Instead this fetches only Odoo's current id SETS (one cheap id-only
+// read per model) and removes orphans, which finishes in seconds.
+//
+//   • projects not in Odoo  → archived (chatter on deleted engagements is kept,
+//                             matching the full-mode behaviour).
+//   • tasks not in Odoo     → hard-deleted (child rows cascade).
+//   • native rows (external_source is null) → deleted; Odoo is authoritative.
+//
+// Guarded: if an Odoo id fetch fails, that model's deletes are skipped so a
+// transient read error can never wipe live data.
+export async function reconcileOdooDeletions(
+  odoo: OdooClient,
+  organizationSlug: string,
+): Promise<{
+  projectsArchived: number;
+  projectsDeleted: number;
+  tasksDeleted: number;
+  errors: string[];
+}> {
+  const organizationId = await resolveOrganizationId(organizationSlug);
+  const errors: string[] = [];
+  let projectsArchived = 0;
+  let projectsDeleted = 0;
+  let tasksDeleted = 0;
+  const DEL = 500;
+  const PAGE = 1000;
+
+  // ── Projects ───────────────────────────────────────────────────────────
+  try {
+    const odooProjects = await odoo.searchRead<{ id: number }>(
+      "project.project",
+      [["active", "in", [true, false]]],
+      ["id"],
+      { limit: 100000, context: { active_test: false } },
+    );
+    const liveIds = new Set(odooProjects.map((p) => p.id));
+    const staleIds: string[] = [];
+    const nativeIds: string[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await supabaseAdmin
+        .from("projects")
+        .select("id, external_id, external_source, status")
+        .eq("organization_id", organizationId)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!rows || rows.length === 0) break;
+      for (const r of rows) {
+        if (r.external_source == null) {
+          nativeIds.push(r.id as string);
+        } else if (r.external_source === SOURCE) {
+          const ext = r.external_id == null ? NaN : Number(r.external_id);
+          if ((!Number.isFinite(ext) || !liveIds.has(ext)) && r.status !== "archived") {
+            staleIds.push(r.id as string);
+          }
+        }
+      }
+      if (rows.length < PAGE) break;
+    }
+    for (let i = 0; i < staleIds.length; i += DEL) {
+      const { error } = await supabaseAdmin
+        .from("projects")
+        .update({ status: "archived" })
+        .in("id", staleIds.slice(i, i + DEL));
+      if (error) errors.push(`archive projects: ${error.message}`);
+      else projectsArchived += Math.min(DEL, staleIds.length - i);
+    }
+    for (let i = 0; i < nativeIds.length; i += DEL) {
+      const { error } = await supabaseAdmin
+        .from("projects")
+        .delete()
+        .in("id", nativeIds.slice(i, i + DEL));
+      if (error) errors.push(`delete native projects: ${error.message}`);
+      else projectsDeleted += Math.min(DEL, nativeIds.length - i);
+    }
+  } catch (e) {
+    errors.push(`projects reconcile skipped: ${(e as Error).message}`);
+  }
+
+  // ── Tasks ──────────────────────────────────────────────────────────────
+  try {
+    const odooTasks = await odoo.searchRead<{ id: number }>(
+      "project.task",
+      [],
+      ["id"],
+      { limit: 1000000, context: { active_test: false } },
+    );
+    const liveIds = new Set(odooTasks.map((t) => t.id));
+    const ghostIds: string[] = [];
+    const nativeIds: string[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id, external_id, external_source")
+        .eq("organization_id", organizationId)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!rows || rows.length === 0) break;
+      for (const r of rows) {
+        if (r.external_source == null) {
+          nativeIds.push(r.id as string);
+        } else if (r.external_source === SOURCE) {
+          const ext = r.external_id == null ? NaN : Number(r.external_id);
+          if (!Number.isFinite(ext) || !liveIds.has(ext)) ghostIds.push(r.id as string);
+        }
+      }
+      if (rows.length < PAGE) break;
+    }
+    for (const ids of [ghostIds, nativeIds]) {
+      for (let i = 0; i < ids.length; i += DEL) {
+        const { error } = await supabaseAdmin
+          .from("tasks")
+          .delete()
+          .in("id", ids.slice(i, i + DEL));
+        if (error) errors.push(`delete tasks: ${error.message}`);
+        else tasksDeleted += Math.min(DEL, ids.length - i);
+      }
+    }
+  } catch (e) {
+    errors.push(`tasks reconcile skipped: ${(e as Error).message}`);
+  }
+
+  console.log(
+    `[odoo-reconcile] projects archived=${projectsArchived} deleted=${projectsDeleted}; tasks deleted=${tasksDeleted}`,
+  );
+  return { projectsArchived, projectsDeleted, tasksDeleted, errors };
+}
+
 // Lightweight wrapper for the /service-categories "Sync from Odoo" button.
 // Runs project.category → services AND mirrors each row into
 // service_categories so the page UI (which reads service_categories) reflects
@@ -2200,6 +2763,7 @@ export async function runServicesImport(
   const ctx: ImportContext = {
     organizationId,
     odoo,
+    mode: "full",
     employeeIdMap: new Map(),
     clientIdMap: new Map(),
     projectIdMap: new Map(),

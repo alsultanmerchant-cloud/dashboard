@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { Briefcase } from "lucide-react";
-import { requirePagePermission, getDashboardScope } from "@/lib/auth-server";
+import { requirePagePermission, getDashboardScope, hasPermission } from "@/lib/auth-server";
+import { PullFromRwasemButton } from "@/components/rwasem/pull-from-rwasem-button";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   buildTaskFiltersFromParams,
@@ -152,6 +153,7 @@ export default async function TasksPage({
               ? { employeeId: session.employeeId, userId: session.userId }
               : null
           }
+          canManage={hasPermission(session, "tasks.manage")}
         />
       </Suspense>
     </div>
@@ -190,6 +192,7 @@ async function TasksBoardSection({
   resolvedProjectId,
   noDeadlineActive,
   agentScope,
+  canManage,
 }: {
   orgId: string;
   view: "kanban" | "list" | "calendar" | "pivot";
@@ -203,6 +206,7 @@ async function TasksBoardSection({
   noDeadlineActive: boolean;
   // Non-null only for agents: scope the board to their own tasks (assigned ∪ followed).
   agentScope: { employeeId: string | null; userId: string | null } | null;
+  canManage: boolean;
 }) {
   const t = await getTranslations("TasksPage");
 
@@ -282,6 +286,11 @@ async function TasksBoardSection({
             kpiNoDeadlineLabel={t("toolbar.kpiNoDeadline")}
           />
         </Suspense>
+        {canManage && (
+          <div className="ms-auto">
+            <PullFromRwasemButton kind="tasks" />
+          </div>
+        )}
       </div>
 
       <TasksInfiniteView

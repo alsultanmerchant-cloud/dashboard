@@ -48,6 +48,10 @@ export interface OdooProject {
   date: OdooDate; // end / deadline
   active: boolean;
   description: string | false;
+  // Odoo manual kanban-sort field (project.project._order).
+  sequence?: number;
+  // Last-modified timestamp (UTC-naive). Drives incremental sync watermarks.
+  write_date?: OdooDatetime;
   // From the rwasem_project_task_progress addon — may be absent on vanilla Odoo.
   total_progress?: number;
   // From aptuem_project_default_task — services bought (M2M to project.category).

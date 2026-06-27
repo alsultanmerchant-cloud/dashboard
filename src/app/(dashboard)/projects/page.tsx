@@ -11,7 +11,8 @@ import {
   Tags,
 } from "lucide-react";
 import Link from "next/link";
-import { requirePagePermission, getDashboardScope } from "@/lib/auth-server";
+import { requirePagePermission, getDashboardScope, hasPermission } from "@/lib/auth-server";
+import { PullFromRwasemButton } from "@/components/rwasem/pull-from-rwasem-button";
 import { getAgentProjectScopeIds } from "@/lib/data/viewer-scope";
 import {
   getProjectSmartBadgeData,
@@ -124,6 +125,7 @@ export default async function ProjectsPage({
     archived: toEnabled(sp.archived),
     allCategoriesArchived: toEnabled(sp.allCategoriesArchived),
     overTimesheets: toEnabled(sp.overTimesheets),
+    onlyWithOverdue: toEnabled(sp.atRisk),
     startDateFrom: toStr(sp.startDateFrom),
     startDateTo: toStr(sp.startDateTo),
     endDateFrom: toStr(sp.endDateFrom),
@@ -138,6 +140,11 @@ export default async function ProjectsPage({
       <PageHeader
         title="المشاريع"
         description="كل مشاريع الوكالة، العملاء، فريق التنفيذ، وعدد المهام."
+        actions={
+          hasPermission(session, "projects.manage") ? (
+            <PullFromRwasemButton kind="projects" />
+          ) : undefined
+        }
       />
 
       {/* Analytics overview — org-wide KPIs, hidden for agents (view-only,
@@ -166,6 +173,7 @@ export default async function ProjectsPage({
             archived: toEnabled(sp.archived),
             allCategoriesArchived: toEnabled(sp.allCategoriesArchived),
             overTimesheets: toEnabled(sp.overTimesheets),
+            atRisk: toEnabled(sp.atRisk),
             startDateFrom: toStr(sp.startDateFrom),
             startDateTo: toStr(sp.startDateTo),
             endDateFrom: toStr(sp.endDateFrom),

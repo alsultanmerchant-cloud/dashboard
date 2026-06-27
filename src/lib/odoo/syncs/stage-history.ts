@@ -41,7 +41,7 @@ export type StageHistorySyncResult = {
 export async function syncStageHistory(
   odoo: OdooClient,
   orgSlug: string,
-  opts: { log?: boolean } = {},
+  opts: { log?: boolean; onlyOdooTaskIds?: number[] } = {},
 ): Promise<StageHistorySyncResult> {
   const log = opts.log ?? false;
   const { data: org } = await supabaseAdmin
@@ -52,24 +52,42 @@ export async function syncStageHistory(
   if (!org) throw new Error(`org ${orgSlug} not found`);
   const orgId = org.id as string;
 
+  // Scope to specific tasks (single-task on-demand pull) or page the whole
+  // table (full sync).
   const taskMap = new Map<number, string>();
-  const PAGE = 1000;
-  for (let off = 0; ; off += PAGE) {
+  if (opts.onlyOdooTaskIds && opts.onlyOdooTaskIds.length > 0) {
     const { data: tasks, error } = await supabaseAdmin
       .from("tasks")
       .select("id, external_id")
       .eq("organization_id", orgId)
       .eq("external_source", "odoo")
-      .range(off, off + PAGE - 1);
+      .in("external_id", opts.onlyOdooTaskIds.map(String));
     if (error) throw error;
-    if (!tasks || tasks.length === 0) break;
-    for (const t of tasks) {
+    for (const t of tasks ?? []) {
       if (t.external_id) {
         const n = Number(t.external_id);
         if (Number.isFinite(n)) taskMap.set(n, t.id as string);
       }
     }
-    if (tasks.length < PAGE) break;
+  } else {
+    const PAGE = 1000;
+    for (let off = 0; ; off += PAGE) {
+      const { data: tasks, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id, external_id")
+        .eq("organization_id", orgId)
+        .eq("external_source", "odoo")
+        .range(off, off + PAGE - 1);
+      if (error) throw error;
+      if (!tasks || tasks.length === 0) break;
+      for (const t of tasks) {
+        if (t.external_id) {
+          const n = Number(t.external_id);
+          if (Number.isFinite(n)) taskMap.set(n, t.id as string);
+        }
+      }
+      if (tasks.length < PAGE) break;
+    }
   }
   if (log) console.log(`[stage-history] mapped ${taskMap.size} tasks`);
 

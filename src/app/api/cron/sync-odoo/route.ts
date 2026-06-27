@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { odooFromEnv } from "@/lib/odoo/client";
-import { runImport, type ImportPhase } from "@/lib/odoo/importer";
+import {
+  runImport,
+  reconcileOdooDeletions,
+  type ImportPhase,
+  type SyncMode,
+} from "@/lib/odoo/importer";
 import { syncStageHistory } from "@/lib/odoo/syncs/stage-history";
 import { syncProjectFollowers } from "@/lib/odoo/syncs/project-followers";
 import { syncTaskFollowers } from "@/lib/odoo/syncs/task-followers";
@@ -18,9 +23,12 @@ import { syncTaskAssigneeManagers } from "@/lib/odoo/syncs/task-assignee-manager
 //
 //   ?only=<csv>   Run ONLY these steps. Everything else is skipped.
 //   ?skip=<csv>   Run everything EXCEPT these steps.
+//   ?mode=full    Re-pull everything + reap deletes (nightly reconcile). Default
+//                 is incremental: pull only rows changed since the watermark
+//                 (sync_watermarks table), which is what fits the time budget.
 //
 // Step names: core, core-base, core-projects, core-tasks, core-comments,
-// stage-history, assignee-managers, followers, members, attachments.
+// reconcile, stage-history, assignee-managers, followers, members, attachments.
 // `core` runs the whole import in one go (manual full runs); the `core-*`
 // slices run one phase each so the staggered cron never blows the function
 // budget. When neither param is set, all steps run sequentially.
@@ -89,6 +97,12 @@ async function handle(request: NextRequest) {
   const shouldRun = (step: string) =>
     only.size > 0 ? only.has(step) : !skip.has(step);
 
+  // ?mode=full re-pulls everything + reaps deletes (nightly reconcile, manual
+  // backfills). Default is incremental: pull only rows changed since the stored
+  // watermark, which is what keeps the every-2h business-hours runs fast.
+  const mode: SyncMode =
+    request.nextUrl.searchParams.get("mode") === "full" ? "full" : "incremental";
+
   const startedAt = Date.now();
   const odoo = odooFromEnv();
 
@@ -97,7 +111,7 @@ async function handle(request: NextRequest) {
   // to skip it. Manual runs (no params) still run core first as before.
   let coreStep: StepStatus | null = null;
   if (shouldRun("core")) {
-    coreStep = await runStep(() => runImport(odoo, orgSlug));
+    coreStep = await runStep(() => runImport(odoo, orgSlug, undefined, mode));
     if (!coreStep.ok) {
       return NextResponse.json(
         {
@@ -126,10 +140,16 @@ async function handle(request: NextRequest) {
   for (const [stepName, phase] of Object.entries(CORE_PHASE_STEPS)) {
     if (shouldRun(stepName)) {
       corePhaseSteps[stepName] = await runStep(() =>
-        runImport(odoo, orgSlug, [phase]),
+        runImport(odoo, orgSlug, [phase], mode),
       );
     }
   }
+
+  // Delete-reconciliation — cheap id-set diff that reaps rows hard-deleted in
+  // Odoo (the incremental upserts never delete). Runs in the nightly job.
+  const reconcileStep = shouldRun("reconcile")
+    ? await runStep(() => reconcileOdooDeletions(odoo, orgSlug))
+    : null;
 
   // Supplementary steps — each isolated so a partial failure is acceptable.
   const stageHistoryStep = shouldRun("stage-history")
@@ -154,6 +174,7 @@ async function handle(request: NextRequest) {
   const steps = {
     core: coreStep,
     ...corePhaseSteps,
+    reconcile: reconcileStep,
     assigneeManagers: assigneeManagersStep,
     stageHistory: stageHistoryStep,
     followers: followersStep,
@@ -165,6 +186,7 @@ async function handle(request: NextRequest) {
   return NextResponse.json({
     ok: !anyFailed,
     orgSlug,
+    mode,
     durationMs: Date.now() - startedAt,
     only: only.size > 0 ? Array.from(only) : null,
     steps,

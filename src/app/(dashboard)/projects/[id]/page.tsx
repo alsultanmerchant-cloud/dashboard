@@ -25,6 +25,7 @@ import { intlLocale } from "@/lib/utils-format";
 import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { GanttChart } from "lucide-react";
+import { PullFromRwasemButton } from "@/components/rwasem/pull-from-rwasem-button";
 import type { BoardTask } from "./task-board";
 import { BulkReassignDialog } from "./bulk-reassign-dialog";
 import { listEmployees } from "@/lib/data/employees";
@@ -207,7 +208,18 @@ export default async function ProjectDetailPage({
 }) {
   const [{ id }, sp, locale, t, tNav, session] = await Promise.all([
     params,
-    searchParams ? searchParams.then((value) => value ?? {}) : Promise.resolve({}),
+    searchParams
+      ? searchParams.then((value) => value ?? {})
+      : Promise.resolve(
+          {} as {
+            view?: string;
+            f?: string;
+            d?: string;
+            filter?: string;
+            q?: string;
+            groupBy?: string;
+          },
+        ),
     getLocale(),
     getTranslations("ProjectDetailPage"),
     getTranslations("Nav"),
@@ -321,13 +333,23 @@ export default async function ProjectDetailPage({
           activitiesSheetTitle: t("activitiesSheet.title"),
         }}
         rightActions={
-          <Link
-            href={`/projects/${project.id}/gantt`}
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] font-medium hover:bg-muted/50 transition-colors"
-          >
-            <GanttChart className="size-3.5" />
-            {t("actions.gantt")}
-          </Link>
+          <>
+            {hasPermission(session, "projects.manage") && (
+              <PullFromRwasemButton
+                kind="project"
+                odooId={Number((project as { external_id?: string | null }).external_id) || null}
+                size="sm"
+                variant="outline"
+              />
+            )}
+            <Link
+              href={`/projects/${project.id}/gantt`}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] font-medium hover:bg-muted/50 transition-colors"
+            >
+              <GanttChart className="size-3.5" />
+              {t("actions.gantt")}
+            </Link>
+          </>
         }
       />
 

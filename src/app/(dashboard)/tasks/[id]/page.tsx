@@ -15,6 +15,7 @@ import {
   listInheritedProjectFollowers,
 } from "@/lib/data/task-detail";
 import { ActionBar, type SmartPill } from "@/components/layout/action-bar";
+import { PullFromRwasemButton } from "@/components/rwasem/pull-from-rwasem-button";
 import { FileText, Folder } from "lucide-react";
 import { SectionTitle } from "@/components/section-title";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -155,7 +156,7 @@ export default async function TaskDetailPage({
   const positionRoleBySlug: Record<string, string> = Object.fromEntries(
     positions.map((p) => [p.slug, p.role]),
   );
-  const hasOpenException = (openExc ?? []).length > 0;
+  const hasOpenException = (openExc.data ?? []).length > 0;
 
   // Migration phase: agents (specialists) use this dashboard for visibility only
   // — every in-task action is disabled so they don't work here instead of
@@ -295,6 +296,16 @@ export default async function TaskDetailPage({
         recordId={task.id}
         recordKind="tasks"
         smartPills={taskActionSmartPills}
+        rightActions={
+          hasPermission(session, "tasks.manage") ? (
+            <PullFromRwasemButton
+              kind="task"
+              odooId={
+                Number((task as { external_id?: string | null }).external_id) || null
+              }
+            />
+          ) : undefined
+        }
       />
 
       <div className="mb-6">
@@ -669,7 +680,7 @@ export default async function TaskDetailPage({
                     <MessageButton
                       employeeId={a.id}
                       employeeName={a.full_name}
-                      contextTaskId={task.id}
+                      contextTaskId={task!.id}
                       size="sm"
                     />
                   </div>
@@ -1642,7 +1653,7 @@ async function TaskCommentComposerSection({
   return (
     <CommentComposer
       taskId={taskId}
-      currentStage={currentStage}
+      currentStage={currentStage as TaskStage}
       hasRequirements={activity.some(
         (item) => item.kind === "note" && item.comment_kind === "requirements",
       )}
