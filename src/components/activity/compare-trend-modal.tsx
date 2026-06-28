@@ -20,10 +20,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
 import type { EmployeeTrend, TrendPoint } from "@/lib/data/performance-trend";
 
 type RangeKey = "weekly" | "monthly" | "yearly";
-type MetricKey = "onTime" | "completed" | "dwell";
+type MetricKey = "actions" | "completed" | "dwell";
 
 const RANGES: { key: RangeKey; label: string; grain: "week" | "month"; take: number }[] = [
   { key: "weekly", label: "آخر ١٢ أسبوع", grain: "week", take: 12 },
@@ -37,14 +38,19 @@ interface MetricMeta {
   explain: string; // what it means, in plain words
   unit: string;
   higherIsBetter: boolean;
+  // Whether the department line is a fair peer comparison. Rates (on-time) and
+  // averages (dwell) are; a COUNT (completed) is stored as a dept total, so
+  // comparing one person to it is apples-to-oranges — hide the bench then.
+  comparable: boolean;
 }
 const METRICS: MetricMeta[] = [
   {
-    key: "onTime",
-    label: "التسليم في الموعد",
-    explain: "من كل ١٠٠ مهمة، كم واحدة سلّمها في وقتها. الأعلى أفضل.",
-    unit: "٪",
+    key: "actions",
+    label: "النشاط في رواسم",
+    explain: "عدد الإجراءات التي قام بها في رواسم (تحريك المهام + ملاحظات العمل). الأعلى = أنشط.",
+    unit: " إجراء",
     higherIsBetter: true,
+    comparable: false,
   },
   {
     key: "completed",
@@ -52,18 +58,20 @@ const METRICS: MetricMeta[] = [
     explain: "كم مهمة أنهى خلال الفترة. الأعلى أفضل.",
     unit: " مهمة",
     higherIsBetter: true,
+    comparable: false,
   },
   {
     key: "dwell",
     label: "متوسط وقت الإنجاز",
-    explain: "كم ساعة عمل يستغرق لإنهاء المهمة الواحدة. الأقل أفضل.",
+    explain: "كم ساعة عمل يستغرق لإنهاء المهمة الواحدة. الأقل أفضل. (مؤشّر أداء — تفصيله في المساءلة)",
     unit: " ساعة",
     higherIsBetter: false,
+    comparable: true,
   },
 ];
 
 function metricValue(p: TrendPoint, m: MetricKey): number | null {
-  if (m === "onTime") return p.onTimePct;
+  if (m === "actions") return p.actions;
   if (m === "completed") return p.completed;
   return p.avgDwell != null ? Math.round((p.avgDwell / 60) * 10) / 10 : null; // → hours
 }
@@ -89,7 +97,7 @@ export function CompareTrendModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeKey>("monthly");
-  const [metric, setMetric] = useState<MetricKey>("onTime");
+  const [metric, setMetric] = useState<MetricKey>("actions");
 
   useEffect(() => {
     if (!open || data || loading) return;
@@ -113,11 +121,12 @@ export function CompareTrendModal({
   const teamLabel = "بقية زملائه في القسم";
   const chartData = emp.map((p) => {
     const b = benchByStart.get(p.periodStart);
-    return {
+    const row: Record<string, string | number | null> = {
       label: fmtLabel(p.periodStart, cfg.grain),
       [fullName]: metricValue(p, metric),
-      [teamLabel]: b ? metricValue(b, metric) : null,
-    } as Record<string, string | number | null>;
+    };
+    if (mcfg.comparable) row[teamLabel] = b ? metricValue(b, metric) : null;
+    return row;
   });
 
   // First vs last measurable point for the employee in this view.
@@ -137,7 +146,7 @@ export function CompareTrendModal({
     .filter((v): v is number => v != null);
   const benchLast = benchVals[benchVals.length - 1] ?? null;
   const aheadOfTeam =
-    last != null && benchLast != null
+    mcfg.comparable && last != null && benchLast != null
       ? mcfg.higherIsBetter
         ? last - benchLast
         : benchLast - last
@@ -165,14 +174,17 @@ export function CompareTrendModal({
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="text-right">
-            كيف يتطوّر أداء {fullName}؟
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle className="text-right">
+              كيف يتطوّر نشاط {fullName}؟
+            </DialogTitle>
+            <ActionBreakdownButton employeeId={employeeId} fullName={fullName} />
+          </div>
         </DialogHeader>
 
         <p className="text-[11px] text-muted-foreground">
-          اختر المؤشّر الذي يهمّك ثم الفترة الزمنية. الخط الملوّن = {fullName}، والخط المتقطّع =
-          متوسّط بقية زملائه في نفس القسم للمقارنة.
+          اختر المؤشّر الذي يهمّك ثم الفترة الزمنية. الخط الملوّن = {fullName}
+          {mcfg.comparable && "، والخط المتقطّع = متوسّط بقية زملائه في نفس القسم للمقارنة"}.
         </p>
 
         {/* Step 1: pick the indicator (plain language + what it means) */}
@@ -327,7 +339,7 @@ export function CompareTrendModal({
                       <YAxis
                         tick={{ fontSize: 10 }}
                         stroke="var(--muted-foreground)"
-                        domain={metric === "onTime" ? [0, 100] : [0, "auto"]}
+                        domain={[0, "auto"]}
                       />
                       <Tooltip
                         contentStyle={{
@@ -349,31 +361,33 @@ export function CompareTrendModal({
                         isAnimationActive
                         animationDuration={600}
                       />
-                      <Line
-                        type="monotone"
-                        dataKey={teamLabel}
-                        stroke="var(--muted-foreground)"
-                        strokeWidth={1.5}
-                        strokeDasharray="5 5"
-                        dot={false}
-                        connectNulls
-                        isAnimationActive
-                        animationDuration={600}
-                      />
+                      {mcfg.comparable && (
+                        <Line
+                          type="monotone"
+                          dataKey={teamLabel}
+                          stroke="var(--muted-foreground)"
+                          strokeWidth={1.5}
+                          strokeDasharray="5 5"
+                          dot={false}
+                          connectNulls
+                          isAnimationActive
+                          animationDuration={600}
+                        />
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
                 <p className="text-center text-[11px] text-muted-foreground">
                   {mcfg.higherIsBetter
-                    ? "↑ كلّما ارتفع الخط كان الأداء أفضل"
-                    : "↓ كلّما انخفض الخط كان الأداء أفضل"}
+                    ? "↑ كلّما ارتفع الخط كان أفضل"
+                    : "↓ كلّما انخفض الخط كان أفضل"}
                 </p>
               </>
             )}
 
             <p className="text-[10px] text-muted-foreground">
-              المصدر: سجلّ مراحل المهام في النظام (Odoo). «التسليم في الموعد» يُحتسب فقط على المهام
-              التي يمكن الحكم عليها. «كل الفترة» تبدأ من أكتوبر ٢٠٢٥ (بداية البيانات).
+              المصدر: سجلّ المهام في رواسم (Odoo). «النشاط» = تحريك المهام بين المراحل + ملاحظات العمل
+              (Log Notes). «كل الفترة» تبدأ من أكتوبر ٢٠٢٥ (بداية البيانات).
             </p>
           </>
         )}

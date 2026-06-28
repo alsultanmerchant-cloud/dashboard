@@ -1,17 +1,9 @@
 import Link from "next/link";
-import { Activity, ArrowLeft, AlertTriangle, Target, Gauge } from "lucide-react";
+import { Activity, ArrowLeft, Zap, Gauge, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { TeamPulseOverview, PulseStatus } from "@/lib/data/team-pulse";
 
-const NA = "—";
-
-const STATUS_TONE: Record<PulseStatus, string> = {
-  good: "text-cc-green",
-  watch: "text-amber",
-  risk: "text-cc-red",
-  na: "text-muted-foreground",
-};
 const STATUS_DOT: Record<PulseStatus, string> = {
   good: "bg-cc-green",
   watch: "bg-amber",
@@ -19,41 +11,18 @@ const STATUS_DOT: Record<PulseStatus, string> = {
   na: "bg-muted-foreground",
 };
 
-function scoreTone(v: number | null): string {
-  if (v == null) return "text-muted-foreground";
-  if (v >= 75) return "text-cc-green";
-  if (v >= 60) return "text-amber";
-  return "text-cc-red";
-}
-const pct = (v: number | null): string => (v == null ? NA : `${v}%`);
-
-// Compact dashboard band: org-level health + the 3 worst teams, linking into
-// the full /team-activity board. Fed by the team-pulse fusion layer (Odoo
-// delivery + contract targets), replacing the dead activity-instrumentation
-// band.
+// Compact dashboard band: org-level activity + the teams that have stalled,
+// linking into the full /team-activity board. Movement/activity only — SLA
+// quality lives on the المساءلة page.
 export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
   const t = data.totals;
-  const worst = data.rows
-    .filter((r) => r.status === "risk" || r.status === "watch")
-    .slice(0, 3);
+  const worst = data.rows.filter((r) => r.status === "risk" || r.status === "watch").slice(0, 3);
 
   const stats = [
-    { icon: Gauge, label: "أقسام مُقاسة", value: `${t.measuredDepartments}/${t.departments}`, tone: "text-cyan" },
-    { icon: Activity, label: "الالتزام بالموعد", value: pct(t.onTimeRate), tone: scoreTone(t.onTimeRate) },
-    { icon: AlertTriangle, label: "متأخرة", value: String(t.overdueOwned), tone: "text-cc-red" },
-    {
-      icon: Target,
-      label: "مقابل الهدف",
-      value: pct(t.commAttainmentPct),
-      tone:
-        t.commAttainmentPct == null
-          ? "text-muted-foreground"
-          : t.commAttainmentPct >= 90
-            ? "text-cc-green"
-            : t.commAttainmentPct >= 70
-              ? "text-amber"
-              : "text-cc-red",
-    },
+    { icon: Zap, label: "يعمل الآن", value: String(t.activeCount), tone: "text-cc-green" },
+    { icon: Activity, label: "إجراء اليوم", value: String(t.actionsToday), tone: "text-cyan" },
+    { icon: Gauge, label: "محمّل زائد", value: String(t.overloadedCount), tone: "text-cc-red" },
+    { icon: AlertTriangle, label: "متوقّفة", value: String(t.stuckTasks), tone: "text-cc-red" },
   ];
 
   return (
@@ -64,9 +33,7 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
             <Activity className="size-5 text-cyan" />
             <div>
               <p className="text-sm font-semibold">نبض الفريق</p>
-              <p className="text-[11px] text-muted-foreground">
-                أداء الأقسام مقابل المعيار التشغيلي وأهداف العقود
-              </p>
+              <p className="text-[11px] text-muted-foreground">حركة العمل ونشاط الفرق — من يتحرّك ومن توقّف</p>
             </div>
           </div>
           <div className="flex items-center gap-5">
@@ -88,7 +55,7 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
         {worst.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              يحتاج انتباهك
+              فرق متوقّفة
             </span>
             {worst.map((r) => (
               <Link
@@ -98,11 +65,8 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
               >
                 <span className={cn("size-1.5 rounded-full", STATUS_DOT[r.status])} />
                 <span className="font-medium">{r.departmentName}</span>
-                <span className={cn("tabular-nums", scoreTone(r.deliveryScore))}>
-                  {r.deliveryScore ?? NA}
-                </span>
-                {r.overdueOwned > 0 && (
-                  <span className="text-cc-red tabular-nums">· {r.overdueOwned} متأخرة</span>
+                {r.stuckTasks > 0 && (
+                  <span className="text-cc-red tabular-nums">{r.stuckTasks} متوقّفة</span>
                 )}
               </Link>
             ))}

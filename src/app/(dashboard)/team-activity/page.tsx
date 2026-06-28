@@ -26,7 +26,7 @@ export default async function TeamActivityPage({
     <div>
       <PageHeader
         title="نبض الفريق"
-        description="أداء كل قسم وكل موظف مقابل المعيار التشغيلي وأهداف العقود — من يسير على المسار ومن يتعثّر ولماذا"
+        description="حركة العمل ونشاط الفِرق — من يحرّك مهامه الآن ومن توقّف، وأين تتكدّس المهام المتوقّفة. (جودة الالتزام بالمواعيد في صفحة المساءلة)"
       />
       {selected && (
         <TeamPulseMembers

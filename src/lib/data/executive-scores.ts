@@ -181,7 +181,7 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
     // Open (non-archived, not done) tasks — drives delivery + freshness.
     supabaseAdmin
       .from("tasks")
-      .select("id, is_overdue, delay_days, hold_since, stage_entered_at, project_id, revision_count")
+      .select("id, stage, is_overdue, delay_days, hold_since, stage_entered_at, project_id, revision_count")
       .eq("organization_id", orgId)
       .is("archived_at", null)
       .neq("stage", "done"),
@@ -264,6 +264,7 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   // derive what genuinely exists (counts, stage dwell, snapshot history) and
   // mark the rest as `null` so it renders N/A and drops out of the score.
   type OpenTask = {
+    stage: string;
     is_overdue: boolean;
     delay_days: number | null;
     hold_since: string | null;
@@ -291,8 +292,14 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
     (t) => t.is_overdue && t.stage_entered_at < daysAgoIso(14),
   ).length;
 
-  // Stalled WIP: no stage movement in > 7 days (proxy for "no updates").
-  const staleTasks = openTasks.filter((t) => t.stage_entered_at < daysAgoIso(7)).length;
+  // Stalled WIP: started work with no stage movement in > 7 days (proxy for
+  // "no updates"). Excludes the `new` stage — a not-started backlog task whose
+  // stage_entered_at is just its creation date is ordinary unreached work, not
+  // neglect, and would otherwise dominate this count (the batch is generated
+  // up-front in `new`). Mirrors the is_overdue rule (migration 0219).
+  const staleTasks = openTasks.filter(
+    (t) => t.stage !== "new" && t.stage_entered_at < daysAgoIso(7),
+  ).length;
 
   // Revisions: revision_count is unpopulated by the Odoo sync → N/A.
   const revisionFilled = openTasks.filter((t) => (t.revision_count ?? 0) > 0).length;
@@ -396,7 +403,11 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   // absorbs the freed 15% (blend renormalizes the present components anyway).
   const qualityScore = blend([
     { w: 0.3, v: 100 * (1 - reworkRate) },
-    { w: 0.15, v: 100 * (1 - rejectionRate) },
+    // Rejection rate only counts when approvals are actually being decided.
+    // `approval_decided_at` is empty org-wide (Odoo sync never fills it), so
+    // decidedCount=0 → rejectionRate=0 → this term WOULD feed a phantom 100 and
+    // inflate Quality. Pass null when there's no decided sample so blend drops it.
+    { w: 0.15, v: decidedCount > 0 ? 100 * (1 - rejectionRate) : null },
     { w: 0.1, v: avgRevisions === null ? null : clamp(100 - avgRevisions * 20) },
     { w: 0.3, v: satAgg.avgSatisfaction },
   ]);
@@ -430,9 +441,20 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
 
   // 5. Operational Stability (composite of the four + risk adjustment)
   const atRiskClients = satAgg.atRiskClients;
-  const riskScore = clamp(
-    100 - unackEscalations * 5 - criticalOverdue * 0.3 - atRiskClients * 6,
-  );
+  // Risk overlay — each dimension is a BOUNDED, PROPORTIONAL penalty so the score
+  // discriminates instead of flooring at 0. The old formula used raw counts
+  // (−atRisk×6 etc.), so 22 at-risk clients alone (132) pinned riskScore to 0 on
+  // any mid-size org — uninformative dead weight. Critical-overdue and churn are
+  // now shares of their base (open tasks / analyzed clients) so they scale with
+  // org size; each term is capped so no single one can saturate the score.
+  const escalationPenalty = Math.min(20, unackEscalations * 2);
+  const criticalPenalty =
+    openCount > 0 ? Math.min(30, (criticalOverdue / openCount) * 100) : 0;
+  const churnPenalty =
+    satAgg.analyzedClients > 0
+      ? Math.min(30, (atRiskClients / satAgg.analyzedClients) * 100)
+      : 0;
+  const riskScore = clamp(100 - escalationPenalty - criticalPenalty - churnPenalty);
   const stabilityScore = blend([
     { w: 0.3, v: deliveryScore },
     { w: 0.25, v: qualityScore },

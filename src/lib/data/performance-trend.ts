@@ -19,6 +19,7 @@ export type TrendGrain = "week" | "month";
 export interface TrendPoint {
   periodStart: string; // ISO date (inclusive)
   periodEnd: string; // ISO date (exclusive)
+  actions: number; // Rwasem actions (stage moves + Log Notes) in the period
   onTimePct: number | null;
   completed: number;
   avgDwell: number | null; // business minutes
@@ -48,6 +49,7 @@ interface SnapRow {
   grain: string;
   period_start: string;
   period_end: string;
+  actions_count: number;
   on_time_pct: number | null;
   avg_dwell: number | null;
   completed_count: number;
@@ -67,6 +69,7 @@ async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
 const toPoint = (r: SnapRow): TrendPoint => ({
   periodStart: r.period_start,
   periodEnd: r.period_end,
+  actions: r.actions_count ?? 0,
   onTimePct: r.on_time_pct,
   completed: r.completed_count ?? 0,
   avgDwell: r.avg_dwell != null ? Math.round(r.avg_dwell) : null,
@@ -98,7 +101,7 @@ async function _getEmployeeTrend(
   // Employee series (both grains) + department benchmark (both grains) in one read.
   const rows = await runSql<SnapRow>(`
     select scope_type, scope_id::text, grain, period_start::text, period_end::text,
-           on_time_pct, avg_dwell, completed_count, rework_count, sla_n, sample_size
+           actions_count, on_time_pct, avg_dwell, completed_count, rework_count, sla_n, sample_size
       from performance_snapshots
      where organization_id = '${orgId}'
        and (

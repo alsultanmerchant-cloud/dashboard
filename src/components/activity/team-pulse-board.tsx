@@ -1,202 +1,210 @@
 import Link from "next/link";
-import { Activity, AlertTriangle, Gauge, Target, Info, ChevronLeft } from "lucide-react";
+import {
+  Users,
+  AlertTriangle,
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Info,
+  ChevronLeft,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
-import { gradeFor } from "@/lib/data/executive-scores";
 import type { TeamPulseOverview, TeamPulseRow, PulseStatus } from "@/lib/data/team-pulse";
 
-const NA = "—";
-
-const STATUS_META: Record<PulseStatus, { label: string; tone: string; dot: string }> = {
-  good: { label: "ضمن المسار", tone: "text-cc-green", dot: "bg-cc-green" },
-  watch: { label: "يحتاج متابعة", tone: "text-amber", dot: "bg-amber" },
-  risk: { label: "متعثّر", tone: "text-cc-red", dot: "bg-cc-red" },
-  na: { label: "غير مُقاس", tone: "text-muted-foreground", dot: "bg-muted-foreground" },
+const STATUS_META: Record<
+  PulseStatus,
+  { label: string; text: string; border: string; chip: string; dot: string }
+> = {
+  good: {
+    label: "يتحرّك جيدًا",
+    text: "text-cc-green",
+    border: "border-cc-green/30",
+    chip: "bg-cc-green/10 text-cc-green",
+    dot: "bg-cc-green",
+  },
+  watch: {
+    label: "يحتاج متابعة",
+    text: "text-amber",
+    border: "border-amber/30",
+    chip: "bg-amber/10 text-amber",
+    dot: "bg-amber",
+  },
+  risk: {
+    label: "متوقّف",
+    text: "text-cc-red",
+    border: "border-cc-red/30",
+    chip: "bg-cc-red/10 text-cc-red",
+    dot: "bg-cc-red",
+  },
+  na: {
+    label: "لا نشاط",
+    text: "text-muted-foreground",
+    border: "border-border",
+    chip: "bg-soft-2 text-muted-foreground",
+    dot: "bg-muted-foreground",
+  },
 };
 
-const pct = (v: number | null): string => (v == null ? NA : `${v}%`);
-const sar = (v: number | null): string =>
-  v == null ? NA : new Intl.NumberFormat("ar-SA", { maximumFractionDigits: 0 }).format(v);
-
-function scoreTone(v: number | null): string {
-  if (v == null) return "text-muted-foreground";
-  if (v >= 75) return "text-cc-green";
-  if (v >= 60) return "text-amber";
-  return "text-cc-red";
+function freshness(iso: string | null): string {
+  if (!iso) return "—";
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "الآن";
+  if (mins < 60) return `قبل ${mins} دقيقة`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `قبل ${hrs} ساعة`;
+  return `قبل ${Math.floor(hrs / 24)} يوم`;
 }
 
-function DeptRow({ row }: { row: TeamPulseRow }) {
-  const meta = STATUS_META[row.status];
-  const grade = row.deliveryScore != null ? gradeFor(row.deliveryScore) : null;
-  const overduePct = row.openTasks > 0 ? Math.round((row.overdueOwned / row.openTasks) * 100) : null;
+function Momentum({ value }: { value: number }) {
+  if (value > 0)
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-cc-green">
+        <TrendingUp className="size-3.5" /> النشاط متزايد
+      </span>
+    );
+  if (value < 0)
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-cc-red">
+        <TrendingDown className="size-3.5" /> النشاط متراجع
+      </span>
+    );
   return (
-    <tr className="border-b border-border/50 hover:bg-soft-1">
-      <td className="px-3 py-3">
-        <div className="flex items-center gap-2">
-          <span className={cn("size-2 rounded-full", meta.dot)} />
-          <div>
-            <Link
-              href={`/team-activity?dept=${row.departmentId}`}
-              className="font-medium hover:text-cyan hover:underline"
-            >
-              {row.departmentName}
-            </Link>
-            <div className="text-[10px] text-muted-foreground">
-              {row.headName ? `يقودها ${row.headName}` : "بدون مسؤول"} · {row.measuredCount}/
-              {row.headcount} مُقاس
-            </div>
-          </div>
-        </div>
-      </td>
-      <td className="px-3 py-3">
-        <div className="flex items-center gap-2">
-          <span className={cn("text-lg font-bold tabular-nums", scoreTone(row.deliveryScore))}>
-            {row.deliveryScore ?? NA}
-          </span>
-          {grade && (
-            <span className="rounded border border-border px-1.5 text-[10px] font-semibold">
-              {grade}
-            </span>
-          )}
-        </div>
-      </td>
-      <td className={cn("px-3 py-3 tabular-nums", scoreTone(row.onTimeRate))}>{pct(row.onTimeRate)}</td>
-      <td className="px-3 py-3 tabular-nums text-center">{row.openTasks}</td>
-      <td
-        className={cn(
-          "px-3 py-3 tabular-nums text-center",
-          overduePct != null && overduePct >= 40 && "font-semibold text-cc-red",
-        )}
-      >
-        {row.overdueOwned}
-        {overduePct != null && (
-          <span className="ms-1 text-[10px] text-muted-foreground">({overduePct}%)</span>
-        )}
-      </td>
-      <td className="px-3 py-3">
-        {row.commAttainmentPct == null ? (
-          <span className="text-muted-foreground">{NA}</span>
-        ) : (
-          <div className="flex items-center gap-2">
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <Minus className="size-3.5" /> مستقر
+    </span>
+  );
+}
+
+function DeptCard({ row }: { row: TeamPulseRow }) {
+  const meta = STATUS_META[row.status];
+  return (
+    <Link href={`/team-activity?dept=${row.departmentId}`} className="group block">
+      <Card className={cn("h-full transition-colors hover:bg-soft-1", meta.border)}>
+        <CardContent className="p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <span
               className={cn(
-                "tabular-nums font-semibold",
-                row.commAttainmentPct >= 90
-                  ? "text-cc-green"
-                  : row.commAttainmentPct >= 70
-                    ? "text-amber"
-                    : "text-cc-red",
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                meta.chip,
               )}
             >
-              {row.commAttainmentPct}%
+              <span className={cn("size-1.5 rounded-full", meta.dot)} />
+              {meta.label}
             </span>
-            <span className="text-[10px] text-muted-foreground">
-              {sar(row.commAchieved)} / {sar(row.commExpected)}
-            </span>
+            <Momentum value={row.momentum} />
           </div>
-        )}
-      </td>
-      <td
-        className={cn(
-          "px-3 py-3 tabular-nums text-center",
-          row.atRiskMembers > 0 && "text-cc-red",
-        )}
-      >
-        {row.atRiskMembers}
-      </td>
-      <td className="px-3 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className={cn("text-xs", meta.tone)}>{meta.label}</span>
-          <ChevronLeft className="size-3.5 text-muted-foreground" />
-        </div>
-      </td>
-    </tr>
+
+          <div className="mb-3">
+            <p className="font-semibold group-hover:text-cyan">{row.departmentName}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {row.headName ? `يقودها ${row.headName}` : "بدون مسؤول"}
+            </p>
+          </div>
+
+          {/* Two plain lines: how many people are active, and what needs a push */}
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              <Users className="size-4 text-muted-foreground" />
+              <span>
+                <span className="font-semibold tabular-nums">
+                  {row.activeCount} من {row.headcount}
+                </span>{" "}
+                موظف نشط
+              </span>
+            </div>
+            {row.stuckTasks > 0 ? (
+              <div className="flex items-center gap-2 text-cc-red">
+                <AlertTriangle className="size-4" />
+                <span>
+                  <span className="font-semibold tabular-nums">{row.stuckTasks}</span> مهمة بحاجة
+                  لمتابعة
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-cc-green">
+                <CheckCircle2 className="size-4" />
+                <span>العمل يسير بدون تعطّل</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 flex items-center justify-end text-[11px] text-cyan opacity-0 transition-opacity group-hover:opacity-100">
+            عرض الفريق <ChevronLeft className="size-3.5" />
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
 export function TeamPulseBoard({ data }: { data: TeamPulseOverview }) {
   const t = data.totals;
-  const headStats = [
-    { icon: Gauge, label: "الأقسام المُقاسة", value: `${t.measuredDepartments}/${t.departments}`, tone: "text-cyan" },
-    { icon: Activity, label: "الالتزام بالموعد", value: pct(t.onTimeRate), tone: scoreTone(t.onTimeRate) },
-    { icon: AlertTriangle, label: "مهام متأخرة", value: String(t.overdueOwned), tone: "text-cc-red" },
-    {
-      icon: Target,
-      label: "الإنجاز مقابل الهدف",
-      value: pct(t.commAttainmentPct),
-      tone:
-        t.commAttainmentPct == null
-          ? "text-muted-foreground"
-          : t.commAttainmentPct >= 90
-            ? "text-cc-green"
-            : t.commAttainmentPct >= 70
-              ? "text-amber"
-              : "text-cc-red",
-    },
-  ];
+  const good = data.rows.filter((r) => r.status === "good").length;
+  const watch = data.rows.filter((r) => r.status === "watch").length;
+  const risk = data.rows.filter((r) => r.status === "risk").length;
+
+  // One plain headline sentence.
+  const parts: string[] = [];
+  if (good) parts.push(`${good} ${good === 1 ? "قسم يتحرّك جيدًا" : "أقسام تتحرّك جيدًا"}`);
+  if (watch) parts.push(`${watch} ${watch === 1 ? "قسم يحتاج متابعة" : "أقسام تحتاج متابعة"}`);
+  if (risk) parts.push(`${risk} ${risk === 1 ? "قسم متوقّف" : "أقسام متوقّفة"}`);
+  const headline = parts.join(" · ") || "لا توجد بيانات بعد";
 
   return (
     <div className="space-y-4">
-      {/* Honesty banner */}
-      <div className="flex items-start gap-2 rounded-xl border border-cyan/20 bg-cyan/5 p-3 text-[11px] text-muted-foreground">
-        <Info className="mt-0.5 size-3.5 shrink-0 text-cyan" />
-        <p>
-          محوران: <span className="font-semibold text-foreground">الأداء التشغيلي</span> (النتيجة = ٦٠٪
-          الالتزام بمواعيد المراحل + ٤٠٪ نسبة المهام غير المتأخرة، من سجل مراحل Odoo خلال آخر ٣٠ يومًا)،
-          و<span className="font-semibold text-foreground">الإنجاز مقابل الهدف</span> (الدخل المُحقّق ÷
-          المستهدف من العقود{data.targetMonth ? ` — شهر ${data.targetMonth}` : ""}). أهداف الدخل تخص
-          مديري الحسابات فقط؛ فرق التنفيذ تُقاس بالمعيار التشغيلي. القيم غير المتوفرة تظهر «—».
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {headStats.map((s) => (
-          <Card key={s.label}>
-            <CardContent className="p-4">
-              <s.icon className={cn("size-4", s.tone)} />
-              <p className={cn("mt-2 text-2xl font-bold tabular-nums", s.tone)}>{s.value}</p>
-              <p className="text-[11px] text-muted-foreground">{s.label}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
+      {/* Headline: the whole picture in one line + the single positive number */}
       <Card>
-        <CardContent className="p-0">
-          {data.rows.length === 0 ? (
-            <div className="p-6">
-              <EmptyState
-                variant="compact"
-                title="لا توجد بيانات فرق بعد"
-                description="تتراكم البيانات تلقائيًا مع حركة المهام والعقود. عُد لاحقًا."
-              />
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
+          <div>
+            <p className="text-sm font-semibold">{headline}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              من يحرّك مهامه ومن توقّف الآن — اضغط على أي قسم لرؤية الموظفين.
+            </p>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className="text-center">
+              <p className="text-2xl font-bold tabular-nums text-cc-green">{t.activeCount}</p>
+              <p className="text-[10px] text-muted-foreground">موظف يعمل الآن</p>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-xs">
-                <thead>
-                  <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
-                    <th className="px-3 py-2.5 font-medium">القسم</th>
-                    <th className="px-3 py-2.5 font-medium">النتيجة</th>
-                    <th className="px-3 py-2.5 font-medium">الالتزام بالموعد</th>
-                    <th className="px-3 py-2.5 font-medium text-center">مهام مفتوحة</th>
-                    <th className="px-3 py-2.5 font-medium text-center">متأخرة</th>
-                    <th className="px-3 py-2.5 font-medium">الإنجاز مقابل الهدف</th>
-                    <th className="px-3 py-2.5 font-medium text-center">أعضاء متعثّرون</th>
-                    <th className="px-3 py-2.5 font-medium">الحالة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.rows.map((r) => (
-                    <DeptRow key={r.departmentId} row={r} />
-                  ))}
-                </tbody>
-              </table>
+            <div className="text-center">
+              <p className="text-2xl font-bold tabular-nums text-cyan">{t.actionsToday}</p>
+              <p className="text-[10px] text-muted-foreground">إجراء في رواسم اليوم</p>
             </div>
-          )}
+          </div>
         </CardContent>
       </Card>
+
+      <p className="-mt-1 px-1 text-[10px] text-muted-foreground">
+        آخر إجراء وارد من رواسم: <span className="text-foreground">{freshness(data.lastActionAt)}</span>
+      </p>
+
+      {data.rows.length === 0 ? (
+        <Card>
+          <CardContent className="p-6">
+            <EmptyState
+              variant="compact"
+              title="لا توجد حركة عمل بعد"
+              description="يظهر النشاط تلقائيًا مع تحرّك المهام بين المراحل."
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {data.rows.map((r) => (
+            <DeptCard key={r.departmentId} row={r} />
+          ))}
+        </div>
+      )}
+
+      <p className="flex items-start gap-1.5 px-1 text-[11px] text-muted-foreground">
+        <Info className="mt-0.5 size-3 shrink-0 text-cyan" />
+        «نشط» = حرّك مهمة خلال آخر يومين · «بحاجة لمتابعة» = مهمة مفتوحة لم تتحرّك منذ ٣ أيام. جودة
+        الالتزام بالمواعيد في صفحة{" "}
+        <Link href="/accountability" className="text-cyan hover:underline">المساءلة</Link>.
+      </p>
     </div>
   );
 }

@@ -547,7 +547,6 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
   }
 
   const { dashboard: d, amTargets, buckets } = analysis;
-  const achievement = Math.min(100, Math.max(0, d.achievement_pct));
   const topAm = [...amTargets].sort((a, b) => b.achievement_pct - a.achievement_pct).slice(0, 3);
   const totalDue = buckets.installments_due.reduce((sum, row) => sum + row.expected_amount, 0);
 
@@ -568,34 +567,45 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
         </Link>
       </div>
 
+      {/* Two department achievements — mirrors the sheet's Account / Sales
+          sections. The sheet never blends them into one company %, so neither
+          do we: each ratio is actual income vs its own target. */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <AnalysisStat label="Expected" value={fmtSR(d.total_expected)} tone="info" tip={t("metricTooltips.dashboard_contractsExpected")} />
-        <AnalysisStat label="Actual" value={fmtSR(d.total_actual)} tone="success" tip={t("metricTooltips.dashboard_contractsActual")} />
-        <AnalysisStat label="Achievement" value={`${d.achievement_pct.toFixed(1)}%`} tone={achievementTone(d.achievement_pct)} tip={t("metricTooltips.dashboard_contractsAchievement")} />
+        <DeptAchievementStat
+          label="Account achievement"
+          pct={d.acc_achievement_pct}
+          actual={d.acc_actual}
+          expected={d.acc_expected}
+          tip="Account dept (sheet 'Revenue Achievement %'): Total Income from Account ÷ Total Expected."
+        />
+        <DeptAchievementStat
+          label="Sales achievement"
+          pct={d.sales_achievement_pct}
+          actual={d.sales_act_inst}
+          expected={d.sales_expected}
+          tip="Sales dept (sheet 'Installments Achievement %'): Actual Installments ÷ Expected Installments. New-client income is excluded (no target)."
+        />
+        <AnalysisStat
+          label="New-client income"
+          value={fmtSR(d.sales_new_income)}
+          tone="info"
+          tip="Sheet 'Actual Income from new clients' — signing income with no renewal/installment target, so it sits outside the achievement ratios."
+        />
         <AnalysisStat label="Due + overdue installments" value={fmtSR(totalDue)} tone="warning" tip={t("metricTooltips.dashboard_dueInstallments")} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.1fr]">
         <div className="rounded-xl border border-soft bg-soft-1/35 p-3">
-          <div className="mb-2 flex items-center justify-between text-xs">
+          <div className="mb-3 flex items-center justify-between text-xs">
             <span className="inline-flex items-center gap-1.5 font-medium">
-              Monthly achievement
+              Department achievement
               <MetricInfo text={t("metricTooltips.dashboard_monthlyAchievementBar")} />
             </span>
             <span className="tabular-nums text-muted-foreground">{analysis.month}</span>
           </div>
-          <div className="h-2.5 overflow-hidden rounded-full bg-soft-2">
-            <div
-              className={cn(
-                "h-full rounded-full",
-                d.achievement_pct >= 80
-                  ? "bg-emerald-500"
-                  : d.achievement_pct >= 40
-                    ? "bg-amber-500"
-                    : "bg-rose-500",
-              )}
-              style={{ width: `${achievement}%` }}
-            />
+          <div className="space-y-2.5">
+            <DeptBar label="Account" pct={d.acc_achievement_pct} />
+            <DeptBar label="Sales" pct={d.sales_achievement_pct} />
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
             <MiniCount label="New" value={d.mov_new} tip={t("metricTooltips.dashboard_movNew")} />
@@ -680,6 +690,60 @@ function AnalysisStat({
         {tip ? <MetricInfo text={tip} /> : null}
       </div>
       <div className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function DeptAchievementStat({
+  label,
+  pct,
+  actual,
+  expected,
+  tip,
+}: {
+  label: string;
+  pct: number;
+  actual: number;
+  expected: number;
+  tip?: React.ReactNode;
+}) {
+  const tone = achievementTone(pct);
+  const toneCls = {
+    success: "border-cc-green/25 bg-green-dim text-status-success",
+    warning: "border-amber/25 bg-amber-dim text-status-warning",
+    danger: "border-cc-red/25 bg-red-dim text-status-danger",
+  }[tone];
+  return (
+    <div className={cn("rounded-xl border p-3", toneCls)}>
+      <div className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        {label}
+        {tip ? <MetricInfo text={tip} /> : null}
+      </div>
+      <div className="mt-1 text-lg font-semibold tabular-nums">{Math.round(pct)}%</div>
+      <div className="mt-0.5 truncate text-[11px] text-muted-foreground tabular-nums">
+        {fmtSR(actual)} / {fmtSR(expected)}
+      </div>
+    </div>
+  );
+}
+
+function DeptBar({ label, pct }: { label: string; pct: number }) {
+  const width = Math.min(100, Math.max(0, pct));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px]">
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums text-muted-foreground">{Math.round(pct)}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-soft-2">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            pct >= 80 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-500",
+          )}
+          style={{ width: `${width}%` }}
+        />
+      </div>
     </div>
   );
 }

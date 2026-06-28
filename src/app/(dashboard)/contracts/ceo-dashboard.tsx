@@ -75,7 +75,6 @@ export function CeoDashboard({
   const copy = (ar: string, en: string) => (locale.startsWith("ar") ? ar : en);
   const router = useRouter();
   const d = dashboard;
-  const achievement = Math.min(100, d.achievement_pct);
   const revenueGap = Math.max(0, d.total_expected - d.total_actual);
   // A frozen month whose per-client lists were never snapshotted falls back to a
   // LIVE recompute that has drifted (contracts renewed → end_date moved forward),
@@ -133,7 +132,6 @@ export function CeoDashboard({
         clients={clientInsights}
         monthLabel={fmtMonth(selectedMonth, locale)}
         revenueGap={revenueGap}
-        achievement={achievement}
         copy={copy}
       />
 
@@ -290,7 +288,6 @@ function ModernSheetBoard({
   clients,
   monthLabel,
   revenueGap,
-  achievement,
   copy,
 }: {
   dashboard: MonthlyDashboard;
@@ -298,7 +295,6 @@ function ModernSheetBoard({
   clients: CeoClientInsight[];
   monthLabel: string;
   revenueGap: number;
-  achievement: number;
   copy: (ar: string, en: string) => string;
 }) {
   const t = useTranslations("ContractsPage");
@@ -379,15 +375,15 @@ function ModernSheetBoard({
               info={t("metricTooltips.contracts_totalExpected")}
             />
             <SheetCell
-              label={copy("إجمالي الدخل الفعلي", "Total Actual income")}
-              value={fmtSR(dashboard.total_actual)}
-              tone="greenStrong"
-              info={t("metricTooltips.contracts_totalActual")}
+              label={copy("إنجاز الأكونت", "Account achievement")}
+              value={`${Math.round(dashboard.acc_achievement_pct)}%`}
+              tone={dashboard.acc_achievement_pct >= 70 ? "green" : dashboard.acc_achievement_pct >= 35 ? "amber" : "red"}
+              info={t("metricTooltips.contracts_achievementPct")}
             />
             <SheetCell
-              label={copy("إنجاز الشركة (الكلي)", "Company Achievement (total)")}
-              value={`${dashboard.achievement_pct.toFixed(1)}%`}
-              tone={dashboard.achievement_pct >= 70 ? "green" : "amber"}
+              label={copy("إنجاز المبيعات (أقساط)", "Sales achievement (installments)")}
+              value={`${Math.round(dashboard.sales_achievement_pct)}%`}
+              tone={dashboard.sales_achievement_pct >= 70 ? "green" : dashboard.sales_achievement_pct >= 35 ? "amber" : "red"}
               info={t("metricTooltips.contracts_achievementPct")}
             />
             <SheetCell
@@ -397,20 +393,23 @@ function ModernSheetBoard({
               info={t("metricTooltips.contracts_revenueGap")}
             />
           </div>
-          <div className="px-1 py-3">
-            <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn(
-                  "h-full rounded-full",
-                  dashboard.achievement_pct >= 70
-                    ? "bg-cc-green"
-                    : dashboard.achievement_pct >= 35
-                      ? "bg-amber"
-                      : "bg-cc-red",
+          <div className="space-y-2.5 px-1 py-3">
+            <DeptBar
+              label={copy("الأكونت", "Account")}
+              pct={dashboard.acc_achievement_pct}
+            />
+            <DeptBar
+              label={copy("المبيعات", "Sales")}
+              pct={dashboard.sales_achievement_pct}
+            />
+            {dashboard.sales_new_income > 0 && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                {copy(
+                  `+ ${fmtSR(dashboard.sales_new_income)} دخل عملاء جدد (توقيعات — بلا هدف تجديد/أقساط، خارج نسبة الإنجاز)`,
+                  `+ ${fmtSR(dashboard.sales_new_income)} new-client income (signings — no renewal/installment target, excluded from achievement)`,
                 )}
-                style={{ width: `${achievement}%` }}
-              />
-            </div>
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -877,6 +876,27 @@ function RenewalFunnelStrip({
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function DeptBar({ label, pct }: { label: string; pct: number }) {
+  const width = Math.min(100, Math.max(0, pct));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px]">
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums text-muted-foreground">{Math.round(pct)}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            pct >= 70 ? "bg-cc-green" : pct >= 35 ? "bg-amber" : "bg-cc-red",
+          )}
+          style={{ width: `${width}%` }}
+        />
       </div>
     </div>
   );

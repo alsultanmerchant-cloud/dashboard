@@ -64,8 +64,14 @@ function toTotalsRow(orgId: string, month: string, t: SheetDashboardTotals) {
     total_expected: t.total_expected,
     actual_renewals,
     actual_installments,
-    total_actual: t.total_actual,
-    achievement_pct: pct(t.total_actual, t.total_expected),
+    // Headline achievement must be LIKE-FOR-LIKE: only income that has a matching
+    // target. The sheet's "Total actual income" cell folds in new-client signing
+    // income (sales_new_income), which has NO expected target — including it
+    // inflates the company achievement (e.g. 68% vs the real ~27%). So total_actual
+    // = collected-against-target = acc_actual + sales installments collected.
+    // New-client income is surfaced separately (sales_new_income) as off-target cash.
+    total_actual: t.acc_actual + t.sales_act_inst,
+    achievement_pct: pct(t.acc_actual + t.sales_act_inst, t.total_expected),
     mov_new: t.mov_new,
     mov_renewed: t.mov_renewed,
     mov_lost: t.mov_lost,

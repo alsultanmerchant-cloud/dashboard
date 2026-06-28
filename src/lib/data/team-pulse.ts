@@ -1,49 +1,60 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import {
-  getAccountabilityScorecard,
-  type AccountabilityScorecardRow,
-} from "@/lib/data/accountability";
+import { isLeadershipPosition } from "@/lib/data/leadership";
+import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 
 // =========================================================================
-// Team Pulse (نبض الفريق) — CEO team-performance fusion layer.
+// Team Pulse (نبض الفريق) — employee MOVEMENT & ACTIVITY, not SLA quality.
 //
-// Replaces the dead `employee_activity_daily` instrumentation feed (which
-// only ever covered ~3 in-system users) with two axes grounded in the
-// Rwasem/Odoo + sheet data the org actually produces:
+// Per the Sky Light team's split of responsibilities:
+//   * المساءلة (/accountability) owns SLA + stage compliance (quality).
+//   * نبض الفريق owns "حركة ونشاط الموظفين" — who is moving work right now,
+//     who has stalled, and how much work is stuck.
 //
-//   * Operational delivery — the accountability engine
-//     (task_stage_history → on-time/SLA, overdue load, dwell, rework,
-//     a 0-100 score). Covers ~99.6% of live tasks and every delivery
-//     agent. Source: getAccountabilityScorecard() — the cached rows only,
-//     not the heavy live overview.
+// So this reads RAW STAGE TRANSITIONS (task_stage_history) as the activity
+// signal — NOT logins (the old employee_activity_daily feed was dead because
+// agents don't log in) and NOT the SLA score (that lives in المساءلة).
 //
-//   * Commercial attainment — the contracts target system
-//     (am_targets: expected vs achieved income per account_manager_id).
-//     Only the ~14 contract-owners (account managers + heads) carry an
-//     income target; delivery agents have NONE, so their bar is the
-//     operational SLA standard, not a fabricated volume number.
-//
-// Rollup is by employee_profiles.department_id (clean: 99%+ assigned)
-// with departments.head_employee_id as the head — NOT the task-level
-// team_manager_employee_id (only ~22% coverage). Leadership is already
-// excluded inside the accountability scorecard, so member rows here are
-// individual contributors only.
-//
-// Honesty: every metric is nullable. Null delivery score = unmeasured
-// (no SLA-decidable stage intervals), null commercial = team owns no
-// contract target. Never coerce null → 0.
+// Scoped to LIVE (non-archived) tasks so the query is small and fast (~1.6k
+// task-assignee pairs) and reflects CURRENT activity, not history. Leadership
+// is excluded (agents-only, mirroring المساءلة). One query, rolled up to
+// department + org in TS. Honest: an employee with no live tasks simply isn't
+// on the board (no current duty), counted separately as noDuty.
 // =========================================================================
 
+export type ActivityStatus = "active" | "slow" | "stalled";
 export type PulseStatus = "good" | "watch" | "risk" | "na";
+// Workload vs the team: drowning / normal / has spare capacity.
+export type LoadFlag = "overloaded" | "balanced" | "light";
 
-export interface TeamMemberRow extends AccountabilityScorecardRow {
+// Activity-status thresholds (calendar days since last stage movement).
+const ACTIVE_DAYS = 2;
+const SLOW_DAYS = 5;
+// A task with no stage movement in this many days is "stuck" (needs a push).
+// (Encoded in the SQL below; kept here for documentation.)
+export const STUCK_DAYS = 3;
+
+export interface TeamMemberRow {
+  employeeId: string;
+  fullName: string;
+  positionLabel: string | null;
   departmentId: string | null;
-  // Commercial axis — populated only when this member owns a contract target.
-  commExpected: number | null;
-  commAchieved: number | null;
-  commAttainmentPct: number | null;
+  // The core "is he working in Rwasem now" signal: most recent ACTION (a stage
+  // move OR a Log Note) and how many actions today / this week.
+  lastActionAt: string | null;
+  actionsToday: number;
+  actionsThisWeek: number;
+  lastMoveAt: string | null;
+  status: ActivityStatus;
+  momentum: number; // actionsThisWeek - actionsPrevWeek (↑/↓)
+  completedThisWeek: number;
+  openWip: number; // open live tasks owned
+  stuckTasks: number; // open tasks not moved in STUCK_DAYS+
+  loadFlag: LoadFlag; // workload vs the team median
+  lastUpdateAt: string | null; // most recent Log Note on their tasks
+  updatesThisWeek: number; // Log Notes on their tasks in the last 7 days
+  noUpdateTasks: number; // open tasks with no Log Note in STUCK_DAYS+
 }
 
 export interface TeamPulseRow {
@@ -51,360 +62,408 @@ export interface TeamPulseRow {
   departmentName: string;
   headEmployeeId: string | null;
   headName: string | null;
-  /** Active non-leadership members of the department. */
-  headcount: number;
-  /** Members with a measurable delivery score. */
-  measuredCount: number;
-  // ---- Operational delivery (aggregated over members) ----
-  deliveryScore: number | null; // sample-weighted mean of member scores
-  onTimeRate: number | null; // pooled SLA-ok / SLA-decidable across members
-  openTasks: number;
-  overdueOwned: number; // sum of per-member overdue (fan-out indicator, not distinct)
-  avgDwellBusinessMinutes: number | null; // sample-weighted mean
-  reworkReturns30d: number;
-  /** Members whose own delivery score is in the risk band (< RISK_SCORE). */
-  atRiskMembers: number;
-  // ---- Commercial attainment (targets from contracts) ----
-  commExpected: number | null; // Σ expected_total of dept's contract-owners
-  commAchieved: number | null;
-  commAttainmentPct: number | null;
+  headcount: number; // members with current duty (live tasks)
+  activeCount: number;
+  slowCount: number;
+  stalledCount: number;
+  actionsToday: number;
+  actionsThisWeek: number;
+  momentum: number;
+  completedThisWeek: number;
+  openWip: number;
+  stuckTasks: number;
+  overloadedCount: number;
+  lightCount: number;
+  updatesThisWeek: number;
+  noUpdateTasks: number;
   status: PulseStatus;
 }
 
 export interface TeamPulseTotals {
   departments: number;
-  measuredDepartments: number;
   headcount: number;
-  openTasks: number;
-  overdueOwned: number;
-  /** Org-wide pooled on-time rate. */
-  onTimeRate: number | null;
-  /** Org-wide commercial attainment (Σ achieved / Σ expected). */
-  commExpected: number | null;
-  commAchieved: number | null;
-  commAttainmentPct: number | null;
+  activeCount: number;
+  slowCount: number;
+  stalledCount: number;
+  actionsToday: number;
+  actionsThisWeek: number;
+  momentum: number;
+  completedThisWeek: number;
+  openWip: number;
+  stuckTasks: number;
+  overloadedCount: number;
+  lightCount: number;
+  updatesThisWeek: number;
+  noUpdateTasks: number;
 }
 
 export interface TeamPulseOverview {
   generatedAt: string;
-  /** Month the commercial targets are read for (latest am_targets month). */
-  targetMonth: string | null;
+  /** Most recent action timestamp across the org — the "last synced from Rwasem" freshness stamp. */
+  lastActionAt: string | null;
   rows: TeamPulseRow[];
   totals: TeamPulseTotals;
 }
 
-// Delivery-score band thresholds.
-const RISK_SCORE = 60;
-const WATCH_SCORE = 75;
-// Commercial attainment band thresholds (%).
-const COMM_RISK_PCT = 70;
-const COMM_WATCH_PCT = 90;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const pct = (num: number, den: number): number | null =>
-  den > 0 ? Math.round((num / den) * 100) : null;
-const round1 = (n: number) => Math.round(n * 10) / 10;
-
-// Worst axis wins: a team that delivers well but misses target (or vice
-// versa) should not read green. `na` only when BOTH axes are unmeasurable.
-function statusFor(
-  deliveryScore: number | null,
-  overdueOwned: number,
-  openTasks: number,
-  commAttainmentPct: number | null,
+// This page measures EMPLOYEE activity, so the team status reflects whether
+// PEOPLE are moving — not the task backlog (which is shown separately as the
+// "متوقّفة" count). A team is at risk when most of its people have stopped;
+// watch when a quarter have stopped or movement is dropping.
+function deptStatus(
+  stalledCount: number,
+  headcount: number,
+  momentum: number,
 ): PulseStatus {
-  const bands: PulseStatus[] = [];
-  if (deliveryScore != null) {
-    if (deliveryScore < RISK_SCORE) bands.push("risk");
-    else if (deliveryScore < WATCH_SCORE) bands.push("watch");
-    else bands.push("good");
-  }
-  // A heavily overdue board is a risk regardless of SLA score.
-  if (openTasks > 0 && overdueOwned / openTasks >= 0.4) bands.push("risk");
-  if (commAttainmentPct != null) {
-    if (commAttainmentPct < COMM_RISK_PCT) bands.push("risk");
-    else if (commAttainmentPct < COMM_WATCH_PCT) bands.push("watch");
-    else bands.push("good");
-  }
-  if (bands.length === 0) return "na";
-  if (bands.includes("risk")) return "risk";
-  if (bands.includes("watch")) return "watch";
+  if (headcount === 0) return "na";
+  const stalledShare = stalledCount / headcount;
+  if (stalledShare >= 0.5) return "risk";
+  if (stalledShare >= 0.25 || momentum < 0) return "watch";
   return "good";
 }
 
-interface EmpRow {
-  id: string;
-  department_id: string | null;
+interface ActivitySqlRow {
+  employee_id: string;
   full_name: string | null;
+  job_title: string | null;
+  position_role: string | null;
+  position_name: string | null;
+  department_id: string | null;
+  last_action: string | null;
+  last_move: string | null;
+  actions_today: number;
+  actions7: number;
+  actions_prev: number;
+  open_wip: number;
+  stalled: number;
+  done7: number;
+  last_update: string | null;
+  updates7: number;
+  no_update: number;
 }
-interface DeptRow {
-  id: string;
-  name: string;
-  head_employee_id: string | null;
+
+async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+  const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
+    p_sql: sql.trim(),
+  });
+  if (error) throw new Error(`team-pulse query failed: ${error.message}`);
+  return (data ?? []) as T[];
 }
-interface AmTargetRow {
-  account_manager_id: string;
-  expected_total: number | null;
-  achieved_total: number | null;
+
+// Status from the most recent ACTION in Rwasem (stage move OR Log Note) — this
+// is the "is he working now" signal the team asked for.
+function statusOf(lastAction: string | null): ActivityStatus {
+  if (!lastAction) return "stalled";
+  const days = (Date.now() - new Date(lastAction).getTime()) / 86_400_000;
+  if (days <= ACTIVE_DAYS) return "active";
+  if (days <= SLOW_DAYS) return "slow";
+  return "stalled";
 }
+
+// Shared per-employee activity loader (leadership-filtered). Scoped to live
+// tasks. Cached per request so the overview + drill-down reuse one query.
+async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
+  if (!UUID_RE.test(orgId)) throw new Error("team-pulse: invalid org id");
+  // Read the precomputed team_activity_cache (0218), refreshed by pg_cron every
+  // 10 min. The live per-task aggregate over task_stage_history + task_comments
+  // is fast warm but spikes past the 12s RPC cap cold/under load → page error
+  // boundary. The cache makes this a trivial indexed join. Names / position /
+  // department are joined fresh so they never go stale; status / load / momentum
+  // are still derived live in TS from the cached counters.
+  const rows = await runSql<ActivitySqlRow>(`
+    select c.employee_id, e.full_name, e.job_title,
+           pp.role position_role, pp.name position_name, e.department_id,
+           c.last_action, c.last_move,
+           c.actions_today, c.actions7, c.actions_prev,
+           c.open_wip, c.stalled, c.done7,
+           c.last_update, c.updates7, c.no_update
+      from team_activity_cache c
+      join employee_profiles e
+        on e.id = c.employee_id and e.organization_id = '${orgId}'
+       and e.employment_status = 'active'
+      left join positions pp on pp.id = e.position_id
+     where c.organization_id = '${orgId}'
+  `);
+
+  const out: TeamMemberRow[] = [];
+  for (const r of rows) {
+    // Agents-only: skip leadership (mirrors المساءلة / the board everywhere).
+    if (isLeadershipPosition({ role: r.position_role, name: r.position_name })) continue;
+    out.push({
+      employeeId: r.employee_id,
+      fullName: r.full_name ?? "—",
+      positionLabel: r.position_role
+        ? (TASK_OWNER_ROLE_LABELS[r.position_role as TaskOwnerRoleKey] ?? r.job_title)
+        : r.job_title,
+      departmentId: r.department_id,
+      lastActionAt: r.last_action,
+      actionsToday: r.actions_today,
+      actionsThisWeek: r.actions7,
+      lastMoveAt: r.last_move,
+      status: statusOf(r.last_action),
+      momentum: r.actions7 - r.actions_prev,
+      completedThisWeek: r.done7,
+      openWip: r.open_wip,
+      stuckTasks: r.stalled,
+      loadFlag: "balanced", // set in the capacity pass below
+      lastUpdateAt: r.last_update,
+      updatesThisWeek: r.updates7,
+      noUpdateTasks: r.no_update,
+    });
+  }
+
+  // Capacity pass: classify workload vs the team median WIP. Overloaded =
+  // well above median (and not trivially small); light = well below. This
+  // surfaces the load imbalance (median ~15 but some agents carry 200+).
+  const wips = out.map((m) => m.openWip).filter((v) => v > 0).sort((a, b) => a - b);
+  const median = wips.length
+    ? wips.length % 2
+      ? wips[(wips.length - 1) / 2]
+      : Math.round((wips[wips.length / 2 - 1] + wips[wips.length / 2]) / 2)
+    : 0;
+  for (const m of out) {
+    if (median > 0 && m.openWip >= Math.max(8, median * 1.5)) m.loadFlag = "overloaded";
+    else if (median > 0 && m.openWip <= median * 0.5) m.loadFlag = "light";
+    else m.loadFlag = "balanced";
+  }
+  return out;
+}
+
+const loadActivityRows = cache(_loadActivityRows);
 
 async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> {
-  // Operational axis (leadership already excluded inside the scorecard).
-  const scorecard = await getAccountabilityScorecard(orgId);
-  const scoreByEmp = new Map<string, AccountabilityScorecardRow>(
-    scorecard.map((r) => [r.employeeId, r]),
+  const members = await loadActivityRows(orgId);
+
+  const [{ data: depts }, { data: emps }] = await Promise.all([
+    supabaseAdmin
+      .from("departments")
+      .select("id, name, head_employee_id")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("id, full_name")
+      .eq("organization_id", orgId),
+  ]);
+  const deptById = new Map(
+    ((depts as { id: string; name: string; head_employee_id: string | null }[] | null) ?? []).map(
+      (d) => [d.id, d],
+    ),
+  );
+  const nameById = new Map(
+    ((emps as { id: string; full_name: string | null }[] | null) ?? []).map((e) => [
+      e.id,
+      e.full_name,
+    ]),
   );
 
-  // Org structure + latest commercial-target month, in parallel.
-  const [{ data: emps }, { data: depts }, { data: latestMonth }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("employee_profiles")
-        .select("id, department_id, full_name")
-        .eq("organization_id", orgId)
-        .eq("employment_status", "active"),
-      supabaseAdmin
-        .from("departments")
-        .select("id, name, head_employee_id")
-        .eq("organization_id", orgId),
-      supabaseAdmin
-        .from("am_targets")
-        .select("month")
-        .eq("organization_id", orgId)
-        .order("month", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-  const targetMonth = (latestMonth as { month: string } | null)?.month ?? null;
-  let amTargets: AmTargetRow[] = [];
-  if (targetMonth) {
-    const { data } = await supabaseAdmin
-      .from("am_targets")
-      .select("account_manager_id, expected_total, achieved_total")
-      .eq("organization_id", orgId)
-      .eq("month", targetMonth);
-    amTargets = (data as AmTargetRow[] | null) ?? [];
-  }
-  const targetByEmp = new Map<string, AmTargetRow>(
-    amTargets.map((t) => [t.account_manager_id, t]),
-  );
-
-  const deptById = new Map<string, DeptRow>(
-    ((depts as DeptRow[] | null) ?? []).map((d) => [d.id, d]),
-  );
-  const empById = new Map<string, EmpRow>(
-    ((emps as EmpRow[] | null) ?? []).map((e) => [e.id, e]),
-  );
-
-  // Bucket active employees by department.
-  const membersByDept = new Map<string, EmpRow[]>();
-  for (const e of (emps as EmpRow[] | null) ?? []) {
-    if (!e.department_id) continue;
-    const list = membersByDept.get(e.department_id) ?? [];
-    list.push(e);
-    membersByDept.set(e.department_id, list);
+  const byDept = new Map<string, TeamMemberRow[]>();
+  for (const m of members) {
+    if (!m.departmentId) continue;
+    const list = byDept.get(m.departmentId) ?? [];
+    list.push(m);
+    byDept.set(m.departmentId, list);
   }
 
   const rows: TeamPulseRow[] = [];
-  for (const [deptId, members] of membersByDept) {
+  for (const [deptId, list] of byDept) {
     const dept = deptById.get(deptId);
     if (!dept) continue;
-
-    // ---- Operational aggregation over scored members ----
-    let scoreWSum = 0;
-    let scoreW = 0;
-    let dwellWSum = 0;
-    let dwellW = 0;
-    let slaOk = 0;
-    let slaN = 0;
-    let openTasks = 0;
-    let overdueOwned = 0;
-    let rework = 0;
-    let measuredCount = 0;
-    let atRiskMembers = 0;
-
-    // ---- Commercial aggregation over contract-owning members ----
-    let commExpected: number | null = null;
-    let commAchieved: number | null = null;
-
-    for (const m of members) {
-      const t = targetByEmp.get(m.id);
-      if (t) {
-        commExpected = (commExpected ?? 0) + (t.expected_total ?? 0);
-        commAchieved = (commAchieved ?? 0) + (t.achieved_total ?? 0);
-      }
-      const sc = scoreByEmp.get(m.id);
-      if (!sc) continue;
-      openTasks += sc.openTasks;
-      overdueOwned += sc.overdueOwned;
-      rework += sc.reworkReturns30d;
-      slaN += sc.slaSampleSize;
-      // slaSampleSize × onTimeRate recovers the ok count without re-querying.
-      if (sc.slaSampleSize > 0 && sc.onTimeRate != null) {
-        slaOk += Math.round((sc.onTimeRate / 100) * sc.slaSampleSize);
-      }
-      if (sc.score != null) {
-        const w = sc.slaSampleSize + 1; // favor measured members, never 0
-        scoreWSum += sc.score * w;
-        scoreW += w;
-        measuredCount += 1;
-        if (sc.score < RISK_SCORE) atRiskMembers += 1;
-      }
-      if (sc.avgDwellBusinessMinutes != null && sc.sampleSize > 0) {
-        dwellWSum += sc.avgDwellBusinessMinutes * sc.sampleSize;
-        dwellW += sc.sampleSize;
-      }
-    }
-
-    const deliveryScore = scoreW > 0 ? Math.round(scoreWSum / scoreW) : null;
-    const onTimeRate = pct(slaOk, slaN);
-    const commAttainmentPct =
-      commExpected != null && commExpected > 0
-        ? Math.round(((commAchieved ?? 0) / commExpected) * 100)
-        : null;
-
+    const agg = list.reduce(
+      (a, m) => {
+        a.activeCount += m.status === "active" ? 1 : 0;
+        a.slowCount += m.status === "slow" ? 1 : 0;
+        a.stalledCount += m.status === "stalled" ? 1 : 0;
+        a.actionsToday += m.actionsToday;
+        a.actionsThisWeek += m.actionsThisWeek;
+        a.momentum += m.momentum;
+        a.completedThisWeek += m.completedThisWeek;
+        a.openWip += m.openWip;
+        a.stuckTasks += m.stuckTasks;
+        a.overloadedCount += m.loadFlag === "overloaded" ? 1 : 0;
+        a.lightCount += m.loadFlag === "light" ? 1 : 0;
+        a.updatesThisWeek += m.updatesThisWeek;
+        a.noUpdateTasks += m.noUpdateTasks;
+        return a;
+      },
+      {
+        activeCount: 0,
+        slowCount: 0,
+        stalledCount: 0,
+        actionsToday: 0,
+        actionsThisWeek: 0,
+        momentum: 0,
+        completedThisWeek: 0,
+        openWip: 0,
+        stuckTasks: 0,
+        overloadedCount: 0,
+        lightCount: 0,
+        updatesThisWeek: 0,
+        noUpdateTasks: 0,
+      },
+    );
     rows.push({
       departmentId: deptId,
       departmentName: dept.name,
       headEmployeeId: dept.head_employee_id,
-      headName: dept.head_employee_id
-        ? (empById.get(dept.head_employee_id)?.full_name ?? null)
-        : null,
-      headcount: members.length,
-      measuredCount,
-      deliveryScore,
-      onTimeRate,
-      openTasks,
-      overdueOwned,
-      avgDwellBusinessMinutes: dwellW > 0 ? round1(dwellWSum / dwellW) : null,
-      reworkReturns30d: rework,
-      atRiskMembers,
-      commExpected,
-      commAchieved,
-      commAttainmentPct,
-      status: statusFor(deliveryScore, overdueOwned, openTasks, commAttainmentPct),
+      headName: dept.head_employee_id ? (nameById.get(dept.head_employee_id) ?? null) : null,
+      headcount: list.length,
+      ...agg,
+      status: deptStatus(agg.stalledCount, list.length, agg.momentum),
     });
   }
 
-  // Worst-first: risk → watch → good → na; within a band, lowest score first.
+  // Worst-first: risk → watch → good → na; within a band, most stuck tasks first.
   const statusRank: Record<PulseStatus, number> = { risk: 0, watch: 1, good: 2, na: 3 };
-  rows.sort((a, b) => {
-    if (statusRank[a.status] !== statusRank[b.status])
-      return statusRank[a.status] - statusRank[b.status];
-    return (a.deliveryScore ?? 999) - (b.deliveryScore ?? 999);
-  });
+  rows.sort((a, b) =>
+    statusRank[a.status] !== statusRank[b.status]
+      ? statusRank[a.status] - statusRank[b.status]
+      : b.stuckTasks - a.stuckTasks,
+  );
 
-  // ---- Org totals ----
-  let tOpen = 0;
-  let tOverdue = 0;
-  let tSlaOk = 0;
-  let tSlaN = 0;
-  let tCommExp: number | null = null;
-  let tCommAch: number | null = null;
-  let measuredDepartments = 0;
-  let headcount = 0;
-  for (const r of rows) {
-    tOpen += r.openTasks;
-    tOverdue += r.overdueOwned;
-    headcount += r.headcount;
-    if (r.deliveryScore != null) measuredDepartments += 1;
-    if (r.commExpected != null) {
-      tCommExp = (tCommExp ?? 0) + r.commExpected;
-      tCommAch = (tCommAch ?? 0) + (r.commAchieved ?? 0);
-    }
-  }
-  // Pool org on-time from the raw accountability rows (exact, not from dept proxy).
-  for (const sc of scorecard) {
-    if (sc.slaSampleSize > 0 && sc.onTimeRate != null) {
-      tSlaN += sc.slaSampleSize;
-      tSlaOk += Math.round((sc.onTimeRate / 100) * sc.slaSampleSize);
-    }
-  }
-
-  return {
-    generatedAt: new Date().toISOString(),
-    targetMonth,
-    rows,
-    totals: {
-      departments: rows.length,
-      measuredDepartments,
-      headcount,
-      openTasks: tOpen,
-      overdueOwned: tOverdue,
-      onTimeRate: pct(tSlaOk, tSlaN),
-      commExpected: tCommExp,
-      commAchieved: tCommAch,
-      commAttainmentPct:
-        tCommExp != null && tCommExp > 0
-          ? Math.round(((tCommAch ?? 0) / tCommExp) * 100)
-          : null,
+  const totals = rows.reduce<TeamPulseTotals>(
+    (t, r) => {
+      t.departments += 1;
+      t.headcount += r.headcount;
+      t.activeCount += r.activeCount;
+      t.slowCount += r.slowCount;
+      t.stalledCount += r.stalledCount;
+      t.actionsToday += r.actionsToday;
+      t.actionsThisWeek += r.actionsThisWeek;
+      t.momentum += r.momentum;
+      t.completedThisWeek += r.completedThisWeek;
+      t.openWip += r.openWip;
+      t.stuckTasks += r.stuckTasks;
+      t.overloadedCount += r.overloadedCount;
+      t.lightCount += r.lightCount;
+      t.updatesThisWeek += r.updatesThisWeek;
+      t.noUpdateTasks += r.noUpdateTasks;
+      return t;
     },
-  };
+    {
+      departments: 0,
+      headcount: 0,
+      activeCount: 0,
+      slowCount: 0,
+      stalledCount: 0,
+      actionsToday: 0,
+      actionsThisWeek: 0,
+      momentum: 0,
+      completedThisWeek: 0,
+      openWip: 0,
+      stuckTasks: 0,
+      overloadedCount: 0,
+      lightCount: 0,
+      updatesThisWeek: 0,
+      noUpdateTasks: 0,
+    },
+  );
+
+  // Org-wide freshness stamp: the most recent action timestamp.
+  const lastActionAt = members.reduce<string | null>((max, m) => {
+    if (m.lastActionAt && (!max || m.lastActionAt > max)) return m.lastActionAt;
+    return max;
+  }, null);
+
+  return { generatedAt: new Date().toISOString(), lastActionAt, rows, totals };
 }
 
 export const getTeamPulseOverview = cache(_getTeamPulseOverview);
 
-// ---- Per-department drill-down -------------------------------------------
-
-async function _getTeamMembers(
-  orgId: string,
-  departmentId: string,
-): Promise<TeamMemberRow[]> {
-  const scorecard = await getAccountabilityScorecard(orgId);
-  const scoreByEmp = new Map<string, AccountabilityScorecardRow>(
-    scorecard.map((r) => [r.employeeId, r]),
-  );
-
-  const { data: emps } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("id, department_id, full_name")
-    .eq("organization_id", orgId)
-    .eq("department_id", departmentId)
-    .eq("employment_status", "active");
-
-  const month = (
-    await supabaseAdmin
-      .from("am_targets")
-      .select("month")
-      .eq("organization_id", orgId)
-      .order("month", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-  ).data as { month: string } | null;
-
-  const targetByEmp = new Map<string, AmTargetRow>();
-  if (month?.month) {
-    const { data } = await supabaseAdmin
-      .from("am_targets")
-      .select("account_manager_id, expected_total, achieved_total")
-      .eq("organization_id", orgId)
-      .eq("month", month.month);
-    for (const t of (data as AmTargetRow[] | null) ?? [])
-      targetByEmp.set(t.account_manager_id, t);
-  }
-
-  const rows: TeamMemberRow[] = [];
-  for (const e of (emps as EmpRow[] | null) ?? []) {
-    // Only members who appear in the (leadership-filtered) scorecard, so the
-    // drill-down stays individual-contributor only and consistent with the
-    // rollup's measuredCount.
-    const sc = scoreByEmp.get(e.id);
-    if (!sc) continue;
-    const t = targetByEmp.get(e.id);
-    const commAttainmentPct =
-      t && (t.expected_total ?? 0) > 0
-        ? Math.round(((t.achieved_total ?? 0) / (t.expected_total ?? 1)) * 100)
-        : null;
-    rows.push({
-      ...sc,
-      departmentId: e.department_id,
-      commExpected: t?.expected_total ?? null,
-      commAchieved: t?.achieved_total ?? null,
-      commAttainmentPct,
-    });
-  }
-  rows.sort((a, b) => (a.score ?? 999) - (b.score ?? 999)); // worst first
-  return rows;
+async function _getTeamMembers(orgId: string, departmentId: string): Promise<TeamMemberRow[]> {
+  const members = await loadActivityRows(orgId);
+  const statusRank: Record<ActivityStatus, number> = { stalled: 0, slow: 1, active: 2 };
+  return members
+    .filter((m) => m.departmentId === departmentId)
+    .sort((a, b) =>
+      statusRank[a.status] !== statusRank[b.status]
+        ? statusRank[a.status] - statusRank[b.status]
+        : b.stuckTasks - a.stuckTasks,
+    );
 }
 
 export const getTeamMembers = cache(_getTeamMembers);
+
+// ---- Per-employee action breakdown (drill-down) --------------------------
+// What the "actions in Rwasem" number is actually made of: which tasks the
+// person acted on, in which project, and how many stage moves vs Log Notes.
+// Scoped to one employee's tasks over a window → small + fast (live, no cache).
+
+export interface ActionLogRow {
+  taskId: string;
+  taskCode: string | null;
+  title: string;
+  projectName: string | null;
+  moves: number; // stage transitions in the window
+  notes: number; // Log Notes in the window
+  total: number;
+  lastActionAt: string | null;
+}
+
+interface ActionLogSqlRow {
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
+  moves: number;
+  notes: number;
+  total: number;
+  last_action: string | null;
+}
+
+async function _getEmployeeActionLog(
+  orgId: string,
+  employeeId: string,
+  days = 30,
+): Promise<ActionLogRow[]> {
+  if (!UUID_RE.test(orgId) || !UUID_RE.test(employeeId)) return [];
+  const win = Math.max(1, Math.min(365, Math.floor(days)));
+  const rows = await runSql<ActionLogSqlRow>(`
+    with my as (
+      select ta.task_id
+        from task_assignees ta
+        join tasks t on t.id = ta.task_id
+       where ta.role_type = 'agent' and ta.employee_id = '${employeeId}'
+         and ta.organization_id = '${orgId}'
+         and t.archived_at is null
+    ),
+    mv as (
+      select h.task_id, count(*) c, max(h.entered_at) la
+        from task_stage_history h
+       where h.task_id in (select task_id from my)
+         and h.entered_at >= now() - interval '${win} days'
+       group by 1
+    ),
+    nt as (
+      select c.task_id, count(*) c, max(c.created_at) la
+        from task_comments c
+       where c.task_id in (select task_id from my)
+         and c.created_at >= now() - interval '${win} days'
+       group by 1
+    )
+    select t.id task_id, t.task_code, t.title, p.name project_name,
+           coalesce(mv.c,0) moves, coalesce(nt.c,0) notes,
+           coalesce(mv.c,0) + coalesce(nt.c,0) total,
+           greatest(mv.la, nt.la) last_action
+      from tasks t
+      left join projects p on p.id = t.project_id
+      left join mv on mv.task_id = t.id
+      left join nt on nt.task_id = t.id
+     where t.id in (select task_id from my)
+       and (mv.c is not null or nt.c is not null)
+     order by total desc, last_action desc nulls last
+     limit 100
+  `);
+  return rows.map((r) => ({
+    taskId: r.task_id,
+    taskCode: r.task_code,
+    title: (r.title ?? "").trim() || "—",
+    projectName: r.project_name,
+    moves: r.moves,
+    notes: r.notes,
+    total: r.total,
+    lastActionAt: r.last_action,
+  }));
+}
+
+export const getEmployeeActionLog = cache(_getEmployeeActionLog);

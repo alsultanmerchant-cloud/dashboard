@@ -78,11 +78,17 @@ function scoreLines(s: ExecutiveScores): BriefScoreLine[] {
 }
 
 async function loadMoney(orgId: string): Promise<BriefMoney> {
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const horizon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01`;
+  // Last day of the current month — needed for the engine's "overdue
+  // installment" window (collected-this-month still counts as overdue).
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
+    .toISOString()
+    .slice(0, 10);
 
-  const [renewals, overdueInst, paid] = await Promise.all([
+  const [renewals, overdueInst, paid, monthRow] = await Promise.all([
     supabaseAdmin
       .from("contracts")
       .select("total_value", { count: "exact" })
@@ -90,22 +96,37 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
       .eq("status", "active")
       .gte("end_date", today)
       .lte("end_date", horizon),
+    // Overdue installments aligned to the CONTRACTS ENGINE definition (sheet
+    // cells acc_exp_overdue_inst / sales_exp_overdue_inst, migrations 0168/0172):
+    // payment seq >= 2 (seq 1 = signing deposit), real revenue source types,
+    // expected before this month, still open or collected this month, contract
+    // not lost before this month. Status is NOT a filter (the sheet keys off
+    // lost_date). The headline VALUE is read from the engine store below so it
+    // matches the sheet to the riyal; these rows drive the client/payment counts.
     supabaseAdmin
       .from("installments")
-      // Only count receivables on LIVE contracts. Installments left on
-      // closed/lost/expired contracts aren't collectible cash — they're stale
-      // rows that wrongly inflated the "overdue collection" cash-threat figure.
-      .select("expected_amount, contract:contracts!inner(status, client_id)", { count: "exact" })
+      .select("expected_amount, contract:contracts!inner(client_id)", { count: "exact" })
       .eq("organization_id", orgId)
-      .lt("expected_date", today)
-      .or("actual_amount.is.null,actual_amount.eq.0")
-      .in("contract.status", ["active", "hold"]),
+      .gte("sequence", 2)
+      .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
+      .lt("expected_date", monthStart)
+      .or(`actual_date.is.null,and(actual_date.gte.${monthStart},actual_date.lte.${monthEnd})`)
+      .or(`lost_date.is.null,lost_date.gte.${monthStart}`),
     supabaseAdmin
       .from("installments")
       .select("actual_amount")
       .eq("organization_id", orgId)
       .gte("actual_date", monthStart)
       .gt("actual_amount", 0),
+    // Engine store for the selected month — same source the /contracts dashboard
+    // and the sheet show. For a frozen (sheet-imported) month this is the exact
+    // sheet value; for a live month it's the engine recompute.
+    supabaseAdmin
+      .from("monthly_dashboard_totals")
+      .select("acc_exp_overdue_inst, sales_exp_overdue_inst")
+      .eq("organization_id", orgId)
+      .eq("month", monthStart)
+      .maybeSingle(),
   ]);
 
   const sum = (rows: Array<Record<string, unknown>> | null, k: string) =>
@@ -114,6 +135,7 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
   if (renewals.error) console.error("[brief.loadMoney.renewals]", renewals.error.message);
   if (overdueInst.error) console.error("[brief.loadMoney.installments]", overdueInst.error.message);
   if (paid.error) console.error("[brief.loadMoney.paid]", paid.error.message);
+  if (monthRow.error) console.error("[brief.loadMoney.monthRow]", monthRow.error.message);
 
   // Distinct clients behind those overdue installments (the embedded contract
   // carries client_id) — the brief leads with this so the count matches the
@@ -124,12 +146,19 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
     if (c?.client_id) overdueClientIds.add(c.client_id);
   }
 
+  // Headline overdue value: prefer the engine store (matches the sheet &
+  // /contracts page exactly); fall back to summing the live rows if no row yet.
+  const overdueValue = monthRow.data
+    ? Number(monthRow.data.acc_exp_overdue_inst ?? 0) +
+      Number(monthRow.data.sales_exp_overdue_inst ?? 0)
+    : sum(overdueInst.data, "expected_amount");
+
   return {
     renew30Count: renewals.count ?? 0,
     renew30Value: sum(renewals.data, "total_value"),
     overdueInstallments: overdueInst.count ?? 0,
     overdueClients: overdueClientIds.size,
-    overdueValue: sum(overdueInst.data, "expected_amount"),
+    overdueValue,
     paidThisMonth: sum(paid.data, "actual_amount"),
   };
 }

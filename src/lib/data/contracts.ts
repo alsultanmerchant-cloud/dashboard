@@ -803,14 +803,25 @@ export type GridContract = {
 // brief's count/amount and the table this drill-down opens describe the exact
 // same population.
 export async function getOverduePaymentContractIds(orgId: string): Promise<string[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  // Mirror the contracts ENGINE "overdue installment" definition (migrations
+  // 0168/0172, sheet cells acc_exp_overdue_inst / sales_exp_overdue_inst) so this
+  // drill-down opens the EXACT contracts behind the CEO brief's overdue-collection
+  // card: payment seq >= 2, real revenue source types, expected before this month,
+  // still open or collected this month, not lost before this month.
+  const now = new Date();
+  const monthStart = `${now.toISOString().slice(0, 7)}-01`;
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
+    .toISOString()
+    .slice(0, 10);
   const { data, error } = await supabaseAdmin
     .from("installments")
-    .select("contract_id, contract:contracts!inner(status)")
+    .select("contract_id")
     .eq("organization_id", orgId)
-    .lt("expected_date", today)
-    .or("actual_amount.is.null,actual_amount.eq.0")
-    .in("contract.status", ["active", "hold"]);
+    .gte("sequence", 2)
+    .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
+    .lt("expected_date", monthStart)
+    .or(`actual_date.is.null,and(actual_date.gte.${monthStart},actual_date.lte.${monthEnd})`)
+    .or(`lost_date.is.null,lost_date.gte.${monthStart}`);
   if (error) throw error;
   return Array.from(
     new Set(
