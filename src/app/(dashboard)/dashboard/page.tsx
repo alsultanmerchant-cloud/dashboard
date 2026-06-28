@@ -239,16 +239,9 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         description={t("welcomeDescription")}
       />
 
-      {canFinance && (
-        <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
-          <BriefSection orgId={orgId} />
-        </DashSection>
-      )}
-
-      <DashSection fallback={<StripSkeleton />}>
-        <PulseBand orgId={orgId} />
-      </DashSection>
-
+      {/* ── INDICATORS (top): the fast, at-a-glance KPI cards, grouped so they
+          render first and stay reliable even if a heavier detail section below
+          is slow or errors (each is its own DashSection boundary). ───────── */}
       <DashSection fallback={<ScoresSkeleton />}>
         <ScoresBand orgId={orgId} />
       </DashSection>
@@ -257,12 +250,24 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         <WorkflowIndicators orgId={orgId} />
       </DashSection>
 
-      <DashSection fallback={<SectionSkeleton h={300} />}>
-        <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
-      </DashSection>
-
       <DashSection fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />
+      </DashSection>
+
+      <DashSection fallback={<StripSkeleton />}>
+        <PulseBand orgId={orgId} />
+      </DashSection>
+
+      {/* CEO brief — narrative summary, sits below the indicators. */}
+      {canFinance && (
+        <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
+          <BriefSection orgId={orgId} />
+        </DashSection>
+      )}
+
+      {/* ── DETAILS (below): heavier tables / flows / lists. ─────────────── */}
+      <DashSection fallback={<SectionSkeleton h={300} />}>
+        <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={260} />}>
