@@ -3232,7 +3232,11 @@
         "escalations": "Unanswered escalations",
         "critical": "Critical delays",
         "atRiskClients": "At-risk clients",
-        "fullReport": "Full report"
+        "fullReport": "Full report",
+        "criticalTip": "Open (unfinished) tasks that are past their deadline AND stuck in their current stage for more than 14 days with no movement. I.e. late AND stalled in one stage for 2+ weeks together — not merely delayed by a few days.",
+        "riskProjectsTip": "Projects that contain at least one overdue task.",
+        "atRiskClientsTip": "Active clients (with a live project) whose AI chat analysis shows low satisfaction or negative sentiment — churn candidates.",
+        "escalationsTip": "Escalations that have not yet been answered."
       },
       "naSourceSatisfaction": "Import client chats on the Satisfaction page",
       "naSourceBrief": "No readable project brief has been analyzed yet",

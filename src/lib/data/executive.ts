@@ -26,8 +26,9 @@ export interface HeroKpis {
 }
 
 async function _getHeroKpis(orgId: string): Promise<HeroKpis> {
-  const [odooNow, weekAgoOverdue, totalRevision30d] = await Promise.all([
+  const [odooNow, overdueNow, weekAgoOverdue, totalRevision30d] = await Promise.all([
     getDashboardOdooMetrics().catch(() => null),
+    countOverdueNow(orgId),
     countOverdueAt(orgId, daysAgoIso(7)),
     countRevisionCommentsSince(orgId, daysAgoIso(30)),
   ]);
@@ -38,7 +39,7 @@ async function _getHeroKpis(orgId: string): Promise<HeroKpis> {
       sample: odooNow?.onTimeSample ?? 0,
     },
     overdue: {
-      current: odooNow?.overdueCount ?? 0,
+      current: overdueNow,
       weekAgo: weekAgoOverdue,
     },
     stuckInReview: {
@@ -1314,6 +1315,25 @@ async function countOverdueAt(orgId: string, isoTs: string): Promise<number> {
     .maybeSingle();
   if (error || !data) return 0;
   return (data as { overdue_count: number }).overdue_count ?? 0;
+}
+
+// Live "currently overdue" count from our own truth source (tasks.is_overdue),
+// matching the daily-snapshot definition exactly (is_overdue ⇒ already excludes
+// done + the not-started `new` stage per migration 0219). We deliberately do
+// NOT use Odoo's live overdueCount here: Odoo counts every task with a past
+// date_deadline that isn't done — including not-started `new`-stage backlog —
+// so it over-reports (~137 vs ~41) and is inconsistent with the week-ago delta
+// (snapshot-backed) and the "where is the danger" card.
+async function countOverdueNow(orgId: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("is_overdue", true)
+    .is("archived_at", null)
+    .neq("stage", "done");
+  if (error) return 0;
+  return count ?? 0;
 }
 
 async function countRevisionCommentsSince(orgId: string, isoTs: string): Promise<number> {

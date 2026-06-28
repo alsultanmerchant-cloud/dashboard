@@ -260,7 +260,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
               <p className="text-base font-semibold tabular-nums text-amber group-hover:underline">
                 {stability.riskProjects}
               </p>
-              <p className="text-[9px] text-muted-foreground">{t("stability.riskProjects")}</p>
+              <Explained text={t("stability.riskProjectsTip")}>
+                <p className="text-[9px] text-muted-foreground">{t("stability.riskProjects")}</p>
+              </Explained>
             </Link>
             <Link
               href="/satisfaction?risk=1"
@@ -274,7 +276,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
               >
                 {stability.atRiskClients}
               </p>
-              <p className="text-[9px] text-muted-foreground">{t("stability.atRiskClients")}</p>
+              <Explained text={t("stability.atRiskClientsTip")}>
+                <p className="text-[9px] text-muted-foreground">{t("stability.atRiskClients")}</p>
+              </Explained>
             </Link>
             <Link
               href="/escalations"
@@ -288,7 +292,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
               >
                 {stability.unackEscalations}
               </p>
-              <p className="text-[9px] text-muted-foreground">{t("stability.escalations")}</p>
+              <Explained text={t("stability.escalationsTip")}>
+                <p className="text-[9px] text-muted-foreground">{t("stability.escalations")}</p>
+              </Explained>
             </Link>
             <Link
               href="/tasks?f=critical"
@@ -302,7 +308,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
               >
                 {stability.criticalOverdue}
               </p>
-              <p className="text-[9px] text-muted-foreground">{t("stability.critical")}</p>
+              <Explained text={t("stability.criticalTip")}>
+                <p className="text-[9px] text-muted-foreground">{t("stability.critical")}</p>
+              </Explained>
             </Link>
           </div>
 
