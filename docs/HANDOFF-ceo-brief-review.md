@@ -1,0 +1,108 @@
+# Handoff — CEO Dashboard Brief: team-feedback fixes + review
+
+**Date:** 2026-06-28 · **Branch:** `wa-multi-number` · **Status:** all changes LOCAL / UNCOMMITTED (user chose to batch).
+**Respond to the user in English** (they write Arabic prompts). Single-tenant org: slug `rawasm-demo` = org id `11111111-1111-1111-1111-000000000000`-style → actual `11111111-1111-1111-1111-111111111111`.
+
+## What this work is
+Making the main `/dashboard` CEO brief card ("موجز المدير التنفيذي" — `ExecutiveDashboard` in `src/app/(dashboard)/dashboard/page.tsx`) production-ready, driven by Sky Light team feedback delivered **one note at a time** (screenshot + Arabic note). 6 notes done + a self-review pass. The brief is a 3-question card: Q1 "الشركة بتتحسن ولا بتسوء؟" (verdict + change pills), Q2 "فين الخطر؟" (risks), Q3 "أعمل إيه؟" (recommendations).
+
+**Brief architecture** (read these memories first): `project_ceo_dashboard_brief`, `project_ceo_brief_sectioned_streaming`, `project_brief_live_client_scoping`, `project_ceo_dashboard_production_audit`. Key facts: deterministic FACTS computed in `src/lib/data/ceo-brief-signals.ts` (`buildCeoBriefSignals`); AI PROSE by Gemini per-section (`src/lib/ceo-brief/sections.ts`). Results cached in `ceo_brief_runs` (is_current) → **changes only appear after regen** (daily cron `0 3 * * *`, the "تحديث" button, or per-section "إعادة تحليل").
+
+## The 6 fixes (all verified against live data)
+
+1. **Q1 change pills** (`ceo-brief-signals.ts` `loadDeliveryWindow` + `ceo-brief-card.tsx` + i18n):
+   - on-time pill = LIVE 7-day window: of tasks DUE (deadline=`planned_date`; `due_date` is empty org-wide) in last 7d, how many delivered on time (`actual_done_date <= planned_date`) — count + % vs prior 7d. No drill (team: "مش محتاجين انه يفتح تاسكات").
+   - NEW "delaysCleared" pill = of tasks that went late this week, how many finished.
+   - overdue pill kept (snapshot delta).
+   - "completed" pill drill fixed: `/tasks?view=list&f=completed_week` (new filter). **Review fix:** drill now uses `stage_entered_at` (not `actual_done_date`, which undercounted 183 vs pill 259 due to backdating) → ~237, within ~8% of pill (residual = reopened-this-week tasks).
+   - `BriefChange.detail.sample` carries the count pairs; card renders them in the popover.
+
+2. **Churn card** (Q2) — now ACTIVE clients at risk only (team: "lost clients don't matter"). Was 18/62 (contract-or-project live, undercounted via merge-map). Now sourced from `getSatisfactionRows` where `hasActiveProject` + `isClientAtRisk` (negative sentiment OR score<55). **Review extension:** aligned EVERYWHERE — new `getActiveProjectClientIds` in `satisfaction.ts`; `getOrgSatisfactionAggregate` (→ Quality/stability score, AI insights) and `getAtRiskClients` (→ notifications, brief risk text) both use it now (was `getLiveClientIds`). All surfaces report 22/68. Consequence: stability churn penalty uses 22 not 18 (stricter/more accurate). `getLiveClientIds` now unused (kept exported).
+
+3. **Risk dedup** — `stuck_project` ("مشروع … متعثّر") and `at_risk_client` ("العميل … في منطقة الخطر") duplicated the same overdue load for single-project clients. Added `clientId` to `StuckProjectRow`; `at_risk_client` is suppressed when `worstClient.clientId === stuckProjectClientId` (keeps the more specific project card).
+
+4. **Overdue-payments card** — numbers were correct but the drill opened the wrong set (`target=Overdue` = renewal-overdue contracts, not payments). New `getOverduePaymentContractIds` (contracts.ts); contracts page `?pay=overdue` mode (`TableSection` pre-filters roster + lifts default status filter). `loadMoney` adds `overdueClients`. Card now: "{clients} عميل · {n} دفعة متأخرة بقيمة {val} ريال", href `/contracts?view=table&pay=overdue`. Verified: 11 installments / 10 contracts / 10 clients.
+
+5. **Dashboard resilience** — every section had `<Suspense>` (loading) but NO error boundary, so one failed fetch (transient `ETIMEDOUT`) blanked the whole page via `(dashboard)/error.tsx`. New `src/components/executive/section-boundary.tsx` exports `DashSection` (client class error boundary + Suspense); all `ExecutiveDashboard` sections now use it. ✅ **RUNTIME-PROVEN 2026-06-28:** the accountability coverage query (`loadCoverage`) intermittently hits the `agent_run_readonly_sql` statement timeout → `PulseBand` (نبض الفريق, which calls `getAccountabilityOverview`) throws; the SectionErrorBoundary isolated it and the rest of the dashboard rendered, then the auto-refresh retry recovered the section. Working as designed.
+
+6. **Task redistribution** (Q3 recommendation) — was pooling people ACROSS departments. New `getDepartmentCapacity` (executive.ts): groups active non-leadership agents BY department (departments ARE specialties), surfaces only depts with both overloaded + available. Wired into `signals.context.departmentCapacity`; `sections.ts` actions prompt now MANDATES same-department-only redistribution (never cross-dept; if no internal slack → hire/escalate). Verified: regen produced correct same-dept recommendations (الجرافيك أحمد محمود → دينا/يحيى/بولا).
+
+7. **Renewal-opportunity value** (Q3 recommendation) — team note: the "فرص تجديد عقود … بقيمة X" figure matched neither the On-Target expected nor the month total. Root cause: `opportunities.renewalsValue` summed `contracts.total_value` over a rolling today→+30d window (`loadMoney.renew30*`), which (a) used whole-contract value not renewal income and (b) was 86% Sales-Deposit contracts (26/30), not renewals. **Fix:** new `loadRenewalPipeline` (ceo-brief-signals.ts) sources the SAME month-aware engine /contracts uses — count = `cnt_on_target + cnt_overdue` (renewal funnel), value = `expected_renewals` (Next-Contract-Value income). Verified June: brief signal now 41 / 87,000 SAR, byte-identical to the /contracts RenewalFunnelStrip (was 31 / 189,810). WhatsApp brief card (`src/lib/brief/cards.tsx`, `data.ts:203`) still uses `renew30*` on purpose — its label is explicitly "خلال ٣٠ يومًا"; flagged but NOT changed (different metric). Needs brief regen to surface in prose.
+
+8. **"مشاريع معرضة للخطر" drill → projects view** (executive-scores card, Q-stability strip) — team note: the 49 at-risk-projects pill linked to `/tasks?f=overdue` (a flat task list); they want the PROJECTS list filtered to those 49 so they can enter each project and see its overdue tasks. **Fix:** new `onlyWithOverdue` opt on `listProjectsPaged` → `resolveOverdueProjectIds(orgId)` (distinct project_ids of open non-archived `is_overdue` tasks, paginated) intersected into the existing `p_id_whitelist` (no RPC change). Threaded through the page (`?atRisk=1`), `ProjectsList` filters + remount key, and `_load-more` action (so page 2+ keeps the filter). Dashboard link in `scores-band.tsx` now `/projects?atRisk=1`. Verified: `listProjectsPaged({onlyWithOverdue:true})` returns **49** (== card riskProjects), out of 70 total. NO migration needed.
+
+9. **"تأخيرات حرجة" drill → empty page** (executive-scores card) — team note: what does it mean + clicking opens an empty list. Meaning = OPEN tasks that are `is_overdue` AND stuck in their current stage >14 days (card `criticalOverdue` in executive-scores.ts; ~104 live). Root cause: the matching task filter `p_critical_delay` used `delay_days > 3`, but `delay_days` is unpopulated org-wide (Odoo sync never fills it) → 0 rows → empty page (same class as 0212). **Fix:** migration **0215** recreates `list_tasks_bundle` with the critical predicate = `stage<>'done' AND is_overdue AND stage_entered_at < now() - interval '14 days'` (ONLY that line changed vs 0205). ⚠️ **NOT YET APPLIED** — needs user authorization to run against prod DB (auto-mode classifier blocked the Management-API apply). Once applied, `/tasks?f=critical` shows the same ~104 tasks the pill counts.
+
+10. **"عملاء معرضون للفقد" drill count mismatch** (executive-scores card → /satisfaction) — team note: clicking the at-risk-clients pill lands on a view whose count is "not logical" / doesn't match. Two layers: (a) the screenshot's **18** is DEPLOYED prod (old `getLiveClientIds` contract-or-project scope); the uncommitted churn fix #2 already moves the pill to **22** (active-project + isClientAtRisk). (b) The real remaining bug: the deep-link (`/satisfaction?risk=1`) opened the workspace with `relation="all"`, so the at-risk view + badge showed **61** (at-risk among ALL clients incl. lost) — not the pill's active-scoped 22. **Fix** (`satisfaction-workspace.tsx`): deep-link now defaults `relation="active"` (an already-lost client can't be "at risk of loss"), and `counts.risk` is relation-aware so the badge always matches the shown list. Verified: active-scoped risk = **22** == pill (was 61). The team's broader "groups section isn't fully accurate" is the known satisfaction data gap (multi-number ingestion / transcript resolution — see [[project_satisfaction_transcript_resolution]]), a separate larger item, NOT addressed here.
+
+11. **Executive Indicators card trims** (المؤشرات التنفيذية / `scores-band.tsx` + `executive-scores.ts` + i18n) — two team requests:
+    - **Removed the "الالتزام بالتسليم" (Delivery) card** — its on-time/overdue numbers are already shown above (نبض الفريق + delivery flow), so the card was a duplicate. Card deleted, grid `xl:grid-cols-4`→`3`, subtitle "خمسة"→"أربعة" (en "Five"→"Four"), unused `delivery` destructure + `Gauge` import removed. **Delivery still feeds the الاستقرار composite at 30%** (it's a roll-up, not a duplicate) — stability tooltip reworded to say so.
+    - **Removed brief-adherence from the جودة التنفيذ (Quality) score** — team: the AI rarely has the real brief doc, so it's unreliable. Dropped the `{w:0.15, v:avgBriefAdherence}` term from the `qualityScore` blend AND the brief metric row from the card. `blend()` renormalizes remaining components. The `briefAdherence` FIELD is still computed/returned (CEO brief context still reads `churn.avgBriefAdherence`). Quality tooltip updated. Verified live: quality 78→82 (brief 56 was dragging it down), satisfaction 68 still counts; stability 58, delivery 55 still in composite.
+    - Last two cards (discipline/productivity) left untouched per team ("tied to incomplete sections, postpone").
+
+12. **"Due installments" card mislabeled** (dashboard Contracts-analysis section / `dashboard/page.tsx` + i18n) — team asked whether SR 66,993 is this-month-due only or due+overdue. Root cause: the value = `sum(getMonthTargetBuckets().installments_due.expected_amount)`, whose predicate (contracts.ts ~528) is `seq≥2 AND expected_date ≤ month-end AND (expected_date ≥ month-start [this-month, any status] OR status NOT IN received/waived [prior-month still owed])` — i.e. **this-month + overdue carryover**, sheet-present, excluding lost/closed. Live composition: 16 rows = 13 overdue + 2 received-this-month + 1 pending — mostly overdue. But the label said "Due installments" and the tooltip said "falling due **this month**" → misleading. **Fix:** label → "Due + overdue installments"; tooltip (ar+en) rewritten to state it's this-month (any status) + unpaid overdue carryover, minus the signing down-payment + lost/closed, "mostly overdue carryover today". No logic change (the combined definition is intentional, mirrors /contracts). Verified live in browser: card reads "Due + overdue installments · 66,993 SR".
+
+14. **"Hold" movement tile always 0** (dashboard Contracts-analysis "Monthly achievement" / `dashboard/page.tsx` + i18n) — team tested putting a client on Hold this month; tile stayed 0. Root cause = known GAP 1 ([[project_contracts_income_model]]): movement tiles (`mov_*`) count by `start_date in month`, so a contract held this month but started earlier never increments `mov_hold`. Team's two options: show current total hold, or remove. **Chose current-total** — switched the tile from `d.mov_hold` (0) to `d.cnt_roster_hold` (10 = live `status='hold'` count). Consistent with its neighbors "On target"/"Overdue", which already use current-state `cnt_*` (not `mov_*`). Renamed tooltip `dashboard_movHold`→`dashboard_cntHold` (ar+en) to say "currently on hold, running total, not this-month movement". Verified live: tile now shows 10. Did NOT fix mov_hold properly (would need `hold_started_at`/contract_events event-month logic — out of scope per team).
+
+15. **Hero-row restructure (review/client-changes → indicators; remove weekly pulse).** Team note: promote عالق في المراجعة + تعديلات العميل out of the hero row into the indicators as FULL index cards (count + oldest-waiting + avg-dwell + filtered drill); remove the Weekly pulse (نبض الأسبوع) section. **Final shipped shape:**
+    - `getWorkflowIndicators(orgId)` (executive.ts) → `{review,clientChanges}` each `{count, oldestDays, avgDwellDays}` from `stage_entered_at` (review = specialist_review+manager_review open; clientChanges = client_changes open).
+    - `workflow-indicators.tsx` = two `IndexCard`-style cards rendered as its own `DashSection` right AFTER the ScoresBand; drills: review → `sf=[specialist_review,manager_review]`, client-changes → `sf=[client_changes]`. i18n under `Executive.workflow` (ar+en).
+    - Hero row trimmed to on-time% + overdue only (`hero-row.tsx`, grid `1.7fr_1fr`); overdue drill fixed `?filter=overdue`→`?f=overdue`. The stuck/revisions hero cards were removed (moved up).
+    - Weekly pulse section removed from `page.tsx` (Pulse fn + PulseStrip import gone; `getPulseStats` kept — still used by the brief). `pulse-strip.tsx` now unused (dead, left in place).
+    - **History:** the user briefly trialed a consolidated `ExecutiveSnapshotSection` (executive-snapshot.tsx) that reused `getWorkflowIndicators`, then reverted it — so for a moment `workflow-indicators.tsx` was orphaned and I deleted it, which broke the build when the revert landed. I restored it. Dev-server gotcha chain: deleting+recreating a component poisons Turbopack's module-resolution cache (touch the importer to clear); adding i18n keys needs `i18n/request.ts` touched to refresh the next-intl cache. Verified live on /dashboard: In review 13 (oldest 27d, avg 7.9d), Client changes 22 (oldest 37d, avg 9.2d); drills 13/22.
+
+15b. **⚠️ REGRESSION I introduced in 0215, fixed by 0217 (APPLIED).** While verifying #15's drills I found `sf=[{field:'stage',value:'<enum>'}]` returned 0 — my migration 0215 (note #9) recreated `list_tasks_bundle` from the **0205** body, which predates **0212**, so it silently dropped 0212's `or t.stage::text = (f->>'value')` stage-enum match. That re-broke EVERY raw-enum stage drill (top-revised, stage-flow-matrix, delivery-flow) since note #9. **Migration 0217** recreates the function with BOTH the 0215 critical-delay predicate AND the 0212 enum match. Verified: review drill→13, client_changes→22, critical→104, Arabic label→22 all correct. LESSON: when recreating a function via create-or-replace, base it on the LATEST migration that touched it, not an arbitrary older one — diff against the deployed `pg_get_functiondef` first.
+
+## Files changed (MINE — safe to commit together)
+- `messages/ar.json`, `messages/en.json` (i18n keys)
+- `src/app/(dashboard)/dashboard/page.tsx` (DashSection wrapping)
+- `src/app/(dashboard)/contracts/page.tsx` (pay=overdue)
+- `src/app/(dashboard)/tasks/_filter_params.ts` (completed_week filter)
+- `src/app/(dashboard)/tasks/smart-search-bar.tsx` (FilterKey union)
+- `src/components/executive/ceo-brief-card.tsx`
+- `src/components/executive/scores-band.tsx` (riskProjects link note 8; Delivery card removed + brief row removed note 11)
+- `src/components/executive/section-boundary.tsx` (NEW)
+- `src/lib/data/executive-scores.ts` (Quality blend drops brief-adherence) — note 11
+- `src/lib/brief/data.ts`
+- `src/lib/ceo-brief/sections.ts`
+- `src/lib/data/ceo-brief-signals.ts`
+- `src/lib/data/contracts.ts`
+- `src/lib/data/executive.ts`
+- `src/lib/data/satisfaction.ts`
+- `src/lib/data/projects.ts` (onlyWithOverdue + resolveOverdueProjectIds) — note 8
+- `src/app/(dashboard)/projects/page.tsx`, `projects-list.tsx`, `_load-more.ts` — note 8
+- `src/components/executive/scores-band.tsx` (riskProjects → /projects?atRisk=1) — note 8
+- `supabase/migrations/0215_critical_delay_uses_overdue_stuck.sql` (NEW, **APPLIED to prod**) — note 9
+- `supabase/migrations/0216_accountability_coverage_indexes.sql` (NEW, **APPLIED to prod**) — note 13 (timeout fix)
+- `supabase/migrations/0217_list_tasks_bundle_restore_stage_enum_facet.sql` (NEW, **APPLIED to prod**) — note 15b (fixes the 0215 regression)
+- `src/lib/data/executive.ts` — `getWorkflowIndicators` (note 15)
+- `src/components/executive/workflow-indicators.tsx` (NEW, note 15 — In review + Client changes cards)
+- `src/components/executive/hero-row.tsx` (note 15 — trimmed to on-time%+overdue)
+- NOTE: `executive-snapshot.tsx` was a reverted experiment (gone). `pulse-strip.tsx` is now unused dead code (weekly pulse removed) — safe to delete later.
+- `src/app/(dashboard)/satisfaction/satisfaction-workspace.tsx` (at-risk drill scope) — note 10
+
+## ⚠️ UNRELATED changes in working tree — DO NOT bundle into the brief commit
+Odoo sync-watermark work by another session: `src/lib/odoo/importer.ts`, `src/lib/odoo/types.ts`, `src/app/api/cron/sync-odoo/route.ts`, `scripts/time-sync-phases.ts` (untracked), `supabase/migrations/0213_sync_watermarks.sql` (untracked). Not part of this work — confirm with user before committing.
+
+## Verification state
+- `bunx tsc --noEmit`: 87 errors total (baseline was 89 — went DOWN), ZERO in touched files. Lint clean (1 pre-existing `FUNNEL_EXCLUDE` warning).
+- Brief regenerated end-to-end via local script (see below) — stored brief reads correctly: 22/68 churn, deduped risks, "10 عميل · 11 دفعة · 52,623", same-dept redistribution.
+- Numbers drift daily (live data) — the LOGIC is what was fixed.
+
+## Environment / gotchas for the next agent
+- **Query Supabase via `.env.local` creds (curl/REST), NOT the Supabase MCP.** `URL=$(grep NEXT_PUBLIC_SUPABASE_URL .env.local|cut -d= -f2)`, `KEY=$(grep SUPABASE_SERVICE_ROLE_KEY .env.local|cut -d= -f2)`.
+- **PostgREST caps at 1000 rows.** Counting agent task_assignees (32,961 rows) requires filtering to open tasks (inner-embed `task.stage=neq.done`) + paginating with `.range()`. See `getDepartmentCapacity` for the pattern.
+- **Run server-only code standalone with `bun --conditions=react-server run scripts/X.ts`** (stubs the `server-only` throw). bun auto-loads `.env.local`.
+- **Regenerate the brief locally** (uses local code, writes prod `ceo_brief_runs`): a scratch script calling `generateAndStoreCeoBrief(orgId, null)` — `GEMINI_API_KEY` is set. Delete scratch scripts after.
+- User's `next dev` is usually already running on :3000 (don't start a second — lock error). The dashboard takes ~75s when Odoo is slow (Odoo fetch has a 120s timeout, caught to null). Owner login: `alsultain@agency.com` / `alsultain22`.
+- Background `Bash run_in_background` jobs with heredocs returned empty output here — run verification scripts in the FOREGROUND.
+
+## Open items / next steps
+1. **Commit decision** (pending): user is batching. Commit MINE only (list above), exclude the unrelated sync files. End commit messages with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Branch is `wa-multi-number`; user has previously pushed via `git push origin HEAD:main`.
+2. **Flagged task** (`task_98065c7a`): `getSpecialistLoadTop` (executive.ts) has the SAME 1000-row undercount bug — pulls all 32,961 assignee rows, capped at 1000, filters in memory → undercounts specialist load on dashboard/reports. Fix using the `getDepartmentCapacity` pagination pattern.
+3. **Declined residuals**: exact completed-pill==drill (needs touching shared `getPulseStats`, hurts prior-week accuracy).
+3b. **Accountability coverage query timeout — FIXED (migration 0216, APPLIED):** `loadCoverage` (accountability.ts:650) ran `count(distinct task_id)` over `task_stage_history`(37,163) + `task_assignees`(45,070) via `agent_run_readonly_sql`, intermittently hitting the statement timeout → نبض الفريق (PulseBand) threw (isolated by fix #5, retry recovered). Root cause: existing indexes (`idx_tsh_org`=org-only, `idx_task_assignees_role`=org+role) lacked `task_id`, forcing heap fetches for the distinct counts. **0216 added covering indexes** `idx_tsh_org_task (organization_id, task_id)` + `idx_task_assignees_org_role_task (organization_id, role_type, task_id)`. EXPLAIN confirms Index-Only Scans (tsh distinct 17ms; whole `getAccountabilityOverview` 2.8s, no timeout). Surfaced while debugging note #13's stale-chunk ReferenceError.
+4. **More team notes expected** — continue one-at-a-time, same workflow: find the surface, verify root cause against live DB, fix, verify, update memory, hold for batch.
+
+## Memory files (read for full context)
+`project_ceo_dashboard_brief`, `project_brief_live_client_scoping`, `project_ceo_dashboard_production_audit`, `project_service_renewal_merge`, `project_satisfaction_contract_bridge`, `feedback_supabase_access`, `feedback_respond_in_english`, `project_agents_only_performance` (leadership filter), `project_odoo_data_gaps` (due_date empty).

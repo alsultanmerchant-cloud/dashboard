@@ -11,9 +11,16 @@ import {
   getPerformerLeaderboard,
   getServiceLineHealth,
   getWipAging,
+  getDepartmentCapacity,
+  type DepartmentCapacityRow,
 } from "@/lib/data/executive";
-import { getOrgSatisfactionAggregate, getAtRiskClients } from "@/lib/data/satisfaction";
+import { getSatisfactionRows, getAtRiskClients, isClientAtRisk } from "@/lib/data/satisfaction";
 import { getAiDataQuality, type AiDataQuality } from "@/lib/data/ai-data-quality";
+import {
+  listDashboardMonths,
+  refreshMonthlyDashboard,
+  getMonthlyDashboard,
+} from "@/lib/data/contracts";
 
 // =========================================================================
 // CEO Brief — deterministic signal builder.
@@ -29,7 +36,14 @@ export type Verdict = "improving" | "stable" | "declining";
 
 export interface BriefChange {
   // i18n key under Executive.brief.changes; serviceName fills the {name} slot.
-  labelKey: "stability" | "delivery" | "overdue" | "completed" | "onTime" | "service";
+  labelKey:
+    | "stability"
+    | "delivery"
+    | "overdue"
+    | "completed"
+    | "onTime"
+    | "delaysCleared"
+    | "service";
   serviceName?: string;
   value: number; // signed magnitude of the change
   unit: "points" | "tasks" | "percent";
@@ -42,6 +56,13 @@ export interface BriefChange {
     from: number; // previous-period value
     to: number; // current-period value
     href?: string; // deep link into the records behind this metric
+    // For window-based delivery ratios (on-time, delays-cleared): the raw
+    // "num of den" counts behind each side, so the popover can show both the
+    // task count AND the percentage the team asked for.
+    sample?: {
+      current: { num: number; den: number };
+      previous: { num: number; den: number };
+    };
   };
 }
 
@@ -88,8 +109,8 @@ export interface CeoBriefOpportunities {
   overloaded: number; // specialists carrying well above team-mean load
   underutilized: number; // specialists well below mean (rebalancing room)
   medianActivity: number | null; // team activity median %
-  renewalsCount: number; // contracts due to renew in 30d
-  renewalsValue: number; // SAR value of those renewals
+  renewalsCount: number; // renewal-pipeline clients this month (On-Target + Overdue)
+  renewalsValue: number; // SAR expected renewal income (= /contracts expected_renewals)
   reviewBottleneckHours: number | null; // worst review dwell (business hours)
   weakestIndex: { label: string; score: number } | null;
   topPerformer: string | null;
@@ -116,6 +137,9 @@ export interface CeoBriefContext {
   bestClients: Array<{ name: string; onTimePct: number | null }>;
   discipline: { staleTasks: number; slaCompliancePct: number | null };
   reworkRate: number; // 0..1 — for "is the process looping?"
+  // Per-DEPARTMENT load imbalance so the action plan only ever proposes
+  // SAME-department task rebalancing (a Social-Media task can't go to SEO).
+  departmentCapacity: DepartmentCapacityRow[];
 }
 
 export interface CeoBriefSignals {
@@ -171,6 +195,70 @@ async function loadSnapshotDeltas(orgId: string): Promise<SnapshotDeltas | null>
     onTimeNow: cur.on_time_pct_30d,
     onTimePrev: prev.on_time_pct_30d,
   };
+}
+
+// Live 7-day delivery window straight from the tasks table (not the 30-day
+// snapshot). The team wants the Q1 "on-time" pill to answer: of the tasks DUE in
+// the last 7 days, how many were delivered on time — count + pct, vs the prior 7
+// days. The same pass yields "delays cleared" (of the tasks that went late this
+// week, how many were eventually finished). planned_date is the real deadline
+// (due_date is empty org-wide); actual_done_date is the real completion date.
+interface DeliveryWindowSide {
+  due: number; // tasks whose deadline fell in this window
+  onTime: number; // …delivered on or before their deadline
+  late: number; // …whose deadline passed without an on-time delivery
+  cleared: number; // …of the late ones, how many are now finished (late but done)
+}
+
+interface DeliveryWindow {
+  current: DeliveryWindowSide;
+  previous: DeliveryWindowSide;
+}
+
+async function loadDeliveryWindow(orgId: string): Promise<DeliveryWindow | null> {
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const todayStr = iso(now);
+  const d7 = iso(now - 7 * 86_400_000);
+  const d14 = iso(now - 14 * 86_400_000);
+
+  const { data } = await supabaseAdmin
+    .from("tasks")
+    .select("stage, planned_date, actual_done_date")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .not("planned_date", "is", null)
+    .gt("planned_date", d14)
+    .lte("planned_date", todayStr);
+
+  const rows = (data ?? []) as Array<{
+    stage: string;
+    planned_date: string;
+    actual_done_date: string | null;
+  }>;
+  if (rows.length === 0) return null;
+
+  const blank = (): DeliveryWindowSide => ({ due: 0, onTime: 0, late: 0, cleared: 0 });
+  const current = blank();
+  const previous = blank();
+
+  for (const t of rows) {
+    const side = t.planned_date > d7 ? current : previous;
+    side.due += 1;
+    const done = t.stage === "done";
+    const onTime = done && t.actual_done_date != null && t.actual_done_date <= t.planned_date;
+    if (onTime) {
+      side.onTime += 1;
+      continue;
+    }
+    // Not on time. It's "late" once its deadline has actually passed.
+    if (t.planned_date < todayStr) {
+      side.late += 1;
+      if (done) side.cleared += 1; // finished, just after the deadline
+    }
+  }
+
+  return { current, previous };
 }
 
 // Risks the CEO has explicitly dismissed ("this isn't a problem"). A row with a
@@ -407,6 +495,38 @@ async function loadBriefTimelineEvents(
 
 // ---- main ----------------------------------------------------------------
 
+// Renewal pipeline for the CURRENT month, mirroring exactly what the /contracts
+// CEO dashboard shows (RenewalFunnelStrip): count = On-Target + Overdue renewal
+// clients, value = `expected_renewals` (the sheet's Next-Contract-Value income
+// for those clients). The brief used to sum `contracts.total_value` over a rolling
+// today→+30d window, which (a) double-counts a contract's whole value instead of
+// the renewal income and (b) is dominated by Sales-Deposit contracts that aren't
+// renewals at all — so it matched neither the On-Target expected nor the month
+// total. Sourcing from the same month-aware engine keeps the brief and /contracts
+// consistent for the CEO who clicks through.
+async function loadRenewalPipeline(
+  orgId: string,
+): Promise<{ count: number; value: number }> {
+  const now = new Date();
+  const monthIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    .toISOString()
+    .slice(0, 10);
+  try {
+    const months = await listDashboardMonths(orgId);
+    const entry = months.find((m) => m.month === monthIso);
+    // Frozen months are immutable; live months recompute once before reading.
+    if (!entry?.is_frozen) await refreshMonthlyDashboard(orgId, monthIso);
+    const d = await getMonthlyDashboard(orgId, monthIso);
+    if (!d) return { count: 0, value: 0 };
+    return {
+      count: d.cnt_on_target + d.cnt_overdue,
+      value: d.expected_renewals,
+    };
+  } catch {
+    return { count: 0, value: 0 };
+  }
+}
+
 export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSignals> {
   const [
     scores,
@@ -420,10 +540,13 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     snap,
     services,
     wip,
-    satAgg,
+    satRows,
     satRisk,
     dismissed,
     dataQuality,
+    deliveryWindow,
+    deptCapacity,
+    renewalPipeline,
   ] = await Promise.all([
     getExecutiveScores(orgId),
     buildCeoBriefData(orgId),
@@ -436,10 +559,13 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     loadSnapshotDeltas(orgId),
     getServiceLineHealth(orgId),
     getWipAging(orgId),
-    getOrgSatisfactionAggregate(orgId).catch(() => null),
+    getSatisfactionRows(orgId).catch(() => []),
     getAtRiskClients(orgId).catch(() => []),
     loadDismissedRisks(orgId),
     getAiDataQuality(orgId),
+    loadDeliveryWindow(orgId),
+    getDepartmentCapacity(orgId).catch(() => []),
+    loadRenewalPipeline(orgId),
   ]);
 
   const statusPct = Math.round(scores.stability.score);
@@ -448,27 +574,92 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   const completedShift = pulse.completed.current - pulse.completed.previous;
   const verdict = computeVerdict(snap, completedShift, scores.stability.score);
 
+  // Client churn — scoped to the EXACT definition the /satisfaction page uses, so
+  // the brief and that page can never disagree again. "At risk of loss" = ACTIVE
+  // clients (those with a live project) whose AI satisfaction is negative or < 55.
+  // Already-lost clients are intentionally excluded — they can't churn, they're
+  // gone. Reuses getSatisfactionRows (the page's own source) rather than the
+  // contract-scoped aggregate, which under-counted (its merge-map canonicalization
+  // silently dropped a few active clients).
+  const activeSatRows = satRows.filter((r) => r.hasActiveProject);
+  const atRiskActive = activeSatRows
+    .filter((r) => isClientAtRisk(r.satisfactionScore, r.sentiment))
+    .sort((a, b) => (a.satisfactionScore ?? 100) - (b.satisfactionScore ?? 100));
+  const meanRound = (xs: number[]) =>
+    xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
+  const riskTextById = new Map(satRisk.map((c) => [c.clientId, c.topRisk] as const));
+  const churn = {
+    activeClients: activeSatRows.length,
+    atRisk: atRiskActive.length,
+    avgSatisfaction: meanRound(
+      activeSatRows.map((r) => r.satisfactionScore).filter((v): v is number => v != null),
+    ),
+    avgBriefAdherence: meanRound(
+      activeSatRows.map((r) => r.briefAdherenceScore).filter((v): v is number => v != null),
+    ),
+    top: atRiskActive.slice(0, 5).map((r) => ({
+      clientId: r.clientId,
+      clientName: r.clientName,
+      score: r.satisfactionScore,
+      risk: riskTextById.get(r.clientId) ?? null,
+    })),
+  };
+
   // ── Changes (evidence for "better or worse") ───────────────────────────
   // All snapshot-backed and reliable. Service-line deltas are intentionally
   // excluded — the "services" taxonomy is per-package (Account Manager, Renewal
   // …) and noisy; service trends live in the detailed Service Health section.
   const changes: BriefChange[] = [];
 
-  if (snap && snap.onTimeNow != null && snap.onTimePrev != null) {
-    const d = Math.round(snap.onTimeNow - snap.onTimePrev);
-    if (d !== 0)
+  // On-time delivery (last 7 days vs prior 7) — of the tasks DUE in the window,
+  // how many were delivered on time. Count + pct, live from the tasks table
+  // (the team explicitly wanted the 7-day required-vs-delivered view, not the
+  // rolling 30-day snapshot, and no task-list drill-down on this pill).
+  if (deliveryWindow && deliveryWindow.current.due > 0) {
+    const cur = deliveryWindow.current;
+    const prv = deliveryWindow.previous;
+    const nowPct = Math.round((cur.onTime / cur.due) * 100);
+    const prevPct = prv.due > 0 ? Math.round((prv.onTime / prv.due) * 100) : null;
+    const d = prevPct == null ? 0 : nowPct - prevPct;
+    changes.push({
+      labelKey: "onTime",
+      value: d,
+      unit: "points",
+      dir: d > 0 ? "up" : d < 0 ? "down" : "flat",
+      good: d >= 0,
+      detail: {
+        from: prevPct ?? 0,
+        to: nowPct,
+        sample: {
+          current: { num: cur.onTime, den: cur.due },
+          previous: { num: prv.onTime, den: prv.due },
+        },
+      },
+    });
+
+    // Delays-cleared rate (new) — of the tasks that went late this week, how
+    // many were eventually finished. Shows the team's recovery on overdue work.
+    if (cur.late > 0) {
+      const nowClr = Math.round((cur.cleared / cur.late) * 100);
+      const prevClr = prv.late > 0 ? Math.round((prv.cleared / prv.late) * 100) : null;
+      const dc = prevClr == null ? 0 : nowClr - prevClr;
       changes.push({
-        labelKey: "onTime",
-        value: d,
+        labelKey: "delaysCleared",
+        value: dc,
         unit: "points",
-        dir: d > 0 ? "up" : "down",
-        good: d > 0,
+        dir: dc > 0 ? "up" : dc < 0 ? "down" : "flat",
+        good: dc >= 0,
         detail: {
-          from: Math.round(snap.onTimePrev),
-          to: Math.round(snap.onTimeNow),
+          from: prevClr ?? 0,
+          to: nowClr,
           href: "/tasks?view=list&filter=overdue",
+          sample: {
+            current: { num: cur.cleared, den: cur.late },
+            previous: { num: prv.cleared, den: prv.late },
+          },
         },
       });
+    }
   }
   if (snap) {
     const od = snap.overdueNow - snap.overduePrev;
@@ -510,7 +701,9 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       detail: {
         from: pulse.completed.previous,
         to: pulse.completed.current,
-        href: "/tasks?view=list",
+        // Open the tasks ACTUALLY completed this week (was opening all open
+        // tasks) — done stage + actual_done_date inside the last-7-days window.
+        href: "/tasks?view=list&f=completed_week",
       },
     });
   }
@@ -557,28 +750,34 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
 
   // Client churn — the satisfaction layer (imported WhatsApp chats, AI-scored).
   // This is the commercial risk the brief was previously blind to.
-  if (satAgg && satAgg.atRiskClients >= 3) {
-    const top = satRisk.slice(0, 3).map((c) => c.clientName).filter(Boolean).join("، ");
-    const avg = satAgg.avgSatisfaction;
-    const parts = [`${satAgg.atRiskClients} من ${satAgg.analyzedClients} عميلًا معرّضون للفقد`];
+  if (churn.atRisk >= 3) {
+    const top = churn.top.slice(0, 3).map((c) => c.clientName).filter(Boolean).join("، ");
+    const avg = churn.avgSatisfaction;
+    const parts = [`${churn.atRisk} من ${churn.activeClients} عميلًا نشطًا معرّضون للفقد`];
     if (avg != null) parts.push(`متوسط الرضا ${avg}/100`);
     if (top) parts.push(`أبرزهم: ${top}`);
     // Deep-link straight to the single worst at-risk client (the concrete
     // evidence) rather than the whole satisfaction page; scope dismissal to it.
-    const worstChurn = satRisk[0];
+    const worstChurn = churn.top[0];
     risks.push({
       id: "client_churn",
       title: "خطر فقدان عملاء",
-      severity: satAgg.atRiskClients >= 10 || (avg != null && avg < 50) ? "critical" : "high",
+      severity: churn.atRisk >= 10 || (avg != null && avg < 50) ? "critical" : "high",
       metric: parts.join(" · "),
       href: worstChurn?.clientId ? `/satisfaction?client=${worstChurn.clientId}` : "/satisfaction",
       entityId: worstChurn?.clientId,
-      weight: 40 + satAgg.atRiskClients * 3,
+      weight: 40 + churn.atRisk * 3,
     });
   }
 
+  // Track the client behind the stuck-project card so the client-level
+  // "at-risk client" card below doesn't restate the SAME overdue load as a
+  // second risk (e.g. a single-project client surfaces identically as both
+  // "مشروع … متعثّر" and "العميل … في منطقة الخطر").
+  let stuckProjectClientId: string | null = null;
   const topStuck = stuck[0];
   if (topStuck && (topStuck.overdueTasks > 0 || topStuck.worstSlipPercent >= 20)) {
+    stuckProjectClientId = topStuck.clientId;
     const slip = Math.round(topStuck.worstSlipPercent);
     const severity =
       slip >= 50 || topStuck.overdueTasks >= 5
@@ -635,20 +834,30 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
 
   if (briefData.money.overdueInstallments > 0) {
     const val = Math.round(briefData.money.overdueValue);
+    const clients = briefData.money.overdueClients;
     risks.push({
       id: "overdue_money",
       title: "دفعات متأخرة التحصيل",
       severity: val >= 50000 ? "critical" : val >= 10000 ? "high" : "medium",
-      metric: `${briefData.money.overdueInstallments} دفعة بقيمة ${val.toLocaleString("en-US")} ريال`,
-      href: "/contracts?view=table&target=Overdue",
+      metric: `${clients} عميل · ${briefData.money.overdueInstallments} دفعة متأخرة بقيمة ${val.toLocaleString("en-US")} ريال`,
+      // Opens the EXACT contracts behind these installments (not the renewal-
+      // overdue list `target=Overdue`, which is an unrelated population).
+      href: "/contracts?view=table&pay=overdue",
       weight: 50 + Math.min(60, val / 3000),
     });
   }
 
   // Driven by overdue load (reliable). On-time % only shown when backed by a
   // real sample (≥3 deliveries) — a "0%" from a single delivery is noise.
+  // Suppressed when this client is already represented by the stuck-project card
+  // above (same client → same overdue tasks → duplicate card); the project card
+  // is kept because it's more specific (names the project, slip %, idle days).
   const worstClient = clientHealth.worst[0];
-  if (worstClient && worstClient.overdueTaskCount >= 3) {
+  if (
+    worstClient &&
+    worstClient.overdueTaskCount >= 3 &&
+    worstClient.clientId !== stuckProjectClientId
+  ) {
     const ot = worstClient.onTimePct30d;
     const showOt = ot != null && worstClient.deliveredCount30d >= 3;
     risks.push({
@@ -687,8 +896,8 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     overloaded: scores.productivity.overloaded,
     underutilized: scores.productivity.underutilized,
     medianActivity: activity.median,
-    renewalsCount: briefData.money.renew30Count,
-    renewalsValue: briefData.money.renew30Value,
+    renewalsCount: renewalPipeline.count,
+    renewalsValue: renewalPipeline.value,
     reviewBottleneckHours: bottlenecks[0]
       ? Math.round(bottlenecks[0].businessHoursInStage)
       : null,
@@ -721,16 +930,18 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     // Intake/«new» stage intentionally not surfaced — see the removed risk above.
     intake: null,
     wip: { chronicOverdue: wipChronic, freshOverdue: wipFresh },
-    satisfaction: satAgg
+    satisfaction: activeSatRows.length
       ? {
-          avg: satAgg.avgSatisfaction,
-          briefAdherence: satAgg.avgBriefAdherence,
-          analyzed: satAgg.analyzedClients,
-          atRisk: satAgg.atRiskClients,
-          topChurn: satRisk.slice(0, 5).map((c) => ({
+          avg: churn.avgSatisfaction,
+          briefAdherence: churn.avgBriefAdherence,
+          // Base = active clients (the churn denominator shown in the card), so
+          // the AI narrates "X من Y" consistently with the visible pill.
+          analyzed: churn.activeClients,
+          atRisk: churn.atRisk,
+          topChurn: churn.top.map((c) => ({
             client: c.clientName,
-            score: c.satisfactionScore,
-            risk: c.topRisk,
+            score: c.score,
+            risk: c.risk,
           })),
         }
       : null,
@@ -750,6 +961,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       slaCompliancePct: scores.discipline.slaCompliancePct,
     },
     reworkRate: scores.quality.reworkRate,
+    departmentCapacity: deptCapacity,
   };
 
   const eventPack = await loadBriefTimelineEvents(orgId, activeRisks.slice(0, 5), new Date().toISOString());

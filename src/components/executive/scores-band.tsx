@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   ChevronLeft,
-  Gauge,
   ShieldCheck,
   Sparkles,
   TrendingDown,
@@ -202,7 +201,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
   const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
   const rate = (n: number) => `${Math.round(n * 100)}%`;
 
-  const { delivery, quality, discipline, productivity, stability } = data;
+  const { quality, discipline, productivity, stability } = data;
   const stabilityTone = toneByScore(stability.score);
 
   return (
@@ -255,7 +254,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
 
           <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center sm:grid-cols-4">
             <Link
-              href="/tasks?f=overdue"
+              href="/projects?atRisk=1"
               className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
             >
               <p className="text-base font-semibold tabular-nums text-amber group-hover:underline">
@@ -316,52 +315,11 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
           </Link>
         </div>
 
-        {/* Four contributing indices */}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <IndexCard
-            icon={<Gauge className="size-4" />}
-            name={t("delivery.name")}
-            desc={t("delivery.desc")}
-            score={delivery.score}
-            delta={delivery.delta}
-            deltaLabel={t("vsPrev")}
-            gradeLabel={grade(gradeFor(delivery.score))}
-            scoreHelp={t("scoreTooltips.delivery")}
-            href="/tasks?filter=overdue"
-            metrics={[
-              {
-                label: t("delivery.onTime"),
-                value: pct(delivery.onTimePct),
-                tone:
-                  delivery.onTimePct === null
-                    ? "neutral"
-                    : delivery.onTimePct >= 85
-                      ? "good"
-                      : delivery.onTimePct >= 70
-                        ? "warn"
-                        : "bad",
-              },
-              {
-                label: t("delivery.overdue"),
-                value: String(delivery.overdueCount),
-                tone: delivery.overdueCount > 50 ? "bad" : delivery.overdueCount > 0 ? "warn" : "good",
-              },
-              delivery.avgDelayDays === null
-                ? { label: t("delivery.avgDelay"), value: t("na"), tone: "na", hint: t("naSource") }
-                : {
-                    label: t("delivery.avgDelay"),
-                    value: String(delivery.avgDelayDays),
-                    tone:
-                      delivery.avgDelayDays > 7 ? "bad" : delivery.avgDelayDays > 2 ? "warn" : "good",
-                  },
-              {
-                label: t("delivery.blocked"),
-                value: String(delivery.blockedTasks),
-                tone: delivery.blockedTasks > 0 ? "warn" : "good",
-              },
-            ]}
-          />
-
+        {/* Three contributing indices. Delivery Commitment was removed here
+            (team feedback 2026-06-28) — its on-time / overdue numbers already
+            live in the sections above (نبض الفريق + delivery flow), so the card
+            was duplicate. Delivery still feeds the الاستقرار composite (30%). */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <IndexCard
             icon={<Sparkles className="size-4" />}
             name={t("quality.name")}
@@ -402,23 +360,9 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
                           : "bad",
                     hint: t("analyzedClients", { n: quality.analyzedClients }),
                   },
-              quality.briefAdherence === null
-                ? {
-                    label: t("quality.briefAdherence"),
-                    value: t("na"),
-                    tone: "na",
-                    hint: t("naSourceBrief"),
-                  }
-                : {
-                    label: t("quality.briefAdherence"),
-                    value: String(quality.briefAdherence),
-                    tone:
-                      quality.briefAdherence >= 70
-                        ? "good"
-                        : quality.briefAdherence >= 50
-                          ? "warn"
-                          : "bad",
-                  },
+              // Brief-adherence row removed (team feedback 2026-06-28): the AI
+              // rarely has the real brief doc, so the metric is unreliable — it
+              // no longer counts toward the score nor shows as a stat here.
             ]}
           />
 

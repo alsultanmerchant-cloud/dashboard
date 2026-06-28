@@ -362,14 +362,14 @@
       "dashboard_contractsExpected": "Total expected contract income for the current month — the sum of every client's monthly target.",
       "dashboard_contractsActual": "Total contract income actually collected for the current month.",
       "dashboard_contractsAchievement": "Actual ÷ Expected contract income for the month, as a percentage.",
-      "dashboard_dueInstallments": "Total amount of contract installments falling due this month.",
+      "dashboard_dueInstallments": "Contract installments expected up to the end of this month: this month's installments (any status) PLUS still-unpaid overdue installments carried over from earlier months. Excludes the signing down-payment (sequence 1) and lost/closed contracts. Today it is mostly overdue carryover, not this month alone.",
       "dashboard_monthlyAchievementBar": "Progress toward the month's revenue target — Actual as a share of Expected.",
       "dashboard_movNew": "New contracts signed this month.",
       "dashboard_movRenewed": "Contracts renewed this month.",
       "dashboard_movLost": "Contracts lost (not renewed / cancelled) this month.",
       "dashboard_cntOnTarget": "Clients still on target for the month (contract end date in or after this month).",
       "dashboard_cntOverdue": "Clients overdue for the month (contract end date already passed).",
-      "dashboard_movHold": "Contracts on Hold this month (Hold is stored as the contract type).",
+      "dashboard_cntHold": "Contracts currently on Hold (running total, not this month's movement). Like On target / Overdue, this is a current-state count.",
       "dashboard_topAccountManagers": "Account managers ranked by achievement (Actual ÷ Expected) for the month — top performers first.",
       "dashboard_amAchievementPct": "This account manager's achievement: their clients' Actual ÷ Expected income for the month, as a percentage."
     },
@@ -505,7 +505,9 @@
   "Errors": {
     "boundaryTitle": "Something went wrong",
     "boundaryDescription": "Sorry about that. Try refreshing the page; if the error persists contact the system administrator.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "sectionTitle": "Couldn't load this section",
+    "sectionDescription": "A temporary error occurred while fetching data. The rest of the dashboard is fine — retry to reload this section."
   },
   "Topbar": {
     "lastUpdated": "Last updated",
@@ -3029,6 +3031,20 @@
       "revisionsHint": "Stage entries · 30d",
       "wow": "WoW:"
     },
+    "workflow": {
+      "metricTooltips": {
+        "dashboard_reviewIndicator": "Open tasks waiting in a review stage (specialist review + manager review). 'Oldest waiting' is the longest one; 'Avg in stage' is the mean wait. Opens the filtered task list.",
+        "dashboard_changesIndicator": "Open tasks sitting in the client-changes stage. 'Oldest waiting' is the longest one; 'Avg in stage' is the mean wait. Opens the filtered task list."
+      },
+      "reviewLabel": "In review",
+      "reviewDesc": "Awaiting specialist or manager review",
+      "changesLabel": "Client changes",
+      "changesDesc": "In the client-changes stage",
+      "oldest": "Oldest waiting",
+      "avgDwell": "Avg in stage",
+      "daysValue": "{n}d",
+      "openTasks": "Open tasks"
+    },
     "pulse": {
       "metricTooltips": {
         "dashboard_pulseCompleted": "Tasks completed in the last 7 days, versus the prior 7. Up is good.",
@@ -3155,7 +3171,7 @@
     },
     "scores": {
       "title": "Executive Indicators",
-      "subtitle": "Five composite indices summarizing operational health",
+      "subtitle": "Four composite indices summarizing operational health",
       "grades": {
         "A": "Excellent",
         "B": "Good",
@@ -3168,9 +3184,9 @@
       "na": "N/A",
       "naSource": "Awaiting data source",
       "scoreTooltips": {
-        "stability": "Overall company-health score (0–100). A weighted blend of the four indices below — Delivery 30%, Quality 25%, Discipline 20%, Productivity 15% — plus a 10% risk adjustment (−5 per un-acknowledged escalation, −0.3 per critical overdue task, −6 per at-risk client). Grade: A ≥85, B ≥70, C ≥55, D ≥40, F <40. It's a formula, not a guess.",
+        "stability": "Overall company-health score (0–100). A weighted blend of Delivery 30%, Quality 25%, Discipline 20%, Productivity 15% (Delivery feeds the composite even though its card now lives in the sections above) plus a 10% risk adjustment (−5 per un-acknowledged escalation, −0.3 per critical overdue task, −6 per at-risk client). Grade: A ≥85, B ≥70, C ≥55, D ≥40, F <40. It's a formula, not a guess.",
         "delivery": "On-time delivery % (50%) + share of tasks not overdue (30%) + a penalty for average delay (10%) + a penalty for blocked tasks (10%). Computed from the last 30 days. Any signal with no data drops out and the rest is reweighted.",
-        "quality": "Lower rework (30%) + lower rejection rate (15%) + a revision-count penalty (10%) + AI-read client satisfaction from WhatsApp chats (30%) + AI-read brief adherence (15%). The satisfaction and brief parts are Gemini reads; if there are no chats or no brief doc, those parts drop out.",
+        "quality": "Lower rework (30%) + lower rejection rate (15%) + a revision-count penalty (10%) + AI-read client satisfaction from WhatsApp chats (30%). The satisfaction part is a Gemini read; if there are no chats it drops out. (Brief adherence was removed — the AI rarely has the real brief document, so it's unreliable.)",
         "discipline": "Active-member coverage (30%) + task freshness — share of open tasks touched in the last 7 days (30%) + weekly action volume per person (20%, baseline ~5/person/week) + SLA compliance on review-stage dwell (20%).",
         "productivity": "Workload balance (40%) — penalizes both overloaded (>1.75× team average) and underused (<0.4×) members — + 30-day throughput per person (30%, baseline ~12/person/month) + capacity utilization vs an 85% target (30%, when hours are allocated)."
       },
@@ -3311,6 +3327,7 @@
         "stability": "Operational stability",
         "delivery": "Delivery commitment",
         "onTime": "On-time delivery",
+        "delaysCleared": "Delays cleared",
         "overdue": "Overdue tasks",
         "completed": "Weekly throughput",
         "service": "{name} performance"
@@ -3338,16 +3355,18 @@
       "changeDetail": {
         "title": "Why is this changing?",
         "fromTo": "Was {from} → now {to}",
-        "period": "Last 7 days vs the prior 7, taken from the nightly metrics snapshot.",
+        "period": "Last 7 days vs the prior 7.",
         "link": "View records",
         "why": {
-          "onTime": "Share of tasks delivered on time. Higher means better deadline discipline.",
+          "onTime": "Of the tasks due in the last 7 days, how many were delivered on time — count and percentage, vs the prior 7 days.",
+          "delaysCleared": "Of the tasks that went late in the last 7 days, how many were eventually finished. Higher means faster recovery from delays.",
           "overdue": "Number of tasks past their due date. Lower is better.",
           "stability": "Overall operational-stability index (delivery, quality and discipline combined).",
           "completed": "Tasks completed during the week. Higher means more throughput.",
           "delivery": "How well projects are delivered by their committed deadlines.",
           "service": "This service line's on-time delivery performance."
-        }
+        },
+        "sample": "This week {num} of {den} · prior week {prevNum} of {prevDen}"
       }
     },
     "assistant": {

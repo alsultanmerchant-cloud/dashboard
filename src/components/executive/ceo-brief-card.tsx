@@ -81,8 +81,10 @@ function changeDelta(c: BriefChange, t: T): string {
 }
 
 // A single before/after value rendered with its unit (e.g. "82%", "11 مهمة").
+// onTime & delaysCleared carry percentages in their from/to, so render as "%".
 function changeValueText(c: BriefChange, n: number, t: T): string {
-  if (c.unit === "percent" || c.labelKey === "onTime") return `${n}%`;
+  if (c.unit === "percent" || c.labelKey === "onTime" || c.labelKey === "delaysCleared")
+    return `${n}%`;
   return `${n} ${t(`units.${c.unit}`)}`;
 }
 
@@ -127,6 +129,16 @@ function ChangePill({ c, t }: { c: BriefChange; t: T }) {
             to: changeValueText(c, c.detail.to, t),
           })}
         </p>
+        {c.detail.sample && (
+          <p className="leading-relaxed tabular-nums text-foreground/80">
+            {t("changeDetail.sample", {
+              num: c.detail.sample.current.num,
+              den: c.detail.sample.current.den,
+              prevNum: c.detail.sample.previous.num,
+              prevDen: c.detail.sample.previous.den,
+            })}
+          </p>
+        )}
         <p className="leading-relaxed text-muted-foreground">{t("changeDetail.period")}</p>
         {c.detail.href && (
           <Link

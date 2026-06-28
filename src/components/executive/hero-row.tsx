@@ -1,4 +1,4 @@
-import { AlertTriangle, Hourglass, RefreshCw, Timer, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { AlertTriangle, Timer, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import type { HeroKpis, OnTimeTrendPoint } from "@/lib/data/executive";
@@ -52,7 +52,7 @@ export async function ExecutiveHeroRow({
   // big-3 stats with delta chips, no spark, to avoid faking data.
 
   return (
-    <section className="mb-8 grid items-stretch gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
+    <section className="mb-8 grid items-stretch gap-3 lg:grid-cols-[1.7fr_1fr]">
       {/* HERO */}
       <div className="relative h-full">
         <span className="absolute end-10 top-5 z-10">
@@ -106,37 +106,18 @@ export async function ExecutiveHeroRow({
       </div>
 
       {/* Secondary */}
+      {/* Stuck-in-review + client-changes moved up to the workflow indicators
+          (team feedback 2026-06-28) — they're now full index cards with sub-
+          metrics + correct filtered drills, so they're removed from the hero. */}
       <SecondaryCard
         label={t("overdueLabel")}
         value={data.overdue.current}
         icon={<AlertTriangle className="size-4" />}
-        href="/tasks?filter=overdue"
+        href="/tasks?f=overdue"
         accent={data.overdue.current > 50 ? "danger" : data.overdue.current > 0 ? "warning" : "neutral"}
         deltaInfo={overdueDelta}
         sparkData={fakeSparkFromTrend()}
         tip={t("metricTooltips.dashboard_heroOverdue")}
-      />
-
-      <SecondaryCard
-        label={t("stuckLabel")}
-        value={data.stuckInReview.current}
-        icon={<Hourglass className="size-4" />}
-        href="/tasks?filter=stuck_in_review"
-        accent={data.stuckInReview.current > 0 ? "warning" : "neutral"}
-        hint={t("stuckHint")}
-        sparkData={[]}
-        tip={t("metricTooltips.dashboard_heroStuck")}
-      />
-
-      <SecondaryCard
-        label={t("revisionsLabel")}
-        value={data.revisionVolume.totalComments30d}
-        icon={<RefreshCw className="size-4" />}
-        href="/tasks?filter=client_changes"
-        accent={data.revisionVolume.totalComments30d > 50 ? "warning" : "neutral"}
-        hint={t("revisionsHint")}
-        sparkData={[]}
-        tip={t("metricTooltips.dashboard_heroRevisions")}
       />
     </section>
   );

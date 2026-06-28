@@ -809,10 +809,24 @@ select p.client_id, t.id as task_id, t.task_code, t.title,
 
 // ---- Public loaders -----------------------------------------------------------
 
+// Scorecard rows only — reads the precomputed accountability_scorecard cache
+// (a trivial indexed join), with NONE of the heavy live queries (reviewers /
+// coverage / AI signals) the full overview also runs. Callers that only need
+// the per-employee scores (e.g. the Team Pulse fusion + dashboard band) MUST
+// use this so a slow live query can't trip their error boundary.
+async function _getAccountabilityScorecard(
+  orgId: string,
+): Promise<AccountabilityScorecardRow[]> {
+  const org = assertUuid(orgId, "organization id");
+  return loadScorecard(org);
+}
+
+export const getAccountabilityScorecard = cache(_getAccountabilityScorecard);
+
 async function _getAccountabilityOverview(orgId: string): Promise<AccountabilityOverview> {
   const org = assertUuid(orgId, "organization id");
   const [rows, reviewers, coverage, aiSignals] = await Promise.all([
-    loadScorecard(org),
+    getAccountabilityScorecard(orgId),
     loadReviewers(org),
     loadCoverage(org),
     loadAiSignals(org),

@@ -31,6 +31,7 @@ export type FilterKey =
   | "mine"
   | "due_today"
   | "due_week"
+  | "completed_week"
   | "behind"
   | "ahead"
   | "critical"
@@ -48,7 +49,7 @@ export type FilterKey =
   | "archived";
 
 const ALL_FILTER_KEYS: ReadonlySet<FilterKey> = new Set([
-  "open", "all", "overdue", "done", "mine", "due_today", "due_week", "behind", "ahead",
+  "open", "all", "overdue", "done", "mine", "due_today", "due_week", "completed_week", "behind", "ahead",
   "critical", "not_started", "in_progress_pct", "completed_pct", "starred", "followed",
   "has_start_date", "has_end_date", "no_deadline",
   "unassigned", "over_timesheets", "near_timesheets",
@@ -184,14 +185,31 @@ export function buildTaskFiltersFromParams(
   // Appended to dateFilters so it composes with `mine`/`open`; the RPC treats
   // the window as [from, to) → `to` is +8 days.
   const allDateFilters = (() => {
-    if (!active.has("due_week")) return dateFilters;
-    const from = new Date();
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(from);
-    to.setDate(to.getDate() + 8);
+    const extra: Array<{ field: DateField; from: string; to: string }> = [];
     const iso = (d: Date) => d.toISOString().slice(0, 10);
-    const week = { field: "planned_date" as DateField, from: iso(from), to: iso(to) };
-    return dateFilters ? [...dateFilters, week] : [week];
+    if (active.has("due_week")) {
+      const from = new Date();
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(from);
+      to.setDate(to.getDate() + 8);
+      extra.push({ field: "planned_date" as DateField, from: iso(from), to: iso(to) });
+    }
+    // "Completed this week" drill-down (CEO brief weekly-completion pill): tasks
+    // that entered the `done` stage in the last 7 days. We filter on
+    // `stage_entered_at` (not actual_done_date) so this list matches the pill's
+    // count, which is derived from done-stage entries — actual_done_date is often
+    // backdated, which would undercount the list vs the headline number. Paired
+    // with the `done` stage (added below). Window [today-7, tomorrow).
+    if (active.has("completed_week")) {
+      const to = new Date();
+      to.setHours(0, 0, 0, 0);
+      to.setDate(to.getDate() + 1);
+      const from = new Date(to);
+      from.setDate(from.getDate() - 8);
+      extra.push({ field: "stage_entered_at" as DateField, from: iso(from), to: iso(to) });
+    }
+    if (extra.length === 0) return dateFilters;
+    return dateFilters ? [...dateFilters, ...extra] : extra;
   })();
   const searchFacets = parseSearchFacets(sp.sf);
 
@@ -199,7 +217,7 @@ export function buildTaskFiltersFromParams(
     if (active.has("all")) return undefined;
     const stages: string[] = [];
     if (active.has("open")) stages.push(...OPEN_STAGES);
-    if (active.has("done")) stages.push("done");
+    if (active.has("done") || active.has("completed_week")) stages.push("done");
     if (stages.length === 0) return undefined;
     return stages;
   })();

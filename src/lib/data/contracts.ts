@@ -797,6 +797,30 @@ export type GridContract = {
   notes: string | null;
 };
 
+// Contract ids that currently carry an OVERDUE PAYMENT — at least one unpaid
+// installment whose expected_date is in the past, on a live (active/hold)
+// contract. Same predicate as the CEO-brief "دفعات متأخرة التحصيل" metric, so the
+// brief's count/amount and the table this drill-down opens describe the exact
+// same population.
+export async function getOverduePaymentContractIds(orgId: string): Promise<string[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabaseAdmin
+    .from("installments")
+    .select("contract_id, contract:contracts!inner(status)")
+    .eq("organization_id", orgId)
+    .lt("expected_date", today)
+    .or("actual_amount.is.null,actual_amount.eq.0")
+    .in("contract.status", ["active", "hold"]);
+  if (error) throw error;
+  return Array.from(
+    new Set(
+      ((data ?? []) as Array<{ contract_id: string | null }>)
+        .map((r) => r.contract_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+}
+
 export async function listContractsGrid(
   orgId: string,
   filters: ContractListFilters = {},

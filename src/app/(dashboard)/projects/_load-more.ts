@@ -15,6 +15,7 @@ export type ProjectFilters = {
   archived?: boolean;
   allCategoriesArchived?: boolean;
   overTimesheets?: boolean;
+  onlyWithOverdue?: boolean;
   startDateFrom?: string;
   startDateTo?: string;
   endDateFrom?: string;
@@ -52,6 +53,7 @@ export async function loadMoreProjectsAction(
     archived: filters.archived,
     allCategoriesArchived: filters.allCategoriesArchived,
     overTimesheets: filters.overTimesheets,
+    onlyWithOverdue: filters.onlyWithOverdue,
     startDateFrom: filters.startDateFrom,
     startDateTo: filters.startDateTo,
     endDateFrom: filters.endDateFrom,

@@ -2,7 +2,6 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isLeadershipPosition } from "@/lib/data/leadership";
-import { getLiveClientIds } from "@/lib/data/satisfaction";
 import {
   getDashboardOdooMetrics,
   type DashboardOdooMetrics,
@@ -237,6 +236,61 @@ async function _getApprovalBottlenecks(orgId: string): Promise<BottleneckRow[]> 
 
 export const getApprovalBottlenecks = cache(_getApprovalBottlenecks);
 
+// ---- Workflow indicators: review backlog + client changes -----------------
+// Two "full indicators" promoted out of the hero row (team feedback 2026-06-28):
+// open tasks waiting in a REVIEW stage (specialist_review + manager_review) and
+// open tasks in CLIENT-CHANGES. Each carries a count plus how long work is
+// waiting — oldest (max days in stage) and average dwell — derived from
+// stage_entered_at (which IS populated, unlike delay_days). Rendered as index
+// cards next to the executive scores, each drilling to the matching filtered
+// task list.
+
+export interface WorkflowIndicator {
+  count: number;
+  oldestDays: number | null; // longest a task has waited in this stage group
+  avgDwellDays: number | null; // mean days-in-stage across the open tasks
+}
+export interface WorkflowIndicators {
+  review: WorkflowIndicator; // specialist_review + manager_review
+  clientChanges: WorkflowIndicator; // client_changes
+}
+
+const REVIEW_STAGES = ["specialist_review", "manager_review"] as const;
+
+async function _getWorkflowIndicators(orgId: string): Promise<WorkflowIndicators> {
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select("stage, stage_entered_at")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .in("stage", [...REVIEW_STAGES, "client_changes"]);
+  if (error) throw error;
+
+  const now = Date.now();
+  const summarize = (rows: Array<{ stage_entered_at: string | null }>): WorkflowIndicator => {
+    const ages = rows
+      .map((r) =>
+        r.stage_entered_at ? (now - new Date(r.stage_entered_at).getTime()) / 86_400_000 : null,
+      )
+      .filter((d): d is number => d !== null && d >= 0);
+    return {
+      count: rows.length,
+      oldestDays: ages.length ? Math.round(Math.max(...ages)) : null,
+      avgDwellDays: ages.length
+        ? Math.round((ages.reduce((a, b) => a + b, 0) / ages.length) * 10) / 10
+        : null,
+    };
+  };
+
+  const rows = (data ?? []) as Array<{ stage: string; stage_entered_at: string | null }>;
+  return {
+    review: summarize(rows.filter((r) => (REVIEW_STAGES as readonly string[]).includes(r.stage))),
+    clientChanges: summarize(rows.filter((r) => r.stage === "client_changes")),
+  };
+}
+
+export const getWorkflowIndicators = cache(_getWorkflowIndicators);
+
 // ---- Specialist load (top 8) ---------------------------------------------
 
 export interface SpecialistLoadRow {
@@ -298,6 +352,96 @@ async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]
 }
 
 export const getSpecialistLoadTop = cache(_getSpecialistLoadTop);
+
+// ---- Department capacity (for SAME-department task rebalancing) -----------
+// Redistribution must respect specialty: a Social-Media specialist's overdue
+// task can't be handed to an SEO one. So we group agents BY department and only
+// surface departments where a within-department rebalance is actually possible
+// (someone well above the dept mean AND a same-department peer with room). The
+// CEO-brief action plan uses this so it never proposes cross-department moves.
+export interface DepartmentCapacityRow {
+  department: string;
+  overloaded: Array<{ name: string; open: number }>; // notably above dept mean
+  available: Array<{ name: string; open: number }>; // same-dept peers with room
+}
+
+async function _getDepartmentCapacity(orgId: string): Promise<DepartmentCapacityRow[]> {
+  const rosterRes = await supabaseAdmin
+    .from("employee_profiles")
+    .select(
+      "id, full_name, department:departments!employee_profiles_department_id_fkey(name), position:positions(role, name)",
+    )
+    .eq("organization_id", orgId)
+    .eq("employment_status", "active");
+  if (rosterRes.error) throw rosterRes.error;
+
+  // Open-task count per agent. Filter to open tasks in the query (inner embed)
+  // and PAGINATE — there are more open agent-assignments than PostgREST's
+  // 1000-row cap, so a single fetch would silently undercount the load.
+  const openByEmp = new Map<string, number>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("task_assignees")
+      .select("employee_id, task:tasks!inner(stage)")
+      .eq("organization_id", orgId)
+      .eq("role_type", "agent")
+      .neq("task.stage", "done")
+      .is("task.archived_at", null)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const r of (data ?? []) as Array<{ employee_id: string }>) {
+      openByEmp.set(r.employee_id, (openByEmp.get(r.employee_id) ?? 0) + 1);
+    }
+    if (!data || data.length < PAGE) break;
+  }
+
+  // Group active, non-leadership agents by department (incl. idle 0-load ones).
+  type EmpRow = {
+    id: string;
+    full_name: string;
+    department: { name: string | null } | { name: string | null }[] | null;
+    position:
+      | { role: string | null; name: string | null }
+      | { role: string | null; name: string | null }[]
+      | null;
+  };
+  const byDept = new Map<string, Array<{ name: string; open: number }>>();
+  for (const e of (rosterRes.data ?? []) as unknown as EmpRow[]) {
+    const pos = Array.isArray(e.position) ? e.position[0] : e.position;
+    if (isLeadershipPosition(pos)) continue;
+    const dept = Array.isArray(e.department) ? e.department[0] : e.department;
+    if (!dept?.name) continue;
+    const arr = byDept.get(dept.name) ?? [];
+    arr.push({ name: e.full_name, open: openByEmp.get(e.id) ?? 0 });
+    byDept.set(dept.name, arr);
+  }
+
+  const rows: DepartmentCapacityRow[] = [];
+  for (const [department, members] of byDept) {
+    if (members.length < 2) continue;
+    const mean = members.reduce((a, m) => a + m.open, 0) / members.length;
+    if (mean <= 0) continue;
+    const overloaded = members
+      .filter((m) => m.open >= Math.max(mean * 1.5, 4))
+      .sort((a, b) => b.open - a.open);
+    const available = members
+      .filter((m) => m.open <= mean * 0.5)
+      .sort((a, b) => a.open - b.open);
+    if (overloaded.length === 0 || available.length === 0) continue;
+    rows.push({
+      department,
+      overloaded: overloaded.slice(0, 4),
+      available: available.slice(0, 4),
+    });
+  }
+  // Most imbalanced departments first (heaviest single agent).
+  return rows
+    .sort((a, b) => (b.overloaded[0]?.open ?? 0) - (a.overloaded[0]?.open ?? 0))
+    .slice(0, 4);
+}
+
+export const getDepartmentCapacity = cache(_getDepartmentCapacity);
 
 // ---- Performer leaderboard (top/bottom 3 by on-time %) -------------------
 
@@ -783,6 +927,7 @@ export interface StuckProjectRow {
   projectId: string;
   projectCode: string | null;
   projectName: string;
+  clientId: string | null;
   clientName: string | null;
   openTasks: number;
   overdueTasks: number;
@@ -794,7 +939,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "id, stage, is_overdue, progress_slip_percent, updated_at, archived_at, project:projects!inner(id, name, project_code, client:clients!inner(name))",
+      "id, stage, is_overdue, progress_slip_percent, updated_at, archived_at, project:projects!inner(id, name, project_code, client:clients!inner(id, name))",
     )
     .eq("organization_id", orgId)
     .is("archived_at", null)
@@ -806,8 +951,8 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
     progress_slip_percent: number | string | null;
     updated_at: string;
     project:
-      | { id: string; name: string; project_code: string | null; client: { name: string } | { name: string }[] | null }
-      | { id: string; name: string; project_code: string | null; client: { name: string } | { name: string }[] | null }[]
+      | { id: string; name: string; project_code: string | null; client: { id: string; name: string } | { id: string; name: string }[] | null }
+      | { id: string; name: string; project_code: string | null; client: { id: string; name: string } | { id: string; name: string }[] | null }[]
       | null;
   };
 
@@ -816,6 +961,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
     {
       name: string;
       code: string | null;
+      clientId: string | null;
       client: string | null;
       open: number;
       overdue: number;
@@ -832,6 +978,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
       agg.get(p.id) ?? {
         name: p.name,
         code: p.project_code,
+        clientId: client?.id ?? null,
         client: client?.name ?? null,
         open: 0,
         overdue: 0,
@@ -851,6 +998,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
       projectId,
       projectCode: v.code,
       projectName: v.name,
+      clientId: v.clientId,
       clientName: v.client,
       openTasks: v.open,
       overdueTasks: v.overdue,

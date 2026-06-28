@@ -389,14 +389,16 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   ]);
 
   // 2. Execution Quality & Satisfaction. Operational signals (rework,
-  // rejection) plus AI-derived client satisfaction and documented brief
-  // adherence — each only weighted when it has data.
+  // rejection) plus AI-derived client satisfaction — each only weighted when it
+  // has data. Brief-adherence was REMOVED from this score (team feedback
+  // 2026-06-28): the AI rarely has the real brief document, so the metric is
+  // unreliable and shouldn't move the Quality index. The satisfaction weight
+  // absorbs the freed 15% (blend renormalizes the present components anyway).
   const qualityScore = blend([
     { w: 0.3, v: 100 * (1 - reworkRate) },
     { w: 0.15, v: 100 * (1 - rejectionRate) },
     { w: 0.1, v: avgRevisions === null ? null : clamp(100 - avgRevisions * 20) },
     { w: 0.3, v: satAgg.avgSatisfaction },
-    { w: 0.15, v: satAgg.avgBriefAdherence },
   ]);
 
   // 3. Team Discipline & Activity

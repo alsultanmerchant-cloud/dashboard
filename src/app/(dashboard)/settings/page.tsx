@@ -1,4 +1,4 @@
-import { Settings, Building2, User, Globe, Shield, Sparkles, CalendarOff, ChevronLeft } from "lucide-react";
+import { Settings, Building2, User, Globe, Shield, Sparkles, CalendarOff, Gauge, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
@@ -81,7 +81,7 @@ export default async function SettingsPage() {
 
       <SectionTitle title={t("workSchedule.title")} />
       <Card className="mb-8">
-        <CardContent className="p-5">
+        <CardContent className="space-y-2 p-5">
           <Link
             href="/settings/holidays"
             className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:bg-muted/40"
@@ -92,6 +92,21 @@ export default async function SettingsPage() {
                 <span className="block text-sm font-medium">{t("workSchedule.holidaysTitle")}</span>
                 <span className="block text-[11px] text-muted-foreground">
                   {t("workSchedule.holidaysDescription")}
+                </span>
+              </span>
+            </span>
+            <ChevronLeft className="size-4 text-muted-foreground icon-flip-rtl" />
+          </Link>
+          <Link
+            href="/settings/sla"
+            className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:bg-muted/40"
+          >
+            <span className="flex items-center gap-3">
+              <Gauge className="size-4 text-cyan" />
+              <span>
+                <span className="block text-sm font-medium">معايير الالتزام بالمواعيد (SLA)</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  الزمن المسموح لكل مرحلة — يُحرّك نسبة الالتزام في نبض الفريق والمساءلة.
                 </span>
               </span>
             </span>

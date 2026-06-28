@@ -445,12 +445,11 @@ function SatisfactionOverview({
   const [view, setView] = useState<"board" | "table">("board");
   const [query, setQuery] = useState("");
   // Active clients (≥1 non-archived project) vs lost/archived relationships.
-  // Defaults to "active" so the board isn't dominated by clients we've lost.
-  // When deep-linked from the dashboard at-risk stat, show "all" so no at-risk
-  // client is hidden by the relation default.
-  const [relation, setRelation] = useState<"active" | "lost" | "all">(
-    initialRisk ? "all" : "active",
-  );
+  // Always defaults to "active" — including the dashboard deep-link. The
+  // "عملاء معرضون للفقد" pill counts ACTIVE at-risk clients only (an already-lost
+  // client can't be "at risk of loss"), so the drill-down must open the active
+  // scope to show the SAME number; opening "all" here showed 61 vs the pill's 22.
+  const [relation, setRelation] = useState<"active" | "lost" | "all">("active");
   // At-risk-only filter — toggled on when deep-linked from the dashboard
   // "عملاء معرضون للفقد" stat. Matches isClientAtRisk: negative sentiment OR score < 55.
   const [riskOnly, setRiskOnly] = useState(initialRisk);
@@ -460,9 +459,17 @@ function SatisfactionOverview({
       active: rows.filter((r) => r.hasActiveProject).length,
       lost: rows.filter((r) => !r.hasActiveProject).length,
       all: rows.length,
-      risk: rows.filter((r) => bucketOf(r) === "atRisk").length,
+      // At-risk count within the CURRENT relation scope, so the badge always
+      // matches what the risk filter actually shows. In the default "active"
+      // scope this equals the dashboard "عملاء معرضون للفقد" pill (22) — both use
+      // active + isClientAtRisk. A lost client can't be "at risk of loss".
+      risk: rows.filter(
+        (r) =>
+          bucketOf(r) === "atRisk" &&
+          (relation === "all" || r.hasActiveProject === (relation === "active")),
+      ).length,
     }),
-    [rows],
+    [rows, relation],
   );
 
   const filtered = useMemo(() => {

@@ -10,8 +10,8 @@ import {
 import { requireSession, getDashboardScope, hasPermission, type ServerSession } from "@/lib/auth-server";
 import { DepartmentDashboard } from "@/components/department/department-dashboard";
 import { AgentCockpit } from "@/components/cockpit/agent-cockpit";
-import { getTeamActivityOverview } from "@/lib/data/activity-scores";
-import { ActivityPulseBand } from "@/components/activity/activity-pulse-band";
+import { getTeamPulseOverview } from "@/lib/data/team-pulse";
+import { TeamPulseBand } from "@/components/executive/team-pulse-band";
 import { getExecutiveScores } from "@/lib/data/executive-scores";
 import { getAccountabilityOverview } from "@/lib/data/accountability";
 import {
@@ -26,7 +26,6 @@ import {
 import {
   getHeroKpis,
   getOnTimeTrend30d,
-  getPulseStats,
   getClientHealth,
   getStageFunnel,
   getApprovalBottlenecks,
@@ -37,6 +36,7 @@ import {
   getUpcomingDeadlines,
   getStageFlowMatrix,
   getTopRevisedTasks,
+  getWorkflowIndicators,
 } from "@/lib/data/executive";
 import { PageHeader } from "@/components/page-header";
 import { MetricInfo, Explained } from "@/components/metric-info";
@@ -45,7 +45,7 @@ import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
 import { getCurrentCeoBrief } from "@/lib/ceo-brief-generate";
 import { ExecutiveHeroRow } from "@/components/executive/hero-row";
-import { PulseStrip } from "@/components/executive/pulse-strip";
+import { WorkflowIndicatorsSection } from "@/components/executive/workflow-indicators";
 import { ClientHealthSection } from "@/components/executive/client-health";
 import { DeliveryFlowSection } from "@/components/executive/delivery-flow";
 import { TeamCapacitySection } from "@/components/executive/team-capacity";
@@ -54,6 +54,7 @@ import { StuckProjectsSection } from "@/components/executive/stuck-projects";
 import { UpcomingDeadlinesSection } from "@/components/executive/upcoming-deadlines";
 import { StageFlowMatrixSection } from "@/components/executive/stage-flow-matrix";
 import { TopRevisedTasksSection } from "@/components/executive/top-revised";
+import { DashSection } from "@/components/executive/section-boundary";
 import { cn } from "@/lib/utils";
 
 // ---- Sections (each streams behind its own Suspense) ---------------------
@@ -71,8 +72,8 @@ async function ScoresBand({ orgId }: { orgId: string }) {
 }
 
 async function PulseBand({ orgId }: { orgId: string }) {
-  const data = await getTeamActivityOverview(orgId);
-  return <ActivityPulseBand data={data} />;
+  const data = await getTeamPulseOverview(orgId);
+  return <TeamPulseBand data={data} />;
 }
 
 async function HeroSection({ orgId }: { orgId: string }) {
@@ -80,9 +81,9 @@ async function HeroSection({ orgId }: { orgId: string }) {
   return <ExecutiveHeroRow data={data} trend={trend} />;
 }
 
-async function Pulse({ orgId }: { orgId: string }) {
-  const data = await getPulseStats(orgId);
-  return <PulseStrip data={data} />;
+async function WorkflowIndicators({ orgId }: { orgId: string }) {
+  const data = await getWorkflowIndicators(orgId);
+  return <WorkflowIndicatorsSection data={data} />;
 }
 
 async function ClientHealth({ orgId }: { orgId: string }) {
@@ -239,62 +240,62 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
       />
 
       {canFinance && (
-        <Suspense fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
+        <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
           <BriefSection orgId={orgId} />
-        </Suspense>
+        </DashSection>
       )}
 
-      <Suspense fallback={<StripSkeleton />}>
+      <DashSection fallback={<StripSkeleton />}>
         <PulseBand orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<ScoresSkeleton />}>
+      <DashSection fallback={<ScoresSkeleton />}>
         <ScoresBand orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={300} />}>
+      <DashSection fallback={<Skeleton className="mb-8 h-[150px] rounded-2xl" />}>
+        <WorkflowIndicators orgId={orgId} />
+      </DashSection>
+
+      <DashSection fallback={<SectionSkeleton h={300} />}>
         <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<HeroSkeleton />}>
+      <DashSection fallback={<HeroSkeleton />}>
         <HeroSection orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<StripSkeleton />}>
-        <Pulse orgId={orgId} />
-      </Suspense>
-
-      <Suspense fallback={<SectionSkeleton h={260} />}>
+      <DashSection fallback={<SectionSkeleton h={260} />}>
         <ClientHealth orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={200} />}>
+      <DashSection fallback={<SectionSkeleton h={200} />}>
         <ServiceHealth orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={320} />}>
+      <DashSection fallback={<SectionSkeleton h={320} />}>
         <StageFlow orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={260} />}>
+      <DashSection fallback={<SectionSkeleton h={260} />}>
         <TopRevised orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={360} />}>
+      <DashSection fallback={<SectionSkeleton h={360} />}>
         <DeliveryFlow orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={180} />}>
+      <DashSection fallback={<SectionSkeleton h={180} />}>
         <StuckProjects orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={180} />}>
+      <DashSection fallback={<SectionSkeleton h={180} />}>
         <UpcomingDeadlines orgId={orgId} />
-      </Suspense>
+      </DashSection>
 
-      <Suspense fallback={<SectionSkeleton h={300} />}>
+      <DashSection fallback={<SectionSkeleton h={300} />}>
         <TeamCapacity orgId={orgId} />
-      </Suspense>
+      </DashSection>
     </div>
   );
 }
@@ -566,7 +567,7 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
         <AnalysisStat label="Expected" value={fmtSR(d.total_expected)} tone="info" tip={t("metricTooltips.dashboard_contractsExpected")} />
         <AnalysisStat label="Actual" value={fmtSR(d.total_actual)} tone="success" tip={t("metricTooltips.dashboard_contractsActual")} />
         <AnalysisStat label="Achievement" value={`${d.achievement_pct.toFixed(1)}%`} tone={achievementTone(d.achievement_pct)} tip={t("metricTooltips.dashboard_contractsAchievement")} />
-        <AnalysisStat label="Due installments" value={fmtSR(totalDue)} tone="warning" tip={t("metricTooltips.dashboard_dueInstallments")} />
+        <AnalysisStat label="Due + overdue installments" value={fmtSR(totalDue)} tone="warning" tip={t("metricTooltips.dashboard_dueInstallments")} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.1fr]">
@@ -597,7 +598,7 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
             <MiniCount label="Lost" value={d.mov_lost} tip={t("metricTooltips.dashboard_movLost")} />
             <MiniCount label="On target" value={d.cnt_on_target} tip={t("metricTooltips.dashboard_cntOnTarget")} />
             <MiniCount label="Overdue" value={d.cnt_overdue} tip={t("metricTooltips.dashboard_cntOverdue")} />
-            <MiniCount label="Hold" value={d.mov_hold} tip={t("metricTooltips.dashboard_movHold")} />
+            <MiniCount label="Hold" value={d.cnt_roster_hold} tip={t("metricTooltips.dashboard_cntHold")} />
           </div>
         </div>
 

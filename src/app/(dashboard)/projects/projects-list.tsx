@@ -84,6 +84,7 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       archived: flag("archived"),
       allCategoriesArchived: flag("allCategoriesArchived"),
       overTimesheets: flag("overTimesheets"),
+      onlyWithOverdue: flag("atRisk"),
       startDateFrom: str("startDateFrom"),
       startDateTo: str("startDateTo"),
       endDateFrom: str("endDateFrom"),

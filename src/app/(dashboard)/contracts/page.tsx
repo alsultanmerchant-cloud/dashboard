@@ -4,6 +4,7 @@ import { FileSignature, ScrollText, Table2, TrendingUp } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import {
   listContractsGrid,
+  getOverduePaymentContractIds,
   listContractTypes,
   getMonthlyDashboard,
   getContractsRoster,
@@ -162,7 +163,7 @@ export default async function ContractsPage({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {tabs}
         {view === "table" && canEdit && (
-          <ContractsHeaderActions />
+          <ContractsHeaderActions lastSyncedLabel={lastSyncedLabel} />
         )}
         {view === "dashboard" && canEdit && (
           <DashboardHeaderActions
@@ -185,6 +186,7 @@ export default async function ContractsPage({
           canEdit={canEdit}
           meEmployeeId={session.employeeId ?? null}
           initialFilters={parseContractGridFilters(sp)}
+          overduePayments={firstParam(sp.pay) === "overdue"}
         />
       )}
     </div>
@@ -198,24 +200,38 @@ async function TableSection({
   canEdit,
   meEmployeeId,
   initialFilters,
+  overduePayments = false,
 }: {
   orgId: string;
   canEdit: boolean;
   meEmployeeId: string | null;
   initialFilters: ContractGridFilters;
+  overduePayments?: boolean;
 }) {
-  const [{ ContractsGrid }, rows, types, ams] = await Promise.all([
+  const [{ ContractsGrid }, allRows, types, ams, overdueIds] = await Promise.all([
     import("./contracts-grid"),
     listContractsGrid(orgId),
     listContractTypes(orgId),
     listAccountManagers(orgId),
+    overduePayments ? getOverduePaymentContractIds(orgId) : Promise.resolve<string[]>([]),
   ]);
   const t = await getTranslations("ContractsPage");
+
+  // "Overdue payments" drill-down (CEO brief → دفعات متأخرة التحصيل): narrow the
+  // roster to exactly the contracts with an unpaid past-due installment, and lift
+  // the default open-status filter so a hold/expired one isn't hidden.
+  let rows = allRows as GridContract[];
+  let filters = initialFilters;
+  if (overduePayments) {
+    const idset = new Set(overdueIds);
+    rows = rows.filter((r) => idset.has(r.id));
+    filters = { ...initialFilters, statuses: [] };
+  }
 
   const typeOptions = types.map((t) => ({ id: t.id, key: t.key, label: t.name_ar }));
   const amOptions = ams.map((a) => ({ id: a.id, full_name: a.full_name }));
 
-  if ((rows as GridContract[]).length === 0) {
+  if (rows.length === 0) {
     return (
       <EmptyState
         icon={<FileSignature className="size-6" />}
@@ -227,22 +243,35 @@ async function TableSection({
 
   return (
     <ContractsGrid
-      key={contractGridFilterKey(initialFilters)}
+      key={contractGridFilterKey(filters)}
       rows={rows}
       meEmployeeId={meEmployeeId}
       canEdit={canEdit}
       contractTypes={typeOptions}
       accountManagers={amOptions}
-      initialFilters={initialFilters}
+      initialFilters={filters}
     />
   );
 }
 
 // The button bundle loads with the table, but its large option lists are fetched
 // only after the user opens the dialog.
-async function ContractsHeaderActions() {
+async function ContractsHeaderActions({
+  lastSyncedLabel,
+}: {
+  lastSyncedLabel: string | null;
+}) {
   const { NewContractButton } = await import("./new-contract-dialog");
-  return <NewContractButton />;
+  const { SheetSyncButton } = await import("./sheet-sync-button");
+  // Contract status lives in the Google Sheet, not Rwasem/Odoo — so the
+  // refresh here is the Sheet sync, surfaced on the table view too (not just
+  // the dashboard view) so contract status is always one click from current.
+  return (
+    <div className="flex items-center gap-2">
+      <SheetSyncButton lastSyncedLabel={lastSyncedLabel} />
+      <NewContractButton />
+    </div>
+  );
 }
 
 async function ContractLogsSection({

@@ -42,6 +42,11 @@ export interface ListProjectsPagedOpts {
   allCategoriesArchived?: boolean;
   /** Project has at least one task where logged hours exceed allocated. */
   overTimesheets?: boolean;
+  /** "At risk": project has at least one OPEN (non-archived, not done) overdue
+   *  task. Mirrors the executive scores card's `riskProjects` count exactly, so
+   *  the dashboard drill-down lands on the same project set. Resolved to an id
+   *  whitelist (like the agent scope) rather than a new RPC param. */
+  onlyWithOverdue?: boolean;
   /** ISO YYYY-MM-DD bounds. */
   startDateFrom?: string;
   startDateTo?: string;
@@ -178,6 +183,37 @@ function safeTarget(v: string | null): LiveProject["target"] {
  * the previous 5-call sequence (main + counts + services + members + 3 org
  * counts).
  */
+/**
+ * Distinct project ids that have at least one OPEN (non-archived, not done)
+ * overdue task. Same predicate as the executive scores card's `riskProjects`
+ * (executive-scores.ts), so the dashboard "مشاريع معرضة للخطر" drill-down opens
+ * exactly that project set. Paginated to stay correct past PostgREST's 1000-row
+ * cap even though the open-task set is currently small.
+ */
+async function resolveOverdueProjectIds(orgId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("tasks")
+      .select("project_id")
+      .eq("organization_id", orgId)
+      .is("archived_at", null)
+      .neq("stage", "done")
+      .eq("is_overdue", true)
+      .not("project_id", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.warn(`[resolveOverdueProjectIds] ${error.message}`);
+      break;
+    }
+    const rows = (data ?? []) as Array<{ project_id: string | null }>;
+    for (const r of rows) if (r.project_id) ids.add(r.project_id);
+    if (rows.length < PAGE) break;
+  }
+  return [...ids];
+}
+
 export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<ListProjectsPagedResult> {
   const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 25));
   const page = Math.max(1, opts.page ?? 1);
@@ -193,6 +229,15 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
   let customIds: string[] | null = null;
   if (opts.customFilter) {
     customIds = await resolveCustomFilterIds(opts.organizationId, opts.customFilter);
+  }
+
+  // "At risk" drill-down: intersect with projects carrying an open overdue task.
+  if (opts.onlyWithOverdue) {
+    const overdueIds = await resolveOverdueProjectIds(opts.organizationId);
+    const allowed = new Set(overdueIds);
+    customIds = customIds == null
+      ? [...allowed]
+      : customIds.filter((id) => allowed.has(id));
   }
 
   // Agent scope: intersect the whitelist with the projects the agent may see.

@@ -908,27 +908,40 @@ async function _getLiveClientIds(orgId: string): Promise<Set<string>> {
 }
 export const getLiveClientIds = cache(_getLiveClientIds);
 
+// Client ids with a LIVE PROJECT (hasActiveProject) — the canonical CHURN scope.
+// Derived from the satisfaction hub rows so the Quality/stability score, churn
+// notifications, AI insights, and the CEO brief all count "at-risk clients" the
+// SAME way: ACTIVE clients only (already-lost clients excluded). The team's rule
+// is "lost clients don't matter", so this is preferred over the broader
+// contract-OR-project getLiveClientIds for all satisfaction/churn scoping.
+async function _getActiveProjectClientIds(orgId: string): Promise<Set<string>> {
+  const rows = await getSatisfactionRows(orgId);
+  return new Set(rows.filter((r) => r.hasActiveProject).map((r) => r.clientId));
+}
+export const getActiveProjectClientIds = cache(_getActiveProjectClientIds);
+
 async function _getOrgSatisfactionAggregate(orgId: string): Promise<SatisfactionAggregate> {
-  const [{ data, error }, liveIds] = await Promise.all([
+  const [{ data, error }, activeIds] = await Promise.all([
     supabaseAdmin
       .from("client_satisfaction_analyses")
       .select("client_id, satisfaction_score, brief_adherence_score, sentiment")
       .eq("organization_id", orgId)
       .eq("is_current", true),
-    getLiveClientIds(orgId),
+    getActiveProjectClientIds(orgId),
   ]);
   if (error || !data || data.length === 0) {
     return { avgSatisfaction: null, avgBriefAdherence: null, analyzedClients: 0, atRiskClients: 0 };
   }
 
-  // Drop analyses for clients that are no longer a live relationship — they
-  // skew the average down and inflate the at-risk count with already-lost names.
+  // Keep only analyses for ACTIVE clients (live project) — already-lost clients
+  // skew the average down and inflate the at-risk count with names that can't
+  // churn. Matches the /satisfaction page + CEO brief churn definition.
   const rows = (data as Array<{
     client_id: string | null;
     satisfaction_score: number | null;
     brief_adherence_score: number | null;
     sentiment: string | null;
-  }>).filter((r) => r.client_id != null && liveIds.has(r.client_id));
+  }>).filter((r) => r.client_id != null && activeIds.has(r.client_id));
   const sat = rows.map((r) => r.satisfaction_score).filter((v): v is number => v !== null);
   const brief = rows.map((r) => r.brief_adherence_score).filter((v): v is number => v !== null);
   const avg = (xs: number[]) =>
@@ -1217,13 +1230,13 @@ export interface AtRiskClient {
 }
 
 async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
-  const [{ data, error }, liveIds] = await Promise.all([
+  const [{ data, error }, activeIds] = await Promise.all([
     supabaseAdmin
       .from("client_satisfaction_analyses")
       .select("client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)")
       .eq("organization_id", orgId)
       .eq("is_current", true),
-    getLiveClientIds(orgId),
+    getActiveProjectClientIds(orgId),
   ]);
   if (error || !data) return [];
 
@@ -1236,7 +1249,7 @@ async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
   };
 
   return (data as unknown as Row[])
-    .filter((r) => r.client_id != null && liveIds.has(r.client_id))
+    .filter((r) => r.client_id != null && activeIds.has(r.client_id))
     .filter((r) => isClientAtRisk(r.satisfaction_score, r.sentiment))
     .map((r) => {
       const c = Array.isArray(r.client) ? r.client[0] : r.client;

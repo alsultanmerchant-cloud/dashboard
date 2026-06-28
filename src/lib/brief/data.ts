@@ -38,6 +38,7 @@ export interface BriefMoney {
   renew30Count: number;
   renew30Value: number;
   overdueInstallments: number;
+  overdueClients: number; // distinct clients behind the overdue installments
   overdueValue: number;
   paidThisMonth: number;
 }
@@ -94,7 +95,7 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
       // Only count receivables on LIVE contracts. Installments left on
       // closed/lost/expired contracts aren't collectible cash — they're stale
       // rows that wrongly inflated the "overdue collection" cash-threat figure.
-      .select("expected_amount, contract:contracts!inner(status)", { count: "exact" })
+      .select("expected_amount, contract:contracts!inner(status, client_id)", { count: "exact" })
       .eq("organization_id", orgId)
       .lt("expected_date", today)
       .or("actual_amount.is.null,actual_amount.eq.0")
@@ -114,10 +115,20 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
   if (overdueInst.error) console.error("[brief.loadMoney.installments]", overdueInst.error.message);
   if (paid.error) console.error("[brief.loadMoney.paid]", paid.error.message);
 
+  // Distinct clients behind those overdue installments (the embedded contract
+  // carries client_id) — the brief leads with this so the count matches the
+  // client list the "overdue payments" drill-down opens.
+  const overdueClientIds = new Set<string>();
+  for (const r of (overdueInst.data ?? []) as Array<{ contract: { client_id: string | null } | { client_id: string | null }[] | null }>) {
+    const c = Array.isArray(r.contract) ? r.contract[0] : r.contract;
+    if (c?.client_id) overdueClientIds.add(c.client_id);
+  }
+
   return {
     renew30Count: renewals.count ?? 0,
     renew30Value: sum(renewals.data, "total_value"),
     overdueInstallments: overdueInst.count ?? 0,
+    overdueClients: overdueClientIds.size,
     overdueValue: sum(overdueInst.data, "expected_amount"),
     paidThisMonth: sum(paid.data, "actual_amount"),
   };
