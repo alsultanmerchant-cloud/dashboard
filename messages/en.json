@@ -1748,6 +1748,7 @@
       "clearFilter": "Clear filter",
       "countLabel": "{shown} of {total}",
       "countAria": "Showing {shown} of {total} tasks",
+      "viewOfTotal": "{shown, number} of {total, number}",
       "kpiNoDeadline": "Tasks without deadline",
       "kpiNoDeadlineHint": "Open tasks with no planned or due date",
       "kpiError": "Count unavailable"

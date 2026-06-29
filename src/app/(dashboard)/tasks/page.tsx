@@ -439,8 +439,14 @@ async function TasksToolbarMeta({
     countScoped("noDeadline"),
   ]);
   const totalCount = totalCountRaw ?? 0;
+  // Show how many match the current view, not just the grand total —
+  // "245 of 1,579" instead of a bare "of 1,579". Localized so it follows the UI
+  // language (and so the number isn't bidi-jumbled inside the LTR-forced badge).
+  const t = await getTranslations("TasksPage");
   const trailingText =
-    filteredTotalCount !== totalCount ? `من أصل ${totalCount}` : null;
+    filteredTotalCount !== totalCount
+      ? t("toolbar.viewOfTotal", { shown: filteredTotalCount, total: totalCount })
+      : null;
 
   return (
     <>

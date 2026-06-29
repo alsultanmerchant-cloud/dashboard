@@ -767,7 +767,10 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: "خطر فقدان عملاء",
       severity: churn.atRisk >= 10 || (avg != null && avg < 50) ? "critical" : "high",
       metric: parts.join(" · "),
-      href: worstChurn?.clientId ? `/satisfaction?client=${worstChurn.clientId}` : "/satisfaction",
+      // The risk spans several clients — open the at-risk-only list (exactly this
+      // risk's entity set), not just the single worst client. Dismissal still
+      // scopes to the worst client via entityId.
+      href: "/satisfaction?risk=1",
       entityId: worstChurn?.clientId,
       weight: 40 + churn.atRisk * 3,
     });
@@ -882,9 +885,19 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: `ضعف في مؤشر ${worstLine.label}`,
       severity: worstLine.score < 40 ? "high" : "medium",
       metric: `المؤشر عند ${worstLine.score}% (تقدير ${worstLine.grade})`,
-      // The composite indices break down in /reports — link there, not back to
-      // the dashboard the CEO is already looking at.
-      href: "/reports",
+      // Each composite index drills into the surface that holds its evidence,
+      // rather than a generic /reports landing: delivery → the overdue tasks that
+      // drag it down; quality/discipline → the accountability board (review rigor
+      // & rework); productivity → the work actually completed this week;
+      // stability → the open escalations behind it.
+      href:
+        {
+          delivery: "/tasks?view=list&filter=overdue",
+          quality: "/accountability",
+          discipline: "/accountability",
+          productivity: "/tasks?view=list&filter=completed_week",
+          stability: "/escalations",
+        }[worstLine.key] ?? "/reports",
       entityId: worstLine.label,
       weight: 6 + (55 - worstLine.score) / 3,
     });

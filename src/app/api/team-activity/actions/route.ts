@@ -17,10 +17,20 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const emp = url.searchParams.get("emp");
   const days = Number(url.searchParams.get("days") ?? "30");
+  // Optional explicit date filter (YYYY-MM-DD). When both are present the data
+  // layer windows on the calendar range instead of the rolling "last N days".
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
   if (!emp) {
     return new Response(JSON.stringify({ error: "emp required" }), { status: 400 });
   }
 
-  const rows = await getEmployeeActionLog(session.orgId, emp, Number.isFinite(days) ? days : 30);
+  const rows = await getEmployeeActionLog(
+    session.orgId,
+    emp,
+    Number.isFinite(days) ? days : 30,
+    from,
+    to,
+  );
   return Response.json({ rows });
 }

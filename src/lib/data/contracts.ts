@@ -376,6 +376,11 @@ export type BucketClient = {
   client_code: string | null;
   account_manager_name: string | null;
   value: number;
+  // Overdue-installment buckets only: true when the payment has already been
+  // COLLECTED this month. The sheet strikes these through and moves them to its
+  // "Actual paid clients ✅" column, so they're no longer outstanding — the UI
+  // renders them struck and excludes their value from the chase total.
+  collected?: boolean;
 };
 export type InstallmentDue = {
   contract_id: string;
@@ -578,24 +583,62 @@ export async function getMonthTargetBuckets(
     source_type_key: i.source_type_key ?? null,
   }));
 
-  // Live fallback for the per-department overdue lists. The snapshot path fills
-  // acc_inst_overdue/sales_inst_overdue from the sheet's "Clients with
-  // Installments" lists, but the live RPC (0174) never emits them — so for any
-  // month without a captured snapshot the dedicated "الدفعات المتأخرة" section
-  // would be empty and silently hidden, even though overdue rows exist inline in
-  // installments_due. Derive the split here from the overdue installment rows
-  // (expected before this month and still owed — mirrors 0168's E27 and the
-  // sheet's overdue lists), grouped by collecting department via source_type_key
-  // ('New' → Sales; Renew/WinBack/UPSELL → Account), one row per contract with
-  // the summed overdue amount. Only when the snapshot/RPC didn't already supply
-  // the lists (both empty ⇒ live path).
-  if (acc_inst_overdue.length === 0 && sales_inst_overdue.length === 0) {
+  // Per-department overdue lists. The snapshot path fills acc_inst_overdue/
+  // sales_inst_overdue from the sheet's "Clients with Installments" lists, but it
+  // (a) goes STALE on the current month as installments get collected / contracts
+  // resolve, and (b) carries no "collected" flag — so already-paid clients read as
+  // still-overdue. So for the CURRENT month we ALWAYS recompute the split live from
+  // the installments table (freshest membership), and for any other month we fall
+  // back to a live compute only when the snapshot/RPC left both lists empty.
+  //
+  // Predicate mirrors 0168's E27 / the sheet's overdue formula: seq >= 2, real
+  // revenue source types, expected before this month, and (still open OR collected
+  // THIS month) so the collected ones are still listed — but flagged so the UI can
+  // strike them, exactly like the sheet's strikethrough + "Actual paid clients ✅"
+  // column. Grouped by collecting department via source_type_key ('New' → Sales;
+  // Renew/WinBack/UPSELL → Account), one row per contract.
+  const isCurrentMonth = month === monthStartIso(new Date());
+  if (
+    isCurrentMonth ||
+    (acc_inst_overdue.length === 0 && sales_inst_overdue.length === 0)
+  ) {
+    acc_inst_overdue.length = 0;
+    sales_inst_overdue.length = 0;
     const ACCOUNT_TYPES = new Set(["Renew", "WinBack", "UPSELL"]);
-    const accMap = new Map<string, BucketClient>();
-    const salesMap = new Map<string, BucketClient>();
-    for (const i of instRows) {
-      if (i.expected_date >= start) continue; // this-month rows are "due", not overdue
-      if (i.status === "received" || i.status === "waived") continue;
+    const { data: ovRows, error: ovErr } = await supabaseAdmin
+      .from("installments")
+      .select(
+        `expected_amount, actual_date, source_type_key,
+         contract:contracts!inner(id, organization_id, sheet_present, status,
+           client:clients(name),
+           am:employee_profiles!contracts_account_manager_id_fkey(full_name))`,
+      )
+      .eq("contract.organization_id", orgId)
+      .eq("contract.sheet_present", true)
+      .not("contract.status", "in", "(lost,closed)")
+      .gte("sequence", 2)
+      .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
+      .lt("expected_date", start)
+      .or(`actual_date.is.null,and(actual_date.gte.${start},actual_date.lte.${endDate})`)
+      .or(`lost_date.is.null,lost_date.gte.${start}`);
+    if (ovErr) throw ovErr;
+
+    type OvRow = {
+      expected_amount: number | string;
+      actual_date: string | null;
+      source_type_key: string | null;
+      contract: {
+        id: string;
+        client: { name: string | null } | null;
+        am: { full_name: string } | null;
+      } | null;
+    };
+    // Track paid/unpaid per contract: a contract is "collected" only when it has
+    // a paid overdue row AND no still-unpaid one left.
+    type Agg = BucketClient & { _paid: boolean; _unpaid: boolean };
+    const accMap = new Map<string, Agg>();
+    const salesMap = new Map<string, Agg>();
+    for (const i of (ovRows ?? []) as unknown as OvRow[]) {
       const cid = i.contract?.id;
       if (!cid) continue;
       const target =
@@ -603,12 +646,15 @@ export async function getMonthTargetBuckets(
           ? salesMap
           : i.source_type_key && ACCOUNT_TYPES.has(i.source_type_key)
             ? accMap
-            : null; // null/legacy type can't be routed to a department; stays in the inline table only
+            : null; // null/legacy type can't be routed to a department
       if (!target) continue;
-      const amount = Number(i.expected_amount);
+      const amount = Number(i.expected_amount) || 0;
+      const paid = !!i.actual_date;
       const existing = target.get(cid);
       if (existing) {
         existing.value += amount;
+        if (paid) existing._paid = true;
+        else existing._unpaid = true;
       } else {
         target.set(cid, {
           contract_id: cid,
@@ -616,11 +662,18 @@ export async function getMonthTargetBuckets(
           client_code: null,
           account_manager_name: i.contract?.am?.full_name ?? null,
           value: amount,
+          _paid: paid,
+          _unpaid: !paid,
         });
       }
     }
-    acc_inst_overdue.push(...accMap.values());
-    sales_inst_overdue.push(...salesMap.values());
+    const finalize = (m: Map<string, Agg>): BucketClient[] =>
+      [...m.values()].map(({ _paid, _unpaid, ...c }) => ({
+        ...c,
+        collected: _paid && !_unpaid,
+      }));
+    acc_inst_overdue.push(...finalize(accMap));
+    sales_inst_overdue.push(...finalize(salesMap));
   }
 
   // Live fallback for the per-department EXPECTED-this-month lists, symmetric to
@@ -807,12 +860,13 @@ export async function getOverduePaymentContractIds(orgId: string): Promise<strin
   // 0168/0172, sheet cells acc_exp_overdue_inst / sales_exp_overdue_inst) so this
   // drill-down opens the EXACT contracts behind the CEO brief's overdue-collection
   // card: payment seq >= 2, real revenue source types, expected before this month,
-  // still open or collected this month, not lost before this month.
+  // not lost before this month. Unlike the sheet's headline KPI we keep ONLY the
+  // still-OUTSTANDING rows (actual_date IS NULL): a payment collected this month is
+  // struck through on the sheet and moved to "Actual paid clients ✅", so it's no
+  // longer something to chase — the card now counts outstanding only and this
+  // drill-down must match it.
   const now = new Date();
   const monthStart = `${now.toISOString().slice(0, 7)}-01`;
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
-    .toISOString()
-    .slice(0, 10);
   const { data, error } = await supabaseAdmin
     .from("installments")
     .select("contract_id")
@@ -820,7 +874,7 @@ export async function getOverduePaymentContractIds(orgId: string): Promise<strin
     .gte("sequence", 2)
     .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
     .lt("expected_date", monthStart)
-    .or(`actual_date.is.null,and(actual_date.gte.${monthStart},actual_date.lte.${monthEnd})`)
+    .is("actual_date", null)
     .or(`lost_date.is.null,lost_date.gte.${monthStart}`);
   if (error) throw error;
   return Array.from(

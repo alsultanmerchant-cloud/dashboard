@@ -1,8 +1,8 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { isLeadershipPosition } from "@/lib/data/leadership";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
+import { isLeadershipPosition, isLeadershipSql } from "@/lib/data/leadership";
 
 // =========================================================================
 // Team Pulse (نبض الفريق) — employee MOVEMENT & ACTIVITY, not SLA quality.
@@ -55,6 +55,10 @@ export interface TeamMemberRow {
   lastUpdateAt: string | null; // most recent Log Note on their tasks
   updatesThisWeek: number; // Log Notes on their tasks in the last 7 days
   noUpdateTasks: number; // open tasks with no Log Note in STUCK_DAYS+
+  // قائد الفريق / مدير القسم. Shown in the member list for visibility, but kept
+  // OUT of the department status math (a lead who doesn't act on Rwasem must not
+  // make the team read as "stalled").
+  isLeadership: boolean;
 }
 
 export interface TeamPulseRow {
@@ -106,6 +110,9 @@ export interface TeamPulseOverview {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Department visibility in نبض الفريق is per-department (departments.
+// show_in_team_pulse, migration 0225) — editable from the departments admin.
 
 // This page measures EMPLOYEE activity, so the team status reflects whether
 // PEOPLE are moving — not the task backlog (which is shown separately as the
@@ -171,31 +178,45 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
   // boundary. The cache makes this a trivial indexed join. Names / position /
   // department are joined fresh so they never go stale; status / load / momentum
   // are still derived live in TS from the cached counters.
+  // Start from active employees (so leadership shows even with no task activity)
+  // and LEFT JOIN the cache. Keep only people who either have activity OR are
+  // leadership — i.e. the executors with current work, plus قائد الفريق /
+  // مدير القسم for visibility. Counters coalesce to 0 when there's no cache row.
   const rows = await runSql<ActivitySqlRow>(`
-    select c.employee_id, e.full_name, e.job_title,
+    select e.id employee_id, e.full_name, e.job_title,
            pp.role position_role, pp.name position_name, e.department_id,
            c.last_action, c.last_move,
-           c.actions_today, c.actions7, c.actions_prev,
-           c.open_wip, c.stalled, c.done7,
-           c.last_update, c.updates7, c.no_update
-      from team_activity_cache c
-      join employee_profiles e
-        on e.id = c.employee_id and e.organization_id = '${orgId}'
-       and e.employment_status = 'active'
+           coalesce(c.actions_today,0) actions_today, coalesce(c.actions7,0) actions7,
+           coalesce(c.actions_prev,0) actions_prev,
+           coalesce(c.open_wip,0) open_wip, coalesce(c.stalled,0) stalled,
+           coalesce(c.done7,0) done7,
+           c.last_update, coalesce(c.updates7,0) updates7, coalesce(c.no_update,0) no_update
+      from employee_profiles e
       left join positions pp on pp.id = e.position_id
-     where c.organization_id = '${orgId}'
+      left join team_activity_cache c
+        on c.employee_id = e.id and c.organization_id = e.organization_id
+     where e.organization_id = '${orgId}'
+       and e.employment_status = 'active'
+       and e.department_id is not null
+       and (c.employee_id is not null or ${isLeadershipSql("pp")})
   `);
 
   const out: TeamMemberRow[] = [];
   for (const r of rows) {
-    // Agents-only: skip leadership (mirrors المساءلة / the board everywhere).
-    if (isLeadershipPosition({ role: r.position_role, name: r.position_name })) continue;
+    // نبض الفريق INCLUDES leadership (قائد الفريق / مدير القسم) — unlike the
+    // agents-only performance tables. The team wants to see who's active across
+    // the whole department, leads included. (Accountability stays agents-only.)
     out.push({
       employeeId: r.employee_id,
       fullName: r.full_name ?? "—",
-      positionLabel: r.position_role
-        ? (TASK_OWNER_ROLE_LABELS[r.position_role as TaskOwnerRoleKey] ?? r.job_title)
-        : r.job_title,
+      // Prefer the real position NAME (e.g. "مدير القسم المساند", "قائد الفريق")
+      // so leads aren't mislabeled by their attribution role (a dept head can
+      // carry role='agent'). Fall back to the role label, then the job title.
+      positionLabel:
+        r.position_name ??
+        (r.position_role
+          ? (TASK_OWNER_ROLE_LABELS[r.position_role as TaskOwnerRoleKey] ?? r.job_title)
+          : r.job_title),
       departmentId: r.department_id,
       lastActionAt: r.last_action,
       actionsToday: r.actions_today,
@@ -210,6 +231,7 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
       lastUpdateAt: r.last_update,
       updatesThisWeek: r.updates7,
       noUpdateTasks: r.no_update,
+      isLeadership: isLeadershipPosition({ role: r.position_role, name: r.position_name }),
     });
   }
 
@@ -238,7 +260,7 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
   const [{ data: depts }, { data: emps }] = await Promise.all([
     supabaseAdmin
       .from("departments")
-      .select("id, name, head_employee_id")
+      .select("id, name, head_employee_id, show_in_team_pulse")
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("employee_profiles")
@@ -246,9 +268,16 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
       .eq("organization_id", orgId),
   ]);
   const deptById = new Map(
-    ((depts as { id: string; name: string; head_employee_id: string | null }[] | null) ?? []).map(
-      (d) => [d.id, d],
-    ),
+    (
+      (depts as
+        | {
+            id: string;
+            name: string;
+            head_employee_id: string | null;
+            show_in_team_pulse: boolean;
+          }[]
+        | null) ?? []
+    ).map((d) => [d.id, d]),
   );
   const nameById = new Map(
     ((emps as { id: string; full_name: string | null }[] | null) ?? []).map((e) => [
@@ -269,7 +298,13 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
   for (const [deptId, list] of byDept) {
     const dept = deptById.get(deptId);
     if (!dept) continue;
-    const agg = list.reduce(
+    if (!dept.show_in_team_pulse) continue;
+    // Dept status/headcount reflect the EXECUTORS only; leads ride along in the
+    // member list but don't move the activity signal. Skip pure-leadership depts
+    // (e.g. القيادة) — they have no executing team to measure.
+    const execList = list.filter((m) => !m.isLeadership);
+    if (execList.length === 0) continue;
+    const agg = execList.reduce(
       (a, m) => {
         a.activeCount += m.status === "active" ? 1 : 0;
         a.slowCount += m.status === "slow" ? 1 : 0;
@@ -307,9 +342,9 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
       departmentName: dept.name,
       headEmployeeId: dept.head_employee_id,
       headName: dept.head_employee_id ? (nameById.get(dept.head_employee_id) ?? null) : null,
-      headcount: list.length,
+      headcount: execList.length,
       ...agg,
-      status: deptStatus(agg.stalledCount, list.length, agg.momentum),
+      status: deptStatus(agg.stalledCount, execList.length, agg.momentum),
     });
   }
 
@@ -375,14 +410,52 @@ async function _getTeamMembers(orgId: string, departmentId: string): Promise<Tea
   const statusRank: Record<ActivityStatus, number> = { stalled: 0, slow: 1, active: 2 };
   return members
     .filter((m) => m.departmentId === departmentId)
-    .sort((a, b) =>
-      statusRank[a.status] !== statusRank[b.status]
+    .sort((a, b) => {
+      // Executors first (worst-first within); leads (قائد الفريق / مدير القسم)
+      // ride at the bottom so an inactive lead never tops the list.
+      if (a.isLeadership !== b.isLeadership) return a.isLeadership ? 1 : -1;
+      return statusRank[a.status] !== statusRank[b.status]
         ? statusRank[a.status] - statusRank[b.status]
-        : b.stuckTasks - a.stuckTasks,
-    );
+        : b.stuckTasks - a.stuckTasks;
+    });
 }
 
 export const getTeamMembers = cache(_getTeamMembers);
+
+export interface AllMemberRow extends TeamMemberRow {
+  departmentName: string | null;
+}
+
+// Flat cross-department roster, sorted LEAST active → MOST active (the team
+// wants one place to spot who's quiet across the whole org, not per-dept).
+async function _getAllMembersByActivity(orgId: string): Promise<AllMemberRow[]> {
+  const [members, { data: depts }] = await Promise.all([
+    loadActivityRows(orgId),
+    supabaseAdmin
+      .from("departments")
+      .select("id, name, show_in_team_pulse")
+      .eq("organization_id", orgId),
+  ]);
+  const deptRows =
+    (depts as { id: string; name: string; show_in_team_pulse: boolean }[] | null) ?? [];
+  const deptName = new Map(deptRows.map((d) => [d.id, d.name]));
+  const visibleDept = new Map(deptRows.map((d) => [d.id, d.show_in_team_pulse]));
+  return members
+    .filter((m) => m.departmentId && visibleDept.get(m.departmentId) !== false)
+    .map((m) => ({
+      ...m,
+      departmentName: m.departmentId ? (deptName.get(m.departmentId) ?? null) : null,
+    }))
+    // Least active first: fewest week actions, then fewest today, then stalest.
+    .sort(
+      (a, b) =>
+        a.actionsThisWeek - b.actionsThisWeek ||
+        a.actionsToday - b.actionsToday ||
+        (a.lastActionAt ?? "").localeCompare(b.lastActionAt ?? ""),
+    );
+}
+
+export const getAllMembersByActivity = cache(_getAllMembersByActivity);
 
 // ---- Per-employee action breakdown (drill-down) --------------------------
 // What the "actions in Rwasem" number is actually made of: which tasks the
@@ -411,13 +484,33 @@ interface ActionLogSqlRow {
   last_action: string | null;
 }
 
+// Date-only bound (YYYY-MM-DD). Anything else is ignored.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 async function _getEmployeeActionLog(
   orgId: string,
   employeeId: string,
   days = 30,
+  from?: string | null,
+  to?: string | null,
 ): Promise<ActionLogRow[]> {
   if (!UUID_RE.test(orgId) || !UUID_RE.test(employeeId)) return [];
+
+  // Two windowing modes:
+  //   • explicit [from, to] calendar dates (the CEO's date filter — lets him
+  //     drill into a single day or a custom span), inclusive of both ends.
+  //   • rolling "last N days" (the default presets).
+  // The explicit range wins when both bounds are valid dates.
+  const useRange = !!from && !!to && ISO_DATE_RE.test(from) && ISO_DATE_RE.test(to) && from <= to;
   const win = Math.max(1, Math.min(365, Math.floor(days)));
+  // `to` is inclusive → compare against the day AFTER it (exclusive upper bound).
+  const movePredicate = useRange
+    ? `h.entered_at >= '${from}'::date and h.entered_at < ('${to}'::date + 1)`
+    : `h.entered_at >= now() - interval '${win} days'`;
+  const notePredicate = useRange
+    ? `c.created_at >= '${from}'::date and c.created_at < ('${to}'::date + 1)`
+    : `c.created_at >= now() - interval '${win} days'`;
+
   const rows = await runSql<ActionLogSqlRow>(`
     with my as (
       select ta.task_id
@@ -431,14 +524,14 @@ async function _getEmployeeActionLog(
       select h.task_id, count(*) c, max(h.entered_at) la
         from task_stage_history h
        where h.task_id in (select task_id from my)
-         and h.entered_at >= now() - interval '${win} days'
+         and ${movePredicate}
        group by 1
     ),
     nt as (
       select c.task_id, count(*) c, max(c.created_at) la
         from task_comments c
        where c.task_id in (select task_id from my)
-         and c.created_at >= now() - interval '${win} days'
+         and ${notePredicate}
        group by 1
     )
     select t.id task_id, t.task_code, t.title, p.name project_name,

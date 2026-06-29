@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import {
   AlertTriangle,
@@ -13,12 +13,15 @@ import {
   Hourglass,
   Info,
   Quote,
+  RefreshCw,
   Scale,
   Sparkles,
   Timer,
   Users,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
+import { refreshAccountabilityScorecardAction } from "./_actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/filter-bar";
@@ -79,6 +82,17 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const tStages = useTranslations("TasksBoard.stages");
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [refreshing, startRefresh] = useTransition();
+  const handleRefresh = () =>
+    startRefresh(async () => {
+      const res = await refreshAccountabilityScorecardAction();
+      if (res.ok) {
+        toast.success("تم تحديث البيانات");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "تعذّر التحديث");
+      }
+    });
   // Filtering stays client-side (instant) because getAccountabilityOverview is
   // an expensive live-compute that already loads every row — re-running it per
   // keystroke would be wrong. We still mirror state to the URL via
@@ -226,6 +240,19 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
 
   return (
     <div className="space-y-4">
+      {/* Refresh: recompute the cached scorecard on demand (else every 10 min) */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-soft-1 disabled:opacity-60"
+        >
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+          {refreshing ? "جارٍ التحديث…" : "تحديث البيانات"}
+        </button>
+      </div>
+
       {/* Honesty banner: how dwell is computed + attribution + N/A rules */}
       <div className="flex items-start gap-2 rounded-xl border border-cyan/20 bg-cyan/5 p-3 text-[11px] leading-relaxed text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0 text-cyan" />
@@ -239,6 +266,7 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
       {selectedId && (
         <EvidencePanel
           evidence={evidence}
+          row={overview.rows.find((r) => r.employeeId === selectedId) ?? null}
           stageLabel={stageLabel}
           fmtMinutes={fmtMinutes}
           onClose={() => router.push("/accountability")}
@@ -544,17 +572,45 @@ function ScorecardTable({
 // ---- Evidence drill-down ---------------------------------------------------
 function EvidencePanel({
   evidence,
+  row,
   stageLabel,
   fmtMinutes,
   onClose,
   t,
 }: {
   evidence: AccountabilityEvidence | null;
+  row: AccountabilityScorecardRow | null;
   stageLabel: (s: string) => string;
   fmtMinutes: (min: number | null) => string;
   onClose: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const lowConf = row?.confidence === "low";
+  // The person's full المساءلة metrics, mirrored above the evidence so the
+  // reader doesn't scroll back to the table to read what a number is built on.
+  const metricBar: { label: string; value: string; tone?: string }[] = row
+    ? [
+        {
+          label: t("col.score"),
+          value: row.score === null ? "—" : String(row.score),
+          tone: scoreTone(row.score, lowConf),
+        },
+        {
+          label: t("col.onTime"),
+          value: row.onTimeRate === null ? "—" : `${row.onTimeRate}%`,
+          tone: lowConf ? "text-muted-foreground" : undefined,
+        },
+        {
+          label: t("col.overdue"),
+          value: String(row.overdueOwned),
+          tone: row.overdueOwned > 0 ? "text-cc-red" : "text-cc-green",
+        },
+        { label: t("col.openTasks"), value: String(row.openTasks) },
+        { label: t("col.avgDwell"), value: fmtMinutes(row.avgDwellBusinessMinutes) },
+        { label: t("col.sample"), value: String(row.sampleSize) },
+        { label: t("col.rework"), value: String(row.reworkReturns30d) },
+      ]
+    : [];
   return (
     <Card className="border-cyan/30">
       <CardContent className="p-4">
@@ -585,6 +641,20 @@ function EvidencePanel({
             <X className="size-4" />
           </button>
         </div>
+
+        {/* Full المساءلة metric bar — so this person's numbers are right here. */}
+        {metricBar.length > 0 && (
+          <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4 lg:grid-cols-7">
+            {metricBar.map((m) => (
+              <div key={m.label} className="bg-card px-2.5 py-2 text-center">
+                <p className={cn("text-sm font-bold tabular-nums", m.tone ?? "text-foreground")}>
+                  {m.value}
+                </p>
+                <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{m.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {!evidence || evidence.items.length === 0 ? (
           <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">

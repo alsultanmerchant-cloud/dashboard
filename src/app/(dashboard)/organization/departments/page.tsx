@@ -82,6 +82,8 @@ export default async function DepartmentsPage() {
                             name: d.name,
                             slug: d.slug,
                             description: d.description ?? null,
+                            showInTeamPulse:
+                              (d as { show_in_team_pulse?: boolean }).show_in_team_pulse ?? true,
                           }}
                         />
                       </DataTableCell>

@@ -101,9 +101,13 @@ export async function updateDepartmentAction(
   }
 
   // Org scope: only update a department that belongs to the caller's org.
+  // show_in_team_pulse is a plain checkbox (0225) — outside the zod schema.
   const { error } = await supabaseAdmin
     .from("departments")
-    .update(parsed.data)
+    .update({
+      ...parsed.data,
+      show_in_team_pulse: formData.get("show_in_team_pulse") === "on",
+    })
     .eq("id", departmentId)
     .eq("organization_id", session.orgId);
   if (error) {

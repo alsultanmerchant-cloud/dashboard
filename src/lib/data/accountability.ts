@@ -163,14 +163,13 @@ const WINDOW_DAYS = 30;
 const REWORK_STAGES = ["in_progress", "client_changes"];
 const REWORK_WINDOW_DAYS = 14;
 
-// Which stage intervals each role is accountable for. Mirrors the Sky Light
-// workflow: agents execute, team managers review, account managers handle
-// client-facing handoff.
-const ROLE_STAGES: Record<AccountabilityRole, string[]> = {
-  agent: ["in_progress", "client_changes"],
-  team_manager: ["manager_review"],
-  account_manager: ["ready_to_send", "sent_to_client"],
-};
+// Which stage intervals each role is accountable for is now TEMPLATE-DRIVEN:
+// the SQL function public.accountable_role_for_stage(stage_owner_positions, stage)
+// (migration 0222) reads each task's per-stage owner map (organised in
+// /task-templates) and falls back to the canonical Rwasem workflow (agents
+// execute new/in_progress/specialist_review/client_changes, team managers
+// review manager_review, account managers handle ready_to_send/sent_to_client).
+// See roleStagePredicate() below.
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -196,35 +195,33 @@ function stageList(stages: string[]): string {
   return stages.map((s) => `'${s}'`).join(", ");
 }
 
-// The attribution CTE shared by the scorecard and evidence queries:
-// one (task_id, employee_id, role) row per accountable relationship.
+// The attribution CTE shared by the scorecard and evidence queries (migration
+// 0223): one (task_id, employee_id, position_role, role) row per assignee.
+// role_type is NOT used — every assignee is matched to stages by their POSITION
+// (carried as position_role; `role` is the collapsed accountability role for
+// display). This mirrors the cached scorecard so the drill-down matches it.
 function attribCte(org: string, employeeFilter?: { id: string }): string {
   const emp = employeeFilter ? `and ta.employee_id = '${employeeFilter.id}'` : "";
-  const tm = employeeFilter
-    ? `and ta.team_manager_employee_id = '${employeeFilter.id}'`
-    : "";
   return `
 attrib as (
-  select ta.task_id, ta.employee_id, 'agent'::text as role
+  select distinct ta.task_id, ta.employee_id,
+         pos.role as position_role,
+         public.accountability_role_of_position(pos.role) as role
     from task_assignees ta
-   where ta.organization_id = '${org}' and ta.role_type = 'agent' ${emp}
-  union
-  select ta.task_id, ta.employee_id, 'account_manager'
-    from task_assignees ta
-   where ta.organization_id = '${org}' and ta.role_type = 'account_manager' ${emp}
-  union
-  select ta.task_id, ta.team_manager_employee_id, 'team_manager'
-    from task_assignees ta
-   where ta.organization_id = '${org}' and ta.team_manager_employee_id is not null ${tm}
+    join employee_profiles e on e.id = ta.employee_id
+    join positions pos on pos.id = e.position_id
+   where ta.organization_id = '${org}'
+     and public.accountability_role_of_position(pos.role) is not null ${emp}
 )`;
 }
 
+// Template-driven POSITION ownership (migration 0223). An assignee is accountable
+// for a stage interval only when their position matches the template's stage
+// owner — the same gate the cached scorecard uses, so the drill-down matches the
+// score. Requires the query to expose a tasks row `t` (for stage_owner_positions)
+// and a stage-history row `h` (for to_stage).
 function roleStagePredicate(alias: string): string {
-  return `(
-       (${alias}.role = 'agent' and h.to_stage in (${stageList(ROLE_STAGES.agent)}))
-    or (${alias}.role = 'team_manager' and h.to_stage in (${stageList(ROLE_STAGES.team_manager)}))
-    or (${alias}.role = 'account_manager' and h.to_stage in (${stageList(ROLE_STAGES.account_manager)}))
-  )`;
+  return `${alias}.position_role = public.accountable_position_for_stage(t.stage_owner_positions, h.to_stage::text)`;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -527,7 +524,10 @@ select e.id as employee_id, e.full_name,
   left join positions pe on pe.id = e.position_id
   left join agg a on a.employee_id = k.employee_id
   left join pend p on p.employee_id = k.employee_id
- where ${nonLeadershipFilter("pe")}
+ -- Manager Review is BY managers (team_manager → leadership), so the agents-only
+ -- filter must NOT apply there or the section comes back empty. Specialist
+ -- Review keeps it (the executing المنفّذ tier).
+ where ${opts.attribution === "team_manager" ? "true" : nonLeadershipFilter("pe")}
  order by coalesce(a.reviews, 0) desc`;
 }
 
@@ -588,7 +588,8 @@ select e.id as employee_id, e.full_name,
   left join positions pe on pe.id = e.position_id
   left join agg a on a.employee_id = k.employee_id
   left join pend p on p.employee_id = k.employee_id
- where ${nonLeadershipFilter("pe")}
+ -- Approval-gate path is Manager Review (deciders are managers/leads) — no
+ -- agents-only filter, or the section empties.
  order by coalesce(a.reviews, 0) desc`;
 
   const gateRows = await runSql<ReviewerSqlRow>(gateSql);
@@ -669,7 +670,7 @@ select
     where organization_id = '${org}' and archived_at is not null)::int as archived_excluded,
   (select count(*) from tasks t
     where t.organization_id = '${org}' and t.archived_at is null
-      and t.stage <> 'done' and t.is_overdue
+      and t.stage not in ('done', 'new') and t.planned_date < current_date
       and exists (select 1 from task_assignees ta where ta.task_id = t.id))::int as distinct_overdue,
   (now() - interval '${WINDOW_DAYS} days') as window_start,
   now() as window_end`;
@@ -782,7 +783,7 @@ select p.client_id, t.id as task_id, t.task_code, t.title,
  where t.organization_id = '${org}'
    and t.archived_at is null
    and t.stage <> 'done'
-   and t.is_overdue
+   and t.planned_date < current_date
    and p.client_id in (${inList})
  order by p.client_id, t.delay_days desc nulls last, t.id`);
 
@@ -869,7 +870,7 @@ async function _getEmployeeAccountabilityEvidence(
 
   const sql = `
 with ${attribCte(org, { id: emp })}
-select t.id as task_id, t.task_code, t.title, t.is_overdue, t.delay_days,
+select t.id as task_id, t.task_code, t.title, (t.stage <> 'done' and t.planned_date < current_date) as is_overdue, t.delay_days,
        h.to_stage::text as stage, h.entered_at, h.exited_at,
        coalesce(d.dwell_business_minutes::numeric,
                 public.business_minutes_between(h.entered_at, coalesce(h.exited_at, now()))) as dwell_min,

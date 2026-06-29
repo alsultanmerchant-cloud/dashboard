@@ -305,7 +305,6 @@ export function ModuleTabs() {
             {moduleTabsMeta?.trailingText ? (
               <span
                 className="inline-flex h-9 items-center rounded-xl border border-border bg-muted/70 px-3 text-[12px] font-semibold tabular-nums text-muted-foreground"
-                dir="ltr"
               >
                 {moduleTabsMeta.trailingText}
               </span>

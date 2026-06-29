@@ -1,8 +1,13 @@
 import { requirePagePermission } from "@/lib/auth-server";
-import { getTeamPulseOverview, getTeamMembers } from "@/lib/data/team-pulse";
+import {
+  getTeamPulseOverview,
+  getTeamMembers,
+  getAllMembersByActivity,
+} from "@/lib/data/team-pulse";
 import { PageHeader } from "@/components/page-header";
 import { TeamPulseBoard } from "@/components/activity/team-pulse-board";
 import { TeamPulseMembers } from "@/components/activity/team-pulse-members";
+import { TeamPulseAllMembers } from "@/components/activity/team-pulse-all-members";
 
 // CEO "نبض الفريق" — team-performance board. Two axes grounded in the data
 // the org actually produces: operational delivery (accountability engine on
@@ -20,7 +25,10 @@ export default async function TeamActivityPage({
   const data = await getTeamPulseOverview(session.orgId);
 
   const selected = dept ? data.rows.find((r) => r.departmentId === dept) : undefined;
-  const members = selected ? await getTeamMembers(session.orgId, selected.departmentId) : [];
+  const [members, allMembers] = await Promise.all([
+    selected ? getTeamMembers(session.orgId, selected.departmentId) : Promise.resolve([]),
+    getAllMembersByActivity(session.orgId),
+  ]);
 
   return (
     <div>
@@ -36,6 +44,7 @@ export default async function TeamActivityPage({
         />
       )}
       <TeamPulseBoard data={data} />
+      <TeamPulseAllMembers members={allMembers} />
     </div>
   );
 }

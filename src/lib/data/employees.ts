@@ -64,7 +64,9 @@ export async function listServices(orgId: string) {
 export async function listDepartments(orgId: string) {
   const { data, error } = await supabaseAdmin
     .from("departments")
-    .select("id, name, slug, description, kind, parent_department_id, head_employee_id")
+    .select(
+      "id, name, slug, description, kind, parent_department_id, head_employee_id, show_in_team_pulse",
+    )
     .eq("organization_id", orgId)
     .order("kind")
     .order("name");

@@ -29,6 +29,7 @@ export function EditDepartmentDialog({
     name: string;
     slug: string;
     description: string | null;
+    showInTeamPulse?: boolean;
   };
 }) {
   const router = useRouter();
@@ -122,6 +123,24 @@ export function EditDepartmentDialog({
                 placeholder="وصف اختياري للقسم…"
               />
             </div>
+            <label
+              htmlFor="edit_dep_pulse"
+              className="flex items-start gap-2 rounded-lg border border-border bg-soft-1/40 p-2.5"
+            >
+              <input
+                id="edit_dep_pulse"
+                name="show_in_team_pulse"
+                type="checkbox"
+                defaultChecked={department.showInTeamPulse ?? true}
+                className="mt-0.5 size-4 accent-cyan"
+              />
+              <span className="text-xs">
+                <span className="font-medium">إظهار في نبض الفريق</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  أزِل العلامة للأقسام التي لا تعمل على رواسم حتى لا تظهر في لوحة النشاط.
+                </span>
+              </span>
+            </label>
             <DialogFooter className="flex-row-reverse justify-between sm:justify-between">
               <Button
                 type="button"

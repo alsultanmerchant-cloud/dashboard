@@ -98,6 +98,10 @@ export function CompareTrendModal({
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangeKey>("monthly");
   const [metric, setMetric] = useState<MetricKey>("actions");
+  // Optional explicit date window (the CEO's date picker). When both are set it
+  // overrides the preset and filters the monthly series to [from, to].
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   useEffect(() => {
     if (!open || data || loading) return;
@@ -113,16 +117,20 @@ export function CompareTrendModal({
   const cfg = RANGES.find((r) => r.key === range)!;
   const mcfg = METRICS.find((m) => m.key === metric)!;
 
-  const empSeries = (cfg.grain === "week" ? data?.weekly : data?.monthly) ?? [];
-  const benchSeries = (cfg.grain === "week" ? data?.benchWeekly : data?.benchMonthly) ?? [];
-  const emp = empSeries.slice(-cfg.take);
+  const customActive = !!from && !!to && from <= to;
+  const grain: "week" | "month" = customActive ? "month" : cfg.grain;
+  const empSeries = (grain === "week" ? data?.weekly : data?.monthly) ?? [];
+  const benchSeries = (grain === "week" ? data?.benchWeekly : data?.benchMonthly) ?? [];
+  const emp = customActive
+    ? empSeries.filter((p) => p.periodStart >= from && p.periodStart <= to)
+    : empSeries.slice(-cfg.take);
   const benchByStart = new Map(benchSeries.map((b) => [b.periodStart, b]));
 
   const teamLabel = "بقية زملائه في القسم";
   const chartData = emp.map((p) => {
     const b = benchByStart.get(p.periodStart);
     const row: Record<string, string | number | null> = {
-      label: fmtLabel(p.periodStart, cfg.grain),
+      label: fmtLabel(p.periodStart, grain),
       [fullName]: metricValue(p, metric),
     };
     if (mcfg.comparable) row[teamLabel] = b ? metricValue(b, metric) : null;
@@ -225,10 +233,14 @@ export function CompareTrendModal({
               <button
                 key={r.key}
                 type="button"
-                onClick={() => setRange(r.key)}
+                onClick={() => {
+                  setFrom("");
+                  setTo("");
+                  setRange(r.key);
+                }}
                 className={cn(
                   "rounded-full border px-3 py-1 text-xs transition-colors",
-                  range === r.key
+                  !customActive && range === r.key
                     ? "border-cyan bg-cyan/10 text-cyan"
                     : "border-border text-muted-foreground hover:bg-soft-1",
                 )}
@@ -236,6 +248,37 @@ export function CompareTrendModal({
                 {r.label}
               </button>
             ))}
+            {/* Explicit date window — overrides the preset (monthly grain). */}
+            <span className="mx-1 text-[11px] text-muted-foreground">أو</span>
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+              className="rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground [color-scheme:dark]"
+              aria-label="من تاريخ"
+            />
+            <span className="text-[11px] text-muted-foreground">→</span>
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+              className="rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground [color-scheme:dark]"
+              aria-label="إلى تاريخ"
+            />
+            {customActive && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFrom("");
+                  setTo("");
+                }}
+                className="rounded-full border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-soft-1"
+              >
+                مسح
+              </button>
+            )}
           </div>
         </div>
 

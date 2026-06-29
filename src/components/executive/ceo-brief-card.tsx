@@ -375,18 +375,43 @@ function BriefBody({
               return (
                 <div
                   key={r.id}
-                  className="group flex items-stretch gap-3 overflow-hidden rounded-xl border border-soft bg-card"
+                  className={cn(
+                    "group flex items-stretch gap-3 overflow-hidden rounded-xl border border-soft bg-card transition-colors",
+                    r.href && "hover:border-foreground/15 hover:bg-soft-1/30",
+                  )}
                 >
                   <span className={cn("w-1 shrink-0", sev.bar)} aria-hidden />
                   <div className="min-w-0 flex-1 py-3.5">
+                    {/* Title + metric are the click target (navigate to the
+                        scoped evidence). The interpretation below stays a plain
+                        <p> so its AI-written text remains selectable for inline
+                        editing, and the info icon keeps its own popover. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p className="text-sm font-semibold">{r.title}</p>
+                      {r.href ? (
+                        <Link
+                          href={r.href}
+                          className="text-sm font-semibold hover:text-cyan hover:underline"
+                        >
+                          {r.title}
+                        </Link>
+                      ) : (
+                        <p className="text-sm font-semibold">{r.title}</p>
+                      )}
                       <span className={cn("text-[10px] font-medium", sev.text)}>
                         {t(`severity.${r.severity}`)}
                       </span>
                       <MetricInfo text={t("riskHelp")} label={t(`severity.${r.severity}`)} />
                     </div>
-                    <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{r.metric}</p>
+                    {r.href ? (
+                      <Link
+                        href={r.href}
+                        className="mt-1 block w-fit text-[11px] tabular-nums text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {r.metric}
+                      </Link>
+                    ) : (
+                      <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{r.metric}</p>
+                    )}
                     <p
                       className={cn(
                         "mt-1.5 text-xs leading-relaxed text-foreground/85",

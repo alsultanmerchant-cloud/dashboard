@@ -45,9 +45,15 @@ export function ActionBreakdownButton({
 }) {
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState(30);
+  // Explicit calendar filter (the CEO's date filter). When both are set the
+  // request windows on [from, to] instead of the rolling "last N days".
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [rows, setRows] = useState<ActionLogRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const rangeActive = !!from && !!to && from <= to;
 
   useEffect(() => {
     if (!open) return;
@@ -55,7 +61,10 @@ export function ActionBreakdownButton({
     setLoading(true);
     setError(null);
     setRows(null);
-    fetch(`/api/team-activity/actions?emp=${employeeId}&days=${days}`)
+    const qs = rangeActive
+      ? `emp=${employeeId}&from=${from}&to=${to}`
+      : `emp=${employeeId}&days=${days}`;
+    fetch(`/api/team-activity/actions?${qs}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d: { rows: ActionLogRow[] }) => {
         if (alive) setRows(d.rows);
@@ -65,7 +74,19 @@ export function ActionBreakdownButton({
     return () => {
       alive = false;
     };
-  }, [open, days, employeeId]);
+  }, [open, days, employeeId, rangeActive, from, to]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  // Picking a preset clears the explicit range; picking a date switches modes.
+  const pickPreset = (d: number) => {
+    setFrom("");
+    setTo("");
+    setDays(d);
+  };
+  const pickToday = () => {
+    setFrom(today);
+    setTo(today);
+  };
 
   const totalActions = rows?.reduce((s, r) => s + r.total, 0) ?? 0;
 
@@ -89,29 +110,81 @@ export function ActionBreakdownButton({
         title={`تفاصيل نشاط ${fullName} في رواسم`}
         description="المهام التي قام عليها بإجراءات، والمشروع، وعدد الإجراءات (تحريك المراحل + ملاحظات العمل)."
       >
-        {/* Window filter */}
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          {WINDOWS.map((w) => (
+        {/* Window filter: rolling presets + explicit date filter */}
+        <div className="mb-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {WINDOWS.map((w) => (
+              <button
+                key={w.days}
+                type="button"
+                onClick={() => pickPreset(w.days)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs transition-colors",
+                  !rangeActive && days === w.days
+                    ? "border-cyan bg-cyan/10 text-cyan"
+                    : "border-border text-muted-foreground hover:bg-soft-1",
+                )}
+              >
+                {w.label}
+              </button>
+            ))}
+            {rows && rows.length > 0 && (
+              <span className="ms-auto text-[11px] text-muted-foreground">
+                {rows.length} مهمة · <span className="font-semibold text-foreground">{totalActions}</span>{" "}
+                إجراء
+              </span>
+            )}
+          </div>
+
+          {/* Explicit date filter — drill into a specific day or custom span. */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <button
-              key={w.days}
               type="button"
-              onClick={() => setDays(w.days)}
+              onClick={pickToday}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs transition-colors",
-                days === w.days
+                "rounded-full border px-3 py-1 transition-colors",
+                rangeActive && from === today && to === today
                   ? "border-cyan bg-cyan/10 text-cyan"
                   : "border-border text-muted-foreground hover:bg-soft-1",
               )}
             >
-              {w.label}
+              اليوم
             </button>
-          ))}
-          {rows && rows.length > 0 && (
-            <span className="ms-auto text-[11px] text-muted-foreground">
-              {rows.length} مهمة · <span className="font-semibold text-foreground">{totalActions}</span>{" "}
-              إجراء
-            </span>
-          )}
+            <span className="text-muted-foreground">من</span>
+            <input
+              type="date"
+              value={from}
+              max={to || today}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                if (!to) setTo(e.target.value);
+              }}
+              className="rounded-lg border border-border bg-background px-2 py-1 text-foreground [color-scheme:dark]"
+              aria-label="من تاريخ"
+            />
+            <span className="text-muted-foreground">إلى</span>
+            <input
+              type="date"
+              value={to}
+              min={from}
+              max={today}
+              onChange={(e) => {
+                setTo(e.target.value);
+                if (!from) setFrom(e.target.value);
+              }}
+              className="rounded-lg border border-border bg-background px-2 py-1 text-foreground [color-scheme:dark]"
+              aria-label="إلى تاريخ"
+            />
+            {rangeActive && (
+              <button
+                type="button"
+                onClick={() => pickPreset(days)}
+                className="rounded-full border border-border px-2 py-1 text-muted-foreground hover:bg-soft-1"
+              >
+                مسح
+              </button>
+            )}
+          </div>
         </div>
 
         {loading && (

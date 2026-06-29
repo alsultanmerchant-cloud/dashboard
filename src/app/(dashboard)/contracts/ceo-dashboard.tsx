@@ -253,12 +253,27 @@ export function CeoDashboard({
             <h3 className="text-sm font-semibold text-rose-700 dark:text-rose-200">
               {copy("الدفعات المتأخرة", "Overdue installments")}
             </h3>
-            <span className="text-[11px] text-muted-foreground">
-              {copy(
-                `${buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length} عميل`,
-                `${buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length} clients`,
-              )}
-            </span>
+            {(() => {
+              const all = [
+                ...buckets.acc_inst_overdue,
+                ...buckets.sales_inst_overdue,
+              ];
+              const collected = all.filter((c) => c.collected).length;
+              const outstanding = all.length - collected;
+              return (
+                <span className="text-[11px] text-muted-foreground">
+                  {copy(
+                    `${outstanding} عميل متبقّي للتحصيل`,
+                    `${outstanding} clients to collect`,
+                  )}
+                  {collected > 0 && (
+                    <span className="ms-1.5 text-emerald-600 dark:text-emerald-300">
+                      {copy(`· ${collected} محصّل ✅`, `· ${collected} collected ✅`)}
+                    </span>
+                  )}
+                </span>
+              );
+            })()}
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
             <BucketCard
@@ -984,14 +999,26 @@ function BucketCard({
     sky: "bg-sky-400",
     zinc: "bg-zinc-400",
   }[accent];
-  const total = clients.reduce((s, c) => s + c.value, 0);
+  // Collected installments (paid this month) are no longer outstanding: the
+  // chase TOTAL and the header count both reflect outstanding only, and the rows
+  // are sorted outstanding-first then struck through — mirroring the sheet's
+  // strikethrough + "Actual paid clients ✅" treatment.
+  const outstanding = clients.filter((c) => !c.collected);
+  const collectedCount = clients.length - outstanding.length;
+  const total = outstanding.reduce((s, c) => s + c.value, 0);
+  const ordered = [...outstanding, ...clients.filter((c) => c.collected)];
   return (
     <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/80 bg-card/95 shadow-[var(--surface-elev)]">
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <span className={cn("size-2 rounded-full", dot)} />
           {title}
-          <span className="font-normal text-muted-foreground">({clients.length})</span>
+          <span className="font-normal text-muted-foreground">({outstanding.length})</span>
+          {collectedCount > 0 && (
+            <span className="font-normal text-emerald-600 dark:text-emerald-300">
+              +{collectedCount} ✅
+            </span>
+          )}
           {info && <MetricInfo text={info} label={title} />}
         </h3>
         {!hideValue && total > 0 && (
@@ -1004,11 +1031,14 @@ function BucketCard({
         <p className="px-4 py-5 text-center text-xs text-muted-foreground">{t("dashboard.buckets.empty")}</p>
       ) : (
         <div className="max-h-60 overflow-y-auto divide-y divide-soft/50">
-          {clients.map((c) => (
+          {ordered.map((c) => (
             <Link
               key={c.contract_id}
               href={`/contracts/${c.contract_id}`}
-              className="flex items-center justify-between gap-2 px-4 py-2 text-[12px] hover:bg-soft-1"
+              className={cn(
+                "flex items-center justify-between gap-2 px-4 py-2 text-[12px] hover:bg-soft-1",
+                c.collected && "text-muted-foreground line-through decoration-emerald-500/60",
+              )}
             >
               <span className="min-w-0 truncate">
                 {c.client_code && (
@@ -1017,6 +1047,11 @@ function BucketCard({
                   </span>
                 )}
                 {c.client_name ?? "—"}
+                {c.collected && (
+                  <span className="ms-1.5 align-middle text-[10px] text-emerald-600 no-underline dark:text-emerald-300">
+                    ✅
+                  </span>
+                )}
               </span>
               {!hideValue && (
                 <span className="shrink-0 tabular-nums text-muted-foreground">

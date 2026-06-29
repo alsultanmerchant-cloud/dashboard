@@ -1748,6 +1748,7 @@
       "clearFilter": "إزالة الفلتر",
       "countLabel": "{shown} من {total}",
       "countAria": "عرض {shown} من {total} مهمة",
+      "viewOfTotal": "{shown, number} من أصل {total, number}",
       "kpiNoDeadline": "مهام بدون موعد نهائي",
       "kpiNoDeadlineHint": "مهام مفتوحة بدون تاريخ مخطط أو موعد نهائي",
       "kpiError": "تعذّر حساب العدد"

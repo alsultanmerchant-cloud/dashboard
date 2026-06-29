@@ -1,11 +1,10 @@
-import Link from "next/link";
-import { ChevronRight, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
+import { ExternalLink, TrendingUp, TrendingDown, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/empty-state";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { CompareTrendModal } from "@/components/activity/compare-trend-modal";
 import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
-import type { TeamMemberRow, ActivityStatus, LoadFlag } from "@/lib/data/team-pulse";
+import type { AllMemberRow, ActivityStatus } from "@/lib/data/team-pulse";
 
 const NA = "—";
 
@@ -13,12 +12,6 @@ const STATUS_META: Record<ActivityStatus, { label: string; tone: string; dot: st
   active: { label: "نشط", tone: "text-cc-green", dot: "bg-cc-green" },
   slow: { label: "بطيء", tone: "text-amber", dot: "bg-amber" },
   stalled: { label: "متوقّف", tone: "text-cc-red", dot: "bg-cc-red" },
-};
-
-const LOAD_META: Record<LoadFlag, { label: string; cls: string } | null> = {
-  overloaded: { label: "محمّل زائد", cls: "bg-cc-red/10 text-cc-red" },
-  light: { label: "سعة متاحة", cls: "bg-soft-2 text-muted-foreground" },
-  balanced: null,
 };
 
 function relativeDays(iso: string | null): string {
@@ -41,45 +34,33 @@ function Momentum({ value }: { value: number }) {
   );
 }
 
-export function TeamPulseMembers({
-  departmentName,
-  headName,
-  members,
-}: {
-  departmentName: string;
-  headName: string | null;
-  members: TeamMemberRow[];
-}) {
+// كل الموظفين عبر الأقسام، مرتّبين من الأقل نشاطًا إلى الأكثر — مكان واحد لرصد من
+// توقّف في الشركة كلها بدل التنقّل بين الأقسام.
+export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
   return (
-    <Card className="mb-4 border-cyan/30">
+    <Card className="mt-6">
       <CardContent className="p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <p className="text-sm font-semibold">{departmentName}</p>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold">
+              <Users className="size-4 text-cyan" />
+              كل الموظفين — مرتّبون من الأقل نشاطًا
+            </p>
             <p className="text-[11px] text-muted-foreground">
-              {headName ? `يقودها ${headName}` : "بدون مسؤول"} · {members.length} عضو لديه عمل حالي
+              نظرة واحدة على نشاط الفريق بالكامل عبر الأقسام · {members.length} موظف
             </p>
           </div>
-          <Link href="/team-activity" className="flex items-center gap-1 text-xs text-cyan hover:underline">
-            كل الأقسام
-            <ChevronRight className="size-3.5" />
-          </Link>
         </div>
 
         {members.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              variant="compact"
-              title="لا يوجد أعضاء لديهم عمل حالي في هذا القسم"
-              description="يظهر العضو هنا عندما تكون لديه مهام مفتوحة تتحرّك."
-            />
-          </div>
+          <p className="p-6 text-center text-xs text-muted-foreground">لا توجد بيانات نشاط بعد.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-h-[32rem] overflow-auto">
             <table className="w-full text-right text-xs">
-              <thead>
+              <thead className="sticky top-0 bg-card">
                 <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
                   <th className="px-3 py-2.5 font-medium">الموظف</th>
+                  <th className="px-3 py-2.5 font-medium">القسم</th>
                   <th className="px-3 py-2.5 font-medium">الحالة</th>
                   <th className="px-3 py-2.5 font-medium">آخر إجراء</th>
                   <th className="px-3 py-2.5 font-medium text-center">إجراءات اليوم</th>
@@ -102,20 +83,13 @@ export function TeamPulseMembers({
                               قيادة
                             </span>
                           )}
-                          {LOAD_META[m.loadFlag] && (
-                            <span
-                              className={cn(
-                                "rounded px-1.5 py-0.5 text-[9px] font-medium",
-                                LOAD_META[m.loadFlag]!.cls,
-                              )}
-                            >
-                              {LOAD_META[m.loadFlag]!.label}
-                            </span>
-                          )}
                         </div>
                         {m.positionLabel && (
                           <div className="text-[10px] text-muted-foreground">{m.positionLabel}</div>
                         )}
+                      </td>
+                      <td className="px-3 py-2.5 text-[11px] text-muted-foreground">
+                        {m.departmentName ?? NA}
                       </td>
                       <td className="px-3 py-2.5">
                         <span className={cn("inline-flex items-center gap-1.5 text-xs", meta.tone)}>

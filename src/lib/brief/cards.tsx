@@ -356,7 +356,10 @@ export async function renderMoneyCard(d: CeoBriefData): Promise<Buffer> {
     {
       label: "دفعات متأخرة التحصيل",
       big: String(m.overdueInstallments),
-      sub: `بقيمة ${formatSar(m.overdueValue)}`,
+      sub:
+        m.overdueCollectedCount > 0
+          ? `بقيمة ${formatSar(m.overdueValue)} · ${m.overdueCollectedCount} محصّلة هذا الشهر`
+          : `بقيمة ${formatSar(m.overdueValue)}`,
       color: RED,
     },
     {
