@@ -55,7 +55,7 @@ export async function buildSignalPack(orgId: string): Promise<{
     supabaseAdmin
       .from("tasks")
       .select(
-        "id, task_code, title, stage, priority, due_date, planned_date, is_overdue, delay_days, stage_entered_at, service_id, project_id",
+        "id, task_code, title, stage, priority, due_date, planned_date, delay_days, stage_entered_at, service_id, project_id",
       )
       .eq("organization_id", orgId)
       .is("archived_at", null)
@@ -83,6 +83,10 @@ export async function buildSignalPack(orgId: string): Promise<{
   const openTasks = openTasksRes.data ?? [];
   const services = servicesRes.data ?? [];
   const assignees = assigneesRes.data ?? [];
+  // Overdue = open task past its deadline (team's Rwasem method). openTasks is
+  // already scoped to open + non-archived, so the date test is the flag.
+  const isOverdue = (t: { planned_date: string | null }) =>
+    t.planned_date != null && t.planned_date < today;
 
   const serviceKey = (id: string | null) => {
     if (!id) return "other" as const;
@@ -148,7 +152,7 @@ export async function buildSignalPack(orgId: string): Promise<{
   for (const t of openTasks) {
     const s = ensureService(serviceKey(t.service_id));
     s.openCount += 1;
-    if (t.is_overdue) s.overdueCount += 1;
+    if (isOverdue(t)) s.overdueCount += 1;
   }
   for (const t of doneWeekRes.data ?? []) {
     ensureService(serviceKey(t.service_id)).doneThisWeek += 1;
@@ -178,7 +182,7 @@ export async function buildSignalPack(orgId: string): Promise<{
   const clientsAtRisk = projects
     .map((p) => {
       const ts = tasksByProject.get(p.id) ?? [];
-      const overdue = ts.filter((t) => t.is_overdue);
+      const overdue = ts.filter(isOverdue);
       const endingSoon = p.end_date && p.end_date <= in30Days && p.end_date >= today;
       const sentToClientStuck = ts.filter(
         (t) =>
@@ -220,7 +224,7 @@ export async function buildSignalPack(orgId: string): Promise<{
   const overdueByTask = new Map<string, boolean>();
   const codeByTask = new Map<string, string | null>();
   for (const t of openTasks) {
-    overdueByTask.set(t.id, t.is_overdue);
+    overdueByTask.set(t.id, isOverdue(t));
     codeByTask.set(t.id, t.task_code);
   }
   const empBuckets = new Map<string, EmpBucket>();
@@ -260,7 +264,7 @@ export async function buildSignalPack(orgId: string): Promise<{
 
   // Headline counters (used in summary + as a fallback denominator).
   const totalOpen = openTasks.length;
-  const totalOverdue = openTasks.filter((t) => t.is_overdue).length;
+  const totalOverdue = openTasks.filter(isOverdue).length;
   const totalDoneWeek = (doneWeekRes.data ?? []).length;
 
   // ── Executive metrics (SQL-backed) ──────────────────────────────────────
@@ -319,7 +323,7 @@ export async function buildSignalPack(orgId: string): Promise<{
        openload as (
          select a.employee_id,
            count(*) open_cnt,
-           count(*) filter (where t.is_overdue) overdue_cnt
+           count(*) filter (where t.planned_date < current_date) overdue_cnt
          from task_assignees a join tasks t on t.id=a.task_id
          where t.archived_at is null and t.stage<>'done'
          group by 1

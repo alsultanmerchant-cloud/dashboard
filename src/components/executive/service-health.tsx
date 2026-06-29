@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { SectionTitle } from "@/components/section-title";
 import { Sparkline } from "./sparkline";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 function pctTone(pct: number | null) {
@@ -22,12 +23,19 @@ const SERVICE_ICON_TONE: Record<string, string> = {
   "web": "bg-green-dim text-cc-green",
 };
 
-export async function ServiceHealthSection({ rows }: { rows: ServiceHealthRow[] }) {
+export async function ServiceHealthSection({
+  rows,
+  windowLabel,
+}: {
+  rows: ServiceHealthRow[];
+  windowLabel?: string;
+}) {
   const t = await getTranslations("Executive.services");
+  const actions = windowLabel ? <WindowLabel label={windowLabel} /> : undefined;
   if (rows.length === 0) {
     return (
       <section className="mb-10">
-        <SectionTitle title={t("title")} description={t("description")} />
+        <SectionTitle title={t("title")} description={t("description")} actions={actions} />
         <EmptyState variant="compact" title={t("empty")} description="" />
       </section>
     );
@@ -35,7 +43,7 @@ export async function ServiceHealthSection({ rows }: { rows: ServiceHealthRow[] 
 
   return (
     <section className="mb-10">
-      <SectionTitle title={t("title")} description={t("description")} />
+      <SectionTitle title={t("title")} description={t("description")} actions={actions} />
       <Card>
         <CardContent className="grid gap-0 divide-y divide-border/40 p-0">
           {rows.map((s) => {

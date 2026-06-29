@@ -371,7 +371,10 @@ async function loadBriefTimelineEvents(
         "id, task_code, title, delay_days, due_date, stage_entered_at, project:projects!inner(id, name, project_code, status, client:clients!inner(name))",
       )
       .eq("organization_id", orgId)
-      .eq("is_overdue", true)
+      // Overdue = open task past deadline (team's Rwasem method), not the buggy
+      // is_overdue field. runDate is the brief's "today".
+      .neq("stage", "done")
+      .lt("planned_date", runDate.slice(0, 10))
       .is("archived_at", null)
       .neq("project.status", "archived")
       .order("delay_days", { ascending: false, nullsFirst: false })

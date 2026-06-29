@@ -25,7 +25,7 @@ import {
 } from "@/lib/data/contracts";
 import {
   getHeroKpis,
-  getOnTimeTrend30d,
+  getOnTimeSeries,
   getClientHealth,
   getStageFunnel,
   getApprovalBottlenecks,
@@ -39,6 +39,8 @@ import {
   getWorkflowIndicators,
 } from "@/lib/data/executive";
 import { PageHeader } from "@/components/page-header";
+import { DateRangePicker } from "@/components/executive/date-range-picker";
+import { resolveRange, rangeLabel, asOfLabel, type DashboardRange } from "@/lib/dashboard-range";
 import { MetricInfo, Explained } from "@/components/metric-info";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
@@ -76,9 +78,23 @@ async function PulseBand({ orgId }: { orgId: string }) {
   return <TeamPulseBand data={data} />;
 }
 
-async function HeroSection({ orgId }: { orgId: string }) {
-  const [data, trend] = await Promise.all([getHeroKpis(orgId), getOnTimeTrend30d(orgId)]);
-  return <ExecutiveHeroRow data={data} trend={trend} />;
+async function HeroSection({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  // on-time % + delivered are windowed to the selected range; overdue / stuck
+  // are point-in-time ("as of" today).
+  const [data, series] = await Promise.all([getHeroKpis(orgId), getOnTimeSeries(orgId, range)]);
+  const merged = {
+    ...data,
+    onTime: { pct: series.pct, sample: series.sample, delivered: series.delivered },
+  };
+  const todayRange = { ...range, to: new Date().toISOString().slice(0, 10) };
+  return (
+    <ExecutiveHeroRow
+      data={merged}
+      trend={series.points}
+      onTimeWindowLabel={rangeLabel(range)}
+      snapshotLabel={asOfLabel(todayRange)}
+    />
+  );
 }
 
 async function WorkflowIndicators({ orgId }: { orgId: string }) {
@@ -91,9 +107,9 @@ async function ClientHealth({ orgId }: { orgId: string }) {
   return <ClientHealthSection worst={worst} best={best} />;
 }
 
-async function ServiceHealth({ orgId }: { orgId: string }) {
-  const rows = await getServiceLineHealth(orgId);
-  return <ServiceHealthSection rows={rows} />;
+async function ServiceHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const rows = await getServiceLineHealth(orgId, range);
+  return <ServiceHealthSection rows={rows} windowLabel={rangeLabel(range)} />;
 }
 
 async function StageFlow({ orgId }: { orgId: string }) {
@@ -195,13 +211,14 @@ function AgentCockpitSkeleton() {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; preset?: string; from?: string; to?: string }>;
 }) {
   const session = await requireSession();
   const scope = await getDashboardScope(session);
+  const sp = await searchParams;
 
   if (scope.kind === "ceo") {
-    return <ExecutiveDashboard session={session} />;
+    return <ExecutiveDashboard session={session} range={resolveRange(sp)} />;
   }
 
   if (scope.kind === "agent") {
@@ -212,7 +229,7 @@ export default async function DashboardPage({
     );
   }
 
-  const { month } = await searchParams;
+  const { month } = sp;
 
   return (
     <DepartmentDashboard
@@ -224,7 +241,7 @@ export default async function DashboardPage({
   );
 }
 
-async function ExecutiveDashboard({ session }: { session: ServerSession }) {
+async function ExecutiveDashboard({ session, range }: { session: ServerSession; range: DashboardRange }) {
   const orgId = session.orgId;
   const t = await getTranslations("Dashboard");
   // Financial / CEO-only blocks (the brief, P&L summary, and contract revenue
@@ -239,6 +256,8 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
         description={t("welcomeDescription")}
       />
 
+      <DateRangePicker range={range} />
+
       {/* ── INDICATORS (top): the fast, at-a-glance KPI cards, grouped so they
           render first and stay reliable even if a heavier detail section below
           is slow or errors (each is its own DashSection boundary). ───────── */}
@@ -251,7 +270,7 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
       </DashSection>
 
       <DashSection fallback={<HeroSkeleton />}>
-        <HeroSection orgId={orgId} />
+        <HeroSection orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<StripSkeleton />}>
@@ -275,7 +294,7 @@ async function ExecutiveDashboard({ session }: { session: ServerSession }) {
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={200} />}>
-        <ServiceHealth orgId={orgId} />
+        <ServiceHealth orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={320} />}>

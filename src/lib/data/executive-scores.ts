@@ -181,7 +181,7 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
     // Open (non-archived, not done) tasks — drives delivery + freshness.
     supabaseAdmin
       .from("tasks")
-      .select("id, stage, is_overdue, delay_days, hold_since, stage_entered_at, project_id, revision_count")
+      .select("id, stage, planned_date, delay_days, hold_since, stage_entered_at, project_id, revision_count")
       .eq("organization_id", orgId)
       .is("archived_at", null)
       .neq("stage", "done"),
@@ -265,7 +265,9 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   // mark the rest as `null` so it renders N/A and drops out of the score.
   type OpenTask = {
     stage: string;
-    is_overdue: boolean;
+    // Overdue = open task with a passed deadline (team's Rwasem method); rows
+    // are already open + non-archived, so the date test alone is the flag.
+    planned_date: string | null;
     delay_days: number | null;
     hold_since: string | null;
     stage_entered_at: string;
@@ -273,11 +275,13 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
     revision_count: number | null;
   };
   const openTasks = (openTasksRes.data ?? []) as unknown as OpenTask[];
+  const todayStr = daysAgoIso(0).slice(0, 10);
+  const isOverdue = (t: OpenTask) => t.planned_date != null && t.planned_date < todayStr;
   const openCount = openTasks.length;
-  const overdueCount = openTasks.filter((t) => t.is_overdue).length;
+  const overdueCount = openTasks.filter(isOverdue).length;
   const blockedTasks = openTasks.filter((t) => t.hold_since !== null).length;
 
-  const lateProjectIds = new Set(openTasks.filter((t) => t.is_overdue).map((t) => t.project_id));
+  const lateProjectIds = new Set(openTasks.filter(isOverdue).map((t) => t.project_id));
   const lateProjects = lateProjectIds.size;
 
   // Delay duration: only if delay_days is actually populated anywhere.
@@ -289,7 +293,7 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   // Critical: overdue AND stuck in its current stage > 14 days (stage_entered_at
   // IS populated, so this is a real "stalled + late" signal).
   const criticalOverdue = openTasks.filter(
-    (t) => t.is_overdue && t.stage_entered_at < daysAgoIso(14),
+    (t) => isOverdue(t) && t.stage_entered_at < daysAgoIso(14),
   ).length;
 
   // Stalled WIP: started work with no stage movement in > 7 days (proxy for

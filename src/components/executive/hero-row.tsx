@@ -40,9 +40,15 @@ function fakeSparkFromTrend(): number[] {
 export async function ExecutiveHeroRow({
   data,
   trend,
+  onTimeWindowLabel,
+  snapshotLabel,
 }: {
   data: HeroKpis;
   trend: OnTimeTrendPoint[];
+  /** window label for the on-time/delivered metric, e.g. "Last 30 days" */
+  onTimeWindowLabel?: string;
+  /** point-in-time label for snapshot stats, e.g. "as of Jun 29" */
+  snapshotLabel?: string;
 }) {
   const t = await getTranslations("Executive.hero");
   const tone = toneByOnTime(data.onTime.pct);
@@ -72,7 +78,7 @@ export async function ExecutiveHeroRow({
                 {t("onTimeLabel")}
               </div>
               <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
-                {t("onTimeRange")}
+                {onTimeWindowLabel ?? t("onTimeRange")}
               </p>
             </div>
             <Timer className="size-4 text-cyan" />
@@ -94,8 +100,8 @@ export async function ExecutiveHeroRow({
 
           <div className="mt-auto flex items-center justify-between gap-3 pt-4 text-[11px] text-muted-foreground">
             <span>
-              {data.onTime.sample > 0
-                ? t("onTimeSample", { sample: data.onTime.sample })
+              {data.onTime.delivered > 0
+                ? t("onTimeSample", { sample: data.onTime.delivered })
                 : t("onTimeNoSample")}
             </span>
             <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-70">
@@ -116,6 +122,7 @@ export async function ExecutiveHeroRow({
         href="/tasks?f=overdue"
         accent={data.overdue.current > 50 ? "danger" : data.overdue.current > 0 ? "warning" : "neutral"}
         deltaInfo={overdueDelta}
+        asOf={snapshotLabel}
         sparkData={fakeSparkFromTrend()}
         tip={t("metricTooltips.dashboard_heroOverdue")}
       />
@@ -131,6 +138,7 @@ function SecondaryCard({
   accent,
   deltaInfo,
   hint,
+  asOf,
   sparkData,
   tip,
 }: {
@@ -141,6 +149,7 @@ function SecondaryCard({
   accent: "neutral" | "warning" | "danger";
   deltaInfo?: { sign: string; DirIcon: React.ElementType; tone: string };
   hint?: string;
+  asOf?: string;
   sparkData: number[];
   tip?: React.ReactNode;
 }) {
@@ -199,11 +208,13 @@ function SecondaryCard({
           ) : (
             <span className="text-muted-foreground">{hint}</span>
           )}
-          {sparkData.length > 0 && (
+          {sparkData.length > 0 ? (
             <div className={cn("w-16 opacity-70", valueTone)}>
               <Sparkline data={sparkData} width={64} height={20} stroke="currentColor" />
             </div>
-          )}
+          ) : asOf ? (
+            <span className="text-[10px] text-muted-foreground/70">{asOf}</span>
+          ) : null}
         </div>
       </Link>
     </div>

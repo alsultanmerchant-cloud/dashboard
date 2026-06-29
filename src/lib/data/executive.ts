@@ -7,6 +7,13 @@ import {
   type DashboardOdooMetrics,
 } from "@/lib/odoo/live";
 import type { TaskStage } from "@/lib/labels";
+import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
+
+function addDaysIso(isoDate: string, delta: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
 
 // =========================================================================
 // Executive (/dashboard) data layer.
@@ -19,7 +26,7 @@ import type { TaskStage } from "@/lib/labels";
 // ---- Hero KPIs (on-time, overdue, stuck-in-review, revisions) ------------
 
 export interface HeroKpis {
-  onTime: { pct: number | null; sample: number };
+  onTime: { pct: number | null; sample: number; delivered: number };
   overdue: { current: number; weekAgo: number };
   stuckInReview: { current: number };
   revisionVolume: { totalComments30d: number };
@@ -37,6 +44,7 @@ async function _getHeroKpis(orgId: string): Promise<HeroKpis> {
     onTime: {
       pct: odooNow?.onTimePct ?? null,
       sample: odooNow?.onTimeSample ?? 0,
+      delivered: odooNow?.deliveredCount ?? 0,
     },
     overdue: {
       current: overdueNow,
@@ -136,15 +144,11 @@ export interface FunnelStageRow {
   avgDwellHours: number;
 }
 
-// Stages excluded from the "where are overdue tasks piling up?" view.
-// "new" hasn't started yet; "done" is finished.
-const FUNNEL_EXCLUDE = new Set<TaskStage>(["new", "done"]);
-
 async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
   const [stagesRes, dwellRes] = await Promise.all([
     supabaseAdmin
       .from("tasks")
-      .select("stage, is_overdue")
+      .select("stage, planned_date")
       .eq("organization_id", orgId)
       .is("archived_at", null),
     supabaseAdmin
@@ -158,11 +162,15 @@ async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
 
   const counts = new Map<TaskStage, number>();
   const overdueCounts = new Map<TaskStage, number>();
+  // Overdue = open task past its deadline (team's Rwasem method).
+  const todayStr = new Date().toISOString().slice(0, 10);
   for (const r of stagesRes.data ?? []) {
-    const s = (r as { stage: TaskStage; is_overdue: boolean }).stage;
-    const overdue = (r as { stage: TaskStage; is_overdue: boolean }).is_overdue;
+    const s = (r as { stage: TaskStage; planned_date: string | null }).stage;
+    const pd = (r as { stage: TaskStage; planned_date: string | null }).planned_date;
     counts.set(s, (counts.get(s) ?? 0) + 1);
-    if (overdue) overdueCounts.set(s, (overdueCounts.get(s) ?? 0) + 1);
+    if (s !== "done" && pd != null && pd < todayStr) {
+      overdueCounts.set(s, (overdueCounts.get(s) ?? 0) + 1);
+    }
   }
 
   const dwellSums = new Map<TaskStage, { total: number; n: number }>();
@@ -533,60 +541,91 @@ export interface OnTimeTrendPoint {
   sample: number;
 }
 
-async function _getOnTimeTrend30d(orgId: string): Promise<OnTimeTrendPoint[]> {
-  // Pull a wider window (last 37 days) so the rolling 7-day window has
-  // valid samples even at the left edge of the chart.
-  const since = daysAgoIso(37).slice(0, 10);
+export interface OnTimeSeries {
+  /** on-time % over [from,to] (of delivered-with-deadline) */
+  pct: number | null;
+  /** delivered-in-range that had a deadline (on-time denominator) */
+  sample: number;
+  /** ALL tasks delivered (done) in [from,to] — matches Rwasem's delivered count */
+  delivered: number;
+  /** rolling 7-day on-time %, one point per day in [from,to] (sparkline) */
+  points: OnTimeTrendPoint[];
+}
+
+// Range-aware on-time + delivered (Phase 2). Computed from Supabase so the
+// figure is explicitly scoped to the selected [from,to] window. Pulls 6 extra
+// days before `from` so the rolling-7d sparkline has history at the left edge.
+async function _getOnTimeSeries(orgId: string, range: DashboardRange): Promise<OnTimeSeries> {
+  const fromExt = addDaysIso(range.from, -6);
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select("completed_at, due_date, planned_date")
     .eq("organization_id", orgId)
     .eq("stage", "done")
-    .gte("completed_at", `${since}T00:00:00Z`)
+    .gte("completed_at", `${fromExt}T00:00:00Z`)
+    .lte("completed_at", `${range.to}T23:59:59Z`)
     .is("archived_at", null);
   if (error) throw error;
 
-  // Daily counts for the wide window.
+  // Per-day buckets across the extended window.
   const daily = new Map<string, { total: number; onTime: number }>();
-  for (let i = 36; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+  for (let d = fromExt; d <= range.to; d = addDaysIso(d, 1)) {
     daily.set(d, { total: 0, onTime: 0 });
   }
+
+  let delivered = 0;
+  let sample = 0;
+  let hits = 0;
   for (const r of (data ?? []) as Array<{
     completed_at: string | null;
     due_date: string | null;
     planned_date: string | null;
   }>) {
     if (!r.completed_at) continue;
+    const day = r.completed_at.slice(0, 10);
+    const inRange = day >= range.from && day <= range.to;
+    if (inRange) delivered += 1; // all delivered in-range (matches Rwasem)
     const deadline = r.due_date ?? r.planned_date;
     if (!deadline) continue;
-    const day = r.completed_at.slice(0, 10);
+    const onTime = day <= deadline;
+    if (inRange) {
+      sample += 1;
+      if (onTime) hits += 1;
+    }
     const b = daily.get(day);
-    if (!b) continue;
-    b.total += 1;
-    if (r.completed_at.slice(0, 10) <= deadline) b.onTime += 1;
+    if (b) {
+      b.total += 1;
+      if (onTime) b.onTime += 1;
+    }
   }
 
-  // Rolling 7-day on-time pct ending on each of the last 30 days.
+  // Rolling 7-day on-time pct ending on each day in [from,to].
   const ordered = Array.from(daily.entries());
-  const out: OnTimeTrendPoint[] = [];
-  for (let i = ordered.length - 30; i < ordered.length; i++) {
+  const firstInRange = ordered.findIndex(([d]) => d >= range.from);
+  const points: OnTimeTrendPoint[] = [];
+  for (let i = Math.max(0, firstInRange); i < ordered.length; i++) {
     let total = 0;
     let onTime = 0;
     for (let j = Math.max(0, i - 6); j <= i; j++) {
       total += ordered[j][1].total;
       onTime += ordered[j][1].onTime;
     }
-    out.push({
+    points.push({
       date: ordered[i][0],
       sample: total,
       pct: total === 0 ? null : Math.round((onTime / total) * 100),
     });
   }
-  return out;
+
+  return {
+    pct: sample === 0 ? null : Math.round((hits / sample) * 100),
+    sample,
+    delivered,
+    points,
+  };
 }
 
-export const getOnTimeTrend30d = cache(_getOnTimeTrend30d);
+export const getOnTimeSeries = cache(_getOnTimeSeries);
 
 // ---- Pulse strip (this week vs last week) --------------------------------
 
@@ -728,10 +767,19 @@ function displayServiceName(name: string): string {
   return name.replace(/^([^\p{L}\p{N}]*)renewal\s+(of\s+)?/iu, "$1").trim();
 }
 
-async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]> {
-  // Wide window for rolling trend (37d so first sparkline point has 7d behind it).
-  const sinceTrend = daysAgoIso(37).slice(0, 10);
-  const sinceTs30 = `${daysAgoIso(30).slice(0, 10)}T00:00:00Z`;
+async function _getServiceLineHealth(
+  orgId: string,
+  // Defaults to the last-30-day window for non-dashboard callers (e.g. the CEO
+  // brief) that don't supply an explicit range.
+  range: DashboardRange = resolveRange(undefined),
+): Promise<ServiceHealthRow[]> {
+  // Delivered / on-time are windowed to the selected range; the sparkline pulls
+  // 6 extra days before `from` so its rolling-7d window has history at the edge.
+  const sinceTrend = addDaysIso(range.from, -6);
+  const sinceTs30 = `${range.from}T00:00:00Z`;
+  const rangeEndTs = `${range.to}T23:59:59Z`;
+  // Overdue = open task past deadline (team's Rwasem method) — point-in-time.
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   const [servicesRes, tasksRes] = await Promise.all([
     supabaseAdmin
@@ -741,7 +789,7 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
       .eq("is_active", true),
     supabaseAdmin
       .from("tasks")
-      .select("service_id, stage, is_overdue, completed_at, due_date, planned_date, revision_count, archived_at")
+      .select("service_id, stage, completed_at, due_date, planned_date, revision_count, archived_at")
       .eq("organization_id", orgId)
       .is("archived_at", null)
       .not("service_id", "is", null),
@@ -752,7 +800,6 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
   type T = {
     service_id: string;
     stage: string;
-    is_overdue: boolean;
     completed_at: string | null;
     due_date: string | null;
     planned_date: string | null;
@@ -766,7 +813,8 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
     {
       open: number;
       overdue: number;
-      delivered: number;
+      delivered: number;     // ALL done in 30d (matches Rwasem's delivered count)
+      onTimeSample: number;  // delivered-in-30d that had a deadline (on-time denominator)
       onTime: number;
       revisions: number;
       revisionsN: number;
@@ -779,7 +827,7 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
     let cur = agg.get(id);
     if (!cur) {
       cur = {
-        open: 0, overdue: 0, delivered: 0, onTime: 0, revisions: 0, revisionsN: 0,
+        open: 0, overdue: 0, delivered: 0, onTimeSample: 0, onTime: 0, revisions: 0, revisionsN: 0,
         daily: new Map(),
       };
       agg.set(id, cur);
@@ -793,40 +841,43 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
     const isOpen = t.stage !== "done";
     if (isOpen) {
       cur.open += 1;
-      if (t.is_overdue) cur.overdue += 1;
+      if (t.planned_date != null && t.planned_date < todayStr) cur.overdue += 1;
       cur.revisions += t.revision_count ?? 0;
       cur.revisionsN += 1;
     }
     if (t.stage === "done" && t.completed_at) {
+      const day = t.completed_at.slice(0, 10);
       const deadline = t.due_date ?? t.planned_date;
-      if (deadline) {
-        const day = t.completed_at.slice(0, 10);
-        // Headline: last 30d.
-        if (t.completed_at >= sinceTs30) {
-          cur.delivered += 1;
+      // Headline: selected range. Delivered counts ALL done (matches Rwasem);
+      // the on-time rate is measured only over the deadline-bearing subset.
+      if (t.completed_at >= sinceTs30 && t.completed_at <= rangeEndTs) {
+        cur.delivered += 1;
+        if (deadline) {
+          cur.onTimeSample += 1;
           if (day <= deadline) cur.onTime += 1;
         }
-        // Trend: last 37d (so rolling 7d can start cleanly at -30).
-        if (day >= sinceTrend) {
-          const slot = cur.daily.get(day) ?? { total: 0, onTime: 0 };
-          slot.total += 1;
-          if (day <= deadline) slot.onTime += 1;
-          cur.daily.set(day, slot);
-        }
+      }
+      // Trend: range + 6 lead-in days so the rolling 7d window is full. Needs deadline.
+      if (deadline && day >= sinceTrend && day <= range.to) {
+        const slot = cur.daily.get(day) ?? { total: 0, onTime: 0 };
+        slot.total += 1;
+        if (day <= deadline) slot.onTime += 1;
+        cur.daily.set(day, slot);
       }
     }
   }
 
-  // Build rolling 7-day series ending each of the last 30 days.
+  // Build the day axis: 6 lead-in days + every day in [from,to]. Index 6 is the
+  // first in-range day, so the rolling-7d series starts there.
   const days37: string[] = [];
-  for (let i = 36; i >= 0; i--) {
-    days37.push(new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10));
-  }
+  for (let d = sinceTrend; d <= range.to; d = addDaysIso(d, 1)) days37.push(d);
+  const trendStart = 6;
 
   // Build one row per physical service, then group by base name so
   // "Renewal Social Media" merges into "Social Media".
   type RawRow = ServiceHealthRow & {
     _onTimeCount: number;
+    _onTimeSample: number;
     _deliveredCount: number;
     _revisionsSum: number;
     _revisionsN: number;
@@ -836,7 +887,7 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
   const rawRows: RawRow[] = (servicesRes.data ?? []).map((s) => {
     const v = agg.get(s.id as string);
     const dailyTotals: Array<{ total: number; onTime: number }> = [];
-    for (let i = 7; i < days37.length; i++) {
+    for (let i = trendStart; i < days37.length; i++) {
       let total = 0;
       let onTime = 0;
       for (let j = i - 6; j <= i; j++) {
@@ -855,10 +906,11 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
       openCount: v?.open ?? 0,
       overdueCount: v?.overdue ?? 0,
       delivered30d: v?.delivered ?? 0,
-      onTimePct30d: v && v.delivered > 0 ? Math.round((v.onTime / v.delivered) * 100) : null,
+      onTimePct30d: v && v.onTimeSample > 0 ? Math.round((v.onTime / v.onTimeSample) * 100) : null,
       avgRevisions: v && v.revisionsN > 0 ? Math.round((v.revisions / v.revisionsN) * 10) / 10 : 0,
       trend,
       _onTimeCount: v?.onTime ?? 0,
+      _onTimeSample: v?.onTimeSample ?? 0,
       _deliveredCount: v?.delivered ?? 0,
       _revisionsSum: v?.revisions ?? 0,
       _revisionsN: v?.revisionsN ?? 0,
@@ -881,6 +933,7 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
       existing.overdueCount += row.overdueCount;
       existing._deliveredCount += row._deliveredCount;
       existing._onTimeCount += row._onTimeCount;
+      existing._onTimeSample += row._onTimeSample;
       existing._revisionsSum += row._revisionsSum;
       existing._revisionsN += row._revisionsN;
       existing.includesRenewals = true;
@@ -910,7 +963,7 @@ async function _getServiceLineHealth(orgId: string): Promise<ServiceHealthRow[]>
       openCount: r.openCount,
       overdueCount: r.overdueCount,
       delivered30d: r._deliveredCount,
-      onTimePct30d: r._deliveredCount > 0 ? Math.round((r._onTimeCount / r._deliveredCount) * 100) : null,
+      onTimePct30d: r._onTimeSample > 0 ? Math.round((r._onTimeCount / r._onTimeSample) * 100) : null,
       avgRevisions: r._revisionsN > 0 ? Math.round((r._revisionsSum / r._revisionsN) * 10) / 10 : 0,
       trend,
       includesRenewals: r.includesRenewals,
@@ -940,7 +993,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "id, stage, is_overdue, progress_slip_percent, updated_at, archived_at, project:projects!inner(id, name, project_code, client:clients!inner(id, name))",
+      "id, stage, planned_date, progress_slip_percent, updated_at, archived_at, project:projects!inner(id, name, project_code, client:clients!inner(id, name))",
     )
     .eq("organization_id", orgId)
     .is("archived_at", null)
@@ -948,7 +1001,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
   if (error) throw error;
 
   type Row = {
-    is_overdue: boolean;
+    planned_date: string | null;
     progress_slip_percent: number | string | null;
     updated_at: string;
     project:
@@ -970,6 +1023,8 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
       lastActivity: string;
     }
   >();
+  // Overdue = open task past deadline (team's Rwasem method).
+  const todayStr = new Date().toISOString().slice(0, 10);
   for (const r of (data ?? []) as unknown as Row[]) {
     const p = Array.isArray(r.project) ? r.project[0] : r.project;
     if (!p) continue;
@@ -987,7 +1042,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
         lastActivity: r.updated_at,
       };
     cur.open += 1;
-    if (r.is_overdue) cur.overdue += 1;
+    if (r.planned_date != null && r.planned_date < todayStr) cur.overdue += 1;
     if (slip > cur.worstSlip) cur.worstSlip = slip;
     if (r.updated_at > cur.lastActivity) cur.lastActivity = r.updated_at;
     agg.set(p.id, cur);
@@ -1109,7 +1164,7 @@ const AGE_LABELS: Record<WipAgeBucket, string> = {
 async function _getWipAging(orgId: string): Promise<WipAgingRow[]> {
   const { data, error } = await supabaseAdmin
     .from("tasks")
-    .select("id, created_at, is_overdue, stage, archived_at")
+    .select("id, created_at, planned_date, stage, archived_at")
     .eq("organization_id", orgId)
     .is("archived_at", null)
     .neq("stage", "done");
@@ -1123,7 +1178,10 @@ async function _getWipAging(orgId: string): Promise<WipAgingRow[]> {
     "90+": { count: 0, overdueCount: 0 },
   };
   const now = Date.now();
-  for (const r of (data ?? []) as Array<{ created_at: string; is_overdue: boolean }>) {
+  // Overdue = open task past deadline (team's Rwasem method); rows are already
+  // open + non-archived, so planned_date < today is the flag.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  for (const r of (data ?? []) as Array<{ created_at: string; planned_date: string | null }>) {
     const ageDays = Math.floor((now - new Date(r.created_at).getTime()) / 86_400_000);
     const key: WipAgeBucket =
       ageDays <= 7 ? "0-7"
@@ -1132,7 +1190,7 @@ async function _getWipAging(orgId: string): Promise<WipAgingRow[]> {
       : ageDays <= 90 ? "31-90"
       : "90+";
     buckets[key].count += 1;
-    if (r.is_overdue) buckets[key].overdueCount += 1;
+    if (r.planned_date != null && r.planned_date < todayStr) buckets[key].overdueCount += 1;
   }
   return (Object.keys(buckets) as WipAgeBucket[]).map((b) => ({
     bucket: b,
@@ -1317,19 +1375,19 @@ async function countOverdueAt(orgId: string, isoTs: string): Promise<number> {
   return (data as { overdue_count: number }).overdue_count ?? 0;
 }
 
-// Live "currently overdue" count from our own truth source (tasks.is_overdue),
-// matching the daily-snapshot definition exactly (is_overdue ⇒ already excludes
-// done + the not-started `new` stage per migration 0219). We deliberately do
-// NOT use Odoo's live overdueCount here: Odoo counts every task with a past
-// date_deadline that isn't done — including not-started `new`-stage backlog —
-// so it over-reports (~137 vs ~41) and is inconsistent with the week-ago delta
-// (snapshot-backed) and the "where is the danger" card.
+// Live "currently overdue" count using the method the Sky Light team actually
+// uses in Rwasem: an OPEN task (stage <> done) whose deadline (planned_date) is
+// before today. NOT tasks.is_overdue — the team confirmed Odoo's is_overdue
+// flag is buggy in their build (it excludes not-started open work, under-
+// reporting ~41 vs the real ~138). planned_date < current_date is evaluated at
+// query time, so this is always fresh and reconciles with Rwasem.
 async function countOverdueNow(orgId: string): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
   const { count, error } = await supabaseAdmin
     .from("tasks")
     .select("id", { count: "exact", head: true })
     .eq("organization_id", orgId)
-    .eq("is_overdue", true)
+    .lt("planned_date", today)
     .is("archived_at", null)
     .neq("stage", "done");
   if (error) return 0;

@@ -923,8 +923,9 @@ export interface DashboardOdooMetrics {
   reviewBacklog: number;        // tasks in manager/specialist review stages
   closedThisWeek: number;       // tasks with date_end in last 7 days
   onTimePct: number | null;     // % of tasks done in last 30 days delivered on/before deadline
-  onTimeSample: number;
+  onTimeSample: number;         // delivered-in-30d that HAD a deadline (on-time denominator)
   onTimeHits: number;
+  deliveredCount: number;       // ALL tasks delivered (done) in last 30d — matches Rwasem's count
   overdueTasks: LiveTask[];     // top 5, sorted most-overdue first
   // Useful aggregate counts
   totalProjects: number;
@@ -958,13 +959,22 @@ const _getDashboardOdooMetricsUncached = unstable_cache(
     const reworkStageIds = idsForStages(["client_changes"]);
     const reviewStageIds = idsForStages(["manager_review", "specialist_review"]);
 
-    const openOverdueDomain: unknown[] = [
-      ["date_deadline", "<", today],
-      ["date_deadline", "!=", false],
+    // Overdue = the method the Sky Light team actually uses in Rwasem: an OPEN
+    // task (state in the four open states) whose deadline is before today.
+    // NOT Odoo's `is_overdue` field — the team confirmed that flag is buggy in
+    // their build. This reproduces their custom "Deadline <= end-of-yesterday"
+    // filter exactly (live: 138).
+    const OPEN_TASK_STATES = [
+      "01_in_progress",
+      "02_changes_requested",
+      "03_approved",
+      "04_waiting_normal",
     ];
-    if (doneStageIds.length) {
-      openOverdueDomain.push(["stage_id", "not in", doneStageIds]);
-    }
+    const openOverdueDomain: unknown[] = [
+      ["state", "in", OPEN_TASK_STATES],
+      ["date_deadline", "!=", false],
+      ["date_deadline", "<", today],
+    ];
 
     // Run every count in parallel — search_count is O(index) on Odoo's side
     // and avoids transferring task rows we don't render.
@@ -978,6 +988,7 @@ const _getDashboardOdooMetricsUncached = unstable_cache(
       activeProjectsCount,
       totalProjectsCount,
       totalClientsCount,
+      deliveredCount,
     ] = await Promise.all([
       odoo.executeKw<number>("project.task", "search_count", [openOverdueDomain]),
       reworkStageIds.length
@@ -1016,6 +1027,15 @@ const _getDashboardOdooMetricsUncached = unstable_cache(
         "res.partner", "search_count",
         [[["customer_rank", ">", 0], ["is_company", "=", true]]],
       ),
+      // Delivered = ALL tasks done in the last 30 days (regardless of whether
+      // they had a deadline). This is the "مهمة مسلّمة" count Sky Light sees in
+      // Rwasem; the on-time SAMPLE below is the deadline-bearing subset only.
+      doneStageIds.length
+        ? odoo.executeKw<number>("project.task", "search_count", [[
+            ["stage_id", "in", doneStageIds],
+            ["date_end", ">=", monthAgo],
+          ]])
+        : Promise.resolve(0),
     ]);
 
     // On-time % over the last 30 days of completions (sample capped at 1000).
@@ -1058,6 +1078,7 @@ const _getDashboardOdooMetricsUncached = unstable_cache(
       onTimeSample,
       onTimeHits,
       onTimePct: onTimeSample > 0 ? Math.round((onTimeHits / onTimeSample) * 100) : null,
+      deliveredCount,
       overdueTasks,
       totalProjects: totalProjectsCount,
       totalActiveProjects: activeProjectsCount,
