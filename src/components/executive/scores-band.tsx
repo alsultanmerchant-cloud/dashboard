@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
+import { WindowLabel } from "./window-label";
 import {
   Activity,
   AlertTriangle,
@@ -195,7 +196,7 @@ function IndexCard({
   );
 }
 
-export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
+export async function ExecutiveScoresBand({ data, windowLabel }: { data: ExecutiveScores; windowLabel?: string }) {
   const t = await getTranslations("Executive.scores");
   const grade = (g: ScoreGrade) => t(`grades.${g}`);
   const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
@@ -210,6 +211,7 @@ export async function ExecutiveScoresBand({ data }: { data: ExecutiveScores }) {
         <Sparkles className="size-4 text-cyan" />
         <h2 className="text-sm font-semibold">{t("title")}</h2>
         <span className="text-[11px] text-muted-foreground">— {t("subtitle")}</span>
+        {windowLabel ? <span className="ms-auto"><WindowLabel label={windowLabel} /></span> : null}
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[1.15fr_2fr]">

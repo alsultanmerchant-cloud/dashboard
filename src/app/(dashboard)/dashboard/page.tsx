@@ -68,9 +68,9 @@ async function BriefSection({ orgId }: { orgId: string }) {
   return <CeoBriefCard initialBrief={current} />;
 }
 
-async function ScoresBand({ orgId }: { orgId: string }) {
-  const data = await getExecutiveScores(orgId);
-  return <ExecutiveScoresBand data={data} />;
+async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const data = await getExecutiveScores(orgId, range);
+  return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} />;
 }
 
 async function PulseBand({ orgId }: { orgId: string }) {
@@ -102,11 +102,11 @@ async function WorkflowIndicators({ orgId }: { orgId: string }) {
   return <WorkflowIndicatorsSection data={data} />;
 }
 
-async function ClientHealth({ orgId }: { orgId: string }) {
-  const { worst, best } = await getClientHealth(orgId);
-  // View-backed (v_client_delivery_health) with hardcoded 30-day columns, so
-  // this card is fixed to the last 30 days regardless of the picker.
-  return <ClientHealthSection worst={worst} best={best} windowLabel="Last 30 days" />;
+async function ClientHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const { worst, best } = await getClientHealth(orgId, range);
+  // on-time % + delivered are windowed to the picker; the open/overdue columns
+  // remain point-in-time (from the delivery-health view).
+  return <ClientHealthSection worst={worst} best={best} windowLabel={rangeLabel(range)} />;
 }
 
 async function ServiceHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
@@ -120,10 +120,9 @@ async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRang
 }
 
 async function TopRevised({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  const rows = await getTopRevisedTasks(orgId);
-  // Point-in-time (tasks currently at client_changes) + a fixed week-over-week
-  // comparison — not driven by the picker.
-  return <TopRevisedTasksSection rows={rows} windowLabel={asOfLabel({ ...range, to: new Date().toISOString().slice(0, 10) })} />;
+  const rows = await getTopRevisedTasks(orgId, range);
+  // "Entered client_changes" follows the window; active-now is point-in-time.
+  return <TopRevisedTasksSection rows={rows} windowLabel={rangeLabel(range)} />;
 }
 
 async function DeliveryFlow({ orgId }: { orgId: string }) {
@@ -267,7 +266,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
           render first and stay reliable even if a heavier detail section below
           is slow or errors (each is its own DashSection boundary). ───────── */}
       <DashSection fallback={<ScoresSkeleton />}>
-        <ScoresBand orgId={orgId} />
+        <ScoresBand orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<Skeleton className="mb-8 h-[150px] rounded-2xl" />}>
@@ -295,7 +294,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={260} />}>
-        <ClientHealth orgId={orgId} />
+        <ClientHealth orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={200} />}>

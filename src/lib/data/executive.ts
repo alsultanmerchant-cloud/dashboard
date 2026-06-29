@@ -76,31 +76,73 @@ export interface ClientHealthRow {
   lastActivityAt: string | null;
 }
 
-async function _getClientHealth(orgId: string): Promise<{
+async function _getClientHealth(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<{
   worst: ClientHealthRow[];
   best: ClientHealthRow[];
 }> {
-  const { data, error } = await supabaseAdmin
-    .from("v_client_delivery_health")
-    .select(
-      "client_id, client_name, active_project_count, open_task_count, overdue_task_count, on_time_pct_30d, delivered_count_30d, avg_revision_count, total_revision_comments, last_activity_at",
-    )
-    .eq("organization_id", orgId)
-    .gt("open_task_count", 0);
+  // The view supplies the point-in-time columns (open/overdue/active projects/
+  // revisions/last activity). on-time % and delivered are recomputed below over
+  // the selected window so the card tracks the picker.
+  const [viewRes, doneRes] = await Promise.all([
+    supabaseAdmin
+      .from("v_client_delivery_health")
+      .select(
+        "client_id, client_name, active_project_count, open_task_count, overdue_task_count, on_time_pct_30d, delivered_count_30d, avg_revision_count, total_revision_comments, last_activity_at",
+      )
+      .eq("organization_id", orgId)
+      .gt("open_task_count", 0),
+    supabaseAdmin
+      .from("tasks")
+      .select("completed_at, due_date, planned_date, project:projects!inner(client_id)")
+      .eq("organization_id", orgId)
+      .eq("stage", "done")
+      .is("archived_at", null)
+      .gte("completed_at", `${range.from}T00:00:00Z`)
+      .lte("completed_at", `${range.to}T23:59:59Z`),
+  ]);
+  const { data, error } = viewRes;
   if (error) throw error;
+  if (doneRes.error) throw doneRes.error;
 
-  const rows: ClientHealthRow[] = (data ?? []).map((r) => ({
-    clientId: r.client_id as string,
-    clientName: r.client_name as string,
-    activeProjectCount: r.active_project_count as number,
-    openTaskCount: r.open_task_count as number,
-    overdueTaskCount: r.overdue_task_count as number,
-    onTimePct30d: r.on_time_pct_30d === null ? null : Number(r.on_time_pct_30d),
-    deliveredCount30d: r.delivered_count_30d as number,
-    avgRevisionCount: Number(r.avg_revision_count ?? 0),
-    totalRevisionComments: r.total_revision_comments as number,
-    lastActivityAt: (r.last_activity_at as string | null) ?? null,
-  }));
+  // Per-client delivered + on-time over the window.
+  const perClient = new Map<string, { delivered: number; sample: number; hits: number }>();
+  for (const r of (doneRes.data ?? []) as Array<{
+    completed_at: string | null;
+    due_date: string | null;
+    planned_date: string | null;
+    project: { client_id: string | null } | { client_id: string | null }[] | null;
+  }>) {
+    const p = Array.isArray(r.project) ? r.project[0] : r.project;
+    const cid = p?.client_id;
+    if (!cid || !r.completed_at) continue;
+    const cur = perClient.get(cid) ?? { delivered: 0, sample: 0, hits: 0 };
+    cur.delivered += 1;
+    const deadline = r.due_date ?? r.planned_date;
+    if (deadline) {
+      cur.sample += 1;
+      if (r.completed_at.slice(0, 10) <= deadline) cur.hits += 1;
+    }
+    perClient.set(cid, cur);
+  }
+
+  const rows: ClientHealthRow[] = (data ?? []).map((r) => {
+    const w = perClient.get(r.client_id as string);
+    return {
+      clientId: r.client_id as string,
+      clientName: r.client_name as string,
+      activeProjectCount: r.active_project_count as number,
+      openTaskCount: r.open_task_count as number,
+      overdueTaskCount: r.overdue_task_count as number,
+      onTimePct30d: w && w.sample > 0 ? Math.round((w.hits / w.sample) * 100) : null,
+      deliveredCount30d: w?.delivered ?? 0,
+      avgRevisionCount: Number(r.avg_revision_count ?? 0),
+      totalRevisionComments: r.total_revision_comments as number,
+      lastActivityAt: (r.last_activity_at as string | null) ?? null,
+    };
+  });
 
   // Worst-5 ranking: overdue desc, on-time asc (nulls last), revision volume desc.
   // Best-5: on-time desc among clients with >= 3 deliveries in 30d.
@@ -1286,9 +1328,15 @@ export interface ClientEditsMetrics {
   byService: Array<{ name: string; slug: string; count: number }>;
 }
 
-async function _getTopRevisedTasks(orgId: string): Promise<ClientEditsMetrics> {
-  const now7 = daysAgoIso(7);
-  const now14 = daysAgoIso(14);
+async function _getTopRevisedTasks(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<ClientEditsMetrics> {
+  // "Entered client_changes" is windowed to the picker (this window vs the
+  // immediately-preceding one of equal length); active-now / by-service are
+  // point-in-time (tasks sitting at client_changes right now).
+  const rangeStartDay = range.from;
+  const priorStartDay = addDaysIso(range.from, -range.days);
 
   const [liveRes, histRes, servicesRes] = await Promise.all([
     // Tasks currently at client_changes with their service.
@@ -1299,13 +1347,14 @@ async function _getTopRevisedTasks(orgId: string): Promise<ClientEditsMetrics> {
       .eq("stage", "client_changes")
       .is("archived_at", null),
 
-    // Tasks that entered client_changes in the last 14 days (for week comparison).
+    // Tasks that entered client_changes across the window + the prior window.
     supabaseAdmin
       .from("task_stage_history")
       .select("task_id, entered_at")
       .eq("organization_id", orgId)
       .eq("to_stage", "client_changes")
-      .gte("entered_at", now14),
+      .gte("entered_at", `${priorStartDay}T00:00:00Z`)
+      .lte("entered_at", `${range.to}T23:59:59Z`),
 
     // Service name map.
     supabaseAdmin
@@ -1324,8 +1373,9 @@ async function _getTopRevisedTasks(orgId: string): Promise<ClientEditsMetrics> {
 
   type HistRow = { task_id: string; entered_at: string };
   const hist = (histRes.data ?? []) as HistRow[];
-  const enteredThisWeek = hist.filter((r) => r.entered_at >= now7).length;
-  const enteredLastWeek = hist.filter((r) => r.entered_at < now7).length;
+  // enteredThisWeek / enteredLastWeek now mean "this window" / "prior window".
+  const enteredThisWeek = hist.filter((r) => r.entered_at >= `${rangeStartDay}T00:00:00Z`).length;
+  const enteredLastWeek = hist.filter((r) => r.entered_at < `${rangeStartDay}T00:00:00Z`).length;
 
   // Count active tasks per service.
   const svcCount = new Map<string, number>();

@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getOrgSatisfactionAggregate } from "@/lib/data/satisfaction";
+import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
 
 // =========================================================================
 // Executive index scores (/dashboard top band).
@@ -155,10 +156,17 @@ async function loadSnapshots(orgId: string): Promise<{
 // Main fetcher
 // =========================================================================
 
-async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
-  const since30 = daysAgoIso(30);
-  const since7 = daysAgoIso(7);
-  const since5 = daysAgoIso(5);
+async function _getExecutiveScores(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<ExecutiveScores> {
+  // Windowed score inputs (rework, activity, contributors, on-time, throughput)
+  // are scoped to the selected range; baselines are scaled by range length so a
+  // longer window doesn't artificially inflate rate-based scores. Point-in-time
+  // inputs (overdue rate, blocked, SLA backlog, escalations, headcount) stay
+  // current.
+  const rangeStart = `${range.from}T00:00:00Z`;
+  const rangeEnd = `${range.to}T23:59:59Z`;
 
   const [
     snaps,
@@ -176,6 +184,7 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
     slaRes,
     escalationsRes,
     satAgg,
+    doneInRangeRes,
   ] = await Promise.all([
     loadSnapshots(orgId),
     // Open (non-archived, not done) tasks — drives delivery + freshness.
@@ -191,13 +200,14 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
       .select("employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at)")
       .eq("organization_id", orgId)
       .eq("role_type", "agent"),
-    // Rework: client_changes transitions in last 30d.
+    // Rework: client_changes transitions within the selected window.
     supabaseAdmin
       .from("task_stage_history")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .eq("to_stage", "client_changes")
-      .gte("entered_at", since30),
+      .gte("entered_at", rangeStart)
+      .lte("entered_at", rangeEnd),
     // Rejections / decided approvals (lifetime decided — the rate is stable).
     supabaseAdmin
       .from("tasks")
@@ -209,28 +219,32 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .not("approval_decided_at", "is", null),
-    // Activity volume last 7d (stage moves + comments + timesheets).
+    // Activity volume within the window (stage moves + comments + timesheets).
     supabaseAdmin
       .from("task_stage_history")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
-      .gte("entered_at", since7),
+      .gte("entered_at", rangeStart)
+      .lte("entered_at", rangeEnd),
     supabaseAdmin
       .from("task_comments")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
-      .gte("created_at", since7),
+      .gte("created_at", rangeStart)
+      .lte("created_at", rangeEnd),
     supabaseAdmin
       .from("task_timesheets")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
-      .gte("created_at", since7),
-    // Distinct active contributors in last 5 days (who moved a task).
+      .gte("created_at", rangeStart)
+      .lte("created_at", rangeEnd),
+    // Distinct active contributors within the window (who moved a task).
     supabaseAdmin
       .from("task_stage_history")
       .select("moved_by")
       .eq("organization_id", orgId)
-      .gte("entered_at", since5)
+      .gte("entered_at", rangeStart)
+      .lte("entered_at", rangeEnd)
       .not("moved_by", "is", null),
     // Active team headcount.
     supabaseAdmin
@@ -255,6 +269,16 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
       .is("acknowledged_at", null),
     // AI client-satisfaction aggregate (from imported WhatsApp chats).
     getOrgSatisfactionAggregate(orgId),
+    // Delivered (done) tasks completed within the window — drives on-time % and
+    // throughput so both track the selected range, not a fixed 30-day snapshot.
+    supabaseAdmin
+      .from("tasks")
+      .select("completed_at, due_date, planned_date")
+      .eq("organization_id", orgId)
+      .eq("stage", "done")
+      .is("archived_at", null)
+      .gte("completed_at", rangeStart)
+      .lte("completed_at", rangeEnd),
   ]);
 
   // ---- Open-task derived figures ----------------------------------------
@@ -314,9 +338,26 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
         ) / 10
       : null;
 
-  // ---- Snapshot-backed delivery figures ---------------------------------
-  const onTimePct = snaps.current?.on_time_pct_30d ?? null;
-  const completed30d = snaps.current?.done_30d_count ?? 0;
+  // ---- Range-windowed delivery figures ----------------------------------
+  // On-time % and completed volume computed over the selected window (of the
+  // deadline-bearing subset for on-time, all-done for completed volume).
+  let completed30d = 0; // = completed in range; name kept for downstream refs
+  let onTimeSampleInRange = 0;
+  let onTimeHitsInRange = 0;
+  for (const r of (doneInRangeRes.data ?? []) as Array<{
+    completed_at: string | null;
+    due_date: string | null;
+    planned_date: string | null;
+  }>) {
+    if (!r.completed_at) continue;
+    completed30d += 1;
+    const deadline = r.due_date ?? r.planned_date;
+    if (!deadline) continue;
+    onTimeSampleInRange += 1;
+    if (r.completed_at.slice(0, 10) <= deadline) onTimeHitsInRange += 1;
+  }
+  const onTimePct: number | null =
+    onTimeSampleInRange > 0 ? Math.round((onTimeHitsInRange / onTimeSampleInRange) * 100) : null;
 
   // ---- Capacity / load (by open-task count; hours are unavailable) -------
   type LoadRow = {
@@ -420,7 +461,11 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   const activeCoverage =
     activeMembers === null || totalMembers === 0 ? null : (activeMembers / totalMembers) * 100;
   const freshnessScore = clamp(100 - (openCount > 0 ? (staleTasks / openCount) * 100 : 0));
-  const activityScore = clamp(totalMembers > 0 ? (actions7d / (totalMembers * 5)) * 100 : 0);
+  // Baseline ~5 actions/member/week, scaled to the window length so longer
+  // ranges don't inflate the score.
+  const activityScore = clamp(
+    totalMembers > 0 ? (actions7d / (totalMembers * 5 * (range.days / 7))) * 100 : 0,
+  );
   const disciplineScore = blend([
     { w: 0.3, v: activeCoverage },
     { w: 0.3, v: freshnessScore },
@@ -432,9 +477,10 @@ async function _getExecutiveScores(orgId: string): Promise<ExecutiveScores> {
   const overloadRate = contributors > 0 ? overloaded / contributors : 0;
   const idleRate = contributors > 0 ? underutilized / contributors : 0;
   const balanceScore = contributors > 0 ? clamp(100 - (overloadRate + idleRate) * 100) : null;
+  // Baseline ~12 delivered/contributor/month, scaled to the window length.
   const throughputScore = clamp(
-    contributors > 0 ? (completed30d / (contributors * 12)) * 100 : 0,
-  ); // baseline ~12 delivered/contributor/month
+    contributors > 0 ? (completed30d / (contributors * 12 * (range.days / 30))) * 100 : 0,
+  );
   const utilizationBand =
     utilizationPct === null ? null : clamp(100 - Math.abs(utilizationPct - 85) * 1.3);
   const productivityScore = blend([
