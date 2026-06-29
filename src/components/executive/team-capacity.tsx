@@ -6,6 +6,7 @@ import type {
 } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 
@@ -56,16 +57,18 @@ function PerformerPill({ row, mode }: { row: PerformerRow; mode: "top" | "bottom
 export async function TeamCapacitySection({
   specialists,
   performers,
+  windowLabel,
 }: {
   specialists: SpecialistLoadRow[];
   performers: { top: PerformerRow[]; bottom: PerformerRow[] };
+  windowLabel?: string;
 }) {
   const t = await getTranslations("Executive.team");
   const maxLoad = Math.max(...specialists.map((s) => s.openCount), 1);
 
   return (
     <section className="mb-10">
-      <SectionTitle title={t("title")} description={t("description")} />
+      <SectionTitle title={t("title")} description={t("description")} actions={windowLabel ? <WindowLabel label={windowLabel} /> : undefined} />
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         <Card>
           <CardContent className="p-3">

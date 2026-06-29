@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import type { FunnelStageRow } from "@/lib/data/executive";
 import { TASK_STAGE_LABELS, type TaskStage } from "@/lib/labels";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 // Build a URL that shows overdue tasks in a specific stage.
@@ -26,9 +27,11 @@ const STAGE_TONE: Partial<Record<TaskStage, { bar: string; badge: string }>> = {
 export async function DeliveryFlowSection({
   funnel,
   bottlenecks: _bottlenecks,
+  windowLabel,
 }: {
   funnel: FunnelStageRow[];
   bottlenecks: unknown[];
+  windowLabel?: string;
 }) {
   const t = await getTranslations("Executive.flow");
 
@@ -42,7 +45,7 @@ export async function DeliveryFlowSection({
 
   return (
     <section className="mb-10">
-      <SectionTitle title={t("title")} description={t("overdueDesc")} />
+      <SectionTitle title={t("title")} description={t("overdueDesc")} actions={windowLabel ? <WindowLabel label={windowLabel} /> : undefined} />
 
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-cc-green/25 bg-cc-green/[0.04] px-5 py-8 text-center text-sm text-cc-green">

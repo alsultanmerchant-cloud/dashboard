@@ -5,6 +5,7 @@ import type { ClientHealthRow } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 function pctTone(pct: number | null) {
@@ -85,9 +86,11 @@ function HealthRow({
 export async function ClientHealthSection({
   worst,
   best,
+  windowLabel,
 }: {
   worst: ClientHealthRow[];
   best: ClientHealthRow[];
+  windowLabel?: string;
 }) {
   const t = await getTranslations("Executive.clientHealth");
   return (
@@ -96,9 +99,12 @@ export async function ClientHealthSection({
         title={t("title")}
         description={t("description")}
         actions={
-          <Link href="/clients" className="text-xs text-cyan hover:underline">
-            {t("viewAll")}
-          </Link>
+          <>
+            {windowLabel ? <WindowLabel label={windowLabel} /> : null}
+            <Link href="/clients" className="text-xs text-cyan hover:underline">
+              {t("viewAll")}
+            </Link>
+          </>
         }
       />
       <div className="grid gap-4 md:grid-cols-2">

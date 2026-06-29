@@ -5,6 +5,7 @@ import type { StuckProjectRow } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 function slipBucket(pct: number): { tone: string; label: string } {
@@ -14,7 +15,7 @@ function slipBucket(pct: number): { tone: string; label: string } {
   return { tone: "text-muted-foreground", label: "minor" };
 }
 
-export async function StuckProjectsSection({ rows }: { rows: StuckProjectRow[] }) {
+export async function StuckProjectsSection({ rows, windowLabel }: { rows: StuckProjectRow[]; windowLabel?: string }) {
   const t = await getTranslations("Executive.stuckProjects");
   return (
     <section className="mb-10">
@@ -22,9 +23,12 @@ export async function StuckProjectsSection({ rows }: { rows: StuckProjectRow[] }
         title={t("title")}
         description={t("description")}
         actions={
-          <Link href="/projects" className="text-xs text-cyan hover:underline">
-            {t("viewAll")}
-          </Link>
+          <>
+            {windowLabel ? <WindowLabel label={windowLabel} /> : null}
+            <Link href="/projects" className="text-xs text-cyan hover:underline">
+              {t("viewAll")}
+            </Link>
+          </>
         }
       />
       {rows.length === 0 ? (

@@ -461,13 +461,15 @@ export interface PerformerRow {
   onTimePct: number;
 }
 
-async function _getPerformerLeaderboard(orgId: string): Promise<{
+async function _getPerformerLeaderboard(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<{
   top: PerformerRow[];
   bottom: PerformerRow[];
 }> {
-  const since = daysAgoIso(30).slice(0, 10);
   // Single round-trip: join task_assignees -> tasks!inner filtered to
-  // done tasks completed in the window. PostgREST filters parents when
+  // done tasks completed in the selected window. PostgREST filters parents when
   // the embedded relation is !inner with .eq()/.gte() on it, so we get
   // back exactly the rows we need with no IN-list blow-up.
   const { data, error } = await supabaseAdmin
@@ -478,7 +480,8 @@ async function _getPerformerLeaderboard(orgId: string): Promise<{
     .eq("organization_id", orgId)
     .eq("role_type", "agent")
     .eq("task.stage", "done")
-    .gte("task.completed_at", `${since}T00:00:00Z`);
+    .gte("task.completed_at", `${range.from}T00:00:00Z`)
+    .lte("task.completed_at", `${range.to}T23:59:59Z`);
   if (error) throw error;
 
   type PerfEmp = {
@@ -1211,20 +1214,22 @@ export interface StageFlowCell {
   isBackward: boolean;
 }
 
-async function _getStageFlowMatrix(orgId: string): Promise<{
+async function _getStageFlowMatrix(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<{
   cells: StageFlowCell[];
   topBackward: Array<{ from: TaskStage; to: TaskStage; count: number }>;
   totalForward: number;
   totalBackward: number;
 }> {
-  // Look at the last 90 days of stage transitions so the matrix isn't
-  // dominated by ancient data.
-  const since = daysAgoIso(90);
+  // Stage transitions that occurred within the selected window.
   const { data, error } = await supabaseAdmin
     .from("task_stage_history")
     .select("from_stage, to_stage")
     .eq("organization_id", orgId)
-    .gte("entered_at", since)
+    .gte("entered_at", `${range.from}T00:00:00Z`)
+    .lte("entered_at", `${range.to}T23:59:59Z`)
     .not("from_stage", "is", null);
   if (error) throw error;
 

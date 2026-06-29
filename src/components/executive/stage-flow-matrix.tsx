@@ -6,6 +6,7 @@ import { FUNNEL_STAGE_ORDER } from "@/lib/data/executive";
 import { TASK_STAGE_LABELS, type TaskStage } from "@/lib/labels";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 // Build a /tasks URL pre-filtered to the "to" stage so the CEO can drill into
@@ -20,11 +21,13 @@ export async function StageFlowMatrixSection({
   topBackward,
   totalForward,
   totalBackward,
+  windowLabel,
 }: {
   cells: StageFlowCell[];
   topBackward: Array<{ from: TaskStage; to: TaskStage; count: number }>;
   totalForward: number;
   totalBackward: number;
+  windowLabel?: string;
 }) {
   const t = await getTranslations("Executive.stageFlow");
   const total = totalForward + totalBackward;
@@ -35,6 +38,7 @@ export async function StageFlowMatrixSection({
       <SectionTitle
         title={t("title")}
         description={t("description", { backwardPct })}
+        actions={windowLabel ? <WindowLabel label={windowLabel} /> : undefined}
       />
       <Card className="border-cc-red/15">
         <CardContent className="p-3">

@@ -4,6 +4,7 @@ import { CalendarClock } from "lucide-react";
 import type { UpcomingDeadlineDay } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 const WEEKDAY_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
@@ -15,7 +16,7 @@ function loadTone(count: number) {
   return { ring: "border-border", bar: "bg-muted-foreground/30", text: "text-muted-foreground" };
 }
 
-export async function UpcomingDeadlinesSection({ days }: { days: UpcomingDeadlineDay[] }) {
+export async function UpcomingDeadlinesSection({ days, windowLabel }: { days: UpcomingDeadlineDay[]; windowLabel?: string }) {
   const t = await getTranslations("Executive.deadlines");
   const total = days.reduce((acc, d) => acc + d.count, 0);
   const max = Math.max(...days.map((d) => d.count), 1);
@@ -26,9 +27,12 @@ export async function UpcomingDeadlinesSection({ days }: { days: UpcomingDeadlin
         title={t("title")}
         description={t("description", { total })}
         actions={
-          <Link href="/tasks?f=due_week" className="text-xs text-cyan hover:underline">
-            {t("viewAll")}
-          </Link>
+          <>
+            {windowLabel ? <WindowLabel label={windowLabel} /> : null}
+            <Link href="/tasks?f=due_week" className="text-xs text-cyan hover:underline">
+              {t("viewAll")}
+            </Link>
+          </>
         }
       />
       <Card>

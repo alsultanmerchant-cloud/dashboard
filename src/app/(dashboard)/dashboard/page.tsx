@@ -104,7 +104,9 @@ async function WorkflowIndicators({ orgId }: { orgId: string }) {
 
 async function ClientHealth({ orgId }: { orgId: string }) {
   const { worst, best } = await getClientHealth(orgId);
-  return <ClientHealthSection worst={worst} best={best} />;
+  // View-backed (v_client_delivery_health) with hardcoded 30-day columns, so
+  // this card is fixed to the last 30 days regardless of the picker.
+  return <ClientHealthSection worst={worst} best={best} windowLabel="Last 30 days" />;
 }
 
 async function ServiceHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
@@ -112,14 +114,16 @@ async function ServiceHealth({ orgId, range }: { orgId: string; range: Dashboard
   return <ServiceHealthSection rows={rows} windowLabel={rangeLabel(range)} />;
 }
 
-async function StageFlow({ orgId }: { orgId: string }) {
-  const data = await getStageFlowMatrix(orgId);
-  return <StageFlowMatrixSection {...data} />;
+async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const data = await getStageFlowMatrix(orgId, range);
+  return <StageFlowMatrixSection {...data} windowLabel={rangeLabel(range)} />;
 }
 
-async function TopRevised({ orgId }: { orgId: string }) {
+async function TopRevised({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const rows = await getTopRevisedTasks(orgId);
-  return <TopRevisedTasksSection rows={rows} />;
+  // Point-in-time (tasks currently at client_changes) + a fixed week-over-week
+  // comparison — not driven by the picker.
+  return <TopRevisedTasksSection rows={rows} windowLabel={asOfLabel({ ...range, to: new Date().toISOString().slice(0, 10) })} />;
 }
 
 async function DeliveryFlow({ orgId }: { orgId: string }) {
@@ -127,25 +131,26 @@ async function DeliveryFlow({ orgId }: { orgId: string }) {
     getStageFunnel(orgId),
     getApprovalBottlenecks(orgId),
   ]);
-  return <DeliveryFlowSection funnel={funnel} bottlenecks={bottlenecks} />;
+  return <DeliveryFlowSection funnel={funnel} bottlenecks={bottlenecks} windowLabel="Current" />;
 }
 
-async function StuckProjects({ orgId }: { orgId: string }) {
+async function StuckProjects({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const rows = await getTopStuckProjects(orgId);
-  return <StuckProjectsSection rows={rows} />;
+  return <StuckProjectsSection rows={rows} windowLabel={asOfLabel({ ...range, to: new Date().toISOString().slice(0, 10) })} />;
 }
 
 async function UpcomingDeadlines({ orgId }: { orgId: string }) {
   const days = await getUpcomingDeadlines(orgId);
-  return <UpcomingDeadlinesSection days={days} />;
+  return <UpcomingDeadlinesSection days={days} windowLabel="Next 7 days" />;
 }
 
-async function TeamCapacity({ orgId }: { orgId: string }) {
+async function TeamCapacity({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const [specialists, performers] = await Promise.all([
     getSpecialistLoadTop(orgId),
-    getPerformerLeaderboard(orgId),
+    getPerformerLeaderboard(orgId, range),
   ]);
-  return <TeamCapacitySection specialists={specialists} performers={performers} />;
+  // Specialist load is current; the performer leaderboard is windowed.
+  return <TeamCapacitySection specialists={specialists} performers={performers} windowLabel={rangeLabel(range)} />;
 }
 
 // ---- Skeletons -----------------------------------------------------------
@@ -298,11 +303,11 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={320} />}>
-        <StageFlow orgId={orgId} />
+        <StageFlow orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={260} />}>
-        <TopRevised orgId={orgId} />
+        <TopRevised orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={360} />}>
@@ -310,7 +315,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={180} />}>
-        <StuckProjects orgId={orgId} />
+        <StuckProjects orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={180} />}>
@@ -318,7 +323,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={300} />}>
-        <TeamCapacity orgId={orgId} />
+        <TeamCapacity orgId={orgId} range={range} />
       </DashSection>
     </div>
   );

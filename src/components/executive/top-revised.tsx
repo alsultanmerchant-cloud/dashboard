@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { ClientEditsMetrics } from "@/lib/data/executive";
 import { SectionTitle } from "@/components/section-title";
+import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
 const DRILL_HREF = `/tasks?sf=${encodeURIComponent(JSON.stringify([{ field: "stage", value: "client_changes" }]))}`;
@@ -39,7 +40,7 @@ function getServiceTone(slug: string) {
   };
 }
 
-export async function TopRevisedTasksSection({ rows: m }: { rows: ClientEditsMetrics }) {
+export async function TopRevisedTasksSection({ rows: m, windowLabel }: { rows: ClientEditsMetrics; windowLabel?: string }) {
   const t = await getTranslations("Executive.topRevised");
 
   const weekDelta = m.enteredThisWeek - m.enteredLastWeek;
@@ -50,7 +51,7 @@ export async function TopRevisedTasksSection({ rows: m }: { rows: ClientEditsMet
 
   return (
     <section className="mb-10">
-      <SectionTitle title={t("indicatorTitle")} description={t("indicatorDesc")} />
+      <SectionTitle title={t("indicatorTitle")} description={t("indicatorDesc")} actions={windowLabel ? <WindowLabel label={windowLabel} /> : undefined} />
 
       <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-[var(--surface-elev)]">
         <div className="grid lg:grid-cols-[minmax(260px,0.7fr)_minmax(0,2fr)]">
