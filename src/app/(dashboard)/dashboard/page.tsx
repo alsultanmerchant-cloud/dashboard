@@ -556,9 +556,15 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
     return <AnalysisUnavailable title="Contracts analysis" message={analysis.message} />;
   }
 
-  const { dashboard: d, amTargets, buckets } = analysis;
+  const { dashboard: d, amTargets } = analysis;
   const topAm = [...amTargets].sort((a, b) => b.achievement_pct - a.achievement_pct).slice(0, 3);
-  const totalDue = buckets.installments_due.reduce((sum, row) => sum + row.expected_amount, 0);
+  // "Due + overdue installments" must match the sheet, which reports four cells:
+  // due-this-month (F27/F36) + overdue (E27/E36) for Account and Sales. The old
+  // live recompute from `installments_due` only captured due-this-month and
+  // dropped the overdue half, so it under-reported by ~50%. On a frozen
+  // sheet_import month these are the sheet's verbatim values.
+  const totalDue =
+    d.acc_exp_inst + d.acc_exp_overdue_inst + d.sales_exp_inst + d.sales_exp_overdue_inst;
 
   return (
     <div className="rounded-2xl border border-soft bg-card p-4">
@@ -580,7 +586,14 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
       {/* Two department achievements — mirrors the sheet's Account / Sales
           sections. The sheet never blends them into one company %, so neither
           do we: each ratio is actual income vs its own target. */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+        <AnalysisStat
+          label="Total revenue (collected)"
+          value={fmtSR(d.acc_actual + d.sales_total_income)}
+          sub={`Acc ${fmtSR(d.acc_actual)} · Sales ${fmtSR(d.sales_total_income)}`}
+          tone="success"
+          tip="Company income collected this month — Account department income + Sales department income (the sheet reports the two separately; this is their sum)."
+        />
         <DeptAchievementStat
           label="Account achievement"
           pct={d.acc_achievement_pct}
@@ -681,11 +694,13 @@ function AnalysisStat({
   value,
   tone,
   tip,
+  sub,
 }: {
   label: string;
   value: string | number;
   tone: "info" | "success" | "warning" | "danger";
   tip?: React.ReactNode;
+  sub?: string;
 }) {
   const toneCls = {
     info: "border-cc-blue/25 bg-blue-dim text-status-info",
@@ -700,6 +715,9 @@ function AnalysisStat({
         {tip ? <MetricInfo text={tip} /> : null}
       </div>
       <div className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</div>
+      {sub ? (
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground tabular-nums">{sub}</div>
+      ) : null}
     </div>
   );
 }
