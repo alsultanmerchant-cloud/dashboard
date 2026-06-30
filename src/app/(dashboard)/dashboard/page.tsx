@@ -565,6 +565,13 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
   // sheet_import month these are the sheet's verbatim values.
   const totalDue =
     d.acc_exp_inst + d.acc_exp_overdue_inst + d.sales_exp_inst + d.sales_exp_overdue_inst;
+  // Company INCOME totals — exactly the sheet's "Total Expected income" (Account
+  // I27 + Sales G36) and "Total Actual income" (Account I30 + Sales I38).
+  // Achievement folds the two department ratios into one combined % (team ask).
+  const expectedIncome = d.acc_expected + d.sales_expected;
+  const actualIncome = d.acc_actual + d.sales_total_income;
+  const incomeAchievementPct =
+    expectedIncome > 0 ? (actualIncome / expectedIncome) * 100 : 0;
 
   return (
     <div className="rounded-2xl border border-soft bg-card p-4">
@@ -583,38 +590,37 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
         </Link>
       </div>
 
-      {/* Two department achievements — mirrors the sheet's Account / Sales
-          sections. The sheet never blends them into one company %, so neither
-          do we: each ratio is actual income vs its own target. */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+      {/* Company income, mirroring the sheet's "Company INCOME (for selected
+          month)" block: Expected + Actual totals, the combined achievement, and
+          the installments due+overdue. */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <AnalysisStat
-          label="Total revenue (collected)"
-          value={fmtSR(d.acc_actual + d.sales_total_income)}
+          label="Expected income"
+          value={fmtSR(expectedIncome)}
+          sub={`Acc ${fmtSR(d.acc_expected)} · Sales ${fmtSR(d.sales_expected)}`}
+          tone="info"
+          tip="Sheet 'Total Expected income' — Account expected (I27) + Sales expected (G36)."
+        />
+        <AnalysisStat
+          label="Actual income"
+          value={fmtSR(actualIncome)}
           sub={`Acc ${fmtSR(d.acc_actual)} · Sales ${fmtSR(d.sales_total_income)}`}
           tone="success"
-          tip="Company income collected this month — Account department income + Sales department income (the sheet reports the two separately; this is their sum)."
+          tip="Sheet 'Total Actual income' — Account income (I30) + Sales income (I38)."
         />
         <DeptAchievementStat
-          label="Account achievement"
-          pct={d.acc_achievement_pct}
-          actual={d.acc_actual}
-          expected={d.acc_expected}
-          tip="Account dept (sheet 'Revenue Achievement %'): Total Income from Account ÷ Total Expected."
-        />
-        <DeptAchievementStat
-          label="Sales achievement"
-          pct={d.sales_achievement_pct}
-          actual={d.sales_act_inst}
-          expected={d.sales_expected}
-          tip="Sales dept (sheet 'Installments Achievement %'): Actual Installments ÷ Expected Installments. New-client income is excluded (no target)."
+          label="Achievement"
+          pct={incomeAchievementPct}
+          actual={actualIncome}
+          expected={expectedIncome}
+          tip="Combined company achievement: total Actual income ÷ total Expected income (Account + Sales together)."
         />
         <AnalysisStat
-          label="New-client income"
-          value={fmtSR(d.sales_new_income)}
-          tone="info"
-          tip="Sheet 'Actual Income from new clients' — signing income with no renewal/installment target, so it sits outside the achievement ratios."
+          label="Due + overdue installments"
+          value={fmtSR(totalDue)}
+          tone="warning"
+          tip={t("metricTooltips.dashboard_dueInstallments")}
         />
-        <AnalysisStat label="Due + overdue installments" value={fmtSR(totalDue)} tone="warning" tip={t("metricTooltips.dashboard_dueInstallments")} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.1fr]">
