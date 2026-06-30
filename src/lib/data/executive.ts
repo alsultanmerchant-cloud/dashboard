@@ -8,6 +8,7 @@ import {
 } from "@/lib/odoo/live";
 import type { TaskStage } from "@/lib/labels";
 import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
+import { riyadhTodayIso } from "@/lib/tz";
 
 function addDaysIso(isoDate: string, delta: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
@@ -1436,8 +1437,12 @@ async function countOverdueAt(orgId: string, isoTs: string): Promise<number> {
 // flag is buggy in their build (it excludes not-started open work, under-
 // reporting ~41 vs the real ~138). planned_date < current_date is evaluated at
 // query time, so this is always fresh and reconciles with Rwasem.
+//
+// "today" MUST be Riyadh-local: the team filters Rwasem in Asia/Riyadh, so using
+// the UTC date here under-counts by a full day between 21:00–24:00 UTC (verified
+// 2026-06-30: UTC said 119, Rwasem/Riyadh said 139). See src/lib/tz.ts.
 async function countOverdueNow(orgId: string): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = riyadhTodayIso();
   const { count, error } = await supabaseAdmin
     .from("tasks")
     .select("id", { count: "exact", head: true })

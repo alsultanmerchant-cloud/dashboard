@@ -41,13 +41,12 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { DateRangePicker } from "@/components/executive/date-range-picker";
 import { resolveRange, rangeLabel, asOfLabel, type DashboardRange } from "@/lib/dashboard-range";
+import { riyadhTodayIso } from "@/lib/tz";
 import { MetricInfo, Explained } from "@/components/metric-info";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
 import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
 import { getCurrentCeoBrief } from "@/lib/ceo-brief-generate";
-import { ExecutiveHeroRow } from "@/components/executive/hero-row";
-import { WorkflowIndicatorsSection } from "@/components/executive/workflow-indicators";
 import { ClientHealthSection } from "@/components/executive/client-health";
 import { DeliveryFlowSection } from "@/components/executive/delivery-flow";
 import { TeamCapacitySection } from "@/components/executive/team-capacity";
@@ -69,37 +68,35 @@ async function BriefSection({ orgId }: { orgId: string }) {
 }
 
 async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  const data = await getExecutiveScores(orgId, range);
-  return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} />;
+  // The four operational KPI cards (on-time, overdue, review backlog, client
+  // changes) are folded INTO this indicators band as a compact row, instead of
+  // sitting in their own headline sections above (team feedback 2026-06-30).
+  const [data, series, hero, workflow] = await Promise.all([
+    getExecutiveScores(orgId, range),
+    getOnTimeSeries(orgId, range),
+    getHeroKpis(orgId),
+    getWorkflowIndicators(orgId),
+  ]);
+  const operational = {
+    onTimePct: series.pct,
+    delivered: series.delivered,
+    windowLabel: rangeLabel(range),
+    overdue: hero.overdue.current,
+    overdueDelta: hero.overdue.current - hero.overdue.weekAgo,
+    asOf: asOfLabel({ ...range, to: riyadhTodayIso() }),
+    reviewCount: workflow.review.count,
+    reviewOldest: workflow.review.oldestDays,
+    reviewAvg: workflow.review.avgDwellDays,
+    changesCount: workflow.clientChanges.count,
+    changesOldest: workflow.clientChanges.oldestDays,
+    changesAvg: workflow.clientChanges.avgDwellDays,
+  };
+  return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} operational={operational} />;
 }
 
 async function PulseBand({ orgId }: { orgId: string }) {
   const data = await getTeamPulseOverview(orgId);
   return <TeamPulseBand data={data} />;
-}
-
-async function HeroSection({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  // on-time % + delivered are windowed to the selected range; overdue / stuck
-  // are point-in-time ("as of" today).
-  const [data, series] = await Promise.all([getHeroKpis(orgId), getOnTimeSeries(orgId, range)]);
-  const merged = {
-    ...data,
-    onTime: { pct: series.pct, sample: series.sample, delivered: series.delivered },
-  };
-  const todayRange = { ...range, to: new Date().toISOString().slice(0, 10) };
-  return (
-    <ExecutiveHeroRow
-      data={merged}
-      trend={series.points}
-      onTimeWindowLabel={rangeLabel(range)}
-      snapshotLabel={asOfLabel(todayRange)}
-    />
-  );
-}
-
-async function WorkflowIndicators({ orgId }: { orgId: string }) {
-  const data = await getWorkflowIndicators(orgId);
-  return <WorkflowIndicatorsSection data={data} />;
 }
 
 async function ClientHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
@@ -156,25 +153,21 @@ async function TeamCapacity({ orgId, range }: { orgId: string; range: DashboardR
 
 function ScoresSkeleton() {
   return (
-    <div className="mb-8 grid gap-3 lg:grid-cols-[1.15fr_2fr]">
-      <Skeleton className="h-[220px] rounded-2xl" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mb-8 space-y-3">
+      <div className="grid gap-3 lg:grid-cols-[1.15fr_2fr]">
         <Skeleton className="h-[220px] rounded-2xl" />
-        <Skeleton className="h-[220px] rounded-2xl" />
-        <Skeleton className="h-[220px] rounded-2xl" />
-        <Skeleton className="h-[220px] rounded-2xl" />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <Skeleton className="h-[220px] rounded-2xl" />
+          <Skeleton className="h-[220px] rounded-2xl" />
+          <Skeleton className="h-[220px] rounded-2xl" />
+        </div>
       </div>
-    </div>
-  );
-}
-
-function HeroSkeleton() {
-  return (
-    <div className="mb-8 grid gap-3 lg:grid-cols-[1.7fr_1fr_1fr_1fr]">
-      <Skeleton className="h-[180px] rounded-2xl" />
-      <Skeleton className="h-[180px] rounded-2xl" />
-      <Skeleton className="h-[180px] rounded-2xl" />
-      <Skeleton className="h-[180px] rounded-2xl" />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-[120px] rounded-2xl" />
+        <Skeleton className="h-[120px] rounded-2xl" />
+        <Skeleton className="h-[120px] rounded-2xl" />
+        <Skeleton className="h-[120px] rounded-2xl" />
+      </div>
     </div>
   );
 }
@@ -260,6 +253,15 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
         description={t("welcomeDescription")}
       />
 
+      {/* CEO brief — narrative summary, pinned to the TOP of the dashboard so
+          it's the first thing the CEO reads. Range-independent (current state),
+          so it sits above the date-range picker. */}
+      {canFinance && (
+        <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
+          <BriefSection orgId={orgId} />
+        </DashSection>
+      )}
+
       <DateRangePicker range={range} />
 
       {/* ── INDICATORS (top): the fast, at-a-glance KPI cards, grouped so they
@@ -269,24 +271,9 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
         <ScoresBand orgId={orgId} range={range} />
       </DashSection>
 
-      <DashSection fallback={<Skeleton className="mb-8 h-[150px] rounded-2xl" />}>
-        <WorkflowIndicators orgId={orgId} />
-      </DashSection>
-
-      <DashSection fallback={<HeroSkeleton />}>
-        <HeroSection orgId={orgId} range={range} />
-      </DashSection>
-
       <DashSection fallback={<StripSkeleton />}>
         <PulseBand orgId={orgId} />
       </DashSection>
-
-      {/* CEO brief — narrative summary, sits below the indicators. */}
-      {canFinance && (
-        <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
-          <BriefSection orgId={orgId} />
-        </DashSection>
-      )}
 
       {/* ── DETAILS (below): heavier tables / flows / lists. ─────────────── */}
       <DashSection fallback={<SectionSkeleton h={300} />}>

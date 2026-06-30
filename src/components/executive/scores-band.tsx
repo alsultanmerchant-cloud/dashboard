@@ -5,8 +5,11 @@ import {
   Activity,
   AlertTriangle,
   ChevronLeft,
+  Hourglass,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
+  Timer,
   TrendingDown,
   TrendingUp,
   Minus,
@@ -18,7 +21,7 @@ import {
   type ScoreGrade,
 } from "@/lib/data/executive-scores";
 import { cn } from "@/lib/utils";
-import { Explained } from "@/components/metric-info";
+import { Explained, MetricInfo } from "@/components/metric-info";
 
 // Executive index band: one big Operational Stability hero + the four
 // contributing indices. Each index is a 0-100 composite with a grade,
@@ -196,11 +199,51 @@ function IndexCard({
   );
 }
 
-export async function ExecutiveScoresBand({ data, windowLabel }: { data: ExecutiveScores; windowLabel?: string }) {
+// Operational KPIs folded into the indicators band (team feedback 2026-06-30):
+// the on-time %, overdue, review-backlog and client-changes cards used to be two
+// separate prominent sections above; they now live as a quieter row inside the
+// المؤشرات التنفيذية block so the dashboard reads as one indicator surface.
+export interface OperationalKpis {
+  onTimePct: number | null;
+  delivered: number;
+  windowLabel: string;
+  overdue: number;
+  overdueDelta: number; // current − weekAgo (positive = more overdue = worse)
+  asOf: string;
+  reviewCount: number;
+  reviewOldest: number | null;
+  reviewAvg: number | null;
+  changesCount: number;
+  changesOldest: number | null;
+  changesAvg: number | null;
+}
+
+const REVIEW_HREF = `/tasks?view=list&sf=${encodeURIComponent(
+  JSON.stringify([
+    { field: "stage", value: "specialist_review" },
+    { field: "stage", value: "manager_review" },
+  ]),
+)}`;
+const CHANGES_HREF = `/tasks?view=list&sf=${encodeURIComponent(
+  JSON.stringify([{ field: "stage", value: "client_changes" }]),
+)}`;
+
+export async function ExecutiveScoresBand({
+  data,
+  windowLabel,
+  operational,
+}: {
+  data: ExecutiveScores;
+  windowLabel?: string;
+  operational?: OperationalKpis;
+}) {
   const t = await getTranslations("Executive.scores");
+  const th = await getTranslations("Executive.hero");
+  const tw = await getTranslations("Executive.workflow");
   const grade = (g: ScoreGrade) => t(`grades.${g}`);
   const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
   const rate = (n: number) => `${Math.round(n * 100)}%`;
+  const days = (n: number | null) => (n === null ? "—" : tw("daysValue", { n }));
 
   const { quality, discipline, productivity, stability } = data;
   const stabilityTone = toneByScore(stability.score);
@@ -475,6 +518,156 @@ export async function ExecutiveScoresBand({ data, windowLabel }: { data: Executi
           />
         </div>
       </div>
+
+      {/* Operational KPI row — the four at-a-glance counts (on-time, overdue,
+          review backlog, client changes), de-emphasised into compact cards that
+          sit under the indices rather than as their own headline sections. */}
+      {operational && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiMini
+            icon={<Timer className="size-4" />}
+            label={th("onTimeLabel")}
+            value={operational.onTimePct === null ? "—" : `${operational.onTimePct}%`}
+            valueTone={
+              operational.onTimePct === null
+                ? "text-muted-foreground"
+                : operational.onTimePct >= 85
+                  ? "text-cc-green"
+                  : operational.onTimePct >= 70
+                    ? "text-amber"
+                    : "text-cc-red"
+            }
+            sub={
+              operational.delivered > 0
+                ? `${operational.windowLabel} · ${th("onTimeSample", { sample: operational.delivered })}`
+                : th("onTimeNoSample")
+            }
+            href="/reports"
+            tip={th("metricTooltips.dashboard_heroOnTime")}
+          />
+          <KpiMini
+            icon={<AlertTriangle className="size-4" />}
+            label={th("overdueLabel")}
+            value={String(operational.overdue)}
+            valueTone={
+              operational.overdue > 50
+                ? "text-cc-red"
+                : operational.overdue > 0
+                  ? "text-amber"
+                  : "text-foreground"
+            }
+            sub={operational.asOf}
+            delta={
+              <OverdueDelta delta={operational.overdueDelta} label={th("wow")} />
+            }
+            href="/tasks?f=overdue"
+            tip={th("metricTooltips.dashboard_heroOverdue")}
+          />
+          <KpiMini
+            icon={<Hourglass className="size-4" />}
+            label={tw("reviewLabel")}
+            value={String(operational.reviewCount)}
+            valueTone={
+              operational.reviewCount > 30
+                ? "text-cc-red"
+                : operational.reviewCount > 0
+                  ? "text-amber"
+                  : "text-foreground"
+            }
+            sub={`${tw("oldest")}: ${days(operational.reviewOldest)} · ${tw("avgDwell")}: ${days(operational.reviewAvg)}`}
+            href={REVIEW_HREF}
+            tip={tw("metricTooltips.dashboard_reviewIndicator")}
+          />
+          <KpiMini
+            icon={<RefreshCw className="size-4" />}
+            label={tw("changesLabel")}
+            value={String(operational.changesCount)}
+            valueTone={
+              operational.changesCount > 30
+                ? "text-cc-red"
+                : operational.changesCount > 0
+                  ? "text-amber"
+                  : "text-foreground"
+            }
+            sub={`${tw("oldest")}: ${days(operational.changesOldest)} · ${tw("avgDwell")}: ${days(operational.changesAvg)}`}
+            href={CHANGES_HREF}
+            tip={tw("metricTooltips.dashboard_changesIndicator")}
+          />
+        </div>
+      )}
     </section>
+  );
+}
+
+// Compact operational-KPI card — quieter sibling of IndexCard, used for the
+// four counts folded into the band. One big number + a one-line context.
+function KpiMini({
+  icon,
+  label,
+  value,
+  valueTone,
+  sub,
+  delta,
+  href,
+  tip,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  valueTone: string;
+  sub: string;
+  delta?: ReactNode;
+  href: string;
+  tip?: string;
+}) {
+  return (
+    <div className="relative h-full">
+      {tip ? (
+        <span className="absolute end-3 top-3 z-10">
+          <MetricInfo text={tip} />
+        </span>
+      ) : null}
+      <Link
+        href={href}
+        className="group flex h-full flex-col rounded-2xl border border-soft bg-card p-4 transition-all hover:border-cyan/35"
+      >
+        <div className="flex items-center gap-2">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-soft-2 text-cyan">
+            {icon}
+          </span>
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            {label}
+          </span>
+        </div>
+        <div className="mt-3 flex items-end gap-2">
+          <span className={cn("text-4xl font-bold tabular-nums leading-none", valueTone)}>
+            {value}
+          </span>
+          {delta}
+        </div>
+        <p className="mt-auto truncate pt-3 text-[11px] text-muted-foreground" title={sub}>
+          {sub}
+        </p>
+      </Link>
+    </div>
+  );
+}
+
+// Overdue WoW chip: positive = more overdue this week = bad (red).
+function OverdueDelta({ delta, label }: { delta: number; label: string }) {
+  if (delta === 0) return null;
+  const up = delta > 0;
+  const Icon = up ? TrendingUp : TrendingDown;
+  return (
+    <span
+      className={cn(
+        "mb-1 inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 text-[10px] font-medium",
+        up ? "text-cc-red" : "text-cc-green",
+      )}
+      title={label}
+    >
+      <Icon className="size-3" />
+      {up ? `+${delta}` : delta}
+    </span>
   );
 }
