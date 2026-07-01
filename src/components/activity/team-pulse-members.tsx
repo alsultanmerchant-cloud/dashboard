@@ -10,6 +10,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
+import { riyadhDateOf, riyadhTodayIso, riyadhDaysAgoIso } from "@/lib/tz";
 import { CompareTrendModal } from "@/components/activity/compare-trend-modal";
 import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
 import type { TeamMemberRow, ActivityStatus, LoadFlag } from "@/lib/data/team-pulse";
@@ -81,11 +82,15 @@ const LOAD_META: Record<LoadFlag, { label: string; cls: string } | null> = {
   balanced: null,
 };
 
+// Riyadh CALENDAR-day relative label — consistent with the status column, so a
+// yesterday-evening action reads "أمس" (not "اليوم" from a rolling-24h floor).
 function relativeDays(iso: string | null): string {
   if (!iso) return NA;
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "اليوم";
-  if (days === 1) return "أمس";
+  const d = riyadhDateOf(iso);
+  const today = riyadhTodayIso();
+  if (d >= today) return "اليوم";
+  if (d === riyadhDaysAgoIso(1)) return "أمس";
+  const days = Math.round((Date.parse(today) - Date.parse(d)) / 86_400_000);
   return `منذ ${days} يوم`;
 }
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ListChecks, Loader2, GitBranch, MessageSquare } from "lucide-react";
 import { StackedSheet } from "@/components/ui/stacked-sheet";
 import { DateField } from "@/components/ui/date-field";
-import { riyadhTodayIso } from "@/lib/tz";
+import { riyadhTodayIso, riyadhDateOf, riyadhDaysAgoIso } from "@/lib/tz";
 import { cn } from "@/lib/utils";
 
 interface ActionLogRow {
@@ -25,11 +25,15 @@ const WINDOWS = [
   { days: 90, label: "آخر ٣ أشهر" },
 ];
 
+// Riyadh calendar-day relative label (not a rolling-24h floor) so a
+// yesterday-evening action reads "أمس", consistent with the pulse table.
 function relative(iso: string | null): string {
   if (!iso) return "—";
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "اليوم";
-  if (days === 1) return "أمس";
+  const d = riyadhDateOf(iso);
+  const today = riyadhTodayIso();
+  if (d >= today) return "اليوم";
+  if (d === riyadhDaysAgoIso(1)) return "أمس";
+  const days = Math.round((Date.parse(today) - Date.parse(d)) / 86_400_000);
   return `منذ ${days} يوم`;
 }
 
