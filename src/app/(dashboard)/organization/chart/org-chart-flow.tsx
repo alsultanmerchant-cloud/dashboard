@@ -11,6 +11,7 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeProps,
@@ -663,10 +664,19 @@ function OrgChartFlowInner({
   const laidOut = useMemo(() => layoutWithDagre(rawNodes, rawEdges), [rawNodes, rawEdges]);
   const [nodes, setNodes, onNodesChange] = useNodesState(laidOut);
   const [edges, , onEdgesChange] = useEdgesState(rawEdges);
+  const { fitView } = useReactFlow();
 
   useEffect(() => {
     setNodes(laidOut);
-  }, [laidOut, setNodes]);
+    // The container's real height can settle after this mount tick (sticky
+    // header/toolbar layout, font load), so the initial `fitView` prop can
+    // fit against a stale size and leave the chart scrolled out of view.
+    // Re-fit once more after layout has a chance to stabilize.
+    const raf = requestAnimationFrame(() => {
+      fitView({ padding: 0.08, minZoom: 0.35, duration: 0 });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [laidOut, setNodes, fitView]);
 
   return (
     <div className="h-[82vh] w-full overflow-hidden rounded-2xl border border-soft bg-white">

@@ -23,12 +23,9 @@ import {
   Settings2,
   Flag,
   FileSignature,
-  Siren,
   Upload,
-  Scale,
   Heart,
   KeyRound,
-  ShieldAlert,
   MessageCircle,
   Activity,
   ClipboardCheck,
@@ -95,12 +92,17 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: "agencyOps",
     items: [
-      { labelKey: "escalations", href: "/escalations", icon: Siren, perm: "escalation.view_own" },
-      { labelKey: "governance", href: "/governance", icon: Scale, perm: "governance.view" },
+      // Escalations + Governance hidden 2026-07-02 per request.
+      // { labelKey: "escalations", href: "/escalations", icon: Siren, perm: "escalation.view_own" },
+      // { labelKey: "governance", href: "/governance", icon: Scale, perm: "governance.view" },
       { labelKey: "teamActivity", href: "/team-activity", icon: Activity, perm: "reports.view" },
       { labelKey: "accountability", href: "/accountability", icon: ClipboardCheck, perm: "people.analytics.view" },
-      { labelKey: "attendance", href: "/attendance", icon: CalendarCheck, perm: "attendance.view" },
-      { labelKey: "warnings", href: "/warnings", icon: ShieldAlert, perm: "warning.view" },
+      // Attendance + Warnings hidden 2026-07-02: neither feature has ever
+      // been used (zero attendance records, zero warnings issued), so the
+      // pages are permanently empty. Restore once the team actually adopts
+      // them, or once there's real data to show.
+      // { labelKey: "attendance", href: "/attendance", icon: CalendarCheck, perm: "attendance.view" },
+      // { labelKey: "warnings", href: "/warnings", icon: ShieldAlert, perm: "warning.view" },
       // Targets (الأهداف الشهرية) hidden 2026-06-17 per client: numbers are
       // unreliable and everything it shows already lives — correctly — under
       // العقود. Restore this line once the targets figures are reconciled.
