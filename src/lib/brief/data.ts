@@ -102,15 +102,24 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
     // cells acc_exp_overdue_inst / sales_exp_overdue_inst, migrations 0168/0172):
     // payment seq >= 2 (seq 1 = signing deposit), real revenue source types,
     // expected before this month, still open OR collected this month, contract
-    // not lost before this month. Status is NOT a filter (the sheet keys off
-    // lost_date). We pull actual_date so we can split these into still-OUTSTANDING
-    // (to chase) vs already-COLLECTED this month: the sheet strikes the collected
-    // ones through and moves them to its "Actual paid clients ✅" column, so they
-    // are no longer overdue to collect — the card must not lump them in.
+    // not lost before this month. We pull actual_date so we can split these into
+    // still-OUTSTANDING (to chase) vs already-COLLECTED this month: the sheet
+    // strikes the collected ones through and moves them to its "Actual paid
+    // clients ✅" column, so they are no longer overdue to collect — the card
+    // must not lump them in.
+    //
+    // LIVE-CONTRACT SCOPE (active/hold): the sheet removes lost clients from the
+    // overdue bucket by setting col R (installments.lost_date). Our importer only
+    // fills lost_date on ~17/168 rows, so relying on it alone leaked overdue
+    // installments of already-CLOSED/EXPIRED contracts (Empen, روعة المنزل, غيث…)
+    // into the total — inflating it ~2x (77.9k vs the sheet's ~35k). Scoping to a
+    // live contract status is the same LIVE-client rule the other CEO danger cards
+    // use. See [[project_brief_live_client_scoping]], [[project_contracts_income_model]].
     supabaseAdmin
       .from("installments")
-      .select("expected_amount, actual_date, contract:contracts!inner(client_id)")
+      .select("expected_amount, actual_date, contract:contracts!inner(client_id, status)")
       .eq("organization_id", orgId)
+      .in("contract.status", ["active", "hold"])
       .gte("sequence", 2)
       .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
       .lt("expected_date", monthStart)
