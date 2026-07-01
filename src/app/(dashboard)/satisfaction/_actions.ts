@@ -627,7 +627,8 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     return { error: (e as Error).message };
   }
 
-  const [linksRes, clientsRes, projectsRes] = await Promise.all([
+  const { getClientDisplayNameMap, foldedContractsByCanonical } = await import("@/lib/data/clients");
+  const [linksRes, clientsRes, projectsRes, displayNames, foldedContracts] = await Promise.all([
     supabaseAdmin
       .from("wa_group_links")
       .select(
@@ -645,6 +646,8 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
       .from("projects")
       .select("id, name, client_id, status")
       .eq("organization_id", session.orgId),
+    getClientDisplayNameMap(session.orgId),
+    foldedContractsByCanonical(session.orgId),
   ]);
   if (linksRes.error) return { error: linksRes.error.message };
   if (clientsRes.error) return { error: clientsRes.error.message };
@@ -653,7 +656,17 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
   const links = linksRes.data ?? [];
   const matches = matchGroups(
     links.map((l) => ({ id: l.chat_id, name: l.chat_name })),
-    (clientsRes.data ?? []).map((c) => ({ id: c.id, name: c.name })),
+    (clientsRes.data ?? []).map((c) => {
+      // Primary name = the contract-sheet name (source of truth); aliases add the
+      // raw Odoo name + every contract sheet_client_name (across merged twins) so a
+      // group named by ANY of them still resolves. See [[project_client_display_name_resolver]].
+      const primary = displayNames.get(c.id) ?? c.name;
+      const contractNames = (foldedContracts.get(c.id) ?? [])
+        .map((k) => k.sheet_client_name)
+        .filter((n): n is string => !!n && n.trim().length > 0);
+      const aliases = Array.from(new Set([c.name, ...contractNames])).filter((n) => n !== primary);
+      return { id: c.id, name: primary, aliases };
+    }),
     (projectsRes.data ?? []).map((p) => ({
       id: p.id,
       name: p.name,

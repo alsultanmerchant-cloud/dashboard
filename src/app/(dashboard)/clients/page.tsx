@@ -14,6 +14,7 @@ import {
   DataTableShell, DataTable, DataTableHead, DataTableHeaderCell,
   DataTableRow, DataTableCell,
 } from "@/components/data-table-shell";
+import { ConnectLinksDialog } from "./connect-links-dialog";
 
 const PAGE_SIZE = 25;
 
@@ -189,13 +190,18 @@ export default async function ClientsPage({
                     <DataTableCell className="tabular-nums">{c.contracts || "—"}</DataTableCell>
                     <DataTableCell className="tabular-nums">{c.projects || "—"}</DataTableCell>
                     <DataTableCell>
-                      <Link
-                        href={detailHref}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
-                        aria-label={t("openClient")}
-                      >
-                        <ChevronLeft className="size-3.5 icon-flip-rtl" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-1">
+                        {canManage && (
+                          <ConnectLinksDialog clientId={c.id} clientName={c.name} variant="icon" />
+                        )}
+                        <Link
+                          href={detailHref}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-soft-2 hover:text-foreground transition-colors"
+                          aria-label={t("openClient")}
+                        >
+                          <ChevronLeft className="size-3.5 icon-flip-rtl" />
+                        </Link>
+                      </div>
                     </DataTableCell>
                   </DataTableRow>
                 );

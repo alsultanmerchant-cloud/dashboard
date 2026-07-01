@@ -16,6 +16,11 @@ import {
   type TaskQueryParams,
 } from "@/app/(dashboard)/tasks/_filter_params";
 import {
+  parseFlowParam,
+  resolveFlowTaskIds,
+  combineTaskIdSets,
+} from "@/app/(dashboard)/tasks/_flow_filter";
+import {
   loadTaskBoardPageForGlobalView,
   loadTasksPageForGlobalView,
 } from "@/app/(dashboard)/tasks/_loaders";
@@ -88,6 +93,17 @@ export async function GET(request: NextRequest) {
         ? []
         : (data ?? []).map((r) => r.id as string);
     }
+  }
+
+  // Stage-transition drill-down (dashboard regressions card): resolve to the
+  // exact regressed task ids so "load more" stays scoped like the first page.
+  const flowFilter = parseFlowParam(sp.get("flow") ?? undefined, sp.get("fw") ?? undefined);
+  if (flowFilter) {
+    const flowIds = await resolveFlowTaskIds(session.orgId, flowFilter);
+    filters.customFilterTaskIds = combineTaskIdSets(
+      filters.customFilterTaskIds ?? null,
+      flowIds,
+    );
   }
 
   // Agent scope: "load more" must stay restricted to the viewer's own tasks

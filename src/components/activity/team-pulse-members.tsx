@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { ChevronRight, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  ChevronRight,
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  GitBranch,
+  MessageSquare,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
@@ -11,9 +18,62 @@ const NA = "—";
 
 const STATUS_META: Record<ActivityStatus, { label: string; tone: string; dot: string }> = {
   active: { label: "نشط", tone: "text-cc-green", dot: "bg-cc-green" },
-  slow: { label: "بطيء", tone: "text-amber", dot: "bg-amber" },
-  stalled: { label: "متوقّف", tone: "text-cc-red", dot: "bg-cc-red" },
+  slow: { label: "خامل", tone: "text-amber", dot: "bg-amber" },
+  stalled: { label: "غير نشط", tone: "text-cc-red", dot: "bg-cc-red" },
 };
+
+// إجراءات اليوم, broken into "how many stage moves" vs "how many Log Notes".
+function ActionsSplit({ moves, notes }: { moves: number; notes: number }) {
+  const total = moves + notes;
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-center gap-2.5 tabular-nums",
+        total > 0 ? "text-cc-green" : "text-muted-foreground",
+      )}
+    >
+      <span className="inline-flex items-center gap-0.5" title="نقل مراحل">
+        <GitBranch className="size-3" />
+        {moves}
+      </span>
+      <span
+        className="inline-flex items-center gap-0.5"
+        title="سجل العمل: ملاحظات (كومنت) + إنشاء مهام + إسناد وتعديلات"
+      >
+        <MessageSquare className="size-3" />
+        {notes}
+      </span>
+    </div>
+  );
+}
+
+// أُنجزت, split into today vs this week.
+function CompletedSplit({ today, week }: { today: number; week: number }) {
+  return (
+    <div className="flex flex-col items-center leading-tight tabular-nums">
+      <span className="font-semibold text-cc-green">
+        {today}
+        <span className="text-[9px] font-normal text-muted-foreground"> اليوم</span>
+      </span>
+      <span className="text-[10px] text-muted-foreground">{week} الأسبوع</span>
+    </div>
+  );
+}
+
+// مُعلقة — tasks whose current stage the person OWNS: how many are past their
+// deadline (SLA / deadline-commitment signal, red) out of the total on their desk.
+function PendingCell({ late, owned }: { late: number; owned: number }) {
+  if (owned === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-col items-center leading-tight tabular-nums">
+      <span className={cn("font-semibold", late > 0 ? "text-cc-red" : "text-muted-foreground")}>
+        {late}
+        <span className="text-[9px] font-normal text-muted-foreground"> متأخرة</span>
+      </span>
+      <span className="text-[10px] text-muted-foreground">{owned} على مكتبه</span>
+    </div>
+  );
+}
 
 const LOAD_META: Record<LoadFlag, { label: string; cls: string } | null> = {
   overloaded: { label: "محمّل زائد", cls: "bg-cc-red/10 text-cc-red" },
@@ -82,10 +142,26 @@ export function TeamPulseMembers({
                   <th className="px-3 py-2.5 font-medium">الموظف</th>
                   <th className="px-3 py-2.5 font-medium">الحالة</th>
                   <th className="px-3 py-2.5 font-medium">آخر إجراء</th>
-                  <th className="px-3 py-2.5 font-medium text-center">إجراءات اليوم</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="كل الإجراءات التي قام بها الموظف نفسه اليوم في رواسم — نقل المراحل + سجل العمل (ملاحظات + إنشاء مهام + إسناد وتعديلات). منسوبة لفاعلها الحقيقي، لا لكل المكلّفين بالمهمة"
+                  >
+                    إجراءات اليوم
+                  </th>
                   <th className="px-3 py-2.5 font-medium">إجراءات الأسبوع</th>
-                  <th className="px-3 py-2.5 font-medium text-center">أُنجزت</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="المهام التي أنهاها اليوم / خلال هذا الأسبوع"
+                  >
+                    أُنجزت
+                  </th>
                   <th className="px-3 py-2.5 font-medium text-center">مفتوحة</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="المهام التي يملك مرحلتها الحالية (على مكتبه الآن) — كم منها تجاوز موعده (متأخرة) من إجمالي ما على مكتبه. مقياس الالتزام بالمواعيد."
+                  >
+                    مُعلقة
+                  </th>
                   <th className="px-3 py-2.5 font-medium" />
                 </tr>
               </thead>
@@ -124,13 +200,8 @@ export function TeamPulseMembers({
                         </span>
                       </td>
                       <td className={cn("px-3 py-2.5", meta.tone)}>{relativeDays(m.lastActionAt)}</td>
-                      <td
-                        className={cn(
-                          "px-3 py-2.5 tabular-nums text-center font-semibold",
-                          m.actionsToday > 0 ? "text-cc-green" : "text-muted-foreground",
-                        )}
-                      >
-                        {m.actionsToday}
+                      <td className="px-3 py-2.5">
+                        <ActionsSplit moves={m.movesToday} notes={m.notesToday} />
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
@@ -138,10 +209,13 @@ export function TeamPulseMembers({
                           <Momentum value={m.momentum} />
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 tabular-nums text-center text-cc-green">
-                        {m.completedThisWeek}
+                      <td className="px-3 py-2.5 text-center">
+                        <CompletedSplit today={m.completedToday} week={m.completedThisWeek} />
                       </td>
                       <td className="px-3 py-2.5 tabular-nums text-center">{m.openWip}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        <PendingCell late={m.pendingLate} owned={m.ownedOpen} />
+                      </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-2">
                           <ActionBreakdownButton

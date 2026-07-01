@@ -113,7 +113,13 @@ async function ServiceHealth({ orgId, range }: { orgId: string; range: Dashboard
 
 async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const data = await getStageFlowMatrix(orgId, range);
-  return <StageFlowMatrixSection {...data} windowLabel={rangeLabel(range)} />;
+  return (
+    <StageFlowMatrixSection
+      {...data}
+      windowLabel={rangeLabel(range)}
+      windowRange={{ from: range.from, to: range.to }}
+    />
+  );
 }
 
 async function TopRevised({ orgId, range }: { orgId: string; range: DashboardRange }) {

@@ -16,6 +16,7 @@ import {
 } from "@/lib/data/satisfaction";
 import { getClientBrief } from "@/lib/satisfaction-brief";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
+import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
@@ -98,6 +99,12 @@ export async function buildSatisfactionInput(
     .eq("id", clientId)
     .maybeSingle();
   if (!client) throw new Error("العميل غير موجود");
+
+  // Contracts own client identity — analyze (and label) the client by its
+  // contract-sheet name, not the raw Odoo project name. See
+  // [[project_client_display_name_resolver]].
+  const displayNames = await getClientDisplayNameMap(orgId);
+  const clientName = displayNames.get(clientId) ?? (client.name as string);
 
   // A weekly ("current status") run normally reads the last 7 days. But when the
   // groups have been quiet (no new messages because traffic genuinely paused, or
@@ -197,7 +204,7 @@ export async function buildSatisfactionInput(
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
 
   const makePrompt = (budget: number) =>
-    `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${client.name}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
+    `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${clientName}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
 ${
   windowKind !== "week"
     ? `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
@@ -267,7 +274,7 @@ ${trim(clientBlock, budget)}
 ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
 
   return {
-    clientName: client.name as string,
+    clientName,
     windowKind,
     windowStart,
     windowEnd,

@@ -850,6 +850,24 @@
       "delivery": "Delivery",
       "both": "Both",
       "other": "Other"
+    },
+    "connect": {
+      "title": "Connect links",
+      "description": "Attach existing projects or contracts to “{name}”. Contracts are the source of truth for a client’s identity.",
+      "projectsLabel": "Projects to attach",
+      "projectsPlaceholder": "Choose projects…",
+      "contractsLabel": "Contracts to attach",
+      "contractsPlaceholder": "Choose contracts…",
+      "searchPlaceholder": "Search by name, code or current client…",
+      "currentlyOwnedBy": "Now: {name}",
+      "noProjects": "No other projects to attach",
+      "noContracts": "No other contracts to attach",
+      "nothingSelected": "Select at least one project or contract",
+      "loading": "Loading options…",
+      "foldNote": "If moving a project/contract leaves its former client with nothing else, that client is folded into this one.",
+      "linked": "Linked {projects} project(s) and {contracts} contract(s)",
+      "cancel": "Cancel",
+      "save": "Connect"
     }
   },
   "AiKnowledge": {
@@ -3158,11 +3176,11 @@
       "emptyTitle": "No recent revisions",
       "emptyDescription": "Tasks that get revised repeatedly will appear here",
       "indicatorTitle": "Client Edits Indicator",
-      "indicatorDesc": "Tasks currently waiting on client feedback, with weekly trend and service breakdown",
+      "indicatorDesc": "Tasks currently waiting on client feedback, compared to the previous period, with a service breakdown",
       "activeNow": "Active edits now",
       "vsLastWeek": "vs last week",
-      "thisWeek": "this week",
-      "weeklyChange": "Weekly change",
+      "thisWeek": "this period",
+      "weeklyChange": "vs previous period",
       "byService": "Breakdown by service",
       "serviceDistributionHint": "Share of tasks currently in the client-edits stage",
       "totalEvents": "Total revisions",
@@ -3878,7 +3896,12 @@
       "contracts": "Contracts",
       "active": "Active",
       "totalValue": "Total value"
-    }
+    },
+    "projectsTitle": "Projects",
+    "noProjects": "No projects linked to this client yet.",
+    "projectName": "Project",
+    "projectCode": "Code",
+    "projectStatus": "Status"
   },
   "AgentCockpit": {
     "welcome": "Welcome, {name}",

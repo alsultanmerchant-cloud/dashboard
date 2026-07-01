@@ -9,11 +9,19 @@ import { SectionTitle } from "@/components/section-title";
 import { WindowLabel } from "./window-label";
 import { cn } from "@/lib/utils";
 
-// Build a /tasks URL pre-filtered to the "to" stage so the CEO can drill into
-// exactly which tasks regressed into that stage.
-function regressionHref(toStage: TaskStage): string {
-  const sf = JSON.stringify([{ field: "stage", value: toStage }]);
-  return `/tasks?sf=${encodeURIComponent(sf)}`;
+// Build a /tasks URL that lands on EXACTLY the tasks that made this backward
+// from→to transition within the dashboard window — not every task currently in
+// the destination stage. The page resolves `flow` + `fw` against
+// task_stage_history (see _flow_filter.ts); `f=all` so the default open-stage
+// filter doesn't drop a regressed task that has since moved to done.
+function regressionHref(
+  fromStage: TaskStage,
+  toStage: TaskStage,
+  win?: { from: string; to: string },
+): string {
+  const params = new URLSearchParams({ f: "all", flow: `${fromStage}~${toStage}` });
+  if (win) params.set("fw", `${win.from}~${win.to}`);
+  return `/tasks?${params.toString()}`;
 }
 
 export async function StageFlowMatrixSection({
@@ -22,12 +30,15 @@ export async function StageFlowMatrixSection({
   totalForward,
   totalBackward,
   windowLabel,
+  windowRange,
 }: {
   cells: StageFlowCell[];
   topBackward: Array<{ from: TaskStage; to: TaskStage; count: number }>;
   totalForward: number;
   totalBackward: number;
   windowLabel?: string;
+  // Dashboard range (ISO dates) so the drill-down matches the counted window.
+  windowRange?: { from: string; to: string };
 }) {
   const t = await getTranslations("Executive.stageFlow");
   const total = totalForward + totalBackward;
@@ -53,7 +64,7 @@ export async function StageFlowMatrixSection({
               {topBackward.map((b, i) => (
                 <li key={`${b.from}>${b.to}`}>
                   <Link
-                    href={regressionHref(b.to)}
+                    href={regressionHref(b.from, b.to, windowRange)}
                     className={cn(
                       "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 transition-colors hover:bg-soft-1",
                       i === 0 ? "border-cc-red/30 bg-cc-red/[0.04]" : "border-cc-red/15",

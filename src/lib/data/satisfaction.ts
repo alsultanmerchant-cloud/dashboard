@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
 import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
+import { getClientDisplayNameMap } from "@/lib/data/clients";
 
 // =========================================================================
 // Client-satisfaction data layer (/satisfaction + Quality executive index).
@@ -72,6 +73,7 @@ export interface SatisfactionRow {
 // ---- Hub overview: every client that has an import or analysis -----------
 async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   const knowledgeStamp = await getKnowledgeStamp(orgId);
+  const displayNames = await getClientDisplayNameMap(orgId);
   const [importsRes, analysesRes, clientsRes, projectsRes, linksRes] = await Promise.all([
     supabaseAdmin
       .from("client_chat_imports")
@@ -105,7 +107,9 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   // project still looks active (cancelled contract not yet archived in Rawasm).
   const manualStatus = new Map<string, string | null>();
   for (const c of (clientsRes.data ?? []) as Array<{ id: string; name: string; status: string | null }>) {
-    names.set(c.id, c.name);
+    // Contracts are the source of truth for a client's name — prefer the
+    // contract-sheet name over the Odoo project name. See [[project_clients_centralization]].
+    names.set(c.id, displayNames.get(c.id) ?? c.name);
     manualStatus.set(c.id, c.status);
   }
 
@@ -305,7 +309,7 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes, brief] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes, brief, displayNames] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -351,6 +355,7 @@ async function _getClientSatisfactionDetail(
       .neq("status", "archived")
       .order("created_at", { ascending: false }),
     getClientBriefRef(orgId, clientId),
+    getClientDisplayNameMap(orgId),
   ]);
   if (clientRes.error) throw clientRes.error;
   if (projectsRes.error) throw projectsRes.error;
@@ -401,7 +406,8 @@ async function _getClientSatisfactionDetail(
 
   return {
     clientId,
-    clientName: clientRes.data.name as string,
+    // Contract-sheet name (folded across merged twins), falling back to the raw name.
+    clientName: displayNames.get(clientId) ?? (clientRes.data.name as string),
     imports: { client: clientImp, technical: techImp },
     hasMessages: (messagesRes.count ?? 0) > 0,
     analysis,
@@ -1006,6 +1012,9 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     coverage.set(row.chat_id, row.account_count);
   }
 
+  // Contract-sourced display names (source of truth) override the embedded name.
+  const displayNames = await getClientDisplayNameMap(orgId);
+
   type Row = {
     id: string;
     chat_id: string;
@@ -1027,7 +1036,7 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
       chatId: r.chat_id,
       chatName: r.chat_name,
       clientId: r.client_id,
-      clientName: c?.name ?? null,
+      clientName: (r.client_id ? displayNames.get(r.client_id) : null) ?? c?.name ?? null,
       projectIds: projectsByLink.get(r.id) ?? [],
       groupKind: r.group_kind,
       isActive: r.is_active,
@@ -1083,6 +1092,9 @@ async function _getWaLinkSuggestions(orgId: string): Promise<WaLinkSuggestion[]>
     .order("suggested_at", { ascending: false, nullsFirst: false });
   if (error || !data) return [];
 
+  // Contract-sourced display names (source of truth) override the embedded name.
+  const displayNames = await getClientDisplayNameMap(orgId);
+
   type Row = {
     id: string;
     chat_id: string;
@@ -1107,7 +1119,7 @@ async function _getWaLinkSuggestions(orgId: string): Promise<WaLinkSuggestion[]>
       chatId: r.chat_id,
       chatName: r.chat_name,
       suggestedClientId: r.suggested_client_id,
-      suggestedClientName: c?.name ?? null,
+      suggestedClientName: displayNames.get(r.suggested_client_id) ?? c?.name ?? null,
       suggestedProjectId: r.suggested_project_id,
       suggestedProjectName: p?.name ?? null,
       suggestedProjectCode: p?.project_code ?? null,
@@ -1168,6 +1180,9 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
     group_kind: GroupKind | null;
   }>;
 
+  // Contract-sourced display names (source of truth) override the embedded name.
+  const displayNames = await getClientDisplayNameMap(orgId);
+
   // group_link_id → set of explicitly linked project ids (0203).
   const projSetByLink = new Map<string, Set<string>>();
   for (const r of (gpRes.data ?? []) as Array<{ group_link_id: string; project_id: string }>) {
@@ -1205,7 +1220,7 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
       projectName: p.name,
       projectCode: p.project_code,
       clientId: p.client_id,
-      clientName: c?.name ?? null,
+      clientName: (p.client_id ? displayNames.get(p.client_id) : null) ?? c?.name ?? null,
       hasClientGroup: hasClient,
       hasTechnicalGroup: hasTech,
     });
@@ -1230,13 +1245,14 @@ export interface AtRiskClient {
 }
 
 async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
-  const [{ data, error }, activeIds] = await Promise.all([
+  const [{ data, error }, activeIds, displayNames] = await Promise.all([
     supabaseAdmin
       .from("client_satisfaction_analyses")
       .select("client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)")
       .eq("organization_id", orgId)
       .eq("is_current", true),
     getActiveProjectClientIds(orgId),
+    getClientDisplayNameMap(orgId),
   ]);
   if (error || !data) return [];
 
@@ -1255,7 +1271,7 @@ async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
       const c = Array.isArray(r.client) ? r.client[0] : r.client;
       return {
         clientId: r.client_id,
-        clientName: c?.name ?? "—",
+        clientName: displayNames.get(r.client_id) ?? c?.name ?? "—",
         satisfactionScore: r.satisfaction_score,
         sentiment: r.sentiment,
         topRisk: r.risks && r.risks.length > 0 ? r.risks[0] : null,

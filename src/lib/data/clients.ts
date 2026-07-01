@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
@@ -8,15 +9,23 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
  * the display name or the legacy "C123" code from the sheet.
  */
 export async function listClientOptions(orgId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("clients")
-    .select("id, name, external_id")
-    .eq("organization_id", orgId)
-    // Hide rows that were merged into a canonical client (de-dup tombstones).
-    .is("merged_into_client_id", null)
-    .order("name");
+  const [{ data, error }, displayNames] = await Promise.all([
+    supabaseAdmin
+      .from("clients")
+      .select("id, name, external_id")
+      .eq("organization_id", orgId)
+      // Hide rows that were merged into a canonical client (de-dup tombstones).
+      .is("merged_into_client_id", null)
+      .order("name"),
+    // Contracts own client identity — every picker shows the contract-sheet name.
+    getClientDisplayNameMap(orgId),
+  ]);
   if (error) throw error;
-  return data ?? [];
+  // Overlay the contract-sourced display name so pickers never show the raw Odoo
+  // project name. Re-sort by the resolved name (the DB ordered by the raw name).
+  return (data ?? [])
+    .map((c) => ({ ...c, name: displayNames.get(c.id) ?? c.name }))
+    .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ar"));
 }
 
 // Per-client search keywords for pickers: the names by which a human might look
@@ -55,6 +64,136 @@ export async function getClientSearchKeywords(orgId: string): Promise<Map<string
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Contracts are the source of truth for a client's IDENTITY. Odoo-synced names
+// (external_source='odoo') and manual rows must defer to the contract sheet:
+// when such a client carries ≥1 contract, its display name is taken from the
+// newest contract's `sheet_client_name`. Sheet-sourced clients keep their own
+// `name` — that value was ALREADY imported from the contracts sheet (the
+// unified client name) and is cleaner than the per-row service label stored on
+// `sheet_client_name`, so we don't override it. Clients with no contract keep
+// their existing name until linked.
+// ---------------------------------------------------------------------------
+export function resolveClientName(
+  fallbackName: string,
+  contracts: { sheet_client_name: string | null; start_date: string | null }[] | null | undefined,
+  externalSource?: string | null,
+): string {
+  // Sheet clients already carry the contract-sourced name — leave it be.
+  if (externalSource === "excel-acc-sheet") return fallbackName;
+  const named = (contracts ?? [])
+    .filter((c) => (c.sheet_client_name ?? "").trim().length > 0)
+    .sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? ""));
+  return named[0]?.sheet_client_name?.trim() || fallbackName;
+}
+
+// ---------------------------------------------------------------------------
+// Contract folding across the merge identity set.
+//
+// A real brand often exists as TWO client rows: the canonical (Odoo) row that
+// carries the delivery project + WhatsApp chats, and a merged sheet twin
+// (external_source='excel-acc-sheet', tombstoned via merged_into_client_id)
+// that carries the contracts. merge_clients repoints contracts onto the
+// canonical, but the nightly contracts-sheet sync re-attaches them to the sheet
+// twin (it keys on the sheet client_id), so in steady state a merged client's
+// contracts live on the tombstone and are invisible to a canonical-id lookup.
+//
+// This resolves, per NON-tombstone client, ALL contracts across its identity
+// set (itself + every twin merged into it), so the contract sheet becomes the
+// single source of truth for a client's display name and contract count no
+// matter which row physically holds the contract. See
+// [[project_satisfaction_contract_bridge]] and [[project_clients_centralization]].
+// ---------------------------------------------------------------------------
+export type FoldedContract = { sheet_client_name: string | null; start_date: string | null };
+
+async function _foldedContractsByCanonical(
+  orgId: string,
+): Promise<Map<string, FoldedContract[]>> {
+  const [clientsRes, contractsRes] = await Promise.all([
+    supabaseAdmin
+      .from("clients")
+      .select("id, merged_into_client_id")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("contracts")
+      .select("client_id, sheet_client_name, start_date")
+      .eq("organization_id", orgId),
+  ]);
+  if (clientsRes.error) throw clientsRes.error;
+  if (contractsRes.error) throw contractsRes.error;
+
+  // tombstone id → canonical id (one hop; merge targets are never themselves merged).
+  const mergeMap = new Map<string, string>();
+  for (const c of (clientsRes.data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
+    if (c.merged_into_client_id) mergeMap.set(c.id, c.merged_into_client_id);
+  }
+
+  const out = new Map<string, FoldedContract[]>();
+  for (const k of (contractsRes.data ?? []) as Array<
+    { client_id: string | null } & FoldedContract
+  >) {
+    if (!k.client_id) continue;
+    const canon = mergeMap.get(k.client_id) ?? k.client_id;
+    const arr = out.get(canon) ?? [];
+    arr.push({ sheet_client_name: k.sheet_client_name, start_date: k.start_date });
+    out.set(canon, arr);
+  }
+  return out;
+}
+export const foldedContractsByCanonical = cache(_foldedContractsByCanonical);
+
+// Org-wide map: canonical clientId → its contract-sourced DISPLAY name. Contracts
+// own client identity, so any client with ≥1 contract (directly or via a merged
+// twin) is named from the newest contract's sheet_client_name; unlinked clients
+// keep their existing name. This is the single resolver every client-name
+// surface (/clients, /satisfaction, group-mapping admin) should use so the whole
+// app shows names "as written on the contract", not the Odoo project name.
+async function _getClientDisplayNameMap(orgId: string): Promise<Map<string, string>> {
+  const [clientsRes, folded] = await Promise.all([
+    supabaseAdmin
+      .from("clients")
+      .select("id, name, external_source")
+      .eq("organization_id", orgId)
+      .is("merged_into_client_id", null),
+    foldedContractsByCanonical(orgId),
+  ]);
+  if (clientsRes.error) throw clientsRes.error;
+
+  const m = new Map<string, string>();
+  for (const c of (clientsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    external_source: string | null;
+  }>) {
+    m.set(c.id, resolveClientName(c.name, folded.get(c.id), c.external_source));
+  }
+  return m;
+}
+export const getClientDisplayNameMap = cache(_getClientDisplayNameMap);
+
+// Every client id that shares this client's commercial identity: itself, its
+// canonical parent (if it is a merged sheet twin), and every sibling merged into
+// that parent. A client's contracts/logs are gathered across this whole set,
+// because the contract sheet keys them on the twin while the delivery data lives
+// on the canonical row. Mirrors the satisfaction bridge so /clients and
+// /satisfaction resolve a client's portfolio identically.
+async function _getClientIdentityIds(orgId: string, clientId: string): Promise<string[]> {
+  const { data } = await supabaseAdmin
+    .from("clients")
+    .select("id, merged_into_client_id")
+    .eq("organization_id", orgId)
+    .not("merged_into_client_id", "is", null);
+  const parentOf = new Map<string, string>();
+  for (const r of (data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
+    if (r.merged_into_client_id) parentOf.set(r.id, r.merged_into_client_id);
+  }
+  const canonical = parentOf.get(clientId) ?? clientId; // walk up one hop
+  const ids = new Set<string>([clientId, canonical]);
+  for (const [child, parent] of parentOf) if (parent === canonical) ids.add(child);
+  return Array.from(ids);
+}
+export const getClientIdentityIds = cache(_getClientIdentityIds);
 
 export async function listClients(orgId: string) {
   const { data, error } = await supabaseAdmin
@@ -116,14 +255,18 @@ export async function listClientsPage(
   const page = Math.max(1, opts.page ?? 1);
   const source = opts.source ?? "all";
 
-  const { data, error } = await supabaseAdmin
-    .from("clients")
-    .select(
-      "id, name, external_id, external_source, phone, email, company_website, contracts(count), projects(count)",
-    )
-    .eq("organization_id", orgId)
-    .is("merged_into_client_id", null)
-    .order("name");
+  const [{ data, error }, folded] = await Promise.all([
+    supabaseAdmin
+      .from("clients")
+      // Contracts are folded in separately (they may live on a merged sheet
+      // twin, invisible to a direct embed), so here we only need the scalar
+      // client fields + the delivery project count.
+      .select("id, name, external_id, external_source, phone, email, company_website, projects(count)")
+      .eq("organization_id", orgId)
+      .is("merged_into_client_id", null)
+      .order("name"),
+    foldedContractsByCanonical(orgId),
+  ]);
   if (error) throw error;
 
   type Raw = {
@@ -134,12 +277,12 @@ export async function listClientsPage(
     phone: string | null;
     email: string | null;
     company_website: string | null;
-    contracts: { count: number }[] | null;
     projects: { count: number }[] | null;
   };
 
   const all: ClientsPageRow[] = ((data ?? []) as unknown as Raw[]).map((r) => {
-    const contracts = r.contracts?.[0]?.count ?? 0;
+    const foldedContracts = folded.get(r.id) ?? [];
+    const contracts = foldedContracts.length;
     const projects = r.projects?.[0]?.count ?? 0;
     const src: ClientSource =
       contracts > 0 && projects > 0
@@ -151,7 +294,8 @@ export async function listClientsPage(
             : "other";
     return {
       id: r.id,
-      name: r.name,
+      // Contracts own the identity: Odoo/manual names defer to the contract.
+      name: resolveClientName(r.name, foldedContracts, r.external_source),
       external_id: r.external_id,
       external_source: r.external_source,
       phone: r.phone,
@@ -162,6 +306,10 @@ export async function listClientsPage(
       source: src,
     };
   });
+
+  // Re-sort by the resolved (contract-sourced) name — the DB ordered by the
+  // raw clients.name, which may differ once contracts override it.
+  all.sort((a, b) => a.name.localeCompare(b.name, "ar"));
 
   const totals = {
     clients: all.length,
@@ -182,13 +330,85 @@ export async function getClient(orgId: string, id: string) {
   const { data, error } = await supabaseAdmin
     .from("clients")
     .select(
-      "*, projects ( id, name, status, priority, start_date, end_date, account_manager_employee_id )",
+      "*, projects ( id, name, project_code, status, priority, start_date, end_date, account_manager_employee_id ), contracts ( sheet_client_name, start_date )",
     )
     .eq("organization_id", orgId)
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Connect pickers — the options for linking a project / contract to a client.
+// Both list EVERY non-tombstone row org-wide (with its current owner name as a
+// hint), so an operator can re-home a mis-attributed project/contract onto the
+// right contract-client. Small tables (~300 rows each) → fetch all, filter in UI.
+// ---------------------------------------------------------------------------
+export type ConnectableProject = {
+  id: string;
+  name: string;
+  project_code: string | null;
+  client_id: string;
+  client_name: string | null;
+};
+
+export type ConnectableContract = {
+  id: string;
+  contract_code: string | null;
+  sheet_client_name: string | null;
+  client_id: string;
+  client_name: string | null;
+};
+
+export async function listConnectableProjects(orgId: string): Promise<ConnectableProject[]> {
+  const { data, error } = await supabaseAdmin
+    .from("projects")
+    .select("id, name, project_code, client_id, client:clients(name)")
+    .eq("organization_id", orgId)
+    .order("name");
+  if (error) throw error;
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    name: string;
+    project_code: string | null;
+    client_id: string;
+    client: { name: string | null } | { name: string | null }[] | null;
+  }>).map((r) => {
+    const c = Array.isArray(r.client) ? r.client[0] : r.client;
+    return {
+      id: r.id,
+      name: r.name,
+      project_code: r.project_code,
+      client_id: r.client_id,
+      client_name: c?.name ?? null,
+    };
+  });
+}
+
+export async function listConnectableContracts(orgId: string): Promise<ConnectableContract[]> {
+  const { data, error } = await supabaseAdmin
+    .from("contracts")
+    .select("id, contract_code, sheet_client_name, client_id, client:clients(name)")
+    .eq("organization_id", orgId)
+    .order("contract_code");
+  if (error) throw error;
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    contract_code: string | null;
+    sheet_client_name: string | null;
+    client_id: string;
+    client: { name: string | null } | { name: string | null }[] | null;
+  }>).map((r) => {
+    const c = Array.isArray(r.client) ? r.client[0] : r.client;
+    return {
+      id: r.id,
+      contract_code: r.contract_code,
+      sheet_client_name: r.sheet_client_name,
+      client_id: r.client_id,
+      client_name: c?.name ?? null,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

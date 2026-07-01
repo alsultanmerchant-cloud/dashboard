@@ -929,7 +929,7 @@ async function TaskAssigneesSection({
         `id, employee_id, role_type, team_manager_employee_id, head_of_dept_employee_id,
          employee:employee_profiles!task_assignees_employee_id_fkey (
            id, full_name, job_title, avatar_url,
-           position:positions!employee_profiles_position_id_fkey ( role ),
+           position:positions!employee_profiles_position_id_fkey ( role, name ),
            department:departments!employee_profiles_department_id_fkey ( name )
          ),
          team_manager:employee_profiles!task_assignees_team_manager_employee_id_fkey (
@@ -958,7 +958,10 @@ async function TaskAssigneesSection({
           full_name: string;
           job_title: string | null;
           avatar_url: string | null;
-          position: { role: string } | { role: string }[] | null;
+          position:
+            | { role: string; name: string | null }
+            | { role: string; name: string | null }[]
+            | null;
           department: { name: string } | { name: string }[] | null;
         }
       | {
@@ -966,7 +969,10 @@ async function TaskAssigneesSection({
           full_name: string;
           job_title: string | null;
           avatar_url: string | null;
-          position: { role: string } | { role: string }[] | null;
+          position:
+            | { role: string; name: string | null }
+            | { role: string; name: string | null }[]
+            | null;
           department: { name: string } | { name: string }[] | null;
         }[]
       | null;
@@ -1057,6 +1063,7 @@ async function TaskAssigneesSection({
         employee_id: row.employee_id,
         role_type: row.role_type,
         positionRole: pos?.role ?? null,
+        positionName: pos?.name ?? null,
         team_manager_employee_id: resolvedLeaderId,
         head_of_dept_employee_id: resolvedHodId,
         employee: {

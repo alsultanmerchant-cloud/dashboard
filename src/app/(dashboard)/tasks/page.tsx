@@ -12,6 +12,12 @@ import {
   type TaskQueryParams,
 } from "./_filter_params";
 import {
+  parseFlowParam,
+  resolveFlowTaskIds,
+  combineTaskIdSets,
+  type FlowFilter,
+} from "./_flow_filter";
+import {
   loadTaskBoardPageForGlobalView,
   loadTasksPageForGlobalView,
 } from "./_loaders";
@@ -43,6 +49,8 @@ export default async function TasksPage({
     odooProjectId?: string;
     groupBy?: string;
     cf?: string;
+    flow?: string;
+    fw?: string;
   }>;
 }) {
   const [session, t, sp] = await Promise.all([
@@ -95,6 +103,17 @@ export default async function TasksPage({
   const active = built.activeKeys;
   const taskFilters = { ...built.filters };
 
+  // Stage-transition drill-down (dashboard regressions card): resolved to the
+  // exact task ids that made the from→to move in the window — see _flow_filter.ts.
+  const flowFilter = parseFlowParam(sp.flow, sp.fw);
+
+  // Denominator scope for the toolbar "من أصل N": when the view is drilled into a
+  // stage facet (e.g. delivery-pipeline card → sf=[stage=in_progress]), the total
+  // should count tasks in that stage, not the whole org — so it matches the card.
+  const stageScope = (taskFilters.searchFacets ?? [])
+    .filter((f) => f.field === "stage")
+    .map((f) => f.value);
+
   const canViewProjectInfo =
     session.isOwner || session.permissions.has("projects.view");
 
@@ -143,6 +162,8 @@ export default async function TasksPage({
           groupBy={groupBy}
           taskFilters={taskFilters}
           customFilterTaskIdsTree={sp.cf ?? null}
+          flowFilter={flowFilter}
+          stageScope={stageScope}
           pageSize={pageSize}
           apiQueryString={apiQueryString}
           queryString={queryString}
@@ -186,6 +207,8 @@ async function TasksBoardSection({
   groupBy,
   taskFilters,
   customFilterTaskIdsTree,
+  flowFilter,
+  stageScope,
   pageSize,
   apiQueryString,
   queryString,
@@ -199,6 +222,10 @@ async function TasksBoardSection({
   groupBy: string[];
   taskFilters: ReturnType<typeof buildTaskFiltersFromParams>["filters"];
   customFilterTaskIdsTree: string | null;
+  // Non-null when drilled into a stage-transition (dashboard regressions card).
+  flowFilter: FlowFilter | null;
+  // Stage facet values in the current view; scopes the toolbar "of N" denominator.
+  stageScope: string[];
   pageSize: number;
   apiQueryString: string;
   queryString: string;
@@ -228,7 +255,17 @@ async function TasksBoardSection({
     return error ? [] : (data ?? []).map((r) => r.id as string);
   })();
 
-  const customFilterTaskIds = await customFilterPromise;
+  // Stage-transition drill-down resolves to the exact regressed task ids, in
+  // parallel with the custom-filter compile above.
+  const flowPromise: Promise<string[] | null> = flowFilter
+    ? resolveFlowTaskIds(orgId, flowFilter)
+    : Promise.resolve(null);
+
+  const [customFilterTaskIdsRaw, flowTaskIds] = await Promise.all([
+    customFilterPromise,
+    flowPromise,
+  ]);
+  const customFilterTaskIds = combineTaskIdSets(customFilterTaskIdsRaw, flowTaskIds);
   // Agent scope: restrict to the viewer's own tasks (assigned ∪ followed). We
   // resolve the id set once and reuse it for both the board filter (intersected
   // with any custom filter) and the toolbar KPI counts.
@@ -278,6 +315,7 @@ async function TasksBoardSection({
             orgId={orgId}
             projectId={resolvedProjectId}
             restrictTaskIds={agentTaskIds}
+            stageScope={stageScope}
             filteredTotalCount={filteredTotalCount}
             noDeadlineActive={noDeadlineActive}
             noDeadlineHref={noDeadlineActive ? "/tasks" : "/tasks?f=no_deadline"}
@@ -384,6 +422,7 @@ async function TasksToolbarMeta({
   orgId,
   projectId,
   restrictTaskIds,
+  stageScope,
   filteredTotalCount,
   noDeadlineActive,
   noDeadlineHref,
@@ -395,6 +434,10 @@ async function TasksToolbarMeta({
   projectId: string | null;
   // Agent scope: when non-null, count only these task ids (the viewer's own).
   restrictTaskIds: string[] | null;
+  // Stage facet values in view: when set, the "of N" total is scoped to those
+  // stages so it matches the dashboard card that drilled in (e.g. "15 of 38 in
+  // in_progress") instead of the org-wide grand total.
+  stageScope: string[];
   filteredTotalCount: number;
   noDeadlineActive: boolean;
   noDeadlineHref: string;
@@ -402,7 +445,8 @@ async function TasksToolbarMeta({
   kpiNoDeadlineHintLabel: string;
   kpiNoDeadlineLabel: string;
 }) {
-  // `kind`: "total" = all non-archived; "noDeadline" = open + no dates.
+  // `kind`: "total" = all non-archived (optionally stage-scoped); "noDeadline" =
+  // open + no dates.
   const buildScope = (kind: "total" | "noDeadline", ids?: string[]) => {
     let q = supabaseAdmin
       .from("tasks")
@@ -410,6 +454,8 @@ async function TasksToolbarMeta({
       .eq("organization_id", orgId)
       .is("archived_at", null);
     if (projectId) q = q.eq("project_id", projectId);
+    // The "of N" denominator follows the stage the user drilled into.
+    if (kind === "total" && stageScope.length) q = q.in("stage", stageScope);
     if (kind === "noDeadline") {
       q = q.neq("stage", "done").is("planned_date", null).is("due_date", null);
     }

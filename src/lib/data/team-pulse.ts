@@ -3,6 +3,7 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import { isLeadershipPosition, isLeadershipSql } from "@/lib/data/leadership";
+import { riyadhTodayIso, riyadhDaysAgoIso, riyadhDateOf } from "@/lib/tz";
 
 // =========================================================================
 // Team Pulse (نبض الفريق) — employee MOVEMENT & ACTIVITY, not SLA quality.
@@ -23,14 +24,15 @@ import { isLeadershipPosition, isLeadershipSql } from "@/lib/data/leadership";
 // on the board (no current duty), counted separately as noDuty.
 // =========================================================================
 
+// Day-granular activity status the team defined (Asia/Riyadh calendar):
+//   active   (نشط)     = took an action TODAY
+//   slow     (خامل)    = last action was YESTERDAY
+//   stalled  (غير نشط) = last action was before yesterday, or never
 export type ActivityStatus = "active" | "slow" | "stalled";
 export type PulseStatus = "good" | "watch" | "risk" | "na";
 // Workload vs the team: drowning / normal / has spare capacity.
 export type LoadFlag = "overloaded" | "balanced" | "light";
 
-// Activity-status thresholds (calendar days since last stage movement).
-const ACTIVE_DAYS = 2;
-const SLOW_DAYS = 5;
 // A task with no stage movement in this many days is "stuck" (needs a push).
 // (Encoded in the SQL below; kept here for documentation.)
 export const STUCK_DAYS = 3;
@@ -44,12 +46,20 @@ export interface TeamMemberRow {
   // move OR a Log Note) and how many actions today / this week.
   lastActionAt: string | null;
   actionsToday: number;
+  movesToday: number; // stage moves the person made today
+  notesToday: number; // Log Notes the person wrote today
   actionsThisWeek: number;
   lastMoveAt: string | null;
   status: ActivityStatus;
   momentum: number; // actionsThisWeek - actionsPrevWeek (↑/↓)
+  completedToday: number; // tasks completed today
   completedThisWeek: number;
   openWip: number; // open live tasks owned
+  // مُعلقة — tasks whose CURRENT stage this person owns (template stage-owner):
+  // how many sit on their desk, and how many of those are past their deadline
+  // (the SLA / deadline-commitment signal). From the accountability engine.
+  ownedOpen: number;
+  pendingLate: number;
   stuckTasks: number; // open tasks not moved in STUCK_DAYS+
   loadFlag: LoadFlag; // workload vs the team median
   lastUpdateAt: string | null; // most recent Log Note on their tasks
@@ -140,14 +150,19 @@ interface ActivitySqlRow {
   last_action: string | null;
   last_move: string | null;
   actions_today: number;
+  moves_today: number;
+  notes_today: number;
   actions7: number;
   actions_prev: number;
   open_wip: number;
   stalled: number;
   done7: number;
+  done_today: number;
   last_update: string | null;
   updates7: number;
   no_update: number;
+  owned_open: number;
+  pending_late: number;
 }
 
 async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
@@ -158,13 +173,14 @@ async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
   return (data ?? []) as T[];
 }
 
-// Status from the most recent ACTION in Rwasem (stage move OR Log Note) — this
-// is the "is he working now" signal the team asked for.
+// Status from the most recent ACTION in Rwasem (stage move OR Log Note),
+// bucketed by Asia/Riyadh CALENDAR DAY (the team's definition): acted today →
+// نشط, yesterday → خامل, anything older / never → غير نشط.
 function statusOf(lastAction: string | null): ActivityStatus {
   if (!lastAction) return "stalled";
-  const days = (Date.now() - new Date(lastAction).getTime()) / 86_400_000;
-  if (days <= ACTIVE_DAYS) return "active";
-  if (days <= SLOW_DAYS) return "slow";
+  const d = riyadhDateOf(lastAction);
+  if (d >= riyadhTodayIso()) return "active";
+  if (d === riyadhDaysAgoIso(1)) return "slow";
   return "stalled";
 }
 
@@ -186,15 +202,30 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
     select e.id employee_id, e.full_name, e.job_title,
            pp.role position_role, pp.name position_name, e.department_id,
            c.last_action, c.last_move,
-           coalesce(c.actions_today,0) actions_today, coalesce(c.actions7,0) actions7,
+           coalesce(c.actions_today,0) actions_today,
+           coalesce(c.moves_today,0) moves_today, coalesce(c.notes_today,0) notes_today,
+           coalesce(c.actions7,0) actions7,
            coalesce(c.actions_prev,0) actions_prev,
            coalesce(c.open_wip,0) open_wip, coalesce(c.stalled,0) stalled,
-           coalesce(c.done7,0) done7,
-           c.last_update, coalesce(c.updates7,0) updates7, coalesce(c.no_update,0) no_update
+           coalesce(c.done7,0) done7, coalesce(c.done_today,0) done_today,
+           c.last_update, coalesce(c.updates7,0) updates7, coalesce(c.no_update,0) no_update,
+           coalesce(sc.owned_open,0) owned_open, coalesce(sc.pending_late,0) pending_late
       from employee_profiles e
       left join positions pp on pp.id = e.position_id
       left join team_activity_cache c
         on c.employee_id = e.id and c.organization_id = e.organization_id
+      -- مُعلقة: tasks whose CURRENT stage this person owns (template stage-owner,
+      -- accountable_position_for_stage) — total on their desk + the past-deadline
+      -- subset. Read from the accountability_scorecard cache so it matches
+      -- /accountability exactly (position-aware, refreshed every 10 min).
+      left join (
+        select employee_id,
+               sum(open_tasks) owned_open,
+               sum(overdue_owned) pending_late
+          from accountability_scorecard
+         where organization_id = '${orgId}'
+         group by employee_id
+      ) sc on sc.employee_id = e.id
      where e.organization_id = '${orgId}'
        and e.employment_status = 'active'
        and e.department_id is not null
@@ -220,12 +251,17 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
       departmentId: r.department_id,
       lastActionAt: r.last_action,
       actionsToday: r.actions_today,
+      movesToday: r.moves_today,
+      notesToday: r.notes_today,
       actionsThisWeek: r.actions7,
       lastMoveAt: r.last_move,
       status: statusOf(r.last_action),
       momentum: r.actions7 - r.actions_prev,
+      completedToday: r.done_today,
       completedThisWeek: r.done7,
       openWip: r.open_wip,
+      ownedOpen: r.owned_open,
+      pendingLate: r.pending_late,
       stuckTasks: r.stalled,
       loadFlag: "balanced", // set in the capacity pass below
       lastUpdateAt: r.last_update,
@@ -460,7 +496,9 @@ export const getAllMembersByActivity = cache(_getAllMembersByActivity);
 // ---- Per-employee action breakdown (drill-down) --------------------------
 // What the "actions in Rwasem" number is actually made of: which tasks the
 // person acted on, in which project, and how many stage moves vs Log Notes.
-// Scoped to one employee's tasks over a window → small + fast (live, no cache).
+// Attributed to the ACTUAL actor (task_comments.actor_employee_id), so the
+// total reconciles with the نبض الفريق header and never counts a co-assignee's
+// actions. Small + fast (live, no cache).
 
 export interface ActionLogRow {
   taskId: string;
@@ -500,51 +538,40 @@ async function _getEmployeeActionLog(
   //   • explicit [from, to] calendar dates (the CEO's date filter — lets him
   //     drill into a single day or a custom span), inclusive of both ends.
   //   • rolling "last N days" (the default presets).
-  // The explicit range wins when both bounds are valid dates.
+  // The explicit range wins when both bounds are valid dates. Calendar bounds
+  // are interpreted in Asia/Riyadh so "اليوم" matches the pulse table's today.
   const useRange = !!from && !!to && ISO_DATE_RE.test(from) && ISO_DATE_RE.test(to) && from <= to;
   const win = Math.max(1, Math.min(365, Math.floor(days)));
-  // `to` is inclusive → compare against the day AFTER it (exclusive upper bound).
-  const movePredicate = useRange
-    ? `h.entered_at >= '${from}'::date and h.entered_at < ('${to}'::date + 1)`
-    : `h.entered_at >= now() - interval '${win} days'`;
-  const notePredicate = useRange
-    ? `c.created_at >= '${from}'::date and c.created_at < ('${to}'::date + 1)`
+  const windowPredicate = useRange
+    ? `c.created_at >= ('${from}'::date at time zone 'Asia/Riyadh')
+        and c.created_at < (('${to}'::date + 1) at time zone 'Asia/Riyadh')`
     : `c.created_at >= now() - interval '${win} days'`;
 
+  // Author-based: count EVERY action the person ACTUALLY performed
+  // (task_comments.actor_employee_id, all kinds), grouped by task. moves =
+  // stage_move; notes = the rest they authored (comments + created + assignee/
+  // edits — the "log" side). Matches the نبض الفريق header exactly, so the
+  // drill-down reconciles instead of counting co-assignees' actions.
+  // task_stage_history is not used here (its moves carry no actor).
   const rows = await runSql<ActionLogSqlRow>(`
-    with my as (
-      select ta.task_id
-        from task_assignees ta
-        join tasks t on t.id = ta.task_id
-       where ta.role_type = 'agent' and ta.employee_id = '${employeeId}'
-         and ta.organization_id = '${orgId}'
-         and t.archived_at is null
-    ),
-    mv as (
-      select h.task_id, count(*) c, max(h.entered_at) la
-        from task_stage_history h
-       where h.task_id in (select task_id from my)
-         and ${movePredicate}
-       group by 1
-    ),
-    nt as (
-      select c.task_id, count(*) c, max(c.created_at) la
+    with acts as (
+      select c.task_id,
+             count(*) filter (where c.action_kind = 'stage_move') moves,
+             count(*) filter (where c.action_kind <> 'stage_move') notes,
+             count(*) total,
+             max(c.created_at) la
         from task_comments c
-       where c.task_id in (select task_id from my)
-         and ${notePredicate}
-       group by 1
+       where c.organization_id = '${orgId}'
+         and c.actor_employee_id = '${employeeId}'
+         and ${windowPredicate}
+       group by c.task_id
     )
     select t.id task_id, t.task_code, t.title, p.name project_name,
-           coalesce(mv.c,0) moves, coalesce(nt.c,0) notes,
-           coalesce(mv.c,0) + coalesce(nt.c,0) total,
-           greatest(mv.la, nt.la) last_action
-      from tasks t
+           a.moves, a.notes, a.total, a.la last_action
+      from acts a
+      join tasks t on t.id = a.task_id and t.archived_at is null
       left join projects p on p.id = t.project_id
-      left join mv on mv.task_id = t.id
-      left join nt on nt.task_id = t.id
-     where t.id in (select task_id from my)
-       and (mv.c is not null or nt.c is not null)
-     order by total desc, last_action desc nulls last
+     order by a.total desc, a.la desc nulls last
      limit 100
   `);
   return rows.map((r) => ({

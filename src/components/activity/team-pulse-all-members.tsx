@@ -1,4 +1,15 @@
-import { ExternalLink, TrendingUp, TrendingDown, Users } from "lucide-react";
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Users,
+  GitBranch,
+  MessageSquare,
+  Search,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -10,9 +21,69 @@ const NA = "—";
 
 const STATUS_META: Record<ActivityStatus, { label: string; tone: string; dot: string }> = {
   active: { label: "نشط", tone: "text-cc-green", dot: "bg-cc-green" },
-  slow: { label: "بطيء", tone: "text-amber", dot: "bg-amber" },
-  stalled: { label: "متوقّف", tone: "text-cc-red", dot: "bg-cc-red" },
+  slow: { label: "خامل", tone: "text-amber", dot: "bg-amber" },
+  stalled: { label: "غير نشط", tone: "text-cc-red", dot: "bg-cc-red" },
 };
+
+function ActionsSplit({ moves, notes }: { moves: number; notes: number }) {
+  const total = moves + notes;
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-center gap-2.5 tabular-nums",
+        total > 0 ? "text-cc-green" : "text-muted-foreground",
+      )}
+    >
+      <span className="inline-flex items-center gap-0.5" title="نقل مراحل">
+        <GitBranch className="size-3" />
+        {moves}
+      </span>
+      <span
+        className="inline-flex items-center gap-0.5"
+        title="سجل العمل: ملاحظات (كومنت) + إنشاء مهام + إسناد وتعديلات"
+      >
+        <MessageSquare className="size-3" />
+        {notes}
+      </span>
+    </div>
+  );
+}
+
+function CompletedSplit({ today, week }: { today: number; week: number }) {
+  return (
+    <div className="flex flex-col items-center leading-tight tabular-nums">
+      <span className="font-semibold text-cc-green">
+        {today}
+        <span className="text-[9px] font-normal text-muted-foreground"> اليوم</span>
+      </span>
+      <span className="text-[10px] text-muted-foreground">{week} الأسبوع</span>
+    </div>
+  );
+}
+
+function PendingCell({ late, owned }: { late: number; owned: number }) {
+  if (owned === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-col items-center leading-tight tabular-nums">
+      <span className={cn("font-semibold", late > 0 ? "text-cc-red" : "text-muted-foreground")}>
+        {late}
+        <span className="text-[9px] font-normal text-muted-foreground"> متأخرة</span>
+      </span>
+      <span className="text-[10px] text-muted-foreground">{owned} على مكتبه</span>
+    </div>
+  );
+}
+
+// Loose Arabic-friendly normalize so "أيمن" matches "ايمن", "علية" ~ "عليه", etc.
+function norm(s: string | null | undefined): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ً-ْٰ]/g, "") // strip tashkeel
+    .trim();
+}
 
 function relativeDays(iso: string | null): string {
   if (!iso) return NA;
@@ -37,23 +108,51 @@ function Momentum({ value }: { value: number }) {
 // كل الموظفين عبر الأقسام، مرتّبين من الأقل نشاطًا إلى الأكثر — مكان واحد لرصد من
 // توقّف في الشركة كلها بدل التنقّل بين الأقسام.
 export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = norm(query);
+    if (!q) return members;
+    return members.filter(
+      (m) =>
+        norm(m.fullName).includes(q) ||
+        norm(m.departmentName).includes(q) ||
+        norm(m.positionLabel).includes(q),
+    );
+  }, [members, query]);
+
   return (
     <Card className="mt-6">
       <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <p className="inline-flex items-center gap-2 text-sm font-semibold">
               <Users className="size-4 text-cyan" />
               كل الموظفين — مرتّبون من الأقل نشاطًا
             </p>
             <p className="text-[11px] text-muted-foreground">
-              نظرة واحدة على نشاط الفريق بالكامل عبر الأقسام · {members.length} موظف
+              نظرة واحدة على نشاط الفريق بالكامل عبر الأقسام ·{" "}
+              {query ? `${filtered.length} من ${members.length}` : `${members.length} موظف`}
             </p>
+          </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="ابحث عن موظف أو قسم…"
+              aria-label="ابحث عن موظف"
+              className="w-56 rounded-lg border border-border bg-card py-1.5 pe-8 ps-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-cyan focus:outline-none"
+            />
           </div>
         </div>
 
         {members.length === 0 ? (
           <p className="p-6 text-center text-xs text-muted-foreground">لا توجد بيانات نشاط بعد.</p>
+        ) : filtered.length === 0 ? (
+          <p className="p-6 text-center text-xs text-muted-foreground">
+            لا يوجد موظف مطابق لـ «{query}».
+          </p>
         ) : (
           <div className="max-h-[32rem] overflow-auto">
             <table className="w-full text-right text-xs">
@@ -63,15 +162,31 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                   <th className="px-3 py-2.5 font-medium">القسم</th>
                   <th className="px-3 py-2.5 font-medium">الحالة</th>
                   <th className="px-3 py-2.5 font-medium">آخر إجراء</th>
-                  <th className="px-3 py-2.5 font-medium text-center">إجراءات اليوم</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="كل الإجراءات التي قام بها الموظف نفسه اليوم في رواسم — نقل المراحل + سجل العمل (ملاحظات + إنشاء مهام + إسناد وتعديلات). منسوبة لفاعلها الحقيقي، لا لكل المكلّفين بالمهمة"
+                  >
+                    إجراءات اليوم
+                  </th>
                   <th className="px-3 py-2.5 font-medium">إجراءات الأسبوع</th>
-                  <th className="px-3 py-2.5 font-medium text-center">أُنجزت</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="المهام التي أنهاها اليوم / خلال هذا الأسبوع"
+                  >
+                    أُنجزت
+                  </th>
                   <th className="px-3 py-2.5 font-medium text-center">مفتوحة</th>
+                  <th
+                    className="px-3 py-2.5 font-medium text-center"
+                    title="المهام التي يملك مرحلتها الحالية (على مكتبه الآن) — كم منها تجاوز موعده (متأخرة) من إجمالي ما على مكتبه. مقياس الالتزام بالمواعيد."
+                  >
+                    مُعلقة
+                  </th>
                   <th className="px-3 py-2.5 font-medium" />
                 </tr>
               </thead>
               <tbody>
-                {members.map((m) => {
+                {filtered.map((m) => {
                   const meta = STATUS_META[m.status];
                   return (
                     <tr key={m.employeeId} className="border-b border-border/50 hover:bg-soft-1">
@@ -98,13 +213,8 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                         </span>
                       </td>
                       <td className={cn("px-3 py-2.5", meta.tone)}>{relativeDays(m.lastActionAt)}</td>
-                      <td
-                        className={cn(
-                          "px-3 py-2.5 tabular-nums text-center font-semibold",
-                          m.actionsToday > 0 ? "text-cc-green" : "text-muted-foreground",
-                        )}
-                      >
-                        {m.actionsToday}
+                      <td className="px-3 py-2.5">
+                        <ActionsSplit moves={m.movesToday} notes={m.notesToday} />
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
@@ -112,10 +222,13 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                           <Momentum value={m.momentum} />
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 tabular-nums text-center text-cc-green">
-                        {m.completedThisWeek}
+                      <td className="px-3 py-2.5 text-center">
+                        <CompletedSplit today={m.completedToday} week={m.completedThisWeek} />
                       </td>
                       <td className="px-3 py-2.5 tabular-nums text-center">{m.openWip}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        <PendingCell late={m.pendingLate} owned={m.ownedOpen} />
+                      </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-2">
                           <ActionBreakdownButton

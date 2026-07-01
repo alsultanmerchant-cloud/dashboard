@@ -609,6 +609,9 @@ async function importClients(ctx: ImportContext): Promise<number> {
     ctx.clientIdMap.set(p.id, data.id);
   }
 
+  // Follow client merges so re-homed projects don't get reverted on sync.
+  await resolveMergedClientMap(ctx);
+
   return partners.length;
 }
 
@@ -2824,6 +2827,38 @@ async function mirrorServicesToCategories(
   return rows.length;
 }
 
+// Redirect the odoo partner→client map through `merged_into_client_id`, so a
+// partner whose client row was folded into a canonical survivor (e.g. an odoo
+// delivery client merged into a contract-client via the /clients connect flow)
+// resolves to the SURVIVOR. Without this, every project sync blindly re-points
+// projects.client_id back to the tombstoned odoo row, undoing the link. Makes
+// re-points durable in BOTH merge directions (supersedes the old
+// "must merge sheet→odoo for sync-safety" rule).
+async function resolveMergedClientMap(ctx: ImportContext): Promise<void> {
+  if (ctx.clientIdMap.size === 0) return;
+  const { data } = await supabaseAdmin
+    .from("clients")
+    .select("id, merged_into_client_id")
+    .eq("organization_id", ctx.organizationId);
+  const mergedInto = new Map<string, string | null>();
+  for (const r of data ?? []) mergedInto.set(r.id, r.merged_into_client_id ?? null);
+  const canonical = (id: string): string => {
+    let cur = id;
+    const seen = new Set<string>();
+    while (!seen.has(cur)) {
+      seen.add(cur);
+      const next = mergedInto.get(cur);
+      if (!next) break;
+      cur = next;
+    }
+    return cur;
+  };
+  for (const [partnerId, clientId] of ctx.clientIdMap) {
+    const c = canonical(clientId);
+    if (c !== clientId) ctx.clientIdMap.set(partnerId, c);
+  }
+}
+
 async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
   const tables = [
     { name: "employee_profiles", map: ctx.employeeIdMap },
@@ -2860,4 +2895,7 @@ async function hydrateExistingMaps(ctx: ImportContext): Promise<void> {
     .eq("external_id", UNASSIGNED_CLIENT_EXTERNAL_ID)
     .maybeSingle();
   if (unassigned) ctx.unassignedClientId = unassigned.id;
+
+  // Follow client merges so re-homed projects don't get reverted on sync.
+  await resolveMergedClientMap(ctx);
 }

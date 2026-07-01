@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ArrowUpLeft, FileSignature, FileText } from "lucide-react";
-import { requirePagePermission } from "@/lib/auth-server";
-import { getClient } from "@/lib/data/clients";
+import { ArrowUpLeft, FileSignature, FileText, Briefcase } from "lucide-react";
+import { requirePagePermission, hasPermission } from "@/lib/auth-server";
+import { getClient, getClientDisplayNameMap } from "@/lib/data/clients";
+import { ConnectLinksDialog } from "../connect-links-dialog";
 import { listClientContracts } from "@/lib/data/contracts";
 import { listEntityActivity } from "@/lib/data/entity-activity";
 import { listMentionableEmployees } from "@/lib/data/employees";
@@ -32,6 +33,7 @@ export default async function ClientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requirePagePermission("clients.view");
+  const canManage = hasPermission(session, "clients.manage");
   const t = await getTranslations("ClientDetailPage");
   const locale = await getLocale();
   const { id } = await params;
@@ -39,13 +41,17 @@ export default async function ClientDetailPage({
   const client = await getClient(session.orgId, id);
   if (!client) notFound();
 
-  const [contracts, activity, mentionable] = await Promise.all([
+  const [contracts, activity, mentionable, nameMap] = await Promise.all([
     listClientContracts(session.orgId, id),
     listEntityActivity(session.orgId, { entityType: "client", entityId: id }),
     listMentionableEmployees(session.orgId),
+    getClientDisplayNameMap(session.orgId),
   ]);
 
-  const clientName = (client.name as string | null) ?? "—";
+  // Contracts own client identity — the display name resolves from the client's
+  // contract sheet (folded across merged twins), falling back to the raw name.
+  const clientName = nameMap.get(id) ?? (client.name as string | null) ?? "—";
+  const projects = ((client as { projects?: Array<{ id: string; name: string; project_code: string | null; status: string }> }).projects) ?? [];
   const activeCount = contracts.filter((c) => !CLOSED_STATUSES.has(c.status)).length;
   const totalValue = contracts.reduce((sum, c) => sum + Number(c.total_value || 0), 0);
 
@@ -54,13 +60,18 @@ export default async function ClientDetailPage({
       <PageHeader
         title={clientName}
         actions={
-          <Link
-            href="/clients"
-            className="inline-flex items-center gap-1 text-xs text-cyan hover:underline"
-          >
-            <ArrowUpLeft className="size-3 icon-flip-rtl" />
-            {t("back")}
-          </Link>
+          <div className="flex items-center gap-3">
+            {canManage && (
+              <ConnectLinksDialog clientId={id} clientName={clientName} variant="button" />
+            )}
+            <Link
+              href="/clients"
+              className="inline-flex items-center gap-1 text-xs text-cyan hover:underline"
+            >
+              <ArrowUpLeft className="size-3 icon-flip-rtl" />
+              {t("back")}
+            </Link>
+          </div>
         }
       />
 
@@ -123,6 +134,46 @@ export default async function ClientDetailPage({
                     <DataTableCell className="text-xs">
                       {formatShortDate(c.start_date, locale)}
                     </DataTableCell>
+                  </DataTableRow>
+                ))}
+              </tbody>
+            </DataTable>
+          </DataTableShell>
+        )}
+      </div>
+
+      <SectionTitle title={t("projectsTitle")} />
+      <div className="mb-8">
+        {projects.length === 0 ? (
+          <EmptyState
+            icon={<Briefcase className="size-6" />}
+            title={t("noProjects")}
+          />
+        ) : (
+          <DataTableShell>
+            <DataTable>
+              <DataTableHead>
+                <tr>
+                  <DataTableHeaderCell>{t("projectName")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("projectCode")}</DataTableHeaderCell>
+                  <DataTableHeaderCell>{t("projectStatus")}</DataTableHeaderCell>
+                </tr>
+              </DataTableHead>
+              <tbody>
+                {projects.map((p) => (
+                  <DataTableRow key={p.id}>
+                    <DataTableCell className="font-medium">
+                      <Link
+                        href={`/projects/${p.id}`}
+                        className="hover:text-cyan transition-colors"
+                      >
+                        {p.name}
+                      </Link>
+                    </DataTableCell>
+                    <DataTableCell className="font-mono text-xs text-muted-foreground">
+                      {p.project_code ?? "—"}
+                    </DataTableCell>
+                    <DataTableCell>{p.status}</DataTableCell>
                   </DataTableRow>
                 ))}
               </tbody>

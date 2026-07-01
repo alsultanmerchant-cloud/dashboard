@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ListChecks, Loader2, GitBranch, MessageSquare } from "lucide-react";
 import { StackedSheet } from "@/components/ui/stacked-sheet";
+import { DateField } from "@/components/ui/date-field";
+import { riyadhTodayIso } from "@/lib/tz";
 import { cn } from "@/lib/utils";
 
 interface ActionLogRow {
@@ -76,7 +78,7 @@ export function ActionBreakdownButton({
     };
   }, [open, days, employeeId, rangeActive, from, to]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = riyadhTodayIso();
   // Picking a preset clears the explicit range; picking a date switches modes.
   const pickPreset = (d: number) => {
     setFrom("");
@@ -108,7 +110,7 @@ export function ActionBreakdownButton({
         open={open}
         onOpenChange={setOpen}
         title={`تفاصيل نشاط ${fullName} في رواسم`}
-        description="المهام التي قام عليها بإجراءات، والمشروع، وعدد الإجراءات (تحريك المراحل + ملاحظات العمل)."
+        description="المهام التي قام عليها بإجراءات، والمشروع، وعدد الإجراءات (نقل المراحل + سجل العمل: ملاحظات وإنشاء وإسناد)."
       >
         {/* Window filter: rolling presets + explicit date filter */}
         <div className="mb-3 space-y-2">
@@ -151,28 +153,24 @@ export function ActionBreakdownButton({
               اليوم
             </button>
             <span className="text-muted-foreground">من</span>
-            <input
-              type="date"
+            <DateField
               value={from}
               max={to || today}
-              onChange={(e) => {
-                setFrom(e.target.value);
-                if (!to) setTo(e.target.value);
+              onChange={(v) => {
+                setFrom(v);
+                if (v && !to) setTo(v);
               }}
-              className="rounded-lg border border-border bg-background px-2 py-1 text-foreground [color-scheme:dark]"
               aria-label="من تاريخ"
             />
             <span className="text-muted-foreground">إلى</span>
-            <input
-              type="date"
+            <DateField
               value={to}
               min={from}
               max={today}
-              onChange={(e) => {
-                setTo(e.target.value);
-                if (!from) setFrom(e.target.value);
+              onChange={(v) => {
+                setTo(v);
+                if (v && !from) setFrom(v);
               }}
-              className="rounded-lg border border-border bg-background px-2 py-1 text-foreground [color-scheme:dark]"
               aria-label="إلى تاريخ"
             />
             {rangeActive && (
@@ -227,7 +225,10 @@ export function ActionBreakdownButton({
                     <GitBranch className="size-3.5" />
                     {r.moves}
                   </span>
-                  <span className="inline-flex items-center gap-1 text-muted-foreground" title="ملاحظات العمل">
+                  <span
+                    className="inline-flex items-center gap-1 text-muted-foreground"
+                    title="سجل العمل: ملاحظات + إنشاء + إسناد وتعديلات"
+                  >
                     <MessageSquare className="size-3.5" />
                     {r.notes}
                   </span>

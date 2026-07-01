@@ -188,52 +188,32 @@ export interface FunnelStageRow {
 }
 
 async function _getStageFunnel(orgId: string): Promise<FunnelStageRow[]> {
-  const [stagesRes, dwellRes] = await Promise.all([
-    supabaseAdmin
-      .from("tasks")
-      .select("stage, planned_date")
-      .eq("organization_id", orgId)
-      .is("archived_at", null),
-    supabaseAdmin
-      .from("task_stage_history")
-      .select("to_stage, duration_seconds")
-      .eq("organization_id", orgId)
-      .not("exited_at", "is", null),
-  ]);
-  if (stagesRes.error) throw stagesRes.error;
-  if (dwellRes.error) throw dwellRes.error;
+  // Aggregated in SQL (migration 0228). The old approach fetched every task row
+  // and counted in JS, but PostgREST caps a response at ~1000 rows — with >1000
+  // non-archived tasks the per-stage counts silently truncated (in_progress
+  // showed 8/19 instead of 15/38). overdue_count uses the same `is_overdue`
+  // column the /tasks `f=overdue` drill-down filters on, so they stay in lockstep.
+  const { data, error } = await supabaseAdmin.rpc("get_stage_funnel", {
+    p_org_id: orgId,
+  });
+  if (error) throw error;
 
-  const counts = new Map<TaskStage, number>();
-  const overdueCounts = new Map<TaskStage, number>();
-  // Overdue = open task past its deadline (team's Rwasem method).
-  const todayStr = new Date().toISOString().slice(0, 10);
-  for (const r of stagesRes.data ?? []) {
-    const s = (r as { stage: TaskStage; planned_date: string | null }).stage;
-    const pd = (r as { stage: TaskStage; planned_date: string | null }).planned_date;
-    counts.set(s, (counts.get(s) ?? 0) + 1);
-    if (s !== "done" && pd != null && pd < todayStr) {
-      overdueCounts.set(s, (overdueCounts.get(s) ?? 0) + 1);
-    }
-  }
-
-  const dwellSums = new Map<TaskStage, { total: number; n: number }>();
-  for (const r of dwellRes.data ?? []) {
-    const s = (r as { to_stage: TaskStage }).to_stage;
-    const d = (r as { duration_seconds: number | null }).duration_seconds ?? 0;
-    if (d <= 0) continue;
-    const cur = dwellSums.get(s) ?? { total: 0, n: 0 };
-    cur.total += d;
-    cur.n += 1;
-    dwellSums.set(s, cur);
-  }
+  type Row = {
+    stage: string;
+    open_count: number;
+    overdue_count: number;
+    avg_dwell_hours: number;
+  };
+  const byStage = new Map<string, Row>();
+  for (const r of (data ?? []) as Row[]) byStage.set(r.stage, r);
 
   return FUNNEL_STAGE_ORDER.map((stage) => {
-    const d = dwellSums.get(stage);
+    const r = byStage.get(stage);
     return {
       stage,
-      openCount: counts.get(stage) ?? 0,
-      overdueCount: overdueCounts.get(stage) ?? 0,
-      avgDwellHours: d ? d.total / d.n / 3600 : 0,
+      openCount: Number(r?.open_count ?? 0),
+      overdueCount: Number(r?.overdue_count ?? 0),
+      avgDwellHours: Number(r?.avg_dwell_hours ?? 0),
     };
   });
 }
@@ -1388,15 +1368,26 @@ async function _getTopRevisedTasks(
   const svcMap = new Map<string, { name: string; slug: string }>();
   for (const s of (servicesRes.data ?? []) as SvcRow[]) svcMap.set(s.id, { name: s.name, slug: s.slug });
 
-  // Merge Renewal variants: strip "Renewal " prefix so they group with the base service.
+  // Merge Renewal variants onto the base service. Names carry a leading emoji
+  // (e.g. "🔵Renewal Social Media"), so we key on serviceGroupKey() — which drops
+  // the emoji AND the Renewal prefix — and display via displayServiceName() (keeps
+  // the emoji, drops the Renewal word). Same helpers the service-health card uses.
   const byServiceMerged = new Map<string, { name: string; slug: string; count: number }>();
   for (const [svcId, count] of svcCount.entries()) {
     const svc = svcMap.get(svcId);
     if (!svc) continue;
-    const baseName = svc.name.replace(/^renewal\s+/i, "").trim();
-    const existing = byServiceMerged.get(baseName);
-    if (existing) existing.count += count;
-    else byServiceMerged.set(baseName, { name: baseName, slug: svc.slug, count });
+    const key = serviceGroupKey(svc.name);
+    const existing = byServiceMerged.get(key);
+    if (existing) {
+      existing.count += count;
+      // Prefer the base (non-renewal) service's slug/name for tone + label.
+      if (!isRenewalName(svc.name)) {
+        existing.name = displayServiceName(svc.name);
+        existing.slug = svc.slug;
+      }
+    } else {
+      byServiceMerged.set(key, { name: displayServiceName(svc.name), slug: svc.slug, count });
+    }
   }
 
   const byService = Array.from(byServiceMerged.values()).sort((a, b) => b.count - a.count);

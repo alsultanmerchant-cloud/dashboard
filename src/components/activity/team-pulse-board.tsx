@@ -201,8 +201,8 @@ export function TeamPulseBoard({ data }: { data: TeamPulseOverview }) {
 
       <p className="flex items-start gap-1.5 px-1 text-[11px] text-muted-foreground">
         <Info className="mt-0.5 size-3 shrink-0 text-cyan" />
-        «نشط» = حرّك مهمة خلال آخر يومين · «بحاجة لمتابعة» = مهمة مفتوحة لم تتحرّك منذ ٣ أيام. جودة
-        الالتزام بالمواعيد في صفحة{" "}
+        «نشط» = قام بإجراء اليوم · «خامل» = آخر إجراء كان أمس · «غير نشط» = آخر إجراء قبل ذلك ·
+        «بحاجة لمتابعة» = مهمة مفتوحة لم تتحرّك منذ ٣ أيام. جودة الالتزام بالمواعيد في صفحة{" "}
         <Link href="/accountability" className="text-cyan hover:underline">المساءلة</Link>.
       </p>
     </div>

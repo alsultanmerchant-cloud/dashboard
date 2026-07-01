@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DateField } from "@/components/ui/date-field";
 import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
 import type { EmployeeTrend, TrendPoint } from "@/lib/data/performance-trend";
 
@@ -117,12 +118,23 @@ export function CompareTrendModal({
   const cfg = RANGES.find((r) => r.key === range)!;
   const mcfg = METRICS.find((m) => m.key === metric)!;
 
-  const customActive = !!from && !!to && from <= to;
+  // A custom window takes over the moment EITHER bound is set (each is
+  // open-ended until the other is filled) — so picking a date visibly cancels
+  // the preset chips above. Inverted ranges are ignored.
+  const inverted = !!from && !!to && from > to;
+  const customActive = (!!from || !!to) && !inverted;
   const grain: "week" | "month" = customActive ? "month" : cfg.grain;
   const empSeries = (grain === "week" ? data?.weekly : data?.monthly) ?? [];
   const benchSeries = (grain === "week" ? data?.benchWeekly : data?.benchMonthly) ?? [];
+  // Compare on the year-month prefix so a same-month window (e.g. 02→30 Jun)
+  // still includes June, whose monthly point starts on the 1st.
+  const fromMonth = from.slice(0, 7);
+  const toMonth = to.slice(0, 7);
   const emp = customActive
-    ? empSeries.filter((p) => p.periodStart >= from && p.periodStart <= to)
+    ? empSeries.filter((p) => {
+        const m = p.periodStart.slice(0, 7);
+        return (!from || m >= fromMonth) && (!to || m <= toMonth);
+      })
     : empSeries.slice(-cfg.take);
   const benchByStart = new Map(benchSeries.map((b) => [b.periodStart, b]));
 
@@ -250,24 +262,20 @@ export function CompareTrendModal({
             ))}
             {/* Explicit date window — overrides the preset (monthly grain). */}
             <span className="mx-1 text-[11px] text-muted-foreground">أو</span>
-            <input
-              type="date"
+            <DateField
               value={from}
               max={to || undefined}
-              onChange={(e) => setFrom(e.target.value)}
-              className="rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground [color-scheme:dark]"
+              onChange={setFrom}
               aria-label="من تاريخ"
             />
             <span className="text-[11px] text-muted-foreground">→</span>
-            <input
-              type="date"
+            <DateField
               value={to}
               min={from || undefined}
-              onChange={(e) => setTo(e.target.value)}
-              className="rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-foreground [color-scheme:dark]"
+              onChange={setTo}
               aria-label="إلى تاريخ"
             />
-            {customActive && (
+            {(!!from || !!to) && (
               <button
                 type="button"
                 onClick={() => {

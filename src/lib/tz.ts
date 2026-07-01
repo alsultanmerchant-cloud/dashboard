@@ -19,6 +19,16 @@ export function riyadhTodayIso(): string {
   }).format(new Date());
 }
 
+/** The Asia/Riyadh calendar date (`YYYY-MM-DD`) of a given instant. */
+export function riyadhDateOf(instant: string | Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: RIYADH,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instant));
+}
+
 /** `YYYY-MM-DD` for `n` days before today, in Asia/Riyadh. */
 export function riyadhDaysAgoIso(n: number): string {
   const today = riyadhTodayIso();

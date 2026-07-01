@@ -3,6 +3,7 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getOrgSatisfactionAggregate } from "@/lib/data/satisfaction";
 import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
+import { riyadhTodayIso } from "@/lib/tz";
 
 // =========================================================================
 // Executive index scores (/dashboard top band).
@@ -299,8 +300,15 @@ async function _getExecutiveScores(
     revision_count: number | null;
   };
   const openTasks = (openTasksRes.data ?? []) as unknown as OpenTask[];
-  const todayStr = daysAgoIso(0).slice(0, 10);
-  const isOverdue = (t: OpenTask) => t.planned_date != null && t.planned_date < todayStr;
+  // Canonical overdue (migration 0219): open + non-archived + a passed deadline,
+  // EXCLUDING the `new` (not-started) stage — those are ordinary slip, not
+  // delivery distress. Rows are already open + non-archived (query above), so we
+  // test the date plus the stage. Boundary is Riyadh "today", matching the
+  // `tasks.is_overdue` column that the /tasks?filter=overdue drill-down reads, so
+  // the danger-card count and the drill-down list agree.
+  const todayStr = riyadhTodayIso();
+  const isOverdue = (t: OpenTask) =>
+    t.stage !== "new" && t.planned_date != null && t.planned_date < todayStr;
   const openCount = openTasks.length;
   const overdueCount = openTasks.filter(isOverdue).length;
   const blockedTasks = openTasks.filter((t) => t.hold_since !== null).length;

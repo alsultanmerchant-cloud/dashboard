@@ -39,6 +39,10 @@ export type AssigneeRow = {
   // function). Null when the employee has no position set; falls back to
   // role_type. Source of truth: /organization/employees.
   positionRole: string | null;
+  // Exact position title (positions.name), e.g. "مدير القسم المساند". Preferred
+  // on the badge over the generic role label so the card shows the person's
+  // real title verbatim. Null when no position is set.
+  positionName: string | null;
   team_manager_employee_id: string | null;
   head_of_dept_employee_id: string | null;
   employee: {
@@ -253,8 +257,12 @@ export function TaskAssigneesPanel({
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
           {assignees.map((a) => {
+            // Match the current-stage owner against the person's fine-grained
+            // POSITION role — not the coarse Odoo role_type (only agent /
+            // account_manager), which lit up every executor on the task at once.
             const isCurrentOwner =
-              currentOwnerRole !== null && a.role_type === currentOwnerRole;
+              currentOwnerRole !== null &&
+              (a.positionRole ?? a.role_type) === currentOwnerRole;
             return (
               <li
                 key={a.id}
@@ -277,10 +285,11 @@ export function TaskAssigneesPanel({
                       {a.employee.full_name}
                     </span>
                     <span className="rounded-full bg-cyan-dim px-1.5 py-0.5 text-[10px] font-semibold text-cyan">
-                      {(a.positionRole &&
-                        TASK_OWNER_ROLE_LABELS[
-                          a.positionRole as TaskOwnerRoleKey
-                        ]) ||
+                      {a.positionName ||
+                        (a.positionRole &&
+                          TASK_OWNER_ROLE_LABELS[
+                            a.positionRole as TaskOwnerRoleKey
+                          ]) ||
                         roleLabels[a.role_type]}
                     </span>
                     {isCurrentOwner && (

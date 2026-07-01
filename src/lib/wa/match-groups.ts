@@ -9,6 +9,11 @@ import "server-only";
 export interface ClientRef {
   id: string;
   name: string;
+  // Extra names the same client is known by — contract sheet names (source of
+  // truth), brand variants, etc. A group matches the client when its token hits
+  // the primary name OR any alias, so a group subject that carries the contract
+  // name still resolves. See [[project_client_display_name_resolver]].
+  aliases?: string[];
 }
 export interface ProjectRef {
   id: string;
@@ -121,12 +126,18 @@ function scoreOne(gcore: string, norm: string): { score: number; conf: MatchConf
   return { score: 50 + overlap, conf: overlap >= 2 ? "high" : "low" };
 }
 
-function scoreClient(gcore: string, clients: { ref: ClientRef; norm: string }[]): ScoredClient | null {
+function scoreClient(gcore: string, clients: { ref: ClientRef; norms: string[] }[]): ScoredClient | null {
   if (!gcore) return null;
   const scored: ScoredClient[] = [];
-  for (const { ref, norm } of clients) {
-    const s = scoreOne(gcore, norm);
-    if (s && s.score > 0) scored.push({ score: s.score, confidence: s.conf, client: ref });
+  for (const { ref, norms } of clients) {
+    // Best score across the client's names (primary + aliases) — a group need
+    // only match one of them (e.g. its contract name) to link.
+    let best: { score: number; conf: MatchConfidence } | null = null;
+    for (const norm of norms) {
+      const s = scoreOne(gcore, norm);
+      if (s && (!best || s.score > best.score)) best = s;
+    }
+    if (best && best.score > 0) scored.push({ score: best.score, confidence: best.conf, client: ref });
   }
   if (scored.length === 0) return null;
   scored.sort((a, b) => b.score - a.score);
@@ -154,7 +165,13 @@ export function matchGroups(
   clients: ClientRef[],
   projects: ProjectRef[],
 ): GroupMatch[] {
-  const clientsN = clients.map((c) => ({ ref: c, norm: normalizeName(c.name) }));
+  const clientsN = clients.map((c) => {
+    // Dedup the normalized primary name + aliases; drop empties.
+    const norms = Array.from(
+      new Set([c.name, ...(c.aliases ?? [])].map(normalizeName).filter(Boolean)),
+    );
+    return { ref: c, norms };
+  });
   const byClient = new Map<string, ProjectRef[]>();
   for (const p of projects) {
     if (!p.clientId) continue;

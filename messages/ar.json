@@ -850,6 +850,24 @@
       "delivery": "تنفيذ",
       "both": "كلاهما",
       "other": "أخرى"
+    },
+    "connect": {
+      "title": "ربط العناصر",
+      "description": "اربط مشاريع أو عقودًا موجودة بـ «{name}». العقود هي مصدر الحقيقة لهوية العميل.",
+      "projectsLabel": "مشاريع لربطها",
+      "projectsPlaceholder": "اختر المشاريع…",
+      "contractsLabel": "عقود لربطها",
+      "contractsPlaceholder": "اختر العقود…",
+      "searchPlaceholder": "ابحث بالاسم أو الكود أو العميل الحالي…",
+      "currentlyOwnedBy": "حاليًا: {name}",
+      "noProjects": "لا توجد مشاريع أخرى لربطها",
+      "noContracts": "لا توجد عقود أخرى لربطها",
+      "nothingSelected": "اختر مشروعًا أو عقدًا واحدًا على الأقل",
+      "loading": "جارٍ تحميل الخيارات…",
+      "foldNote": "إذا لم يتبقَّ لدى العميل السابق أي مشروع أو عقد بعد النقل، يُدمج هذا العميل في العميل الحالي.",
+      "linked": "تم ربط {projects} مشروع و{contracts} عقد",
+      "cancel": "إلغاء",
+      "save": "ربط"
     }
   },
   "AiKnowledge": {
@@ -3158,11 +3176,11 @@
       "emptyTitle": "لا توجد مراجعات حديثة",
       "emptyDescription": "ستظهر هنا المهام التي تكرر تعديلها",
       "indicatorTitle": "مؤشر تعديلات العميل",
-      "indicatorDesc": "المهام في انتظار رد العميل الآن، مع مقارنة أسبوعية وتوزيع حسب الخدمة",
+      "indicatorDesc": "المهام في انتظار رد العميل الآن، مع مقارنة بالفترة السابقة وتوزيع حسب الخدمة",
       "activeNow": "قيد التعديل الآن",
       "vsLastWeek": "مقارنة بالأسبوع الماضي",
-      "thisWeek": "هذا الأسبوع",
-      "weeklyChange": "التغيّر الأسبوعي",
+      "thisWeek": "هذه الفترة",
+      "weeklyChange": "التغيّر عن الفترة السابقة",
       "byService": "توزيع حسب الخدمة",
       "serviceDistributionHint": "حصة كل خدمة من المهام الموجودة حاليًا في مرحلة تعديلات العميل",
       "totalEvents": "إجمالي التعديلات",
@@ -3878,7 +3896,12 @@
       "contracts": "العقود",
       "active": "نشطة",
       "totalValue": "إجمالي القيمة"
-    }
+    },
+    "projectsTitle": "المشاريع",
+    "noProjects": "لا توجد مشاريع مرتبطة بهذا العميل بعد.",
+    "projectName": "المشروع",
+    "projectCode": "الكود",
+    "projectStatus": "الحالة"
   },
   "AgentCockpit": {
     "welcome": "مرحبًا، {name}",

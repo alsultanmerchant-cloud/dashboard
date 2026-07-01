@@ -1043,13 +1043,21 @@ export async function listClientContracts(
   orgId: string,
   clientId: string,
 ): Promise<ClientContractRow[]> {
+  // Gather across the client's full merge identity set — a merged client's
+  // contracts sit on its sheet twin, not the canonical row the detail page is
+  // keyed on. See [[project_satisfaction_contract_bridge]].
+  const { getClientIdentityIds } = await import("@/lib/data/clients");
+  const ids = await getClientIdentityIds(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contracts")
     .select(
-      "id, contract_code, status, target, total_value, start_date, end_date, type:contract_types(name_ar)",
+      // Pin the FK: contracts → contract_types has 2 relationships
+      // (contract_type_id + type_before_hold_id) so an implicit embed fails with
+      // PGRST201. See [[feedback_postgrest_ambiguous_embeds]].
+      "id, contract_code, status, target, total_value, start_date, end_date, type:contract_types!contracts_contract_type_id_fkey(name_ar)",
     )
     .eq("organization_id", orgId)
-    .eq("client_id", clientId)
+    .in("client_id", ids)
     .order("start_date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((c) => {
