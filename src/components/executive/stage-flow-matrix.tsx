@@ -2,7 +2,6 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { CornerDownLeft, ArrowRight, ChevronLeft } from "lucide-react";
 import type { StageFlowCell } from "@/lib/data/executive";
-import { FUNNEL_STAGE_ORDER } from "@/lib/data/executive";
 import { TASK_STAGE_LABELS, type TaskStage } from "@/lib/labels";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
@@ -25,7 +24,6 @@ function regressionHref(
 }
 
 export async function StageFlowMatrixSection({
-  cells: _cells,
   topBackward,
   totalForward,
   totalBackward,
@@ -86,7 +84,6 @@ export async function StageFlowMatrixSection({
               ))}
             </ul>
           )}
-          <p className="mt-3 text-[10px] text-muted-foreground">{t("caption")}</p>
         </CardContent>
       </Card>
     </section>

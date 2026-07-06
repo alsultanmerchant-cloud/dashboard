@@ -3,7 +3,7 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getOrgSatisfactionAggregate } from "@/lib/data/satisfaction";
 import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
-import { riyadhTodayIso } from "@/lib/tz";
+import { riyadhDateOf, riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
 
 // =========================================================================
 // Executive index scores (/dashboard top band).
@@ -166,8 +166,10 @@ async function _getExecutiveScores(
   // longer window doesn't artificially inflate rate-based scores. Point-in-time
   // inputs (overdue rate, blocked, SLA backlog, escalations, headcount) stay
   // current.
-  const rangeStart = `${range.from}T00:00:00Z`;
-  const rangeEnd = `${range.to}T23:59:59Z`;
+  const { start: rangeStart, endExclusive: rangeEnd } = riyadhDateRangeUtcBounds(
+    range.from,
+    range.to,
+  );
 
   const [
     snaps,
@@ -208,7 +210,7 @@ async function _getExecutiveScores(
       .eq("organization_id", orgId)
       .eq("to_stage", "client_changes")
       .gte("entered_at", rangeStart)
-      .lte("entered_at", rangeEnd),
+      .lt("entered_at", rangeEnd),
     // Rejections / decided approvals (lifetime decided — the rate is stable).
     supabaseAdmin
       .from("tasks")
@@ -226,26 +228,26 @@ async function _getExecutiveScores(
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .gte("entered_at", rangeStart)
-      .lte("entered_at", rangeEnd),
+      .lt("entered_at", rangeEnd),
     supabaseAdmin
       .from("task_comments")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .gte("created_at", rangeStart)
-      .lte("created_at", rangeEnd),
+      .lt("created_at", rangeEnd),
     supabaseAdmin
       .from("task_timesheets")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .gte("created_at", rangeStart)
-      .lte("created_at", rangeEnd),
+      .lt("created_at", rangeEnd),
     // Distinct active contributors within the window (who moved a task).
     supabaseAdmin
       .from("task_stage_history")
       .select("moved_by")
       .eq("organization_id", orgId)
       .gte("entered_at", rangeStart)
-      .lte("entered_at", rangeEnd)
+      .lt("entered_at", rangeEnd)
       .not("moved_by", "is", null),
     // Active team headcount.
     supabaseAdmin
@@ -279,7 +281,7 @@ async function _getExecutiveScores(
       .eq("stage", "done")
       .is("archived_at", null)
       .gte("completed_at", rangeStart)
-      .lte("completed_at", rangeEnd),
+      .lt("completed_at", rangeEnd),
   ]);
 
   // ---- Open-task derived figures ----------------------------------------
@@ -362,7 +364,7 @@ async function _getExecutiveScores(
     const deadline = r.due_date ?? r.planned_date;
     if (!deadline) continue;
     onTimeSampleInRange += 1;
-    if (r.completed_at.slice(0, 10) <= deadline) onTimeHitsInRange += 1;
+    if (riyadhDateOf(r.completed_at) <= deadline) onTimeHitsInRange += 1;
   }
   const onTimePct: number | null =
     onTimeSampleInRange > 0 ? Math.round((onTimeHitsInRange / onTimeSampleInRange) * 100) : null;

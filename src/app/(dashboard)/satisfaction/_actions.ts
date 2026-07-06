@@ -654,9 +654,14 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
   if (projectsRes.error) return { error: projectsRes.error.message };
 
   const links = linksRes.data ?? [];
+  const contractBackedClientIds = new Set(
+    Array.from(foldedContracts.entries())
+      .filter(([, contracts]) => contracts.length > 0)
+      .map(([clientId]) => clientId),
+  );
   const matches = matchGroups(
     links.map((l) => ({ id: l.chat_id, name: l.chat_name })),
-    (clientsRes.data ?? []).map((c) => {
+    (clientsRes.data ?? []).filter((c) => contractBackedClientIds.has(c.id)).map((c) => {
       // Primary name = the contract-sheet name (source of truth); aliases add the
       // raw Odoo name + every contract sheet_client_name (across merged twins) so a
       // group named by ANY of them still resolves. See [[project_client_display_name_resolver]].
@@ -684,14 +689,22 @@ export async function autoLinkWaProjectsAction(): Promise<AutoLinkState> {
     const row = existing.get(m.chatId);
     if (!row) continue;
     const update: Record<string, unknown> = {};
+    const strong = m.confidence === "exact" || m.confidence === "high";
+    const currentHasContractClient = !!row.client_id && contractBackedClientIds.has(row.client_id);
 
     // Project: only strong matches that resolved a project, never overwrite manual.
-    const willLink =
-      m.projectId && (m.confidence === "exact" || m.confidence === "high") && !row.project_id;
+    const willLink = m.projectId && strong && !row.project_id;
     if (willLink) {
       update.project_id = m.projectId;
-      if (!row.client_id && m.clientId) update.client_id = m.clientId;
     }
+    // Client: fill blanks, and repair older auto-links that pointed at a
+    // project-only/Odoo client with no contract identity. Contract-backed
+    // clients are left untouched so manual choices are not overwritten.
+    const willSetClient =
+      m.clientId &&
+      strong &&
+      (!row.client_id || (!currentHasContractClient && row.client_id !== m.clientId));
+    if (willSetClient) update.client_id = m.clientId;
 
     // Kind: 💫/📍 convention, only fill when blank (never override manual).
     const willClassify = m.groupKind && !row.group_kind;
@@ -867,6 +880,17 @@ export async function confirmWaSuggestionAction(input: {
     })
     .eq("organization_id", session.orgId)
     .eq("chat_id", chatId.data);
+
+  if (row.suggested_project_id) {
+    await supabaseAdmin.from("wa_group_projects").upsert(
+      {
+        organization_id: session.orgId,
+        group_link_id: row.id,
+        project_id: row.suggested_project_id,
+      },
+      { onConflict: "group_link_id,project_id", ignoreDuplicates: true },
+    );
+  }
 
   await logAudit({
     organizationId: session.orgId,

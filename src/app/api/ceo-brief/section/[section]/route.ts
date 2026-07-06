@@ -10,8 +10,9 @@ import {
   applyTrajectoryFromSignals,
   applyRisks,
   applyActions,
+  applySynthesis,
 } from "@/lib/ceo-brief/merge";
-import type { CeoBriefResult, RisksAi } from "@/lib/ceo-brief-schema";
+import type { CeoBriefResult, RisksAi, SynthesisAi } from "@/lib/ceo-brief-schema";
 import { logAiEvent } from "@/lib/audit";
 
 export const runtime = "nodejs";
@@ -80,9 +81,14 @@ export async function POST(
         // Rebuild the risk SET from fresh signals + overlay AI interpretations
         // by id — new risks appear, resolved ones drop.
         next = applyRisks(current, signals.risks, object as RisksAi);
+      } else if (section === "synthesis") {
+        next = applySynthesis(current, object as SynthesisAi);
       } else {
         next = applyActions(current, object as Parameters<typeof applyActions>[1]);
       }
+      // Emphasis is pure code (f(risks, verdict)); refresh it from the fresh
+      // signals so a re-analyze that changed the risk set re-points the hero.
+      next = { ...next, emphasis: signals.emphasis };
 
       const { error: updateError } = await supabaseAdmin
         .from("ceo_brief_runs")

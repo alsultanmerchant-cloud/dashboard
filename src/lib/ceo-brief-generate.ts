@@ -20,6 +20,7 @@ import {
   trajectorySection,
   risksSection,
   actionsSection,
+  synthesisSection,
   type SectionDef,
 } from "@/lib/ceo-brief/sections";
 import {
@@ -27,6 +28,7 @@ import {
   applyTrajectory,
   applyRisks,
   applyActions,
+  applySynthesis,
 } from "@/lib/ceo-brief/merge";
 
 const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
@@ -121,9 +123,15 @@ export async function generateAndStoreCeoBrief(
         });
         return { object: object as z.infer<S>, model: CEO_BRIEF_MODEL };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/model|not found|404|unsupported|invalid/i.test(msg) && CEO_BRIEF_MODEL !== GEMINI_MODEL) {
-          console.warn(`[ceo-brief] model "${CEO_BRIEF_MODEL}" rejected (${msg}); falling back to ${GEMINI_MODEL}`);
+        // The "stronger" CEO_BRIEF_MODEL is a best-effort upgrade. On ANY failure
+        // (rejected model id, timeout, quota/429, transient error) degrade to the
+        // known-good GEMINI_MODEL rather than blanking the whole brief — the narrow
+        // regex used to only fall back on model-id errors, so a throttled/slow
+        // stronger model silently failed all sections. If the fallback ALSO fails,
+        // rethrow so per-section graceful-degradation (keep prior value) kicks in.
+        if (CEO_BRIEF_MODEL !== GEMINI_MODEL) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[ceo-brief] model "${CEO_BRIEF_MODEL}" failed (${msg}); falling back to ${GEMINI_MODEL}`);
           const { object } = await generateObject({
             model: google(GEMINI_MODEL),
             schema: def.schema,
@@ -136,10 +144,11 @@ export async function generateAndStoreCeoBrief(
       }
     }
 
-    const [trajRes, risksRes, actsRes] = await Promise.allSettled([
+    const [trajRes, risksRes, actsRes, synthRes] = await Promise.allSettled([
       runSection(trajectorySection),
       runSection(risksSection),
       runSection(actionsSection),
+      runSection(synthesisSection),
     ]);
 
     // Code-computed skeleton (identical to before); AI prose layered on below,
@@ -148,7 +157,9 @@ export async function generateAndStoreCeoBrief(
       statusPct: signals.statusPct,
       grade: signals.grade,
       verdict: signals.verdict,
+      emphasis: signals.emphasis,
       headline: priorResult?.headline ?? "",
+      synthesis: priorResult?.synthesis ?? "",
       changes: signals.changes,
       risks: mergeRisks(signals.risks, []),
       criticalEvents: signals.criticalEvents,
@@ -181,6 +192,11 @@ export async function generateAndStoreCeoBrief(
       anySucceeded = true;
     }
 
+    if (synthRes.status === "fulfilled") {
+      result = applySynthesis(result, synthRes.value.object);
+      anySucceeded = true;
+    }
+
     // Preserve the old failure semantics: only mark the run failed if EVERY
     // section failed (otherwise we have a usable, partially-fresh brief).
     if (!anySucceeded) {
@@ -197,6 +213,7 @@ export async function generateAndStoreCeoBrief(
       ...trajectorySection.pickSignals(signals),
       ...risksSection.pickSignals(signals),
       ...actionsSection.pickSignals(signals),
+      ...synthesisSection.pickSignals(signals),
     };
 
     await supabaseAdmin

@@ -3128,12 +3128,17 @@
     },
     "team": {
       "title": "Team & capacity",
-      "description": "Specialist load and on-time performance",
-      "loadTitle": "Most loaded specialists",
+      "description": "Current workload, delay risk, and reliable delivery commitment",
+      "loadTitle": "Current load by specialist",
+      "loadMetric": "Open tasks",
       "loadEmpty": "No open tasks",
-      "topTitle": "Top performers",
-      "bottomTitle": "Needs support",
-      "emptyLeaderboard": "Not enough sample (≥ 3 deliveries / 30d)"
+      "topTitle": "Highest commitment",
+      "bottomTitle": "Need intervention now",
+      "emptyLeaderboard": "No reliable sample (5+ dated deliveries in range)",
+      "noSupportRisks": "No current delay or stale-work risk",
+      "open": "open",
+      "overdue": "overdue",
+      "stale": "stale"
     },
     "commercial": {
       "title": "Commercial mix · this month",
@@ -3375,6 +3380,17 @@
       "reanalyzeSection": "Re-analyze",
       "reanalyzingSection": "Analyzing…",
       "sectionError": "Could not analyze this section",
+      "synthesisTitle": "Executive read",
+      "askBrief": "Ask about this brief",
+      "heroRisk": "Top priority",
+      "focusLabel": "Focus",
+      "focus": {
+        "delivery": "Delivery",
+        "money": "Collections",
+        "people": "Team",
+        "clients": "Clients",
+        "stable": "Stable"
+      },
       "changeDetail": {
         "title": "Why is this changing?",
         "fromTo": "Was {from} → now {to}",
@@ -3401,6 +3417,7 @@
       "placeholder": "Type a correction, or teach the AI a fact about the company…",
       "send": "Send",
       "selectHint": "Select text from the brief to start",
+      "briefAskHint": "Ask anything about the brief — e.g. why did churn risk rise? which team is most behind?",
       "thinking": "Thinking…",
       "editing": "Editing the text…",
       "edited": "Text updated ✅",

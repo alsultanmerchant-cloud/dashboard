@@ -13,6 +13,7 @@ import "server-only";
 // `fw` (flow window) bounds the transitions to the same dates the card counted.
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { riyadhNextDayStartUtcIso, riyadhStartOfDayUtcIso } from "@/lib/tz";
 
 export type FlowFilter = {
   from: string;
@@ -53,8 +54,8 @@ export async function resolveFlowTaskIds(
     .eq("organization_id", orgId)
     .eq("from_stage", flow.from)
     .eq("to_stage", flow.to);
-  if (flow.since) q = q.gte("entered_at", `${flow.since}T00:00:00Z`);
-  if (flow.until) q = q.lte("entered_at", `${flow.until}T23:59:59Z`);
+  if (flow.since) q = q.gte("entered_at", riyadhStartOfDayUtcIso(flow.since));
+  if (flow.until) q = q.lt("entered_at", riyadhNextDayStartUtcIso(flow.until));
 
   const { data, error } = await q;
   if (error) return [];

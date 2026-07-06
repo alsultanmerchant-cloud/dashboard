@@ -10,6 +10,7 @@ import type {
   TrajectoryAi,
   RisksAi,
   ActionsAi,
+  SynthesisAi,
 } from "@/lib/ceo-brief-schema";
 
 export const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -77,6 +78,10 @@ export function applyRisks(
   ai: RisksAi,
 ): CeoBriefResult {
   return { ...base, risks: mergeRisks(signalRisks, ai.riskNotes) };
+}
+
+export function applySynthesis(base: CeoBriefResult, ai: SynthesisAi): CeoBriefResult {
+  return { ...base, synthesis: oneLine(ai.synthesis) };
 }
 
 export function applyActions(base: CeoBriefResult, ai: ActionsAi): CeoBriefResult {

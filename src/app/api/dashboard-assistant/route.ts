@@ -23,7 +23,7 @@ const SYSTEM_PROMPT = `أنت "مساعد لوحة القيادة" — مساع�
 يحدّد المستخدم نصًّا من أي مكان في لوحة القيادة (الموجز التنفيذي، المؤشرات، صحة العملاء، الخدمات، أداء الفريق، العقود… إلخ) ويطلب أحد ثلاثة أشياء:
 
 ١) **التصحيح المباشر للنص**: ممكن **فقط** لنصوص موجز المدير التنفيذي (تُعطى لك مع \`مفتاح الحقل\`). استخدم \`editBriefText\` بتمرير \`field\` و\`newText\`.
-   - الحقول القابلة للتعديل: العنوان (headline)، الخلاصة (bottomLine)، نص توصية (rec:N)، تفسير خطر (risk:ID).
+   - الحقول القابلة للتعديل: العنوان (headline)، القراءة التنفيذية (synthesis)، الخلاصة (bottomLine)، نص توصية (rec:N)، تفسير خطر (risk:ID).
    - **بقية أرقام ومؤشرات اللوحة محسوبة آليًا من البيانات ولا يمكن تعديلها كنص.** إذا طلب المستخدم "تصحيح" رقم أو نص خارج الموجز (لا يوجد مفتاح حقل)، فلا تستخدم editBriefText؛ بل افهم التصحيح واحفظه عبر \`saveLesson\`، أو اشرح كيف يُحتسب الرقم.
 
 ٢) **إزالة تنبيه/خطر بالكامل**: إذا أوضح المستخدم أنّ خطرًا معيّنًا في «أين الخطر؟» **ليس مشكلة فعلية** (مع سبب)، استخدم \`dismissRisk\` بتمرير \`riskId\` الخاص بذلك الخطر و\`reason\` يلخّص السبب.
@@ -47,7 +47,7 @@ const SYSTEM_PROMPT = `أنت "مساعد لوحة القيادة" — مساع�
 const briefField = z
   .string()
   .regex(BRIEF_FIELD_RE)
-  .describe("مفتاح الحقل: headline | bottomLine | rec:<رقم> | risk:<معرّف>");
+  .describe("مفتاح الحقل: headline | synthesis | bottomLine | rec:<رقم> | risk:<معرّف>");
 
 export async function POST(req: Request) {
   try {
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
-    const { messages, selection, field, context, page, clientId } = (await req.json()) as {
+    const { messages, selection, field, context, page, clientId, askBrief } = (await req.json()) as {
       messages: unknown[];
       briefRunId?: string | null;
       selection?: string | null;
@@ -67,11 +67,47 @@ export async function POST(req: Request) {
       context?: string | null;
       page?: string | null;
       clientId?: string | null;
+      askBrief?: boolean | null;
     };
     const orgId = session.orgId;
     const userId = session.userId;
 
     const knowledge = await buildKnowledgeBlock(orgId);
+
+    // "Ask about this brief" mode: ground the agent in the CURRENT brief's
+    // code-computed facts + prose so a CEO question ("لماذا ارتفع خطر الفقد؟")
+    // is answered against the exact brief on screen, then deepened with the read
+    // tools. Numbers stay code-authoritative — the facts below are the stored
+    // result_json, not model output. See [[project_ceo_brief_generative_ui]].
+    let briefContext = "";
+    if (askBrief) {
+      const { getCurrentCeoBrief } = await import("@/lib/ceo-brief-generate");
+      const brief = await getCurrentCeoBrief(orgId);
+      const r = brief?.result ?? null;
+      if (r) {
+        const risks = (r.risks ?? [])
+          .map(
+            (rk) =>
+              `- [${rk.severity}] ${rk.title} — ${rk.metric}${rk.interpretation ? ` (${rk.interpretation})` : ""}${rk.href ? ` → ${rk.href}` : ""}`,
+          )
+          .join("\n");
+        const recs = (r.recommendations ?? [])
+          .map((rc) => `- (${rc.category}) ${rc.action} — ${rc.owner}`)
+          .join("\n");
+        briefContext =
+          `\n\n---\nهذا هو موجز المدير التنفيذي الحالي الذي يسأل عنه المستخدم (الأرقام محسوبة آليًا — لا تغيّرها):\n` +
+          `الحكم: ${r.verdict} · الاستقرار: ${r.statusPct}%\n` +
+          (r.headline ? `العنوان: ${r.headline}\n` : "") +
+          (r.synthesis ? `القراءة التنفيذية: ${r.synthesis}\n` : "") +
+          (risks ? `المخاطر:\n${risks}\n` : "") +
+          (recs ? `التوصيات:\n${recs}\n` : "") +
+          (r.bottomLine ? `الخلاصة: ${r.bottomLine}\n` : "") +
+          `أجب عن سؤال المستخدم مستندًا إلى هذه الحقائق وإلى أدوات القراءة (runAnalytics/queryDatabase) لجلب التفاصيل الداعمة. لا تخترع أرقامًا، واذكر رابط الدليل من القائمة أعلاه حين يكون متاحًا.`;
+      } else {
+        briefContext =
+          "\n\n---\nلا يوجد موجز تنفيذي حالي بعد. اطلب من المستخدم توليد الموجز أولًا، أو أجب من أدوات القراءة مباشرةً.";
+      }
+    }
 
     // Satisfaction-page grounding: when the user asks about a client's metric
     // (e.g. "why is brief-adherence 40?"), the bare selected label isn't enough.
@@ -118,7 +154,7 @@ export async function POST(req: Request) {
 
     const result = streamText({
       model: google(GEMINI_MODEL),
-      system: `${SYSTEM_PROMPT}${knowledge ? `\n\n---\n\n${knowledge}` : ""}${clientContext}${selectionContext}`,
+      system: `${SYSTEM_PROMPT}${knowledge ? `\n\n---\n\n${knowledge}` : ""}${briefContext}${clientContext}${selectionContext}`,
       messages: modelMessages,
       maxRetries: 0,
       stopWhen: stepCountIs(8),
@@ -128,7 +164,7 @@ export async function POST(req: Request) {
       tools: {
         editBriefText: tool({
           description:
-            "تعديل حقل نصّي واحد في موجز المدير التنفيذي الحالي للمنظمة. الحقول المسموحة فقط: headline, bottomLine, rec:<رقم التوصية>, risk:<معرّف الخطر>. لا يمكن تعديل الأرقام أو المؤشرات.",
+            "تعديل حقل نصّي واحد في موجز المدير التنفيذي الحالي للمنظمة. الحقول المسموحة فقط: headline, synthesis, bottomLine, rec:<رقم التوصية>, risk:<معرّف الخطر>. لا يمكن تعديل الأرقام أو المؤشرات.",
           inputSchema: z.object({
             field: briefField,
             newText: z

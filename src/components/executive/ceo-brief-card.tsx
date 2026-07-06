@@ -16,6 +16,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   ChevronLeft,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -31,11 +32,13 @@ import {
   type TrajectoryAi,
   type RisksAi,
   type ActionsAi,
+  type SynthesisAi,
 } from "@/lib/ceo-brief-schema";
-import { applyTrajectory, applyActions, overlayRiskNotes } from "@/lib/ceo-brief/merge";
+import { applyTrajectory, applyActions, applySynthesis, overlayRiskNotes } from "@/lib/ceo-brief/merge";
 import {
   BRIEF_PATCHED_EVENT,
   RISK_DISMISSED_EVENT,
+  OPEN_BRIEF_ASSISTANT_EVENT,
 } from "@/components/executive/dashboard-selection-assistant";
 
 const VERDICT = {
@@ -263,6 +266,7 @@ function BriefBody({
   traj,
   risksCtl,
   acts,
+  synth,
   busy,
 }: {
   data: CeoBriefResult;
@@ -270,6 +274,7 @@ function BriefBody({
   traj: Reanalyze<TrajectoryAi>;
   risksCtl: Reanalyze<RisksAi>;
   acts: Reanalyze<ActionsAi>;
+  synth: Reanalyze<SynthesisAi>;
   busy: boolean;
 }) {
   const v = VERDICT[data.verdict];
@@ -277,6 +282,15 @@ function BriefBody({
   // Tolerate older/partial cached briefs that predate a field.
   const changes = data.changes ?? [];
   const risks = data.risks ?? [];
+  // Cross-section analyst narrative. Streamed partial wins only while loading.
+  const synthesis = synth.isLoading ? synth.object?.synthesis ?? data.synthesis : data.synthesis;
+  // Code-computed adaptive emphasis (never the model). The hero risk is only
+  // highlighted if it still exists in the current risk list.
+  const focus = data.emphasis?.focus ?? null;
+  const heroRiskId =
+    data.emphasis?.heroRiskId && risks.some((r) => r.id === data.emphasis!.heroRiskId)
+      ? data.emphasis!.heroRiskId
+      : null;
 
   // Streamed partials override the persisted value ONLY while that section is
   // re-analyzing; once finished, the stored `data` (updated in onFinish) is the
@@ -304,6 +318,41 @@ function BriefBody({
 
   return (
     <div className="space-y-7">
+      {(synthesis || synth.isLoading || synth.error) && (
+        <div className="rounded-xl border border-cyan/20 bg-cyan-dim/40 p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-cyan">
+                <Sparkles className="size-3.5" />
+                {t("synthesisTitle")}
+              </div>
+              {focus && focus !== "stable" && (
+                <span className="rounded-full bg-soft-2 px-2 py-0.5 text-[10px] font-medium text-foreground/70">
+                  {t("focusLabel")}: {t(`focus.${focus}`)}
+                </span>
+              )}
+            </div>
+            <ReanalyzeButton ctl={synth} t={t} disabled={busy} />
+          </div>
+          {synth.error ? (
+            <p className="flex items-center gap-1.5 text-[11px] text-cc-red">
+              <AlertTriangle className="size-3" />
+              {t("sectionError")}
+            </p>
+          ) : (
+            <p
+              className={cn(
+                "text-sm leading-7 text-foreground/90",
+                synth.isLoading && "animate-pulse",
+              )}
+              data-brief-field="synthesis"
+            >
+              {synthesis}
+            </p>
+          )}
+        </div>
+      )}
+
       <QSection
         n={1}
         title={t("q1")}
@@ -372,12 +421,14 @@ function BriefBody({
             {risks.map((r) => {
               const sev = SEVERITY[r.severity];
               const interpretation = streamedRiskNote.get(r.id) ?? r.interpretation;
+              const isHero = r.id === heroRiskId;
               return (
                 <div
                   key={r.id}
                   className={cn(
                     "group flex items-stretch gap-3 overflow-hidden rounded-xl border border-soft bg-card transition-colors",
                     r.href && "hover:border-foreground/15 hover:bg-soft-1/30",
+                    isHero && "border-cc-red/35 ring-1 ring-cc-red/30 bg-cc-red/[0.03]",
                   )}
                 >
                   <span className={cn("w-1 shrink-0", sev.bar)} aria-hidden />
@@ -400,6 +451,11 @@ function BriefBody({
                       <span className={cn("text-[10px] font-medium", sev.text)}>
                         {t(`severity.${r.severity}`)}
                       </span>
+                      {isHero && (
+                        <span className="rounded bg-cc-red/10 px-1.5 py-0.5 text-[9px] font-bold text-cc-red">
+                          {t("heroRisk")}
+                        </span>
+                      )}
                       <MetricInfo text={t("riskHelp")} label={t(`severity.${r.severity}`)} />
                     </div>
                     {r.href ? (
@@ -527,8 +583,18 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
       router.refresh();
     },
   });
+  const synthObj = useObject({
+    api: "/api/ceo-brief/section/synthesis",
+    schema: SECTION_SCHEMA.synthesis,
+    onFinish: ({ object }) => {
+      if (!object) return;
+      setData((prev) => (prev ? applySynthesis(prev, object) : prev));
+      router.refresh();
+    },
+  });
 
-  const sectionBusy = trajObj.isLoading || risksObj.isLoading || actsObj.isLoading;
+  const sectionBusy =
+    trajObj.isLoading || risksObj.isLoading || actsObj.isLoading || synthObj.isLoading;
 
   // After a section re-analyze persists + router.refresh(), the parent re-renders
   // with a fresh initialBrief carrying the re-computed code fields (statusPct /
@@ -629,6 +695,17 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {data && !loading && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.dispatchEvent(new CustomEvent(OPEN_BRIEF_ASSISTANT_EVENT))}
+              className="h-8 gap-1.5 text-xs text-muted-foreground"
+            >
+              <MessageCircleQuestion className="size-3.5" />
+              {t("askBrief")}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -689,6 +766,7 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
           traj={{ object: trajObj.object, isLoading: trajObj.isLoading, error: trajObj.error, run: () => trajObj.submit({}) }}
           risksCtl={{ object: risksObj.object, isLoading: risksObj.isLoading, error: risksObj.error, run: () => risksObj.submit({}) }}
           acts={{ object: actsObj.object, isLoading: actsObj.isLoading, error: actsObj.error, run: () => actsObj.submit({}) }}
+          synth={{ object: synthObj.object, isLoading: synthObj.isLoading, error: synthObj.error, run: () => synthObj.submit({}) }}
           busy={loading || sectionBusy}
         />
       )}

@@ -103,9 +103,18 @@ function scoreOne(gcore: string, norm: string): { score: number; conf: MatchConf
   if (norm === gcore) return { score: 100, conf: "exact" };
 
   if (gcore.includes(norm) || norm.includes(gcore)) {
+    const shorterText = norm.length <= gcore.length ? norm : gcore;
     const shorter = Math.min(norm.length, gcore.length);
     const longer = Math.max(norm.length, gcore.length);
     const coverage = shorter / longer; // how much of the longer string is covered
+    const shorterTokens = shorterText.split(" ").filter(Boolean);
+    // Contract sheet names often append the service/package to the brand
+    // ("Home Nest - نوفا", "كوكتيل مزة - تصوير منتجات"). If the whole group
+    // core is a meaningful multi-token brand inside that contract name, keep it
+    // linkable even though the coverage ratio is low.
+    if (shorter >= 6 && shorterTokens.length >= 2) {
+      return { score: 78 + Math.round(Math.min(coverage, 1) * 10), conf: "high" };
+    }
     // Guard against short-token false positives — a 2–3 char client name (or a
     // tiny shared fragment) swallowed by a longer group subject must NOT score
     // as a confident link. This was the main source of WRONG auto-links.
@@ -154,11 +163,47 @@ function scoreClient(gcore: string, clients: { ref: ClientRef; norms: string[] }
   return best;
 }
 
+function scoreProject(gcore: string, norm: string): { score: number; conf: MatchConfidence } | null {
+  if (!gcore || !norm) return null;
+  const gt = new Set(gcore.split(" ").filter(Boolean));
+  const pt = new Set(norm.split(" ").filter(Boolean));
+  if (gt.size === 0 || pt.size === 0) return null;
+  const overlap = [...gt].filter((w) => pt.has(w)).length;
+  if (overlap !== gt.size) return null;
+  return {
+    score: 60 + overlap * 5,
+    conf: gt.size >= 2 ? "high" : "low",
+  };
+}
+
+function pickProjectByGroupName(gcore: string, projects: ProjectRef[]): ProjectRef | null {
+  const scorePool = (pool: ProjectRef[]) => {
+    const scored = pool
+      .map((project) => {
+        const score = scoreProject(gcore, normalizeName(project.name));
+        return score ? { project, ...score } : null;
+      })
+      .filter((p): p is { project: ProjectRef; score: number; conf: MatchConfidence } => p !== null)
+      .sort((a, b) => b.score - a.score);
+    const best = scored[0];
+    if (!best || best.conf === "low") return null;
+    const runner = scored[1];
+    if (runner && runner.conf !== "low" && best.score - runner.score < 8) return null;
+    return best.project;
+  };
+
+  return (
+    scorePool(projects.filter((p) => p.status === "active")) ??
+    scorePool(projects)
+  );
+}
+
 /**
  * Match groups to client + project by name.
  * Project = the matched client's project (prefers active; if exactly one project
- * overall, uses it). Returns null project when the client has 0 or >1 candidate
- * projects so the result stays unambiguous.
+ * overall, uses it). If the client comes from the contract side and the Odoo
+ * project still lives on a separate client row, fall back to a single strong
+ * project-name match. Returns null project when candidates are ambiguous.
  */
 export function matchGroups(
   groups: { id: string; name: string | null }[],
@@ -184,7 +229,8 @@ export function matchGroups(
     .filter((g) => g.id.endsWith("@g.us"))
     .map((g) => {
       const groupKind = detectGroupKind(g.name);
-      const sc = scoreClient(coreToken(g.name ?? ""), clientsN);
+      const gcore = coreToken(g.name ?? "");
+      const sc = scoreClient(gcore, clientsN);
       if (!sc) {
         return {
           chatId: g.id,
@@ -203,6 +249,7 @@ export function matchGroups(
       let chosen: ProjectRef | null = null;
       if (active.length === 1) chosen = active[0];
       else if (projs.length === 1) chosen = projs[0];
+      else chosen = pickProjectByGroupName(gcore, projects);
       return {
         chatId: g.id,
         chatName: g.name,

@@ -7,6 +7,12 @@
 // not-yet-late). Always derive day-granular boundaries through this helper.
 
 const RIYADH = "Asia/Riyadh";
+const RIYADH_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+function parseIsoDate(isoDate: string): { year: number; month: number; day: number } {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return { year, month, day };
+}
 
 /** Today's date in Asia/Riyadh as `YYYY-MM-DD`. */
 export function riyadhTodayIso(): string {
@@ -35,4 +41,27 @@ export function riyadhDaysAgoIso(n: number): string {
   const [y, m, d] = today.split("-").map(Number);
   const base = Date.UTC(y, m - 1, d) - n * 86_400_000;
   return new Date(base).toISOString().slice(0, 10);
+}
+
+/** UTC instant for the start of a Riyadh calendar day. */
+export function riyadhStartOfDayUtcIso(isoDate: string): string {
+  const { year, month, day } = parseIsoDate(isoDate);
+  return new Date(Date.UTC(year, month - 1, day) - RIYADH_UTC_OFFSET_MS).toISOString();
+}
+
+/** Exclusive UTC instant immediately after a Riyadh calendar day. */
+export function riyadhNextDayStartUtcIso(isoDate: string): string {
+  const { year, month, day } = parseIsoDate(isoDate);
+  return new Date(Date.UTC(year, month - 1, day + 1) - RIYADH_UTC_OFFSET_MS).toISOString();
+}
+
+/** Inclusive Riyadh date range expressed as UTC bounds for timestamptz queries. */
+export function riyadhDateRangeUtcBounds(
+  from: string,
+  to: string,
+): { start: string; endExclusive: string } {
+  return {
+    start: riyadhStartOfDayUtcIso(from),
+    endExclusive: riyadhNextDayStartUtcIso(to),
+  };
 }

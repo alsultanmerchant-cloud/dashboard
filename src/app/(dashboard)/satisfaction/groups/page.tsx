@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listClientOptions } from "@/lib/data/clients";
+import { listContractClientOptions } from "@/lib/data/clients";
 import {
   getWaGroupLinks,
   listProjectOptions,
@@ -22,7 +22,7 @@ export default async function WaGroupsPage() {
 
   const [links, clients, projects, suggestions, coverageGaps] = await Promise.all([
     getWaGroupLinks(session.orgId),
-    listClientOptions(session.orgId),
+    listContractClientOptions(session.orgId),
     listProjectOptions(session.orgId),
     getWaLinkSuggestions(session.orgId),
     getProjectGroupCoverage(session.orgId),

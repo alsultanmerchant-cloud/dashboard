@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BriefChange, BriefRisk, Verdict } from "@/lib/data/ceo-brief-signals";
+import type { BriefChange, BriefRisk, Verdict, BriefEmphasis } from "@/lib/data/ceo-brief-signals";
 
 // =========================================================================
 // CEO Brief — AI output schema.
@@ -29,6 +29,11 @@ export const CeoBriefAiSchema = z.object({
     .string()
     .describe(
       "جملة واحدة حاسمة بالعربية تجيب: هل الشركة تتحسّن أم تتراجع ولماذا. تستند للحكم والتغيّرات المعطاة فقط، بدون اختراع أرقام.",
+    ),
+  synthesis: z
+    .string()
+    .describe(
+      "تحليل رابط من ٢-٤ جمل بالعربية يربط الأسئلة الثلاثة في قصة واحدة: كيف يتصل اتجاه الشركة بأخطر المخاطر وبالإجراء المطلوب (مثلاً أنّ نفس العملاء خلف خطر الفقد هم المتأخرون في الدفعات). لا يخترع أي رقم؛ يربط الحقائق المعطاة فقط.",
     ),
   riskNotes: z
     .array(
@@ -78,21 +83,26 @@ export const ActionsAiSchema = z.object({
   recommendations: CeoBriefAiSchema.shape.recommendations,
   bottomLine: CeoBriefAiSchema.shape.bottomLine,
 }); // Q3
+// Cross-section synthesis — reads all three questions' facts and writes the
+// connective narrative. Prose-only, like the others: it emits no numbers.
+export const SynthesisAiSchema = z.object({ synthesis: CeoBriefAiSchema.shape.synthesis });
 
 export type TrajectoryAi = z.infer<typeof TrajectoryAiSchema>;
 export type RisksAi = z.infer<typeof RisksAiSchema>;
 export type ActionsAi = z.infer<typeof ActionsAiSchema>;
+export type SynthesisAi = z.infer<typeof SynthesisAiSchema>;
 
 export const SECTION_SCHEMA = {
   trajectory: TrajectoryAiSchema,
   risks: RisksAiSchema,
   actions: ActionsAiSchema,
+  synthesis: SynthesisAiSchema,
 } as const;
 
 export type BriefSection = keyof typeof SECTION_SCHEMA;
-export const BRIEF_SECTIONS = ["trajectory", "risks", "actions"] as const;
+export const BRIEF_SECTIONS = ["trajectory", "risks", "actions", "synthesis"] as const;
 export function isBriefSection(v: string): v is BriefSection {
-  return v === "trajectory" || v === "risks" || v === "actions";
+  return v === "trajectory" || v === "risks" || v === "actions" || v === "synthesis";
 }
 
 // The merged record stored in ceo_brief_runs.result_json and rendered by the
@@ -130,6 +140,12 @@ export interface CeoBriefResult {
   grade: string;
   verdict: Verdict;
   headline: string;
+  // Cross-section analyst narrative (2–4 sentences). Optional for back-compat:
+  // briefs stored before this field render without it.
+  synthesis?: string;
+  // Code-computed adaptive emphasis (focus area + hero risk). Optional for
+  // back-compat; the card falls back to a static layout when absent.
+  emphasis?: BriefEmphasis;
   changes: BriefChange[];
   risks: CeoBriefRiskRendered[];
   criticalEvents?: CeoBriefEvent[];
@@ -234,8 +250,8 @@ export function sanitizeCeoBriefResult(result: CeoBriefResult | null): CeoBriefR
 // editable — only the four AI-written prose surfaces.
 // =========================================================================
 
-// headline | bottomLine | rec:<index> | risk:<risk_id>
-export const BRIEF_FIELD_RE = /^(headline|bottomLine|rec:\d+|risk:[a-z_]+)$/;
+// headline | synthesis | bottomLine | rec:<index> | risk:<risk_id>
+export const BRIEF_FIELD_RE = /^(headline|synthesis|bottomLine|rec:\d+|risk:[a-z_]+)$/;
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -260,6 +276,11 @@ export function applyBriefPatch(
   if (field === "headline") {
     const oldValue = next.headline;
     next.headline = value;
+    return { ok: true, next, oldValue };
+  }
+  if (field === "synthesis") {
+    const oldValue = next.synthesis ?? "";
+    next.synthesis = value;
     return { ok: true, next, oldValue };
   }
   if (field === "bottomLine") {

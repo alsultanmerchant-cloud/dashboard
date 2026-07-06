@@ -9,6 +9,8 @@
 // Pure module (no server-only / no React) so it can be imported by both the
 // server page and the client picker.
 
+import { riyadhDateOf } from "@/lib/tz";
+
 export type RangePreset = "last_7" | "last_30" | "last_90" | "this_month" | "custom";
 
 export interface DashboardRange {
@@ -35,7 +37,7 @@ function iso(d: Date): string {
 }
 
 function todayIso(now: Date): string {
-  return iso(now);
+  return riyadhDateOf(now);
 }
 
 function addDays(isoDate: string, delta: number): string {
@@ -106,7 +108,7 @@ export function fmtDay(isoDate: string, now: Date = new Date()): string {
   if (!DATE_RE.test(isoDate)) return isoDate;
   const [y, m, d] = isoDate.split("-").map(Number);
   const base = `${MONTHS[m - 1]} ${d}`;
-  return y === now.getUTCFullYear() ? base : `${base}, ${y}`;
+  return y === Number(riyadhDateOf(now).slice(0, 4)) ? base : `${base}, ${y}`;
 }
 
 /** Human label for a windowed card header, e.g. "Jun 1 – Jun 29". */

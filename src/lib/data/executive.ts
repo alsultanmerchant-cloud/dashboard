@@ -8,7 +8,7 @@ import {
 } from "@/lib/odoo/live";
 import type { TaskStage } from "@/lib/labels";
 import { resolveRange, type DashboardRange } from "@/lib/dashboard-range";
-import { riyadhTodayIso } from "@/lib/tz";
+import { riyadhDateOf, riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
 
 function addDaysIso(isoDate: string, delta: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
@@ -87,6 +87,7 @@ async function _getClientHealth(
   // The view supplies the point-in-time columns (open/overdue/active projects/
   // revisions/last activity). on-time % and delivered are recomputed below over
   // the selected window so the card tracks the picker.
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
   const [viewRes, doneRes] = await Promise.all([
     supabaseAdmin
       .from("v_client_delivery_health")
@@ -101,8 +102,8 @@ async function _getClientHealth(
       .eq("organization_id", orgId)
       .eq("stage", "done")
       .is("archived_at", null)
-      .gte("completed_at", `${range.from}T00:00:00Z`)
-      .lte("completed_at", `${range.to}T23:59:59Z`),
+      .gte("completed_at", start)
+      .lt("completed_at", endExclusive),
   ]);
   const { data, error } = viewRes;
   if (error) throw error;
@@ -124,7 +125,7 @@ async function _getClientHealth(
     const deadline = r.due_date ?? r.planned_date;
     if (deadline) {
       cur.sample += 1;
-      if (r.completed_at.slice(0, 10) <= deadline) cur.hits += 1;
+      if (riyadhDateOf(r.completed_at) <= deadline) cur.hits += 1;
     }
     perClient.set(cid, cur);
   }
@@ -329,19 +330,21 @@ export interface SpecialistLoadRow {
   employeeId: string;
   fullName: string;
   openCount: number;
+  overdueCount: number;
+  staleCount: number;
   allocatedHours: number;
 }
 
-async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]> {
-  const { data, error } = await supabaseAdmin
-    .from("task_assignees")
-    .select(
-      "employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name, position:positions(role, name))",
-    )
-    .eq("organization_id", orgId)
-    .eq("role_type", "agent");
-  if (error) throw error;
+export interface SupportRiskRow {
+  employeeId: string;
+  fullName: string;
+  openCount: number;
+  overdueCount: number;
+  staleCount: number;
+  riskScore: number;
+}
 
+async function getOpenAgentRiskRows(orgId: string): Promise<SpecialistLoadRow[]> {
   type EmpEmbed = {
     id: string;
     full_name: string;
@@ -350,26 +353,67 @@ async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]
   type Row = {
     employee_id: string;
     task:
-      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
-      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
+      | {
+          id: string;
+          stage: string;
+          allocated_time_minutes: number | null;
+          archived_at: string | null;
+          is_overdue: boolean | null;
+          stage_entered_at: string | null;
+        }
+      | {
+          id: string;
+          stage: string;
+          allocated_time_minutes: number | null;
+          archived_at: string | null;
+          is_overdue: boolean | null;
+          stage_entered_at: string | null;
+        }[]
       | null;
     employee: EmpEmbed | EmpEmbed[] | null;
   };
 
-  const agg = new Map<string, { name: string; count: number; minutes: number }>();
-  for (const raw of ((data ?? []) as unknown as Row[])) {
-    const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
-    const e = Array.isArray(raw.employee) ? raw.employee[0] : raw.employee;
-    if (!t || !e) continue;
-    // Agents-only performance: skip leadership.
-    const pos = Array.isArray(e.position) ? e.position[0] : e.position;
-    if (isLeadershipPosition(pos)) continue;
-    if (t.archived_at) continue;
-    if (t.stage === "done") continue;
-    const cur = agg.get(e.id) ?? { name: e.full_name, count: 0, minutes: 0 };
-    cur.count += 1;
-    cur.minutes += t.allocated_time_minutes ?? 0;
-    agg.set(e.id, cur);
+  const staleCutoff = daysAgoIso(7);
+  const agg = new Map<
+    string,
+    { name: string; count: number; overdue: number; stale: number; minutes: number }
+  >();
+  const seen = new Set<string>();
+  const PAGE = 1000;
+
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("task_assignees")
+      .select(
+        "employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at, is_overdue, stage_entered_at), employee:employee_profiles!task_assignees_employee_id_fkey(id, full_name, position:positions(role, name))",
+      )
+      .eq("organization_id", orgId)
+      .eq("role_type", "agent")
+      .neq("task.stage", "done")
+      .is("task.archived_at", null)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+
+    for (const raw of ((data ?? []) as unknown as Row[])) {
+      const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
+      const e = Array.isArray(raw.employee) ? raw.employee[0] : raw.employee;
+      if (!t || !e) continue;
+      const pos = Array.isArray(e.position) ? e.position[0] : e.position;
+      if (isLeadershipPosition(pos)) continue;
+
+      const key = `${e.id}:${t.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const cur = agg.get(e.id) ?? { name: e.full_name, count: 0, overdue: 0, stale: 0, minutes: 0 };
+      cur.count += 1;
+      cur.minutes += t.allocated_time_minutes ?? 0;
+      if (t.is_overdue) cur.overdue += 1;
+      if (t.stage !== "new" && t.stage_entered_at && t.stage_entered_at < staleCutoff) cur.stale += 1;
+      agg.set(e.id, cur);
+    }
+
+    if (!data || data.length < PAGE) break;
   }
 
   return Array.from(agg.entries())
@@ -377,8 +421,14 @@ async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]
       employeeId,
       fullName: v.name,
       openCount: v.count,
+      overdueCount: v.overdue,
+      staleCount: v.stale,
       allocatedHours: Math.round((v.minutes / 60) * 10) / 10,
-    }))
+    }));
+}
+
+async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]> {
+  return (await getOpenAgentRiskRows(orgId))
     .sort((a, b) => b.openCount - a.openCount)
     .slice(0, 8);
 }
@@ -489,12 +539,13 @@ async function _getPerformerLeaderboard(
   range: DashboardRange = resolveRange(undefined),
 ): Promise<{
   top: PerformerRow[];
-  bottom: PerformerRow[];
+  bottom: SupportRiskRow[];
 }> {
   // Single round-trip: join task_assignees -> tasks!inner filtered to
   // done tasks completed in the selected window. PostgREST filters parents when
   // the embedded relation is !inner with .eq()/.gte() on it, so we get
   // back exactly the rows we need with no IN-list blow-up.
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
   const { data, error } = await supabaseAdmin
     .from("task_assignees")
     .select(
@@ -503,8 +554,8 @@ async function _getPerformerLeaderboard(
     .eq("organization_id", orgId)
     .eq("role_type", "agent")
     .eq("task.stage", "done")
-    .gte("task.completed_at", `${range.from}T00:00:00Z`)
-    .lte("task.completed_at", `${range.to}T23:59:59Z`);
+    .gte("task.completed_at", start)
+    .lt("task.completed_at", endExclusive);
   if (error) throw error;
 
   type PerfEmp = {
@@ -535,7 +586,7 @@ async function _getPerformerLeaderboard(
     seen.add(key);
     const deadline = t.due_date ?? t.planned_date;
     if (!deadline || !t.completed_at) continue;
-    const onTime = t.completed_at.slice(0, 10) <= deadline;
+    const onTime = riyadhDateOf(t.completed_at) <= deadline;
     const cur = agg.get(e.id) ?? { name: e.full_name, delivered: 0, onTime: 0 };
     cur.delivered += 1;
     if (onTime) cur.onTime += 1;
@@ -543,7 +594,7 @@ async function _getPerformerLeaderboard(
   }
 
   const rows: PerformerRow[] = Array.from(agg.entries())
-    .filter(([, v]) => v.delivered >= 3)
+    .filter(([, v]) => v.delivered >= 5)
     .map(([employeeId, v]) => ({
       employeeId,
       fullName: v.name,
@@ -551,8 +602,27 @@ async function _getPerformerLeaderboard(
       onTimePct: Math.round((v.onTime / v.delivered) * 100),
     }));
 
-  const top = [...rows].sort((a, b) => b.onTimePct - a.onTimePct).slice(0, 3);
-  const bottom = [...rows].sort((a, b) => a.onTimePct - b.onTimePct).slice(0, 3);
+  const top = [...rows]
+    .sort((a, b) => b.onTimePct - a.onTimePct || b.delivered30d - a.delivered30d)
+    .slice(0, 3);
+  const bottom = (await getOpenAgentRiskRows(orgId))
+    .map((r) => ({
+      employeeId: r.employeeId,
+      fullName: r.fullName,
+      openCount: r.openCount,
+      overdueCount: r.overdueCount,
+      staleCount: r.staleCount,
+      riskScore: r.overdueCount * 10 + r.staleCount * 4 + r.openCount,
+    }))
+    .filter((r) => r.riskScore > 0 && (r.overdueCount > 0 || r.staleCount > 0))
+    .sort(
+      (a, b) =>
+        b.riskScore - a.riskScore ||
+        b.overdueCount - a.overdueCount ||
+        b.staleCount - a.staleCount ||
+        b.openCount - a.openCount,
+    )
+    .slice(0, 3);
 
   return { top, bottom };
 }
@@ -583,13 +653,14 @@ export interface OnTimeSeries {
 // days before `from` so the rolling-7d sparkline has history at the left edge.
 async function _getOnTimeSeries(orgId: string, range: DashboardRange): Promise<OnTimeSeries> {
   const fromExt = addDaysIso(range.from, -6);
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(fromExt, range.to);
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select("completed_at, due_date, planned_date")
     .eq("organization_id", orgId)
     .eq("stage", "done")
-    .gte("completed_at", `${fromExt}T00:00:00Z`)
-    .lte("completed_at", `${range.to}T23:59:59Z`)
+    .gte("completed_at", start)
+    .lt("completed_at", endExclusive)
     .is("archived_at", null);
   if (error) throw error;
 
@@ -608,7 +679,7 @@ async function _getOnTimeSeries(orgId: string, range: DashboardRange): Promise<O
     planned_date: string | null;
   }>) {
     if (!r.completed_at) continue;
-    const day = r.completed_at.slice(0, 10);
+    const day = riyadhDateOf(r.completed_at);
     const inRange = day >= range.from && day <= range.to;
     if (inRange) delivered += 1; // all delivered in-range (matches Rwasem)
     const deadline = r.due_date ?? r.planned_date;
@@ -802,28 +873,11 @@ async function _getServiceLineHealth(
   // Delivered / on-time are windowed to the selected range; the sparkline pulls
   // 6 extra days before `from` so its rolling-7d window has history at the edge.
   const sinceTrend = addDaysIso(range.from, -6);
-  const sinceTs30 = `${range.from}T00:00:00Z`;
-  const rangeEndTs = `${range.to}T23:59:59Z`;
   // Overdue = open task past deadline (team's Rwasem method) — point-in-time.
-  const todayStr = new Date().toISOString().slice(0, 10);
-
-  const [servicesRes, tasksRes] = await Promise.all([
-    supabaseAdmin
-      .from("services")
-      .select("id, name, slug")
-      .eq("organization_id", orgId)
-      .eq("is_active", true),
-    supabaseAdmin
-      .from("tasks")
-      .select("service_id, stage, completed_at, due_date, planned_date, revision_count, archived_at")
-      .eq("organization_id", orgId)
-      .is("archived_at", null)
-      .not("service_id", "is", null),
-  ]);
-  if (servicesRes.error) throw servicesRes.error;
-  if (tasksRes.error) throw tasksRes.error;
+  const todayStr = riyadhTodayIso();
 
   type T = {
+    id: string;
     service_id: string;
     stage: string;
     completed_at: string | null;
@@ -832,6 +886,38 @@ async function _getServiceLineHealth(
     revision_count: number;
     archived_at: string | null;
   };
+
+  async function fetchTaskRows(): Promise<T[]> {
+    const rows: T[] = [];
+    const PAGE = 1000;
+
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id, service_id, stage, completed_at, due_date, planned_date, revision_count, archived_at")
+        .eq("organization_id", orgId)
+        .is("archived_at", null)
+        .not("service_id", "is", null)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+
+      if (error) throw error;
+      rows.push(...((data ?? []) as T[]));
+      if (!data || data.length < PAGE) break;
+    }
+
+    return rows;
+  }
+
+  const [servicesRes, taskRows] = await Promise.all([
+    supabaseAdmin
+      .from("services")
+      .select("id, name, slug")
+      .eq("organization_id", orgId)
+      .eq("is_active", true),
+    fetchTaskRows(),
+  ]);
+  if (servicesRes.error) throw servicesRes.error;
 
   // Per-service totals (current snapshot) + per-day buckets for the trend.
   const agg = new Map<
@@ -861,7 +947,7 @@ async function _getServiceLineHealth(
     return cur;
   };
 
-  for (const t of (tasksRes.data ?? []) as T[]) {
+  for (const t of taskRows) {
     if (!t.service_id) continue;
     const cur = ensure(t.service_id);
     const isOpen = t.stage !== "done";
@@ -872,11 +958,11 @@ async function _getServiceLineHealth(
       cur.revisionsN += 1;
     }
     if (t.stage === "done" && t.completed_at) {
-      const day = t.completed_at.slice(0, 10);
+      const day = riyadhDateOf(t.completed_at);
       const deadline = t.due_date ?? t.planned_date;
       // Headline: selected range. Delivered counts ALL done (matches Rwasem);
       // the on-time rate is measured only over the deadline-bearing subset.
-      if (t.completed_at >= sinceTs30 && t.completed_at <= rangeEndTs) {
+      if (day >= range.from && day <= range.to) {
         cur.delivered += 1;
         if (deadline) {
           cur.onTimeSample += 1;
@@ -1050,7 +1136,7 @@ async function _getTopStuckProjects(orgId: string): Promise<StuckProjectRow[]> {
     }
   >();
   // Overdue = open task past deadline (team's Rwasem method).
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = riyadhTodayIso();
   for (const r of (data ?? []) as unknown as Row[]) {
     const p = Array.isArray(r.project) ? r.project[0] : r.project;
     if (!p) continue;
@@ -1206,7 +1292,7 @@ async function _getWipAging(orgId: string): Promise<WipAgingRow[]> {
   const now = Date.now();
   // Overdue = open task past deadline (team's Rwasem method); rows are already
   // open + non-archived, so planned_date < today is the flag.
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = riyadhTodayIso();
   for (const r of (data ?? []) as Array<{ created_at: string; planned_date: string | null }>) {
     const ageDays = Math.floor((now - new Date(r.created_at).getTime()) / 86_400_000);
     const key: WipAgeBucket =
@@ -1247,12 +1333,13 @@ async function _getStageFlowMatrix(
   totalBackward: number;
 }> {
   // Stage transitions that occurred within the selected window.
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
   const { data, error } = await supabaseAdmin
     .from("task_stage_history")
     .select("from_stage, to_stage")
     .eq("organization_id", orgId)
-    .gte("entered_at", `${range.from}T00:00:00Z`)
-    .lte("entered_at", `${range.to}T23:59:59Z`)
+    .gte("entered_at", start)
+    .lt("entered_at", endExclusive)
     .not("from_stage", "is", null);
   if (error) throw error;
 
@@ -1301,9 +1388,9 @@ export const getStageFlowMatrix = cache(_getStageFlowMatrix);
 export interface ClientEditsMetrics {
   // Tasks currently sitting at client_changes right now.
   activeNow: number;
-  // Tasks that ENTERED client_changes in the last 7 days (new requests).
+  // Distinct tasks that entered client_changes in the selected window.
   enteredThisWeek: number;
-  // Same window the prior week — for the trend arrow.
+  // Distinct tasks that entered client_changes in the same-length prior window.
   enteredLastWeek: number;
   // Per-service breakdown of tasks currently at client_changes.
   byService: Array<{ name: string; slug: string; count: number }>;
@@ -1318,24 +1405,63 @@ async function _getTopRevisedTasks(
   // point-in-time (tasks sitting at client_changes right now).
   const rangeStartDay = range.from;
   const priorStartDay = addDaysIso(range.from, -range.days);
+  const { start: priorStart, endExclusive } = riyadhDateRangeUtcBounds(
+    priorStartDay,
+    range.to,
+  );
+  const { start: rangeStart } = riyadhDateRangeUtcBounds(rangeStartDay, range.to);
 
-  const [liveRes, histRes, servicesRes] = await Promise.all([
-    // Tasks currently at client_changes with their service.
-    supabaseAdmin
-      .from("tasks")
-      .select("id, service_id")
-      .eq("organization_id", orgId)
-      .eq("stage", "client_changes")
-      .is("archived_at", null),
+  type LiveRow = { id: string; service_id: string | null };
+  type HistRow = { task_id: string; entered_at: string };
 
-    // Tasks that entered client_changes across the window + the prior window.
-    supabaseAdmin
-      .from("task_stage_history")
-      .select("task_id, entered_at")
-      .eq("organization_id", orgId)
-      .eq("to_stage", "client_changes")
-      .gte("entered_at", `${priorStartDay}T00:00:00Z`)
-      .lte("entered_at", `${range.to}T23:59:59Z`),
+  async function fetchLiveRows(): Promise<LiveRow[]> {
+    const rows: LiveRow[] = [];
+    const PAGE = 1000;
+
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select("id, service_id")
+        .eq("organization_id", orgId)
+        .eq("stage", "client_changes")
+        .is("archived_at", null)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+
+      if (error) throw error;
+      rows.push(...((data ?? []) as LiveRow[]));
+      if (!data || data.length < PAGE) break;
+    }
+
+    return rows;
+  }
+
+  async function fetchHistoryRows(): Promise<HistRow[]> {
+    const rows: HistRow[] = [];
+    const PAGE = 1000;
+
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("task_stage_history")
+        .select("task_id, entered_at")
+        .eq("organization_id", orgId)
+        .eq("to_stage", "client_changes")
+        .gte("entered_at", priorStart)
+        .lt("entered_at", endExclusive)
+        .order("entered_at", { ascending: true })
+        .range(from, from + PAGE - 1);
+
+      if (error) throw error;
+      rows.push(...((data ?? []) as HistRow[]));
+      if (!data || data.length < PAGE) break;
+    }
+
+    return rows;
+  }
+
+  const [live, hist, servicesRes] = await Promise.all([
+    fetchLiveRows(),
+    fetchHistoryRows(),
 
     // Service name map.
     supabaseAdmin
@@ -1345,18 +1471,23 @@ async function _getTopRevisedTasks(
       .eq("is_active", true),
   ]);
 
-  if (liveRes.error) throw liveRes.error;
-  if (histRes.error) throw histRes.error;
+  if (servicesRes.error) throw servicesRes.error;
 
-  type LiveRow = { id: string; service_id: string | null };
-  const live = (liveRes.data ?? []) as LiveRow[];
   const activeNow = live.length;
 
-  type HistRow = { task_id: string; entered_at: string };
-  const hist = (histRes.data ?? []) as HistRow[];
-  // enteredThisWeek / enteredLastWeek now mean "this window" / "prior window".
-  const enteredThisWeek = hist.filter((r) => r.entered_at >= `${rangeStartDay}T00:00:00Z`).length;
-  const enteredLastWeek = hist.filter((r) => r.entered_at < `${rangeStartDay}T00:00:00Z`).length;
+  // Period cards are activity counters: distinct tasks that entered
+  // client_changes during the selected window, even if they have since moved on.
+  const thisPeriodTaskIds = new Set<string>();
+  const lastPeriodTaskIds = new Set<string>();
+  for (const r of hist) {
+    if (r.entered_at >= rangeStart) {
+      thisPeriodTaskIds.add(r.task_id);
+    } else {
+      lastPeriodTaskIds.add(r.task_id);
+    }
+  }
+  const enteredThisWeek = thisPeriodTaskIds.size;
+  const enteredLastWeek = lastPeriodTaskIds.size;
 
   // Count active tasks per service.
   const svcCount = new Map<string, number>();

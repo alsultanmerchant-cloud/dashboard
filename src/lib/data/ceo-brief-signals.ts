@@ -133,6 +133,7 @@ export interface CeoBriefContext {
     topChurn: Array<{ client: string; score: number | null; risk: string | null }>;
   } | null;
   zeroOnTimePerformers: string[];
+  supportRiskPerformers: Array<{ name: string; open: number; overdue: number; stale: number }>;
   topPerformers: Array<{ name: string; onTimePct: number | null }>;
   bestClients: Array<{ name: string; onTimePct: number | null }>;
   discipline: { staleTasks: number; slaCompliancePct: number | null };
@@ -142,10 +143,60 @@ export interface CeoBriefContext {
   departmentCapacity: DepartmentCapacityRow[];
 }
 
+// ---- Adaptive emphasis (code-computed, NEVER the model) ------------------
+// A deterministic "where to look first" hint derived purely from the ranked
+// risks + verdict. The card reacts to it (a focus chip + a spotlighted hero
+// risk) so the brief FEELS adaptive month-to-month, while the model has zero
+// say over what is emphasised — layout authority stays in code. See
+// [[project_ceo_brief_generative_ui]].
+export type BriefLayout = "standard" | "risk-first" | "money-first" | "people-first";
+export type BriefFocus = "delivery" | "money" | "people" | "clients" | "stable";
+export interface BriefEmphasis {
+  layout: BriefLayout;
+  focus: BriefFocus;
+  heroRiskId: RiskKind | null; // the single risk to spotlight (critical/high only)
+}
+
+// Map the top-ranked risk kind → the area the CEO should focus on.
+function focusForRisk(kind: RiskKind): { layout: BriefLayout; focus: BriefFocus } {
+  switch (kind) {
+    case "overdue_money":
+      return { layout: "money-first", focus: "money" };
+    case "client_churn":
+    case "at_risk_client":
+      return { layout: "risk-first", focus: "clients" };
+    case "idle_people":
+    case "review_bottleneck":
+      return { layout: "people-first", focus: "people" };
+    case "delivery_slip":
+    case "stuck_project":
+    case "weak_index":
+    default:
+      return { layout: "risk-first", focus: "delivery" };
+  }
+}
+
+// Pure: the ranked risks (severity-sorted) + verdict → emphasis. The top risk
+// drives the focus; it is only spotlighted as "hero" when critical/high (a
+// medium risk shouldn't hijack the layout).
+export function computeEmphasis(risks: BriefRisk[], verdict: Verdict): BriefEmphasis {
+  const top = risks[0];
+  if (!top) {
+    return { layout: "standard", focus: verdict === "declining" ? "delivery" : "stable", heroRiskId: null };
+  }
+  const { layout, focus } = focusForRisk(top.id);
+  return {
+    layout,
+    focus,
+    heroRiskId: top.severity === "critical" || top.severity === "high" ? top.id : null,
+  };
+}
+
 export interface CeoBriefSignals {
   statusPct: number; // operational stability composite (0-100)
   grade: string; // A..F
   verdict: Verdict;
+  emphasis: BriefEmphasis; // code-computed focus/hero hint (no model input)
   changes: BriefChange[];
   risks: BriefRisk[];
   criticalEvents: BriefEvent[];
@@ -961,9 +1012,13 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
           })),
         }
       : null,
-    zeroOnTimePerformers: performers.bottom
-      .filter((p) => p.onTimePct === 0 && p.delivered30d >= 3)
-      .map((p) => p.fullName),
+    zeroOnTimePerformers: [],
+    supportRiskPerformers: performers.bottom.map((p) => ({
+      name: p.fullName,
+      open: p.openCount,
+      overdue: p.overdueCount,
+      stale: p.staleCount,
+    })),
     topPerformers: performers.top.slice(0, 3).map((p) => ({
       name: p.fullName,
       onTimePct: p.onTimePct,
@@ -982,12 +1037,14 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
 
   const eventPack = await loadBriefTimelineEvents(orgId, activeRisks.slice(0, 5), new Date().toISOString());
 
+  const finalRisks = activeRisks.slice(0, 5);
   return {
     statusPct,
     grade,
     verdict,
+    emphasis: computeEmphasis(finalRisks, verdict),
     changes: changes.slice(0, 5),
-    risks: activeRisks.slice(0, 5),
+    risks: finalRisks,
     criticalEvents: eventPack.criticalEvents,
     timelineEvents: eventPack.timelineEvents,
     opportunities,

@@ -40,6 +40,11 @@ export const BRIEF_PATCHED_EVENT = "ceo-brief:patched";
 // (the server already persisted both the removal and the durable suppression).
 export const RISK_DISMISSED_EVENT = "ceo-brief:risk-dismissed";
 
+// Dispatched by the CEO brief card's "Ask about this brief" button. Opens the
+// assistant in brief-Q&A mode (no text selection needed) — the route grounds
+// answers in the current brief's facts + the read tools.
+export const OPEN_BRIEF_ASSISTANT_EVENT = "ceo-brief:ask";
+
 /**
  * Global "Ask AI" popover for the whole dashboard. Watches text selections
  * inside the [data-dashboard-root] container, surfaces a button, and opens a
@@ -66,6 +71,13 @@ export function DashboardSelectionAssistant({
   const [buttonAt, setButtonAt] = useState<Anchor | null>(null);
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
+  // Brief-Q&A mode: opened via the card's "ask about this brief" button; the
+  // route grounds answers in the current brief instead of a text selection.
+  const [briefMode, setBriefMode] = useState(false);
+  const briefModeRef = useRef(false);
+  useEffect(() => {
+    briefModeRef.current = briefMode;
+  }, [briefMode]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -96,6 +108,7 @@ export function DashboardSelectionAssistant({
             context: sel?.context ?? null,
             page: pathname,
             clientId,
+            askBrief: briefModeRef.current,
           },
         },
       );
@@ -215,6 +228,23 @@ export function DashboardSelectionAssistant({
     setOpen(true);
   }, [setMessages]);
 
+  // "Ask about this brief" — open in brief-Q&A mode (no selection required).
+  useEffect(() => {
+    const onAsk = () => {
+      setSelection(null);
+      setButtonAt(null);
+      setBriefMode(true);
+      openPanel();
+    };
+    window.addEventListener(OPEN_BRIEF_ASSISTANT_EVENT, onAsk);
+    return () => window.removeEventListener(OPEN_BRIEF_ASSISTANT_EVENT, onAsk);
+  }, [openPanel]);
+
+  // Leaving the panel drops brief mode so the next open starts clean.
+  useEffect(() => {
+    if (!open) setBriefMode(false);
+  }, [open]);
+
   const quickAction = useCallback(
     (kind: "correct" | "explain" | "teach") => {
       const sel = selectionRef.current;
@@ -323,7 +353,9 @@ export function DashboardSelectionAssistant({
 
           <div className="flex-1 space-y-3 overflow-y-auto px-3.5 py-3">
             {messages.length === 0 && (
-              <p className="py-6 text-center text-[11px] text-muted-foreground">{t("selectHint")}</p>
+              <p className="py-6 text-center text-[11px] text-muted-foreground">
+                {briefMode ? t("briefAskHint") : t("selectHint")}
+              </p>
             )}
             {messages.map((msg) => (
               <div key={msg.id} className="space-y-1.5">

@@ -138,7 +138,7 @@ async function DeliveryFlow({ orgId }: { orgId: string }) {
 
 async function StuckProjects({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const rows = await getTopStuckProjects(orgId);
-  return <StuckProjectsSection rows={rows} windowLabel={asOfLabel({ ...range, to: new Date().toISOString().slice(0, 10) })} />;
+  return <StuckProjectsSection rows={rows} windowLabel={asOfLabel({ ...range, to: riyadhTodayIso() })} />;
 }
 
 async function UpcomingDeadlines({ orgId }: { orgId: string }) {
@@ -151,8 +151,15 @@ async function TeamCapacity({ orgId, range }: { orgId: string; range: DashboardR
     getSpecialistLoadTop(orgId),
     getPerformerLeaderboard(orgId, range),
   ]);
-  // Specialist load is current; the performer leaderboard is windowed.
-  return <TeamCapacitySection specialists={specialists} performers={performers} windowLabel={rangeLabel(range)} />;
+  // Specialist load/support risk is current; the performer leaderboard is windowed.
+  return (
+    <TeamCapacitySection
+      specialists={specialists}
+      performers={performers}
+      loadWindowLabel={asOfLabel({ ...range, to: riyadhTodayIso() })}
+      performanceWindowLabel={rangeLabel(range)}
+    />
+  );
 }
 
 // ---- Skeletons -----------------------------------------------------------

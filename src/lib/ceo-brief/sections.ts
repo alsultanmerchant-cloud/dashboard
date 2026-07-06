@@ -4,6 +4,7 @@ import {
   TrajectoryAiSchema,
   RisksAiSchema,
   ActionsAiSchema,
+  SynthesisAiSchema,
   type BriefSection,
 } from "@/lib/ceo-brief-schema";
 import type { CeoBriefSignals } from "@/lib/data/ceo-brief-signals";
@@ -156,8 +157,47 @@ ${fence(f)}
   },
 };
 
+// Cross-section synthesis «القصة الواحدة» → { synthesis }. Fed the WHOLE fact
+// universe (trajectory + risks + actions slices) so it can connect the dots the
+// three parallel sections can't see across — e.g. tying the churn risk to the
+// same clients behind on installments. Prose-only: it never emits a number.
+export const synthesisSection: SectionDef<typeof SynthesisAiSchema> = {
+  schema: SynthesisAiSchema,
+  pickSignals: (s) => ({
+    verdict: s.verdict,
+    verdictArabic: VERDICT_AR[s.verdict],
+    statusPct: s.statusPct,
+    changes: s.changes,
+    risks: s.risks.map((r) => ({
+      id: r.id,
+      title: r.title,
+      severity: r.severity,
+      metric: r.metric,
+    })),
+    opportunities: s.opportunities,
+    context: s.context,
+    dataQuality: s.dataQuality,
+  }),
+  buildPrompt: (s, knowledge) => {
+    const f = synthesisSection.pickSignals(s);
+    return withKnowledge(
+      `${sharedHeader(s)}
+
+المهمة: اربط الأسئلة الثلاثة (الاتجاه · الخطر · الإجراء) في **قصة واحدة** للرئيس التنفيذي.
+
+البيانات (الحقائق المحسوبة لكل الأقسام):
+${fence(f)}
+
+التعليمات:
+- **synthesis**: تحليلٌ رابطٌ من ٢-٤ جمل يصل بين اتجاه الشركة (verdict/changes) وأخطر المخاطر (risks) وجذور السبب (context) والفرص (opportunities) — لا سردًا منفصلًا. اكشف **الخيط المشترك** حين يوجد (مثلاً: نفس الخدمة الأضعف تفسّر التأخير وخطر الفقد معًا، أو أنّ العملاء المعرّضين للفقد هم أنفسهم المتأخرون في الدفعات). اختم بما يعنيه ذلك للأولوية اليوم. **لا تخترع أي رقم** — اربط الأرقام المعطاة فقط، ولا تكرّر نص العناوين الأخرى حرفيًا.`,
+      knowledge,
+    );
+  },
+};
+
 export const SECTION_DEFS = {
   trajectory: trajectorySection,
   risks: risksSection,
   actions: actionsSection,
+  synthesis: synthesisSection,
 } satisfies Record<BriefSection, SectionDef<z.ZodTypeAny>>;

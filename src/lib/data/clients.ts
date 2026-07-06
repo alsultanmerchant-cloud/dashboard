@@ -28,6 +28,14 @@ export async function listClientOptions(orgId: string) {
     .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ar"));
 }
 
+export async function listContractClientOptions(orgId: string) {
+  const [clients, folded] = await Promise.all([
+    listClientOptions(orgId),
+    foldedContractsByCanonical(orgId),
+  ]);
+  return clients.filter((c) => (folded.get(c.id as string)?.length ?? 0) > 0);
+}
+
 // Per-client search keywords for pickers: the names by which a human might look
 // a client up — its project names + codes, WhatsApp group names, contract codes
 // + the original sheet name, and the legacy external code. Lets the satisfaction
@@ -105,7 +113,7 @@ export function resolveClientName(
 // matter which row physically holds the contract. See
 // [[project_satisfaction_contract_bridge]] and [[project_clients_centralization]].
 // ---------------------------------------------------------------------------
-export type FoldedContract = { sheet_client_name: string | null; start_date: string | null };
+export type FoldedContract = { id?: string; sheet_client_name: string | null; start_date: string | null };
 
 async function _foldedContractsByCanonical(
   orgId: string,
@@ -117,7 +125,7 @@ async function _foldedContractsByCanonical(
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("contracts")
-      .select("client_id, sheet_client_name, start_date")
+      .select("id, client_id, project_id, sheet_client_name, start_date, project:projects(client_id)")
       .eq("organization_id", orgId),
   ]);
   if (clientsRes.error) throw clientsRes.error;
@@ -129,15 +137,37 @@ async function _foldedContractsByCanonical(
     if (c.merged_into_client_id) mergeMap.set(c.id, c.merged_into_client_id);
   }
 
+  type ContractRow = {
+    id: string;
+    client_id: string | null;
+    project_id: string | null;
+    sheet_client_name: string | null;
+    start_date: string | null;
+    project: { client_id: string | null } | { client_id: string | null }[] | null;
+  };
   const out = new Map<string, FoldedContract[]>();
-  for (const k of (contractsRes.data ?? []) as Array<
-    { client_id: string | null } & FoldedContract
-  >) {
-    if (!k.client_id) continue;
-    const canon = mergeMap.get(k.client_id) ?? k.client_id;
+  const seen = new Map<string, Set<string>>();
+  const add = (clientId: string | null | undefined, k: ContractRow) => {
+    if (!clientId) return;
+    const canon = mergeMap.get(clientId) ?? clientId;
+    const key = k.id ?? `${k.sheet_client_name ?? ""}:${k.start_date ?? ""}`;
+    const seenForClient = seen.get(canon) ?? new Set<string>();
+    if (seenForClient.has(key)) return;
+    seenForClient.add(key);
+    seen.set(canon, seenForClient);
     const arr = out.get(canon) ?? [];
-    arr.push({ sheet_client_name: k.sheet_client_name, start_date: k.start_date });
+    arr.push({ id: k.id, sheet_client_name: k.sheet_client_name, start_date: k.start_date });
     out.set(canon, arr);
+  };
+
+  for (const k of (contractsRes.data ?? []) as unknown as ContractRow[]) {
+    // Normal path: contract.client_id, canonicalized through merge tombstones.
+    add(k.client_id, k);
+    // Project bridge: some contracts stay on the sheet client while their
+    // project points at the Odoo client. Contract names must still win on the
+    // delivery/satisfaction side, so fold the same contract onto project.client_id.
+    const p = Array.isArray(k.project) ? k.project[0] : k.project;
+    add(p?.client_id, k);
   }
   return out;
 }
