@@ -1,7 +1,6 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { loadTaskTipContext } from "@/lib/tech-tips/context";
 import { buildTaskTipPrompt } from "@/lib/tech-tips/prompt";
@@ -11,7 +10,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // On-demand technical tip for ONE task (task detail page). Button-triggered, so
 // we don't spend a model call on every task open. Grounded in the task + its
@@ -33,7 +31,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ taskId: strin
   const knowledge = await buildKnowledgeBlock(session.orgId);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicGen"),
     schema: TaskTechTipSchema,
     maxRetries: 2,
     prompt: buildTaskTipPrompt(taskCtx, taskCtx.task.service, knowledge),

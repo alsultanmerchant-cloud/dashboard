@@ -1,8 +1,7 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { aiModel } from "@/lib/ai-model";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { GEMINI_MODEL } from "@/lib/ai-model";
 import { buildCeoBriefSignals } from "@/lib/data/ceo-brief-signals";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { SECTION_DEFS, isBriefSection } from "@/lib/ceo-brief/sections";
@@ -18,7 +17,6 @@ import { logAiEvent } from "@/lib/audit";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Re-analyze ONE brief section, streamed. We deliberately use the fast shared
 // model (low time-to-first-token) so the user sees text streaming in — the
@@ -55,7 +53,7 @@ export async function POST(
   const prompt = def.buildPrompt(signals, knowledge);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicHiQ"),
     schema: def.schema,
     maxRetries: 2,
     prompt,

@@ -1,0 +1,290 @@
+import { AlertTriangle, AlertOctagon, Timer, Clock, RefreshCcw, TrendingUp, TrendingDown, Minus, type LucideIcon } from "lucide-react";
+import Link from "next/link";
+import { getTranslations } from "next-intl/server";
+import type { ExecutiveIndicators, KpiTrend, Period } from "@/lib/data/executive-indicators";
+import { MetricInfo } from "@/components/metric-info";
+import { cn } from "@/lib/utils";
+
+// Executive Indicators section (client spec — docs/EXECUTIVE_INDICATORS_SPEC.md).
+// Each card = a big Main KPI Value (current live state) + a Trend chip (Selected
+// vs Previous Equivalent Period) with a hover tooltip. Below the four headline
+// cards sits the per-service delivery table (KPI 4).
+
+type T = Awaited<ReturnType<typeof getTranslations>>;
+
+function fmtPeriod(p: Period) {
+  return `${p.from} → ${p.to}`;
+}
+
+// Trend chip + tooltip shared by every KPI. `higherIsBetter` flips the colour
+// polarity (on-time up = good; overdue up = bad).
+function TrendChip({
+  trend,
+  higherIsBetter,
+  unit,
+  label,
+  periods,
+  t,
+  percentMode = false,
+}: {
+  trend: KpiTrend;
+  higherIsBetter: boolean;
+  unit?: string;
+  label: string;
+  periods: { selected: Period; previous: Period };
+  t: T;
+  /** Spec KPI 5: display the % increase/decrease instead of the absolute diff. */
+  percentMode?: boolean;
+}) {
+  const { difference, direction, available, percentChange } = trend;
+  const Icon = direction === "increase" ? TrendingUp : direction === "decrease" ? TrendingDown : Minus;
+  const good = direction === "no_change" ? null : (direction === "increase") === higherIsBetter;
+  const tone = good === null ? "text-muted-foreground" : good ? "text-cc-green" : "text-cc-red";
+  const sign = difference > 0 ? `+${difference}` : `${difference}`;
+  const pctSign = percentChange != null ? (percentChange > 0 ? `+${percentChange}%` : `${percentChange}%`) : null;
+  // In percentMode show the % change (fall back to absolute when previous is 0).
+  const chipText = percentMode ? (pctSign ?? sign) : `${sign}${unit ?? ""}`;
+
+  const tooltip = (
+    <div className="space-y-1 text-start">
+      <div className="font-semibold">{label}</div>
+      <div className="text-muted-foreground">{t("tooltip.selectedPeriod")}: {fmtPeriod(periods.selected)}</div>
+      <div className="text-muted-foreground">{t("tooltip.previousPeriod")}: {fmtPeriod(periods.previous)}</div>
+      {available ? (
+        <>
+          <div>{t("tooltip.current")}: {trend.current}{unit}</div>
+          <div>{t("tooltip.previous")}: {trend.previous}{unit}</div>
+          <div>
+            {t("tooltip.difference")}: {sign}{unit}
+            {percentMode && pctSign ? ` (${pctSign})` : ""}
+          </div>
+          <div>{t("tooltip.direction")}: {t(`direction.${direction}`)}</div>
+        </>
+      ) : (
+        <div className="text-amber">{t("tooltip.trendPending")}</div>
+      )}
+      <div className="pt-1 text-[10px] text-muted-foreground/70">{t("tooltip.note")}</div>
+    </div>
+  );
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      <span className={cn("inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 text-[11px] font-medium", tone)}>
+        <Icon className="size-3" />
+        {available ? chipText : "—"}
+      </span>
+      <MetricInfo text={tooltip} />
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  icon: Icon,
+  value,
+  unit,
+  sub,
+  accent,
+  href,
+  trend,
+  higherIsBetter,
+  periods,
+  t,
+  percentMode,
+}: {
+  label: string;
+  icon: LucideIcon;
+  value: number | null;
+  unit?: string;
+  sub?: string;
+  accent: "danger" | "warning" | "ok" | "neutral";
+  href: string;
+  trend: KpiTrend;
+  higherIsBetter: boolean;
+  periods: { selected: Period; previous: Period };
+  t: T;
+  percentMode?: boolean;
+}) {
+  const valueTone =
+    accent === "danger" ? "text-cc-red" : accent === "warning" ? "text-amber" : accent === "ok" ? "text-cc-green" : "text-foreground";
+  const iconTone =
+    accent === "danger" ? "text-cc-red bg-red-dim" : accent === "warning" ? "text-amber bg-amber-dim" : accent === "ok" ? "text-cc-green bg-cc-green/10" : "text-muted-foreground bg-soft-2";
+  const borderTone =
+    accent === "danger" ? "border-cc-red/25" : accent === "warning" ? "border-amber/25" : accent === "ok" ? "border-cc-green/25" : "border-cyan/15";
+
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "group relative flex h-full min-h-[150px] flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/50 p-4 transition-all hover:border-cyan/40 hover:shadow-[0_0_30px_rgba(0,212,255,0.06)]",
+        borderTone,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+        <span className={cn("flex size-8 items-center justify-center rounded-lg", iconTone)}>
+          <Icon className="size-4" />
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-baseline gap-1">
+        <span className={cn("text-[2.5rem] font-bold leading-none tabular-nums", valueTone)}>
+          {value === null ? "—" : value}
+        </span>
+        {value !== null && unit ? <span className={cn("text-xl font-semibold", valueTone)}>{unit}</span> : null}
+      </div>
+      {sub ? <p className="mt-1.5 text-[11px] text-muted-foreground/80">{sub}</p> : null}
+
+      <div className="mt-auto flex items-center justify-between gap-2 pt-3">
+        <TrendChip trend={trend} higherIsBetter={higherIsBetter} unit={unit} label={label} periods={periods} t={t} percentMode={percentMode} />
+        <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">{t("liveLabel")}</span>
+      </div>
+    </Link>
+  );
+}
+
+export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicators }) {
+  const t = await getTranslations("Executive.indicators");
+  const { projectsAtRisk: risk, highRisk, onTime, overdue, clientChanges: cc, serviceDelivery, periods } = data;
+
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex items-baseline gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t("sectionTitle")}</h2>
+        <span className="text-[10px] text-muted-foreground/60">{t("subtitle")}</span>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <StatCard
+          label={t("projectsAtRisk.label")}
+          icon={AlertTriangle}
+          value={risk.mainValue}
+          sub={t("projectsAtRisk.minHint")}
+          accent={risk.mainValue === null ? "neutral" : risk.mainValue > 0 ? "warning" : "ok"}
+          href="/projects"
+          trend={risk.trend}
+          higherIsBetter={false}
+          periods={periods}
+          t={t}
+        />
+        <StatCard
+          label={t("highRisk.label")}
+          icon={AlertOctagon}
+          value={highRisk.mainValue}
+          sub={t("highRisk.thresholdHint", { threshold: highRisk.threshold })}
+          accent={highRisk.mainValue === null ? "neutral" : highRisk.mainValue > 0 ? "danger" : "ok"}
+          href="/projects"
+          trend={highRisk.trend}
+          higherIsBetter={false}
+          periods={periods}
+          t={t}
+        />
+        <StatCard
+          label={t("overdue.label")}
+          icon={Clock}
+          value={overdue.mainValue}
+          sub={t("overdue.sub")}
+          accent={overdue.mainValue === null ? "neutral" : overdue.mainValue > 50 ? "danger" : overdue.mainValue > 0 ? "warning" : "ok"}
+          href="/tasks?f=overdue"
+          trend={overdue.trend}
+          higherIsBetter={false}
+          periods={periods}
+          t={t}
+        />
+        <StatCard
+          label={t("onTime.label")}
+          icon={Timer}
+          value={onTime.onTimePct}
+          unit="%"
+          sub={t("onTime.sub", { completed: onTime.completedCount, today: onTime.mainValue ?? 0 })}
+          accent={onTime.onTimePct === null ? "neutral" : onTime.onTimePct >= 85 ? "ok" : onTime.onTimePct >= 70 ? "warning" : "danger"}
+          href="/reports"
+          trend={onTime.trend}
+          higherIsBetter
+          periods={periods}
+          t={t}
+        />
+        <StatCard
+          label={t("clientChanges.label")}
+          icon={RefreshCcw}
+          value={cc.mainValue}
+          sub={t("clientChanges.sub")}
+          accent={cc.mainValue === null ? "neutral" : cc.mainValue > 40 ? "danger" : cc.mainValue > 0 ? "warning" : "ok"}
+          href="/tasks?stage=client_changes"
+          trend={cc.trend}
+          higherIsBetter={false}
+          periods={periods}
+          t={t}
+          percentMode
+        />
+      </div>
+
+      {serviceDelivery.length > 0 ? (
+        <ServiceDeliveryTable rows={serviceDelivery} periods={periods} t={t} />
+      ) : null}
+    </section>
+  );
+}
+
+function ServiceDeliveryTable({
+  rows,
+  periods,
+  t,
+}: {
+  rows: ExecutiveIndicators["serviceDelivery"];
+  periods: { selected: Period; previous: Period };
+  t: T;
+}) {
+  return (
+    <div className="mt-4 overflow-hidden rounded-2xl border border-cyan/15 bg-card">
+      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{t("service.title")}</h3>
+        <span className="text-[10px] text-muted-foreground/60">{fmtPeriod(periods.selected)}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+              <th className="px-4 py-2 text-start font-medium">{t("service.colService")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("service.colOnTime")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("service.colCompleted")}</th>
+              <th className="px-4 py-2 text-center font-medium">{t("service.colChanges")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const pctTone = r.onTimePct === null ? "text-muted-foreground" : r.onTimePct >= 85 ? "text-cc-green" : r.onTimePct >= 70 ? "text-amber" : "text-cc-red";
+              return (
+                <tr key={r.service} className="border-t border-border/40 hover:bg-soft-1/40">
+                  <td className="px-4 py-2.5 text-start">
+                    <span className="font-medium">{r.service}</span>
+                    {r.includesRenewals ? (
+                      <span className="ms-2 rounded-full bg-soft-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/70">
+                        {t("service.renewalBadge")}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    <div className="inline-flex items-center gap-1.5">
+                      <span className={cn("font-semibold tabular-nums", pctTone)}>
+                        {r.onTimePct === null ? "—" : `${r.onTimePct}%`}
+                      </span>
+                      <TrendChip trend={r.onTimeTrend} higherIsBetter unit="%" label={`${r.service} · ${t("service.colOnTime")}`} periods={periods} t={t} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-center tabular-nums text-muted-foreground">{r.completedCount}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    <div className="inline-flex items-center gap-1.5">
+                      <span className="font-semibold tabular-nums">{r.clientChanges}</span>
+                      <TrendChip trend={r.clientChangesTrend} higherIsBetter={false} label={`${r.service} · ${t("service.colChanges")}`} periods={periods} t={t} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

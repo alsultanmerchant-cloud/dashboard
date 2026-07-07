@@ -8,6 +8,7 @@ import {
   type BriefSection,
 } from "@/lib/ceo-brief-schema";
 import type { CeoBriefSignals } from "@/lib/data/ceo-brief-signals";
+import { MODELS } from "@/lib/ai-model";
 
 // Per-section prompt builders for the CEO brief. The monolithic ~131-line
 // prompt is split here into three focused prompts — one per visual question —
@@ -21,7 +22,7 @@ export { isBriefSection, BRIEF_SECTIONS, type BriefSection } from "@/lib/ceo-bri
 // The blocking path additionally falls back to GEMINI_MODEL on a model-rejection
 // error; a committed stream cannot switch models mid-flight, so the route uses
 // this value as-is.
-export const CEO_BRIEF_MODEL = process.env.CEO_BRIEF_MODEL ?? "gemini-3.5-flash";
+export const CEO_BRIEF_MODEL = process.env.CEO_BRIEF_MODEL ?? MODELS.arabicHiQ;
 
 const VERDICT_AR = {
   improving: "تتحسّن",

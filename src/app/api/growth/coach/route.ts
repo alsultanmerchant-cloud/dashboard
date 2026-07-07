@@ -1,7 +1,6 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { getAgentGrowth } from "@/lib/data/agent-growth";
 import { buildGrowthCoachPrompt } from "@/lib/growth-coach/prompt";
@@ -10,7 +9,6 @@ import { GrowthCoachSchema } from "@/lib/growth-coach/schema";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Private growth coach for the signed-in specialist: reads their own scorecard
 // + self-trend (this 30 days vs prior) and streams a constructive, specialty-
@@ -38,7 +36,7 @@ export async function POST(request: Request) {
   ]);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicGen"),
     schema: GrowthCoachSchema,
     maxRetries: 2,
     prompt: buildGrowthCoachPrompt(growth, knowledge, locale),

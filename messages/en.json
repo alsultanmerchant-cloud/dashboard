@@ -3031,6 +3031,57 @@
     }
   },
   "Executive": {
+    "indicators": {
+      "sectionTitle": "Executive Indicators",
+      "subtitle": "Big number = current live state · Trend = vs previous equivalent period",
+      "liveLabel": "Live",
+      "unableToCalculate": "Unable to calculate — missing data",
+      "trendPendingShort": "Trend pending",
+      "projectsAtRisk": {
+        "label": "Projects At Risk",
+        "thresholdHint": "{threshold}+ overdue open tasks",
+        "minHint": "Projects with ≥1 overdue task"
+      },
+      "highRisk": {
+        "label": "High-Risk Projects",
+        "thresholdHint": "{threshold}+ overdue open tasks"
+      },
+      "overdue": {
+        "label": "Overdue Tasks",
+        "sub": "Open tasks past their deadline now"
+      },
+      "onTime": {
+        "label": "On-Time Delivery",
+        "sub": "of {completed} completed · {today} on time today"
+      },
+      "clientChanges": {
+        "label": "Client Changes",
+        "sub": "Tasks that entered the Client Changes stage"
+      },
+      "service": {
+        "title": "Service Delivery Performance",
+        "colService": "Service",
+        "colOnTime": "On-Time",
+        "colCompleted": "Completed",
+        "colChanges": "Client Changes",
+        "renewalBadge": "incl. renewal"
+      },
+      "direction": {
+        "increase": "Increase",
+        "decrease": "Decrease",
+        "no_change": "No Change"
+      },
+      "tooltip": {
+        "selectedPeriod": "Selected Period",
+        "previousPeriod": "Previous Equivalent Period",
+        "current": "Current Period Value",
+        "previous": "Previous Period Value",
+        "difference": "Difference",
+        "direction": "Trend Direction",
+        "trendPending": "Historical trend is currently unavailable.",
+        "note": "The Main value is the current live operational state; the Trend compares the Selected Period with the Previous Equivalent Period."
+      }
+    },
     "hero": {
       "metricTooltips": {
         "dashboard_heroOnTime": "Share of tasks delivered on or before their deadline over the last 30 days. Target benchmark is 85%; the sparkline shows the recent trend.",
@@ -3042,6 +3093,7 @@
       "onTimeRange": "Last 30 days",
       "onTimeSample": "{sample} delivered tasks",
       "onTimeNoSample": "No deliveries in last 30 days",
+      "completedToday": "{n} completed today",
       "benchmark": "Target 85%",
       "overdueLabel": "Overdue tasks",
       "stuckLabel": "Stuck in review",
@@ -3091,10 +3143,11 @@
     },
     "services": {
       "title": "Service-line health",
-      "description": "On-time rate, overdue load and revision pressure per service",
+      "description": "On-time rate, overdue load and client-changes per service",
       "openTasks": "open",
       "delivered": "delivered",
       "onTime": "on-time",
+      "clientChanges": "client changes",
       "empty": "No service data"
     },
     "flow": {
@@ -3194,7 +3247,7 @@
       "threePlus": "3+ revisions"
     },
     "scores": {
-      "title": "Executive Indicators",
+      "title": "Operational Health",
       "subtitle": "Four composite indices summarizing operational health",
       "grades": {
         "A": "Excellent",
@@ -3656,6 +3709,45 @@
     },
     "causes": {
       "title": "Root causes"
+    },
+    "accountability": {
+      "title": "Accountability",
+      "hint": "Each material complaint connected to the real work and the people behind it.",
+      "none": "No complaints could be tied to specific work or owners.",
+      "finding": "Where it sits",
+      "evidence": "Evidence",
+      "responsible": "Responsible",
+      "tasks": "Tasks",
+      "service": "Service",
+      "confidence": {
+        "high": "High confidence",
+        "medium": "Medium confidence",
+        "low": "Low confidence"
+      },
+      "basis": {
+        "stage_owner": "Stage owner",
+        "assignee": "Executor",
+        "account_manager": "Account manager",
+        "team_manager": "Team manager",
+        "process_gap": "Process gap"
+      }
+    },
+    "team": {
+      "title": "Team on this account",
+      "hint": "Who works this client's tasks and how active they've been (last 30 days).",
+      "accountManager": "Account manager",
+      "services": "Services",
+      "person": "Person",
+      "role": "Role",
+      "open": "Open",
+      "overdue": "Overdue",
+      "actions30d": "Actions (30d)",
+      "lastAction": "Last action",
+      "gaps": "Detected gaps",
+      "none": "No open tasks for this client.",
+      "noActivity": "No activity",
+      "show": "Show team activity",
+      "hide": "Hide team activity"
     },
     "highlights": "Highlights",
     "emptyOverview": "No synced chats yet. Connect WhatsApp groups to get started.",

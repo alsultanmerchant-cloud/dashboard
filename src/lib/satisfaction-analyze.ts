@@ -1,6 +1,5 @@
 import "server-only";
 import { generateObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import {
@@ -14,10 +13,15 @@ import {
   getClientContractContext,
   getClientContractActivity,
 } from "@/lib/data/satisfaction";
+import {
+  getClientTeamActivitySnapshot,
+  renderTeamActivityBlock,
+  type ClientTeamActivitySnapshot,
+} from "@/lib/data/satisfaction-team";
 import { getClientBrief } from "@/lib/satisfaction-brief";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel, MODELS } from "@/lib/ai-model";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
 // (/api/satisfaction/analyze), the streaming re-analyze route
@@ -29,8 +33,7 @@ import { GEMINI_MODEL } from "@/lib/ai-model";
 // paths share identical input-building + persistence:
 //   buildSatisfactionInput → (generateObject | streamObject) → persistSatisfaction
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const MODEL = GEMINI_MODEL;
+const MODEL = MODELS.flagship;
 export const SATISFACTION_MODEL = MODEL;
 export const SATISFACTION_MAX_CHARS = 45_000;
 const MAX_CHARS = SATISFACTION_MAX_CHARS;
@@ -79,6 +82,10 @@ export interface SatisfactionInput {
   brief: Awaited<ReturnType<typeof getClientBrief>>;
   contract: Awaited<ReturnType<typeof getClientContractContext>>;
   activity: Awaited<ReturnType<typeof getClientContractActivity>>;
+  // The accountability roster (people + stuck tasks + gaps) fed to the model.
+  // Frozen into the analysis and used to validate the model's `accountability`
+  // output — any name/task-code not present here is dropped on persist.
+  team: ClientTeamActivitySnapshot;
   makePrompt: (budget: number) => string;
 }
 
@@ -201,6 +208,13 @@ export async function buildSatisfactionInput(
       } — أسوأ وضع (target): ${contract.target} — الحالة الغالبة: ${contract.status}${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
+  // The accountability roster: who works the client's tasks, who owns the stuck
+  // stages, and how much each has actually done. Rides OUTSIDE the transcript
+  // budget (like the contract/execution blocks) so the retry-shrink loop never
+  // amputates it.
+  const team = await getClientTeamActivitySnapshot(orgId, clientId);
+  const teamBlock = renderTeamActivityBlock(team);
+
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
 
   const makePrompt = (budget: number) =>
@@ -259,6 +273,22 @@ ${briefInstruction}
 — recommendations (الأكشنز المقترحة، الأهم أولاً، حتى ٦) —
 اربط ما يشكو/يطلبه العميل بالعمل الفعلي في التاسكات. issue = المشكلة موصولة بالواقع، action = الخطوة العملية. استخدم رموز/عناوين المهام عند توفرها. لا تخترع مهاماً. إن لم توجد مشكلة جوهرية أعِد مصفوفة فارغة.
 
+— accountability (اربط الشكوى/التعثّر بالمسؤول — أهم مخرج لهذه الصفحة، حتى ٦) —
+أنشئ صفاً في الحالتين: (١) لكل شكوى جوهرية من مجموعة العميل، و(٢) لكل تعثّر تشغيلي مؤثر في قسم "الفريق والمسؤوليات" قد يضرّ بالعميل حتى لو لم يشتكِ صراحةً بعد (مثل مهمة عالقة أسابيع بلا حركة، أو فجوة مذكورة في "فجوات مكتشفة آليًا"). حدّد الخدمة، ثم اربطها بالمهام والأشخاص من قسم "الفريق والمسؤوليات" حصراً (لا تستخدم أي اسم أو كود مهمة غير مذكور هناك). املأ:
+- complaint: شكوى العميل الفعلية (اقتباس أو تلخيص أمين)، أو — إن لم توجد شكوى صريحة — وصفٌ موجز للتعثّر التشغيلي المؤثر.
+- service: الخدمة المعنية كما وردت في الروستر (أو null).
+- finding: أين تتركّز المشكلة فعلياً — تشخيص مهني محايد لا اتهام شخصي.
+- responsible: من يتحمّل المسؤولية التشغيلية (حتى ٣، بالاسم والدور من الروستر) مع basis:
+  • مهمة عالقة في التنفيذ (in_progress/specialist_review) → المنفّذ (assignee) أو مالك المرحلة إن كان أخصائياً (stage_owner).
+  • مهمة عالقة في manager_review → مالك المرحلة / مدير الفريق (team_manager).
+  • مهمة في sent_to_client/ready_to_send تنتظر العميل → ليست تقصير فريق؛ لا تُسند لشخص إلا إن تأخّر مدير الحساب في متابعة الاعتماد (account_manager).
+  • تأخر اعتمادات أو بريف ناقص → مدير الحساب (account_manager).
+  • لا يوجد منفّذ معيّن، أو مهمة خاملة بلا حركة، أو مدير حساب صامت → basis=process_gap واترك responsible فارغة أو بالاسم المذكور في الفجوات.
+- taskCodes: أكواد المهام من الروستر التي تُثبت الـfinding (حتى ٥).
+- evidence: السلسلة الواقعية (مهمة X عالقة في مرحلة Y منذ Z يوم، آخر إجراء من W، عدد الإجراءات...).
+- confidence: high فقط عند دليل صريح يربط الشكوى بمهمة/شخص محدّد؛ إن ربطت بالخدمة فقط فاجعلها low.
+لا تخترع اسماً أو كوداً أو رقماً. إن لم توجد شكوى قابلة للربط أعِد مصفوفة فارغة. كذلك في causes، إن كان لسبب المشكلة مالك مذكور بالاسم في الروستر ضعه في ownerName (وإلا null).
+
 ضوابط عامة:
 - حدود رواسم: اذكر رقم «في هذه المرحلة منذ» كما ورد ولا تُعِد صياغته كـ«تأخّر اعتماد X أيام». لا تنسب لمهمة أثراً لم يُذكر صراحةً ما لم يقُله العميل في مجموعته.
 - highlights: لكل عنصر audience: "client" (من العميل) أو "team" (تنسيق داخلي). نص كل عنصر اقتباس حقيقي أو تلخيص أمين — لا تخترع رسائل أو "تم الاعتماد/الانتهاء". milestone للمخرجات المعتمدة الجوهرية فقط؛ الاسترداد المالي/فسخ التعاقد/مغادرة العميل = escalation وليست milestone.
@@ -271,7 +301,7 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني 📍 ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${teamBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
 
   return {
     clientName,
@@ -281,6 +311,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${k
     brief,
     contract,
     activity,
+    team,
     makePrompt,
   };
 }
@@ -294,12 +325,47 @@ export async function persistSatisfaction(
   result: SatisfactionResult,
   input: SatisfactionInput,
 ): Promise<AnalyzeOutcome> {
-  const { brief, contract, activity, windowKind, windowStart, windowEnd } = input;
+  const { brief, contract, activity, team, windowKind, windowStart, windowEnd } = input;
   // Brief text wasn't available → the model must not have inferred adherence.
   if (!brief) {
     result.briefAdherenceScore = null;
     result.briefAdherence = null;
   }
+
+  // ---- Roster guardrail: the model may ONLY cite names/codes we handed it.
+  // Drop any invented name or task code so a hallucinated attribution can never
+  // reach the DB, even if the model ignores the prompt. A row that loses all of
+  // its people AND task codes is dropped unless it is an explicit process_gap.
+  const rosterNames = new Set<string>();
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+  for (const p of team.people) rosterNames.add(norm(p.name));
+  if (team.accountManager) rosterNames.add(norm(team.accountManager));
+  for (const t of team.stuckTasks) {
+    for (const n of [t.executor, t.accountManager, t.stageOwner]) {
+      if (!n) continue;
+      // stageOwner may be a comma-joined list.
+      for (const part of n.split(",")) if (part.trim()) rosterNames.add(norm(part));
+    }
+  }
+  const rosterCodes = new Set<string>();
+  for (const t of team.stuckTasks) if (t.taskCode) rosterCodes.add(t.taskCode);
+
+  result.accountability = (result.accountability ?? [])
+    .map((row) => {
+      const namedPeople = (row.responsible ?? []).length;
+      const responsible = (row.responsible ?? []).filter((r) => rosterNames.has(norm(r.name)));
+      const taskCodes = (row.taskCodes ?? []).filter((c) => rosterCodes.has(c));
+      // Drop only when the model named people but EVERY name was invented and no
+      // valid task code survives — that row is a hallucination. A row that never
+      // named anyone (a pure process finding) is kept.
+      const hallucinated = namedPeople > 0 && responsible.length === 0 && taskCodes.length === 0;
+      return hallucinated ? null : { ...row, responsible, taskCodes };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+  // Same guard for the per-cause owner name.
+  result.causes = (result.causes ?? []).map((c) =>
+    c.ownerName && rosterNames.has(norm(c.ownerName)) ? c : { ...c, ownerName: null },
+  );
 
   const { data: imp } = await supabaseAdmin
     .from("client_chat_imports")
@@ -339,8 +405,10 @@ export async function persistSatisfaction(
       client_group_signals: result.clientGroupSignals,
       technical_group_signals: result.technicalGroupSignals,
       causes: result.causes,
+      accountability: result.accountability,
       big_picture: result.bigPicture,
       contract_context: contract ? { ...contract, recentActivity: activity } : null,
+      team_context: team.hasData ? team : null,
       model: MODEL,
       client_import_id: clientImportId,
       technical_import_id: technicalImportId,
@@ -407,7 +475,7 @@ export async function analyzeClientSatisfaction(
   for (const budget of budgets) {
     try {
       const { object } = await generateObject({
-        model: google(MODEL),
+        model: aiModel("flagship"),
         maxRetries: 2,
         schema: SatisfactionSchema,
         prompt: input.makePrompt(budget),

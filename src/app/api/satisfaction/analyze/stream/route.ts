@@ -1,11 +1,10 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { aiModel } from "@/lib/ai-model";
 import { requirePermission } from "@/lib/auth-server";
 import { SatisfactionSchema } from "@/lib/satisfaction-schema";
 import {
   buildSatisfactionInput,
   persistSatisfaction,
-  SATISFACTION_MODEL,
   SATISFACTION_MAX_CHARS,
   NoTranscriptError,
   NoRecentActivityError,
@@ -19,7 +18,6 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 export async function POST(req: Request) {
   let session;
@@ -56,7 +54,7 @@ export async function POST(req: Request) {
   }
 
   const result = streamObject({
-    model: google(SATISFACTION_MODEL),
+    model: aiModel("flagship"),
     schema: SatisfactionSchema,
     maxRetries: 2,
     prompt: input.makePrompt(SATISFACTION_MAX_CHARS),

@@ -101,36 +101,63 @@ export function ExecutiveDashboardSkeleton() {
   return (
     <div>
       <PageHeaderSkeleton />
-      <div className="mb-8 grid gap-3 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
-        <Skeleton className="h-[148px] rounded-2xl" />
-        <Skeleton className="h-[148px] rounded-2xl" />
-        <Skeleton className="h-[148px] rounded-2xl" />
-        <Skeleton className="h-[148px] rounded-2xl" />
+
+      <Skeleton className="mb-8 h-[360px] rounded-2xl" />
+
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <Skeleton className="h-9 w-28 rounded-lg" />
+        <Skeleton className="h-9 w-28 rounded-lg" />
+        <Skeleton className="h-9 w-28 rounded-lg" />
+        <Skeleton className="h-9 w-36 rounded-lg" />
       </div>
+
+      <div className="mb-8">
+        <div className="mb-3 flex items-center gap-2">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-3 w-56" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className="h-[150px] rounded-2xl" />
+          ))}
+        </div>
+        <Skeleton className="mt-3 h-[132px] rounded-2xl" />
+      </div>
+
+      <div className="mb-8 space-y-3">
+        <div className="grid gap-3 lg:grid-cols-[1.15fr_2fr]">
+          <Skeleton className="h-[220px] rounded-2xl" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <Skeleton className="h-[220px] rounded-2xl" />
+            <Skeleton className="h-[220px] rounded-2xl" />
+            <Skeleton className="h-[220px] rounded-2xl" />
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-[120px] rounded-2xl" />
+          ))}
+        </div>
+      </div>
+
+      <Skeleton className="mb-8 h-[88px] rounded-2xl" />
 
       <div className="space-y-8">
         <div className="grid gap-4 lg:grid-cols-2">
-          <Skeleton className="h-72 rounded-2xl" />
-          <Skeleton className="h-72 rounded-2xl" />
+          <Skeleton className="h-[300px] rounded-2xl" />
+          <Skeleton className="h-[300px] rounded-2xl" />
         </div>
-        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <Skeleton className="h-80 rounded-2xl" />
-          <Skeleton className="h-80 rounded-2xl" />
-        </div>
-        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <Skeleton className="h-72 rounded-2xl" />
-          <div className="grid gap-3">
-            <Skeleton className="h-36 rounded-2xl" />
-            <Skeleton className="h-36 rounded-2xl" />
-          </div>
-        </div>
-        <Skeleton className="h-44 rounded-2xl" />
         <div>
-          <div className="mb-3 space-y-2">
-            <Skeleton className="h-5 w-48" />
-            <Skeleton className="h-3 w-72" />
-          </div>
-          <CardListSkeleton rows={4} />
+          <Skeleton className="mb-3 h-5 w-48" />
+          <Skeleton className="h-[260px] rounded-2xl" />
+        </div>
+        <div>
+          <Skeleton className="mb-3 h-5 w-48" />
+          <Skeleton className="h-[320px] rounded-2xl" />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-[180px] rounded-2xl" />
+          <Skeleton className="h-[180px] rounded-2xl" />
         </div>
       </div>
     </div>

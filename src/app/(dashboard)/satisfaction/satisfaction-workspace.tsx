@@ -42,6 +42,9 @@ import {
   ClipboardList,
   Trash2,
   Pencil,
+  Users,
+  ChevronDown,
+  Scale,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
@@ -1324,6 +1327,16 @@ function AnalysisView({
         <TechnicalSignalsPanel signals={analysis.technicalGroupSignals} t={t} />
       </div>
 
+      {/* المسؤولية — complaint → finding → responsible people + tasks */}
+      <AccountabilityPanel
+        accountability={analysis.accountability}
+        teamContext={analysis.teamContext}
+        t={t}
+      />
+
+      {/* الفريق على هذا الحساب — factual roster + code-detected gaps */}
+      <TeamRosterPanel teamContext={analysis.teamContext} t={t} />
+
       {/* أسباب المشاكل */}
       <CausesPanel causes={analysis.causes} t={t} />
 
@@ -1366,9 +1379,6 @@ function AnalysisView({
           t={t}
         />
       )}
-
-      {/* past analyses — click to view an earlier snapshot */}
-      <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
   );
 }
@@ -2044,6 +2054,271 @@ function CausesPanel({
   );
 }
 
+// ---- Accountability: complaint → finding → responsible people + tasks -------
+// The audit spine. Names & task codes are already roster-validated server-side,
+// so every chip here is a real person / real task. Person chips deep-link to the
+// accountability drill-down; task chips to the filtered task list.
+const BASIS_TONE: Record<string, string> = {
+  stage_owner: "border-amber/40 bg-amber/10 text-amber",
+  assignee: "border-cyan/40 bg-cyan/10 text-cyan",
+  account_manager: "border-violet-400/40 bg-violet-400/10 text-violet-300",
+  team_manager: "border-blue-400/40 bg-blue-400/10 text-blue-300",
+  process_gap: "border-cc-red/40 bg-cc-red/10 text-cc-red",
+};
+
+function AccountabilityPanel({
+  accountability,
+  teamContext,
+  t,
+}: {
+  accountability: Analysis["accountability"];
+  teamContext: Analysis["teamContext"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (!accountability || accountability.length === 0) return null;
+  // name → employeeId, so person chips can deep-link to the accountability page.
+  const idByName = new Map<string, string>();
+  for (const p of teamContext?.people ?? []) {
+    idByName.set(p.name.replace(/\s+/g, " ").trim(), p.employeeId);
+  }
+  return (
+    <Card className="border-cc-red/25">
+      <CardContent className="p-4">
+        <p className="inline-flex items-center gap-2 text-sm font-semibold">
+          <Scale className="size-4 text-cc-red" /> {t("accountability.title")}
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          {t("accountability.hint")}
+        </p>
+        <ul className="mt-3 space-y-3">
+          {accountability.map((row, i) => (
+            <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
+              {/* complaint → finding */}
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-[13px] font-medium leading-snug">“{row.complaint}”</span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {row.service && (
+                    <span className="rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {row.service}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                      row.confidence === "high"
+                        ? "bg-emerald-400/10 text-emerald-300"
+                        : row.confidence === "low"
+                          ? "bg-soft-2 text-muted-foreground"
+                          : "bg-amber/10 text-amber",
+                    )}
+                  >
+                    {t(`accountability.confidence.${row.confidence}`)}
+                  </span>
+                </div>
+              </div>
+              <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-foreground/90">
+                <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0 text-cc-red" />
+                {row.finding}
+              </p>
+
+              {/* responsible people */}
+              {row.responsible.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {t("accountability.responsible")}:
+                  </span>
+                  {row.responsible.map((p, j) => {
+                    const empId = idByName.get(p.name.replace(/\s+/g, " ").trim());
+                    const chip = (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                          BASIS_TONE[p.basis] ?? "border-border bg-soft-2 text-foreground",
+                        )}
+                      >
+                        <Users className="size-3" />
+                        {p.name}
+                        <span className="opacity-70">· {t(`accountability.basis.${p.basis}`)}</span>
+                      </span>
+                    );
+                    return empId ? (
+                      <Link key={j} href={`/accountability?employee=${empId}`}>
+                        {chip}
+                      </Link>
+                    ) : (
+                      <span key={j}>{chip}</span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* evidencing tasks */}
+              {row.taskCodes.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {t("accountability.tasks")}:
+                  </span>
+                  {row.taskCodes.map((code) => (
+                    <Link
+                      key={code}
+                      href={`/tasks?q=${encodeURIComponent(code)}`}
+                      className="inline-flex items-center gap-1 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground hover:text-foreground"
+                    >
+                      <ClipboardList className="size-3" />
+                      {code}
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              {/* evidence line */}
+              {row.evidence && (
+                <p className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-snug text-muted-foreground">
+                  {row.evidence}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- Team roster strip: pure facts from the frozen snapshot. Renders even
+// when the AI produced no accountability rows — the CEO still sees who's on the
+// account and who's gone quiet. Collapsible to keep the page calm.
+function TeamRosterPanel({
+  teamContext,
+  t,
+}: {
+  teamContext: Analysis["teamContext"];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!teamContext || !teamContext.hasData || teamContext.people.length === 0) return null;
+  const fmtDate = (iso: string | null) => (iso ? iso.slice(0, 10) : t("team.noActivity"));
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2"
+        >
+          <span className="inline-flex items-center gap-2 text-sm font-semibold">
+            <Users className="size-4 text-muted-foreground" /> {t("team.title")}
+          </span>
+          <span className="inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+            {teamContext.accountManager && (
+              <span>
+                {t("team.accountManager")}: {teamContext.accountManager}
+              </span>
+            )}
+            <ChevronDown
+              className={cn("size-4 transition-transform", open && "rotate-180")}
+            />
+          </span>
+        </button>
+
+        {open && (
+          <div className="mt-3 space-y-3">
+            {/* services summary */}
+            {teamContext.services.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {teamContext.services.map((s) => (
+                  <span
+                    key={s.service}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-soft-1 px-2 py-1 text-[11px]"
+                  >
+                    <span className="text-muted-foreground">{s.service}</span>
+                    <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">
+                      {s.totalOpen}
+                    </span>
+                    {s.overdue > 0 && (
+                      <span className="rounded-full bg-amber/15 px-1.5 font-medium tabular-nums text-amber">
+                        {s.overdue}
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* people table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <th className="py-1.5 pe-2 text-start font-medium">{t("team.person")}</th>
+                    <th className="px-2 text-start font-medium">{t("team.role")}</th>
+                    <th className="px-2 text-center font-medium">{t("team.open")}</th>
+                    <th className="px-2 text-center font-medium">{t("team.overdue")}</th>
+                    <th className="px-2 text-center font-medium">{t("team.actions30d")}</th>
+                    <th className="ps-2 text-start font-medium">{t("team.lastAction")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamContext.people.map((p) => (
+                    <tr key={p.employeeId} className="border-b border-border/50 last:border-0">
+                      <td className="py-1.5 pe-2">
+                        <Link
+                          href={`/accountability?employee=${p.employeeId}`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          {p.name}
+                        </Link>
+                      </td>
+                      <td className="px-2 text-muted-foreground">{p.positionLabel}</td>
+                      <td className="px-2 text-center tabular-nums">{p.openTasks}</td>
+                      <td
+                        className={cn(
+                          "px-2 text-center tabular-nums",
+                          p.overdueTasks > 0 && "font-medium text-amber",
+                        )}
+                      >
+                        {p.overdueTasks || "—"}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 text-center tabular-nums",
+                          p.actions30d === 0 && p.overdueTasks > 0 && "font-medium text-cc-red",
+                        )}
+                      >
+                        {p.actions30d}
+                      </td>
+                      <td className="ps-2 text-muted-foreground tabular-nums">
+                        {fmtDate(p.lastActionAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* code-detected gaps */}
+            {teamContext.gaps.length > 0 && (
+              <div className="rounded-lg border border-cc-red/20 bg-cc-red/5 p-2.5">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-cc-red">
+                  {t("team.gaps")}
+                </p>
+                <ul className="space-y-1">
+                  {teamContext.gaps.map((g, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-[11px] text-foreground/90">
+                      <AlertTriangle className="mt-0.5 size-3 shrink-0 text-cc-red" />
+                      {g}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ClientTimelinePanel({
   events,
   range,
@@ -2476,77 +2751,5 @@ function BriefAttachForms({
 
         {error && <p className="text-xs text-cc-red">{error}</p>}
     </div>
-  );
-}
-
-// ---- Past-analyses history ----------------------------------------------
-function HistoryList({
-  history,
-  clientId,
-  shownId,
-  t,
-}: {
-  history: AnalysisHistoryItem[];
-  clientId: string;
-  shownId: string;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  if (history.length <= 1) return null;
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-          <History className="size-4 text-cyan" /> {t("history.title")}
-          <MetricInfo
-            text={t("metricTooltips.satisfaction_historyScore")}
-            label={t("history.title")}
-          />
-        </p>
-        <ul className="space-y-1.5">
-          {history.map((h) => {
-            const tone = scoreTone(h.satisfactionScore);
-            const isShown = h.id === shownId;
-            const href = h.isCurrent
-              ? `/satisfaction?client=${clientId}`
-              : `/satisfaction?client=${clientId}&analysis=${h.id}`;
-            return (
-              <li key={h.id}>
-                <Link
-                  href={href}
-                  className={cn(
-                    "flex items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-[13px] transition-colors",
-                    isShown
-                      ? "border-cyan/40 bg-soft-1"
-                      : "border-border bg-card hover:border-cyan/30 hover:bg-soft-1",
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={cn("text-base font-bold tabular-nums", tone.text)}>
-                      {h.satisfactionScore ?? "—"}
-                    </span>
-                    <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      {t(`window.${h.windowKind}`)}
-                    </span>
-                    {h.isCurrent && (
-                      <span className="rounded bg-cc-green/15 px-1.5 py-0.5 text-[10px] font-medium text-cc-green">
-                        {t("history.current")}
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>
-                      {h.sentiment ? t(`sentiment.${h.sentiment}`) : "—"}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground/70">
-                      {h.createdAt.slice(0, 10)}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </CardContent>
-    </Card>
   );
 }

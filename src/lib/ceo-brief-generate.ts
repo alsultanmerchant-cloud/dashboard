@@ -1,6 +1,6 @@
 import "server-only";
 import { generateObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { gateway } from "ai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { GEMINI_MODEL } from "@/lib/ai-model";
 import { buildCeoBriefSignals } from "@/lib/data/ceo-brief-signals";
@@ -31,7 +31,6 @@ import {
   applySynthesis,
 } from "@/lib/ceo-brief/merge";
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Clicking "تحديث" (or a second cron pass) within this window returns the
 // cached brief instead of burning a Gemini call. force=true bypasses.
@@ -116,7 +115,7 @@ export async function generateAndStoreCeoBrief(
       const prompt = def.buildPrompt(signals, knowledge);
       try {
         const { object } = await generateObject({
-          model: google(CEO_BRIEF_MODEL),
+          model: gateway(CEO_BRIEF_MODEL),
           schema: def.schema,
           maxRetries: 2,
           prompt,
@@ -133,7 +132,7 @@ export async function generateAndStoreCeoBrief(
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[ceo-brief] model "${CEO_BRIEF_MODEL}" failed (${msg}); falling back to ${GEMINI_MODEL}`);
           const { object } = await generateObject({
-            model: google(GEMINI_MODEL),
+            model: gateway(GEMINI_MODEL),
             schema: def.schema,
             maxRetries: 2,
             prompt,

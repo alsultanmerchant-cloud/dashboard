@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
+import type { ClientTeamActivitySnapshot } from "@/lib/data/satisfaction-team";
 import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
 import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
@@ -37,6 +38,10 @@ export interface AnalysisInfo extends SatisfactionResult {
   // The contract snapshot fed to the model when the analysis ran (UI shows the
   // pill; the model used it for the commercial dimension of the big picture).
   contractContext: ClientContractContext | null;
+  // The accountability roster (people + stuck tasks + gaps) frozen at run time.
+  // The UI renders the team strip from this so history stays truthful. Null for
+  // analyses stored before migration 0238 or clients with no open tasks.
+  teamContext: ClientTeamActivitySnapshot | null;
 }
 
 // One row in the per-client analysis history list (stored past snapshots).
@@ -237,7 +242,7 @@ export interface ClientSatisfactionDetail {
 }
 
 const ANALYSIS_COLUMNS =
-  "id, satisfaction_score, brief_adherence_score, brief_adherence, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, indicators, client_group_signals, technical_group_signals, causes, contract_context, big_picture, model, created_at, window_kind, window_start, window_end";
+  "id, satisfaction_score, brief_adherence_score, brief_adherence, sentiment, summary, highlights, sentiment_timeline, risks, recommendations, indicators, client_group_signals, technical_group_signals, causes, accountability, contract_context, team_context, big_picture, model, created_at, window_kind, window_start, window_end";
 
 // Defaults for the rich fields so rows written before migration 0178 (which
 // have NULL in the new columns) still render without per-call null checks.
@@ -276,11 +281,13 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     technicalGroupSignals:
       (a.technical_group_signals as SatisfactionResult["technicalGroupSignals"]) ?? EMPTY_TECH_SIGNALS,
     causes: (a.causes as SatisfactionResult["causes"]) ?? [],
+    accountability: (a.accountability as SatisfactionResult["accountability"]) ?? [],
     highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
     sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
     risks: (a.risks as string[]) ?? [],
     recommendations: (a.recommendations as SatisfactionResult["recommendations"]) ?? [],
     contractContext: (a.contract_context as ClientContractContext | null) ?? null,
+    teamContext: (a.team_context as ClientTeamActivitySnapshot | null) ?? null,
     model: (a.model as string | null) ?? null,
     createdAt: a.created_at as string,
     windowKind: ((a.window_kind as string) ?? "all") as WindowKind,

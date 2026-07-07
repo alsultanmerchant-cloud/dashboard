@@ -1,8 +1,7 @@
 import { streamText, convertToModelMessages, tool, stepCountIs, type UIMessage } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { buildReadTools } from "@/lib/ai-tools";
 import { buildKnowledgeBlock, insertKnowledge } from "@/lib/data/ai-knowledge";
 import { logAudit, logAiEvent } from "@/lib/audit";
@@ -17,7 +16,6 @@ import { z } from "zod";
 // §9.1: cap runtime so a hung tool/stream surfaces as an error to the client.
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const SYSTEM_PROMPT = `أنت "مساعد لوحة القيادة" — مساعد تحرير وتعلّم يعمل داخل لوحة قيادة وكالة تسويق سعودية (رواسم).
 يحدّد المستخدم نصًّا من أي مكان في لوحة القيادة (الموجز التنفيذي، المؤشرات، صحة العملاء، الخدمات، أداء الفريق، العقود… إلخ) ويطلب أحد ثلاثة أشياء:
@@ -153,7 +151,7 @@ export async function POST(req: Request) {
     const seenToolCalls = new Map<string, number>();
 
     const result = streamText({
-      model: google(GEMINI_MODEL),
+      model: aiModel("arabicGen"),
       system: `${SYSTEM_PROMPT}${knowledge ? `\n\n---\n\n${knowledge}` : ""}${briefContext}${clientContext}${selectionContext}`,
       messages: modelMessages,
       maxRetries: 0,

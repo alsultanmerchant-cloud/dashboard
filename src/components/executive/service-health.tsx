@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Activity, AlertTriangle, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
 import type { ServiceHealthRow } from "@/lib/data/executive";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
@@ -14,6 +14,34 @@ function pctTone(pct: number | null) {
   if (pct >= 85) return "text-cc-green";
   if (pct >= 70) return "text-amber";
   return "text-cc-red";
+}
+
+// Delta chip vs the previous equivalent period. `higherIsBetter` flips colour
+// polarity (on-time up = good/green; client-changes up = bad/red). Hidden when
+// there's no comparable previous value or the change is flat.
+function DeltaChip({
+  current,
+  previous,
+  higherIsBetter,
+  unit = "",
+}: {
+  current: number | null;
+  previous: number | null;
+  higherIsBetter: boolean;
+  unit?: string;
+}) {
+  if (current === null || previous === null) return null;
+  const diff = Math.round((current - previous) * 10) / 10;
+  if (diff === 0) return null;
+  const up = diff > 0;
+  const good = up === higherIsBetter;
+  const Icon = up ? TrendingUp : TrendingDown;
+  return (
+    <span className={cn("inline-flex items-center gap-0.5 text-[10px] font-medium tabular-nums", good ? "text-cc-green" : "text-cc-red")}>
+      <Icon className="size-3" />
+      {up ? `+${diff}` : diff}{unit}
+    </span>
+  );
 }
 
 const SERVICE_ICON_TONE: Record<string, string> = {
@@ -88,8 +116,9 @@ export async function ServiceHealthSection({
                 </div>
 
                 <div className="text-left tabular-nums">
-                  <div className={cn("text-lg font-bold leading-none", pctTone(pct))}>
+                  <div className={cn("flex items-center justify-end gap-1.5 text-lg font-bold leading-none", pctTone(pct))}>
                     {pct === null ? "—" : `${pct}%`}
+                    <DeltaChip current={pct} previous={s.onTimePctPrev} higherIsBetter unit="%" />
                   </div>
                   <div className="mt-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
                     {t("onTime")}
@@ -103,11 +132,12 @@ export async function ServiceHealthSection({
                   </span>
                 </div>
 
-                <div className="hidden items-center gap-1 md:flex">
-                  <RefreshCw className={cn("size-3.5", s.avgRevisions >= 1 ? "text-amber" : "text-muted-foreground opacity-40")} />
+                <div className="hidden items-center gap-1.5 md:flex" title={t("clientChanges")}>
+                  <RefreshCw className={cn("size-3.5", s.clientChanges > 0 ? "text-amber" : "text-muted-foreground opacity-40")} />
                   <span className="text-sm font-semibold tabular-nums">
-                    {s.avgRevisions.toFixed(1)}
+                    {s.clientChanges}
                   </span>
+                  <DeltaChip current={s.clientChanges} previous={s.clientChangesPrev} higherIsBetter={false} />
                 </div>
               </Link>
             );

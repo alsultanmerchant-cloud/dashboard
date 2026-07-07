@@ -52,7 +52,7 @@ function normalizePayment(raw: string | null): "complete" | "installments" | nul
 async function _getClientFinanceMap(orgId: string): Promise<ClientFinanceMap> {
   const today = new Date().toISOString().slice(0, 10);
 
-  const [contractsRes, installmentsRes] = await Promise.all([
+  const [contractsRes, installmentsRes, mergeRes] = await Promise.all([
     supabaseAdmin
       .from("contracts")
       .select("id, client_id, target, payment_status, status, start_date")
@@ -63,6 +63,16 @@ async function _getClientFinanceMap(orgId: string): Promise<ClientFinanceMap> {
       .select("contract_id, expected_amount, actual_amount, expected_date")
       .eq("organization_id", orgId)
       .lt("expected_date", today),
+    // Twin→canonical map: a merged client's contracts sit on its sheet twin,
+    // but every consuming surface (satisfaction cards, /clients) keys on the
+    // canonical row. Fold contract client_id to canonical so the badge is
+    // reachable there. Mirrors getClientIdentityIds. See
+    // [[project_satisfaction_contract_bridge]].
+    supabaseAdmin
+      .from("clients")
+      .select("id, merged_into_client_id")
+      .eq("organization_id", orgId)
+      .not("merged_into_client_id", "is", null),
   ]);
 
   if (contractsRes.error) {
@@ -83,25 +93,34 @@ async function _getClientFinanceMap(orgId: string): Promise<ClientFinanceMap> {
   };
   const contracts = (contractsRes.data ?? []) as ContractRow[];
 
+  // Fold each contract's client_id up to its canonical row (one hop), so a
+  // merged client's twin-attached contracts land on the id the UI keys on.
+  const parentOf = new Map<string, string>();
+  for (const r of (mergeRes.data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
+    if (r.merged_into_client_id) parentOf.set(r.id, r.merged_into_client_id);
+  }
+  const canonicalOf = (id: string) => parentOf.get(id) ?? id;
+
   // Representative contract per client: active preferred, then latest start.
   const repByClient = new Map<string, ContractRow>();
   for (const c of contracts) {
-    const cur = repByClient.get(c.client_id);
+    const key = canonicalOf(c.client_id);
+    const cur = repByClient.get(key);
     if (!cur) {
-      repByClient.set(c.client_id, c);
+      repByClient.set(key, c);
       continue;
     }
     const curActive = cur.status === "active";
     const newActive = c.status === "active";
     if (newActive !== curActive) {
-      if (newActive) repByClient.set(c.client_id, c);
+      if (newActive) repByClient.set(key, c);
       continue;
     }
-    if ((c.start_date ?? "") > (cur.start_date ?? "")) repByClient.set(c.client_id, c);
+    if ((c.start_date ?? "") > (cur.start_date ?? "")) repByClient.set(key, c);
   }
 
   const clientByContract = new Map<string, string>();
-  for (const c of contracts) clientByContract.set(c.id, c.client_id);
+  for (const c of contracts) clientByContract.set(c.id, canonicalOf(c.client_id));
 
   const overdueByClient = new Map<string, { n: number; amount: number }>();
   for (const i of installmentsRes.data ?? []) {

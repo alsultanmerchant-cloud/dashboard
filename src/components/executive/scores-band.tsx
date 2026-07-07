@@ -20,6 +20,7 @@ import {
   type ExecutiveScores,
   type ScoreGrade,
 } from "@/lib/data/executive-scores";
+import type { KpiTrend } from "@/lib/data/executive-indicators";
 import { cn } from "@/lib/utils";
 import { Explained, MetricInfo } from "@/components/metric-info";
 
@@ -206,9 +207,14 @@ function IndexCard({
 export interface OperationalKpis {
   onTimePct: number | null;
   delivered: number;
+  /** ALL tasks completed today (live, Sky Light feedback 2026-07-07). */
+  completedToday: number;
+  /** On-time % trend: selected period vs previous equivalent period. */
+  onTimeTrend: KpiTrend;
   windowLabel: string;
   overdue: number;
-  overdueDelta: number; // current − weekAgo (positive = more overdue = worse)
+  /** Overdue trend: overdue-during-period vs the previous equivalent period. */
+  overdueTrend: KpiTrend;
   asOf: string;
   reviewCount: number;
   reviewOldest: number | null;
@@ -537,10 +543,12 @@ export async function ExecutiveScoresBand({
                     ? "text-amber"
                     : "text-cc-red"
             }
+            delta={<OnTimeDelta trend={operational.onTimeTrend} label={t("vsPrev")} />}
             sub={
-              operational.delivered > 0
-                ? `${operational.windowLabel} · ${th("onTimeSample", { sample: operational.delivered })}`
-                : th("onTimeNoSample")
+              `${th("completedToday", { n: operational.completedToday })}` +
+              (operational.delivered > 0
+                ? ` · ${operational.windowLabel} · ${th("onTimeSample", { sample: operational.delivered })}`
+                : ` · ${operational.windowLabel}`)
             }
             href="/reports"
             tip={th("metricTooltips.dashboard_heroOnTime")}
@@ -558,7 +566,9 @@ export async function ExecutiveScoresBand({
             }
             sub={operational.asOf}
             delta={
-              <OverdueDelta delta={operational.overdueDelta} label={th("wow")} />
+              operational.overdueTrend.available ? (
+                <OverdueDelta delta={operational.overdueTrend.difference} label={t("vsPrev")} />
+              ) : null
             }
             href="/tasks?f=overdue"
             tip={th("metricTooltips.dashboard_heroOverdue")}
@@ -650,6 +660,28 @@ function KpiMini({
         </p>
       </Link>
     </div>
+  );
+}
+
+// On-time trend chip: on-time % rising vs the previous period = good (green).
+// (spec KPI 2.D — selected vs previous equivalent period)
+// Shows the percentage-point difference (spec KPI 2.D). Hidden when there is no
+// comparable previous period or the change is flat.
+function OnTimeDelta({ trend, label }: { trend: KpiTrend; label: string }) {
+  if (!trend.available || trend.difference === 0) return null;
+  const up = trend.difference > 0;
+  const Icon = up ? TrendingUp : TrendingDown;
+  return (
+    <span
+      className={cn(
+        "mb-1 inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 text-[10px] font-medium",
+        up ? "text-cc-green" : "text-cc-red",
+      )}
+      title={label}
+    >
+      <Icon className="size-3" />
+      {up ? `+${trend.difference}` : trend.difference}%
+    </span>
   );
 }
 

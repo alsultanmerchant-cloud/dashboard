@@ -24,18 +24,13 @@ import {
   type MonthlyDashboard,
 } from "@/lib/data/contracts";
 import {
-  getHeroKpis,
-  getOnTimeSeries,
   getClientHealth,
   getStageFunnel,
   getApprovalBottlenecks,
-  getSpecialistLoadTop,
-  getPerformerLeaderboard,
   getServiceLineHealth,
   getTopStuckProjects,
   getUpcomingDeadlines,
   getStageFlowMatrix,
-  getTopRevisedTasks,
   getWorkflowIndicators,
 } from "@/lib/data/executive";
 import { PageHeader } from "@/components/page-header";
@@ -45,16 +40,16 @@ import { riyadhTodayIso } from "@/lib/tz";
 import { MetricInfo, Explained } from "@/components/metric-info";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExecutiveScoresBand } from "@/components/executive/scores-band";
+import { ExecutiveIndicatorsRow } from "@/components/executive/executive-indicators-row";
+import { getExecutiveIndicators } from "@/lib/data/executive-indicators";
 import { CeoBriefCard } from "@/components/executive/ceo-brief-card";
 import { getCurrentCeoBrief } from "@/lib/ceo-brief-generate";
 import { ClientHealthSection } from "@/components/executive/client-health";
 import { DeliveryFlowSection } from "@/components/executive/delivery-flow";
-import { TeamCapacitySection } from "@/components/executive/team-capacity";
 import { ServiceHealthSection } from "@/components/executive/service-health";
 import { StuckProjectsSection } from "@/components/executive/stuck-projects";
 import { UpcomingDeadlinesSection } from "@/components/executive/upcoming-deadlines";
 import { StageFlowMatrixSection } from "@/components/executive/stage-flow-matrix";
-import { TopRevisedTasksSection } from "@/components/executive/top-revised";
 import { DashSection } from "@/components/executive/section-boundary";
 import { cn } from "@/lib/utils";
 
@@ -67,22 +62,39 @@ async function BriefSection({ orgId }: { orgId: string }) {
   return <CeoBriefCard initialBrief={current} />;
 }
 
+async function ExecIndicators({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  // Executive Indicators (client spec) — each card is a Main live value + a
+  // Trend vs the Previous Equivalent Period. docs/EXECUTIVE_INDICATORS_SPEC.md
+  const data = await getExecutiveIndicators(orgId, range);
+  return <ExecutiveIndicatorsRow data={data} />;
+}
+
 async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
   // The four operational KPI cards (on-time, overdue, review backlog, client
   // changes) are folded INTO this indicators band as a compact row, instead of
   // sitting in their own headline sections above (team feedback 2026-06-30).
-  const [data, series, hero, workflow] = await Promise.all([
+  // On-time card is sourced from the client-spec Executive Indicators (KPI 2) so
+  // it matches the spec definition (selected-period on-time %, completed-today
+  // count, and a trend vs the previous equivalent period) — Sky Light feedback
+  // 2026-07-07. getExecutiveIndicators is React-cached, so this is deduped with
+  // the ExecIndicators section's own call.
+  const [data, exec, workflow] = await Promise.all([
     getExecutiveScores(orgId, range),
-    getOnTimeSeries(orgId, range),
-    getHeroKpis(orgId),
+    getExecutiveIndicators(orgId, range),
     getWorkflowIndicators(orgId),
   ]);
+  // On-time AND overdue are sourced from the client-spec Executive Indicators so
+  // the number is spec-correct (HOLD/LOST-excluded) and carries a trend vs the
+  // previous equivalent period (Sky Light feedback 2026-07-07: the old point-in-
+  // time overdue count was wrong and didn't respond to the date filter).
   const operational = {
-    onTimePct: series.pct,
-    delivered: series.delivered,
+    onTimePct: exec.onTime.onTimePct,
+    delivered: exec.onTime.completedCount,
+    completedToday: exec.onTime.completedToday,
+    onTimeTrend: exec.onTime.trend,
     windowLabel: rangeLabel(range),
-    overdue: hero.overdue.current,
-    overdueDelta: hero.overdue.current - hero.overdue.weekAgo,
+    overdue: exec.overdue.mainValue ?? 0,
+    overdueTrend: exec.overdue.trend,
     asOf: asOfLabel({ ...range, to: riyadhTodayIso() }),
     reviewCount: workflow.review.count,
     reviewOldest: workflow.review.oldestDays,
@@ -122,12 +134,6 @@ async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRang
   );
 }
 
-async function TopRevised({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  const rows = await getTopRevisedTasks(orgId, range);
-  // "Entered client_changes" follows the window; active-now is point-in-time.
-  return <TopRevisedTasksSection rows={rows} windowLabel={rangeLabel(range)} />;
-}
-
 async function DeliveryFlow({ orgId }: { orgId: string }) {
   const [funnel, bottlenecks] = await Promise.all([
     getStageFunnel(orgId),
@@ -144,22 +150,6 @@ async function StuckProjects({ orgId, range }: { orgId: string; range: Dashboard
 async function UpcomingDeadlines({ orgId }: { orgId: string }) {
   const days = await getUpcomingDeadlines(orgId);
   return <UpcomingDeadlinesSection days={days} windowLabel="Next 7 days" />;
-}
-
-async function TeamCapacity({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  const [specialists, performers] = await Promise.all([
-    getSpecialistLoadTop(orgId),
-    getPerformerLeaderboard(orgId, range),
-  ]);
-  // Specialist load/support risk is current; the performer leaderboard is windowed.
-  return (
-    <TeamCapacitySection
-      specialists={specialists}
-      performers={performers}
-      loadWindowLabel={asOfLabel({ ...range, to: riyadhTodayIso() })}
-      performanceWindowLabel={rangeLabel(range)}
-    />
-  );
 }
 
 // ---- Skeletons -----------------------------------------------------------
@@ -277,6 +267,12 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
 
       <DateRangePicker range={range} />
 
+      {/* ── EXECUTIVE INDICATORS (client spec): Main live value + Trend vs the
+          Previous Equivalent Period. docs/EXECUTIVE_INDICATORS_SPEC.md ────── */}
+      <DashSection fallback={<SectionSkeleton h={200} />}>
+        <ExecIndicators orgId={orgId} range={range} />
+      </DashSection>
+
       {/* ── INDICATORS (top): the fast, at-a-glance KPI cards, grouped so they
           render first and stay reliable even if a heavier detail section below
           is slow or errors (each is its own DashSection boundary). ───────── */}
@@ -305,10 +301,6 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
         <StageFlow orgId={orgId} range={range} />
       </DashSection>
 
-      <DashSection fallback={<SectionSkeleton h={260} />}>
-        <TopRevised orgId={orgId} range={range} />
-      </DashSection>
-
       <DashSection fallback={<SectionSkeleton h={360} />}>
         <DeliveryFlow orgId={orgId} />
       </DashSection>
@@ -321,9 +313,6 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
         <UpcomingDeadlines orgId={orgId} />
       </DashSection>
 
-      <DashSection fallback={<SectionSkeleton h={300} />}>
-        <TeamCapacity orgId={orgId} range={range} />
-      </DashSection>
     </div>
   );
 }

@@ -1,8 +1,7 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { buildSignalPack } from "@/lib/insights/signal-pack";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import {
@@ -16,7 +15,6 @@ import { logAiEvent } from "@/lib/audit";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Re-analyze ONE insights section, streamed. Fresh signal pack each call (live
 // data), fast model for visible streaming. The model copies the section's
@@ -46,7 +44,7 @@ export async function POST(
   const prompt = buildInsightSectionPrompt(section, payloadForModel, knowledge);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicGen"),
     schema: INSIGHT_SECTION_SCHEMA[section],
     maxRetries: 2,
     prompt,

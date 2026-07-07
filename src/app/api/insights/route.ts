@@ -1,14 +1,11 @@
 import { generateObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { InsightsSchema, type InsightsResult, type StoredInsightRun } from "@/lib/ai-insights-schema";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel, MODELS } from "@/lib/ai-model";
 import { buildSignalPack } from "@/lib/insights/signal-pack";
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
-const INSIGHT_MODEL = GEMINI_MODEL;
 
 // How long a stored insight is considered fresh. Clicking "تحديث التحليل"
 // within this window returns the cached run instead of burning another
@@ -102,7 +99,7 @@ export async function POST(req: Request) {
         organization_id: session.orgId,
         requested_by: session.userId,
         status: "running",
-        model: INSIGHT_MODEL,
+        model: MODELS.arabicGen,
       })
       .select("id")
       .single();
@@ -118,7 +115,7 @@ export async function POST(req: Request) {
     ]);
 
     const { object } = await generateObject({
-      model: google(INSIGHT_MODEL),
+      model: aiModel("arabicGen"),
       schema: InsightsSchema,
       prompt: `أنت رئيس أركان (Chief of Staff) للرئيس التنفيذي لوكالة تسويق سعودية تتبع منهجية Sky Light (8 مراحل، 4 أدوار).
 مهمتك: تحويل الإشارات المحتسبة مسبقًا أدناه إلى **تقرير تنفيذي يساعد الشركة على التحسّن**.

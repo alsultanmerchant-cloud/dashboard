@@ -58,23 +58,23 @@ export async function StageFlowMatrixSection({
           {topBackward.length === 0 ? (
             <p className="px-1 text-[11px] text-muted-foreground">{t("topBackwardEmpty")}</p>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
               {topBackward.map((b, i) => (
                 <li key={`${b.from}>${b.to}`}>
                   <Link
                     href={regressionHref(b.from, b.to, windowRange)}
                     className={cn(
-                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 transition-colors hover:bg-soft-1",
+                      "flex aspect-square min-h-16 flex-col justify-between rounded-lg border p-2 transition-colors hover:bg-soft-1",
                       i === 0 ? "border-cc-red/30 bg-cc-red/[0.04]" : "border-cc-red/15",
                     )}
                   >
-                    <div className="flex items-center gap-1.5 text-[11px] min-w-0">
-                      <span className="truncate">{TASK_STAGE_LABELS[b.from]}</span>
-                      <ArrowRight className="size-3 shrink-0 text-cc-red/70 rtl:rotate-180" />
-                      <span className="truncate font-medium">{TASK_STAGE_LABELS[b.to]}</span>
+                    <div className="min-w-0 space-y-0.5 text-[9px] leading-tight">
+                      <span className="block truncate text-muted-foreground">{TASK_STAGE_LABELS[b.from]}</span>
+                      <ArrowRight className="size-3 text-cc-red/70 rtl:rotate-180" />
+                      <span className="block truncate font-medium">{TASK_STAGE_LABELS[b.to]}</span>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-sm font-bold tabular-nums text-cc-red">
+                    <div className="flex items-end justify-between gap-2">
+                      <span className="text-base font-bold tabular-nums text-cc-red">
                         {b.count}
                       </span>
                       <ChevronLeft className="size-3.5 text-muted-foreground/50 ltr:rotate-180" />

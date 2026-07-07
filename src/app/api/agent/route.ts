@@ -1,5 +1,4 @@
 import { streamText, generateText, convertToModelMessages, tool, stepCountIs } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -22,12 +21,9 @@ import {
 import { getTaskTimeline } from "@/lib/data/task-detail";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { buildReadTools } from "@/lib/ai-tools";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { z } from "zod";
 
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
 
 const AGENT_SYSTEM_PROMPT = `أنت "المساعد الذكي" — رئيس الأركان (Chief of Staff) ومحلل أعمال لمالك وكالة تسويق سعودية تستخدم منصة "مركز قيادة الوكالة".
 
@@ -308,7 +304,7 @@ export async function POST(req: Request) {
     const seenToolCalls = new Map<string, number>();
 
     const result = streamText({
-      model: google(GEMINI_MODEL),
+      model: aiModel("agent"),
       system: `${AGENT_SYSTEM_PROMPT}\n\nقاعدة لغة الواجهة: ${responseLanguage}\n\n---\n\n${snapshot}${knowledge ? `\n\n---\n\n${knowledge}` : ""}`,
       messages: modelMessages,
       // Fail fast on transient Gemini errors (esp. 429 rate limits) instead
@@ -329,9 +325,8 @@ export async function POST(req: Request) {
           execute: async ({ query }) => {
             try {
               const r = await generateText({
-                model: google(GEMINI_MODEL),
+                model: aiModel("webSearch"),
                 prompt: query,
-                tools: { googleSearch: google.tools.googleSearch({}) },
               });
               return { success: true as const, result: r.text, query };
             } catch (err) {

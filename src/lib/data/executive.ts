@@ -344,7 +344,7 @@ export interface SupportRiskRow {
   riskScore: number;
 }
 
-async function getOpenAgentRiskRows(orgId: string): Promise<SpecialistLoadRow[]> {
+async function _getOpenAgentRiskRows(orgId: string): Promise<SpecialistLoadRow[]> {
   type EmpEmbed = {
     id: string;
     full_name: string;
@@ -426,6 +426,8 @@ async function getOpenAgentRiskRows(orgId: string): Promise<SpecialistLoadRow[]>
       allocatedHours: Math.round((v.minutes / 60) * 10) / 10,
     }));
 }
+
+const getOpenAgentRiskRows = cache(_getOpenAgentRiskRows);
 
 async function _getSpecialistLoadTop(orgId: string): Promise<SpecialistLoadRow[]> {
   return (await getOpenAgentRiskRows(orgId))
@@ -824,10 +826,17 @@ export interface ServiceHealthRow {
   name: string;
   slug: string;
   openCount: number;
-  overdueCount: number;
+  /** delivered (done) in the selected period — INCLUDES archived done tasks. */
   delivered30d: number;
+  overdueCount: number;
+  /** on-time % over the selected period; denominator = ALL delivered (spec KPI 4). */
   onTimePct30d: number | null;
-  avgRevisions: number;
+  /** on-time % over the previous equivalent period (for the trend chip). */
+  onTimePctPrev: number | null;
+  /** distinct tasks that entered client_changes during the selected period. */
+  clientChanges: number;
+  /** same for the previous equivalent period (for the trend chip). */
+  clientChangesPrev: number;
   // 30-point rolling 7-day on-time pct, ending today (for sparkline).
   trend: Array<number | null>;
   // True when this row is a merge of the base service + its Renewal variant.
@@ -842,7 +851,7 @@ export interface ServiceHealthRow {
 //
 // serviceGroupKey() is the merge key: it drops the leading emoji/symbols AND the
 // Renewal prefix and lowercases, so all variants of a service collapse to one key.
-function serviceGroupKey(name: string): string {
+export function serviceGroupKey(name: string): string {
   return name
     .replace(/^[^\p{L}\p{N}]+/u, "") // leading emoji / symbols
     .replace(/^renewal\s+(of\s+)?/i, "") // "Renewal " / "Renewal of "
@@ -855,12 +864,12 @@ function serviceGroupKey(name: string): string {
 }
 
 // True when the name is the Renewal variant (after any leading emoji).
-function isRenewalName(name: string): boolean {
+export function isRenewalName(name: string): boolean {
   return /^[^\p{L}\p{N}]*\s*renewal\s+/iu.test(name);
 }
 
 // Human display name: keep the leading emoji, drop the Renewal word that follows.
-function displayServiceName(name: string): string {
+export function displayServiceName(name: string): string {
   return name.replace(/^([^\p{L}\p{N}]*)renewal\s+(of\s+)?/iu, "$1").trim();
 }
 
@@ -875,6 +884,10 @@ async function _getServiceLineHealth(
   const sinceTrend = addDaysIso(range.from, -6);
   // Overdue = open task past deadline (team's Rwasem method) — point-in-time.
   const todayStr = riyadhTodayIso();
+  // Previous equivalent period (same duration) — powers the on-time% and
+  // client-changes trend chips (Sky Light feedback 2026-07-07).
+  const prevTo = addDaysIso(range.from, -1);
+  const prevFrom = addDaysIso(prevTo, -(range.days - 1));
 
   type T = {
     id: string;
@@ -883,10 +896,13 @@ async function _getServiceLineHealth(
     completed_at: string | null;
     due_date: string | null;
     planned_date: string | null;
-    revision_count: number;
     archived_at: string | null;
   };
 
+  // NOTE: archived tasks are NO LONGER filtered out at the query — archived
+  // *done* tasks must count toward "delivered" (spec KPI 4: archived + non-
+  // archived both included). Archived *open* tasks are still excluded from the
+  // open/overdue counts in the loop below.
   async function fetchTaskRows(): Promise<T[]> {
     const rows: T[] = [];
     const PAGE = 1000;
@@ -894,9 +910,8 @@ async function _getServiceLineHealth(
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabaseAdmin
         .from("tasks")
-        .select("id, service_id, stage, completed_at, due_date, planned_date, revision_count, archived_at")
+        .select("id, service_id, stage, completed_at, due_date, planned_date, archived_at")
         .eq("organization_id", orgId)
-        .is("archived_at", null)
         .not("service_id", "is", null)
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
@@ -909,13 +924,53 @@ async function _getServiceLineHealth(
     return rows;
   }
 
-  const [servicesRes, taskRows] = await Promise.all([
+  // Distinct tasks that ENTERED the client_changes stage during the selected /
+  // previous period, per (physical) service. Replaces the old avg-revisions
+  // column, which read a `revision_count` that Odoo never populated (always 0).
+  async function fetchClientChangesByService(): Promise<Map<string, { sel: Set<string>; prev: Set<string> }>> {
+    const { start } = riyadhDateRangeUtcBounds(prevFrom, prevFrom);
+    const { endExclusive } = riyadhDateRangeUtcBounds(range.to, range.to);
+    const out = new Map<string, { sel: Set<string>; prev: Set<string> }>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("task_stage_history")
+        .select("task_id, entered_at, task:tasks!inner(service_id)")
+        .eq("organization_id", orgId)
+        .eq("to_stage", "client_changes")
+        .gte("entered_at", start)
+        .lt("entered_at", endExclusive)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const rows = (data ?? []) as Array<{
+        task_id: string;
+        entered_at: string;
+        task: { service_id: string | null } | { service_id: string | null }[] | null;
+      }>;
+      for (const r of rows) {
+        const task = Array.isArray(r.task) ? r.task[0] : r.task;
+        const sid = task?.service_id;
+        if (!sid) continue;
+        const day = riyadhDateOf(r.entered_at);
+        const bucket = out.get(sid) ?? { sel: new Set<string>(), prev: new Set<string>() };
+        if (day >= range.from && day <= range.to) bucket.sel.add(r.task_id);
+        else if (day >= prevFrom && day <= prevTo) bucket.prev.add(r.task_id);
+        out.set(sid, bucket);
+      }
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  }
+
+  const [servicesRes, taskRows, ccByService] = await Promise.all([
     supabaseAdmin
       .from("services")
       .select("id, name, slug")
       .eq("organization_id", orgId)
       .eq("is_active", true),
     fetchTaskRows(),
+    fetchClientChangesByService(),
   ]);
   if (servicesRes.error) throw servicesRes.error;
 
@@ -925,12 +980,11 @@ async function _getServiceLineHealth(
     {
       open: number;
       overdue: number;
-      delivered: number;     // ALL done in 30d (matches Rwasem's delivered count)
-      onTimeSample: number;  // delivered-in-30d that had a deadline (on-time denominator)
-      onTime: number;
-      revisions: number;
-      revisionsN: number;
-      // Map<YYYY-MM-DD, { total, onTime }> over the 37-day window.
+      delivered: number;      // ALL done in the selected window (incl. archived)
+      onTime: number;         // of those, delivered on/before deadline
+      prevDelivered: number;  // previous-period delivered (denom for trend)
+      prevOnTime: number;
+      // Map<YYYY-MM-DD, { total, onTime }> over the 37-day sparkline window.
       daily: Map<string, { total: number; onTime: number }>;
     }
   >();
@@ -938,10 +992,7 @@ async function _getServiceLineHealth(
   const ensure = (id: string) => {
     let cur = agg.get(id);
     if (!cur) {
-      cur = {
-        open: 0, overdue: 0, delivered: 0, onTimeSample: 0, onTime: 0, revisions: 0, revisionsN: 0,
-        daily: new Map(),
-      };
+      cur = { open: 0, overdue: 0, delivered: 0, onTime: 0, prevDelivered: 0, prevOnTime: 0, daily: new Map() };
       agg.set(id, cur);
     }
     return cur;
@@ -952,28 +1003,31 @@ async function _getServiceLineHealth(
     const cur = ensure(t.service_id);
     const isOpen = t.stage !== "done";
     if (isOpen) {
-      cur.open += 1;
-      if (t.planned_date != null && t.planned_date < todayStr) cur.overdue += 1;
-      cur.revisions += t.revision_count ?? 0;
-      cur.revisionsN += 1;
+      // Archived open tasks are not live work — exclude from open/overdue.
+      if (t.archived_at == null) {
+        cur.open += 1;
+        if (t.planned_date != null && t.planned_date < todayStr) cur.overdue += 1;
+      }
+      continue;
     }
     if (t.stage === "done" && t.completed_at) {
       const day = riyadhDateOf(t.completed_at);
       const deadline = t.due_date ?? t.planned_date;
-      // Headline: selected range. Delivered counts ALL done (matches Rwasem);
-      // the on-time rate is measured only over the deadline-bearing subset.
+      const onTime = deadline != null && day <= deadline;
+      // Delivered counts ALL done (incl. archived); the on-time RATE denominator
+      // is all delivered (spec KPI 4) — a no-deadline task counts as not-on-time.
       if (day >= range.from && day <= range.to) {
         cur.delivered += 1;
-        if (deadline) {
-          cur.onTimeSample += 1;
-          if (day <= deadline) cur.onTime += 1;
-        }
+        if (onTime) cur.onTime += 1;
+      } else if (day >= prevFrom && day <= prevTo) {
+        cur.prevDelivered += 1;
+        if (onTime) cur.prevOnTime += 1;
       }
-      // Trend: range + 6 lead-in days so the rolling 7d window is full. Needs deadline.
-      if (deadline && day >= sinceTrend && day <= range.to) {
+      // Sparkline: range + 6 lead-in days so the rolling 7d window is full.
+      if (day >= sinceTrend && day <= range.to) {
         const slot = cur.daily.get(day) ?? { total: 0, onTime: 0 };
         slot.total += 1;
-        if (day <= deadline) slot.onTime += 1;
+        if (onTime) slot.onTime += 1;
         cur.daily.set(day, slot);
       }
     }
@@ -985,19 +1039,25 @@ async function _getServiceLineHealth(
   for (let d = sinceTrend; d <= range.to; d = addDaysIso(d, 1)) days37.push(d);
   const trendStart = 6;
 
+  const pctOf = (num: number, den: number): number | null =>
+    den > 0 ? Math.round((num / den) * 100) : null;
+
   // Build one row per physical service, then group by base name so
   // "Renewal Social Media" merges into "Social Media".
   type RawRow = ServiceHealthRow & {
-    _onTimeCount: number;
-    _onTimeSample: number;
-    _deliveredCount: number;
-    _revisionsSum: number;
-    _revisionsN: number;
+    _onTime: number;
+    _delivered: number;
+    _prevOnTime: number;
+    _prevDelivered: number;
+    _cc: number;
+    _ccPrev: number;
     _dailyTotals: Array<{ total: number; onTime: number }>;
   };
 
   const rawRows: RawRow[] = (servicesRes.data ?? []).map((s) => {
-    const v = agg.get(s.id as string);
+    const sid = s.id as string;
+    const v = agg.get(sid);
+    const cc = ccByService.get(sid);
     const dailyTotals: Array<{ total: number; onTime: number }> = [];
     for (let i = trendStart; i < days37.length; i++) {
       let total = 0;
@@ -1008,24 +1068,25 @@ async function _getServiceLineHealth(
       }
       dailyTotals.push({ total, onTime });
     }
-    const trend: Array<number | null> = dailyTotals.map((d) =>
-      d.total === 0 ? null : Math.round((d.onTime / d.total) * 100),
-    );
+    const trend: Array<number | null> = dailyTotals.map((d) => pctOf(d.onTime, d.total));
     return {
-      serviceId: s.id as string,
+      serviceId: sid,
       name: s.name as string,
       slug: s.slug as string,
       openCount: v?.open ?? 0,
       overdueCount: v?.overdue ?? 0,
       delivered30d: v?.delivered ?? 0,
-      onTimePct30d: v && v.onTimeSample > 0 ? Math.round((v.onTime / v.onTimeSample) * 100) : null,
-      avgRevisions: v && v.revisionsN > 0 ? Math.round((v.revisions / v.revisionsN) * 10) / 10 : 0,
+      onTimePct30d: pctOf(v?.onTime ?? 0, v?.delivered ?? 0),
+      onTimePctPrev: pctOf(v?.prevOnTime ?? 0, v?.prevDelivered ?? 0),
+      clientChanges: cc?.sel.size ?? 0,
+      clientChangesPrev: cc?.prev.size ?? 0,
       trend,
-      _onTimeCount: v?.onTime ?? 0,
-      _onTimeSample: v?.onTimeSample ?? 0,
-      _deliveredCount: v?.delivered ?? 0,
-      _revisionsSum: v?.revisions ?? 0,
-      _revisionsN: v?.revisionsN ?? 0,
+      _onTime: v?.onTime ?? 0,
+      _delivered: v?.delivered ?? 0,
+      _prevOnTime: v?.prevOnTime ?? 0,
+      _prevDelivered: v?.prevDelivered ?? 0,
+      _cc: cc?.sel.size ?? 0,
+      _ccPrev: cc?.prev.size ?? 0,
       _dailyTotals: dailyTotals,
     };
   });
@@ -1040,21 +1101,19 @@ async function _getServiceLineHealth(
     if (!existing) {
       grouped.set(key, { ...row, name: displayServiceName(row.name), includesRenewals: isRenewal });
     } else {
-      // Merge stats into the existing canonical row.
       existing.openCount += row.openCount;
       existing.overdueCount += row.overdueCount;
-      existing._deliveredCount += row._deliveredCount;
-      existing._onTimeCount += row._onTimeCount;
-      existing._onTimeSample += row._onTimeSample;
-      existing._revisionsSum += row._revisionsSum;
-      existing._revisionsN += row._revisionsN;
+      existing._delivered += row._delivered;
+      existing._onTime += row._onTime;
+      existing._prevDelivered += row._prevDelivered;
+      existing._prevOnTime += row._prevOnTime;
+      existing._cc += row._cc;
+      existing._ccPrev += row._ccPrev;
       existing.includesRenewals = true;
-      // Merge daily buckets for combined trend.
       for (let i = 0; i < existing._dailyTotals.length; i++) {
         existing._dailyTotals[i].total += row._dailyTotals[i].total;
         existing._dailyTotals[i].onTime += row._dailyTotals[i].onTime;
       }
-      // Prefer the non-Renewal row's display name + serviceId/slug for linking.
       if (!isRenewal) {
         existing.name = displayServiceName(row.name);
         existing.serviceId = row.serviceId;
@@ -1063,26 +1122,25 @@ async function _getServiceLineHealth(
     }
   }
 
-  // Re-derive onTimePct30d, avgRevisions, and trend from merged buckets.
-  const rows: ServiceHealthRow[] = Array.from(grouped.values()).map((r) => {
-    const trend: Array<number | null> = r._dailyTotals.map((d) =>
-      d.total === 0 ? null : Math.round((d.onTime / d.total) * 100),
-    );
-    return {
-      serviceId: r.serviceId,
-      name: r.name,
-      slug: r.slug,
-      openCount: r.openCount,
-      overdueCount: r.overdueCount,
-      delivered30d: r._deliveredCount,
-      onTimePct30d: r._onTimeSample > 0 ? Math.round((r._onTimeCount / r._onTimeSample) * 100) : null,
-      avgRevisions: r._revisionsN > 0 ? Math.round((r._revisionsSum / r._revisionsN) * 10) / 10 : 0,
-      trend,
-      includesRenewals: r.includesRenewals,
-    };
-  });
+  // Re-derive rates / trend from the merged buckets.
+  const rows: ServiceHealthRow[] = Array.from(grouped.values()).map((r) => ({
+    serviceId: r.serviceId,
+    name: r.name,
+    slug: r.slug,
+    openCount: r.openCount,
+    overdueCount: r.overdueCount,
+    delivered30d: r._delivered,
+    onTimePct30d: pctOf(r._onTime, r._delivered),
+    onTimePctPrev: pctOf(r._prevOnTime, r._prevDelivered),
+    clientChanges: r._cc,
+    clientChangesPrev: r._ccPrev,
+    trend: r._dailyTotals.map((d) => pctOf(d.onTime, d.total)),
+    includesRenewals: r.includesRenewals,
+  }));
 
-  return rows.filter((r) => r.openCount > 0 || r.delivered30d > 0).sort((a, b) => b.openCount - a.openCount);
+  return rows
+    .filter((r) => r.openCount > 0 || r.delivered30d > 0 || r.clientChanges > 0)
+    .sort((a, b) => b.openCount - a.openCount);
 }
 
 export const getServiceLineHealth = cache(_getServiceLineHealth);
@@ -1332,27 +1390,46 @@ async function _getStageFlowMatrix(
   totalForward: number;
   totalBackward: number;
 }> {
-  // Stage transitions that occurred within the selected window.
+  // Stage transitions that occurred within the selected window. PAGINATED: a
+  // wide window easily exceeds the 1000-row PostgREST cap, and without paging the
+  // arbitrary 1000-row slice made a LARGER window return FEWER transitions — so
+  // the counts SHRANK as the period grew (Sky Light feedback 2026-07-07).
   const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
-  const { data, error } = await supabaseAdmin
-    .from("task_stage_history")
-    .select("from_stage, to_stage")
-    .eq("organization_id", orgId)
-    .gte("entered_at", start)
-    .lt("entered_at", endExclusive)
-    .not("from_stage", "is", null);
-  if (error) throw error;
+  type Row = { task_id: string; from_stage: TaskStage; to_stage: TaskStage };
+  const rows: Row[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("task_stage_history")
+      .select("task_id, from_stage, to_stage")
+      .eq("organization_id", orgId)
+      .gte("entered_at", start)
+      .lt("entered_at", endExclusive)
+      .not("from_stage", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...((data ?? []) as Row[]));
+    if (!data || data.length < PAGE) break;
+  }
 
   const orderIdx: Record<string, number> = {};
   FUNNEL_STAGE_ORDER.forEach((s, i) => (orderIdx[s] = i));
 
-  const counts = new Map<string, number>();
+  // Per-edge count = DISTINCT tasks (a task that bounces the same from→to edge
+  // twice is ONE task in the drill-down `/tasks?flow=` list, which de-dupes by
+  // task_id — so the card count must too, else "the number differs when you open
+  // the tasks"). totalForward/Backward stay movement-based (they drive the
+  // backward-% ratio, a property of movements, not tasks).
+  const edgeTasks = new Map<string, Set<string>>();
   let totalForward = 0;
   let totalBackward = 0;
-  for (const r of (data ?? []) as Array<{ from_stage: TaskStage; to_stage: TaskStage }>) {
-    if (!r.from_stage || !r.to_stage) continue;
+  for (const r of rows) {
+    if (!r.from_stage || !r.to_stage || r.from_stage === r.to_stage) continue;
     const key = `${r.from_stage}>${r.to_stage}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const set = edgeTasks.get(key) ?? new Set<string>();
+    set.add(r.task_id);
+    edgeTasks.set(key, set);
     const fi = orderIdx[r.from_stage] ?? 0;
     const ti = orderIdx[r.to_stage] ?? 0;
     if (ti < fi) totalBackward += 1;
@@ -1363,7 +1440,7 @@ async function _getStageFlowMatrix(
   for (const from of FUNNEL_STAGE_ORDER) {
     for (const to of FUNNEL_STAGE_ORDER) {
       if (from === to) continue;
-      const c = counts.get(`${from}>${to}`) ?? 0;
+      const c = edgeTasks.get(`${from}>${to}`)?.size ?? 0;
       cells.push({
         from,
         to,

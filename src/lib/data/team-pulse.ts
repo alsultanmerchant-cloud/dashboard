@@ -123,6 +123,49 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Department visibility in نبض الفريق is per-department (departments.
 // show_in_team_pulse, migration 0225) — editable from the departments admin.
+// These departments are intentionally hidden even if old data still marks them
+// visible: their current work is not actioned inside Rwasem.
+const NON_ACTION_DEPARTMENT_NAMES = new Set([
+  "اداره المبيعات",
+  "المبيعات",
+  "الموارد البشريه",
+  "الموادر البشريه",
+  "البيع الهاتفي",
+  "ضبط الجوده",
+  "sales",
+]);
+const NON_ACTION_DEPARTMENT_SLUGS = new Set([
+  "sales-group",
+  "sales-team",
+  "sales",
+  "telesales",
+  "tele-sales",
+  "hr",
+  "sl-hr",
+  "hr-department",
+  "quality-control",
+]);
+
+function normDepartmentName(name: string | null | undefined): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ً-ْٰ]/g, "")
+    .trim();
+}
+
+function shouldShowInTeamPulse(dept: {
+  name: string | null;
+  slug?: string | null;
+  show_in_team_pulse: boolean | null;
+}): boolean {
+  if (dept.show_in_team_pulse === false) return false;
+  if (NON_ACTION_DEPARTMENT_NAMES.has(normDepartmentName(dept.name))) return false;
+  if (dept.slug && NON_ACTION_DEPARTMENT_SLUGS.has(dept.slug)) return false;
+  return true;
+}
 
 // This page measures EMPLOYEE activity, so the team status reflects whether
 // PEOPLE are moving — not the task backlog (which is shown separately as the
@@ -296,7 +339,7 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
   const [{ data: depts }, { data: emps }] = await Promise.all([
     supabaseAdmin
       .from("departments")
-      .select("id, name, head_employee_id, show_in_team_pulse")
+      .select("id, name, slug, head_employee_id, show_in_team_pulse")
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("employee_profiles")
@@ -309,6 +352,7 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
         | {
             id: string;
             name: string;
+            slug: string | null;
             head_employee_id: string | null;
             show_in_team_pulse: boolean;
           }[]
@@ -321,10 +365,16 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
       e.full_name,
     ]),
   );
+  const visibleDeptIds = new Set(
+    Array.from(deptById.entries())
+      .filter(([, dept]) => shouldShowInTeamPulse(dept))
+      .map(([id]) => id),
+  );
 
   const byDept = new Map<string, TeamMemberRow[]>();
   for (const m of members) {
     if (!m.departmentId) continue;
+    if (!visibleDeptIds.has(m.departmentId)) continue;
     const list = byDept.get(m.departmentId) ?? [];
     list.push(m);
     byDept.set(m.departmentId, list);
@@ -334,7 +384,7 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
   for (const [deptId, list] of byDept) {
     const dept = deptById.get(deptId);
     if (!dept) continue;
-    if (!dept.show_in_team_pulse) continue;
+    if (!shouldShowInTeamPulse(dept)) continue;
     // Dept status/headcount reflect the EXECUTORS only; leads ride along in the
     // member list but don't move the activity signal. Skip pure-leadership depts
     // (e.g. القيادة) — they have no executing team to measure.
@@ -432,6 +482,7 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
 
   // Org-wide freshness stamp: the most recent action timestamp.
   const lastActionAt = members.reduce<string | null>((max, m) => {
+    if (!m.departmentId || !visibleDeptIds.has(m.departmentId)) return max;
     if (m.lastActionAt && (!max || m.lastActionAt > max)) return m.lastActionAt;
     return max;
   }, null);
@@ -469,13 +520,13 @@ async function _getAllMembersByActivity(orgId: string): Promise<AllMemberRow[]> 
     loadActivityRows(orgId),
     supabaseAdmin
       .from("departments")
-      .select("id, name, show_in_team_pulse")
+      .select("id, name, slug, show_in_team_pulse")
       .eq("organization_id", orgId),
   ]);
   const deptRows =
-    (depts as { id: string; name: string; show_in_team_pulse: boolean }[] | null) ?? [];
+    (depts as { id: string; name: string; slug: string | null; show_in_team_pulse: boolean }[] | null) ?? [];
   const deptName = new Map(deptRows.map((d) => [d.id, d.name]));
-  const visibleDept = new Map(deptRows.map((d) => [d.id, d.show_in_team_pulse]));
+  const visibleDept = new Map(deptRows.map((d) => [d.id, shouldShowInTeamPulse(d)]));
   return members
     .filter((m) => m.departmentId && visibleDept.get(m.departmentId) !== false)
     .map((m) => ({

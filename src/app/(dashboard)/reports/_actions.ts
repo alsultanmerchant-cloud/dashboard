@@ -1,16 +1,12 @@
 "use server";
 
 import { generateText } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { requirePermission } from "@/lib/auth-server";
 import { getCEOWeeklyDigest } from "@/lib/data/reports";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { logAiEvent } from "@/lib/audit";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
 
 /**
  * "اختصر لي تقرير الأسبوع" — Gemini summary grounded ONLY on the four
@@ -39,7 +35,7 @@ export async function summarizeWeekAction(): Promise<
 ${JSON.stringify(payload, null, 2)}${knowledge ? `\n\n${knowledge}` : ""}`;
 
     const r = await generateText({
-      model: google(GEMINI_MODEL),
+      model: aiModel("arabicGen"),
       prompt,
     });
 

@@ -1070,6 +1070,7 @@ function buildTaskRow(
     description: nullable(t.description),
     stage,
     planned_date: nullable(t.date_deadline),
+    source_created_at: nullable(t.create_date), // real Odoo create_date (0239) — existence for historical KPI reconstruction
     progress_percent: t.progress_percentage ?? 0,
     expected_progress_percent: t.expected_progress ?? 0,
     progress_slip_percent: t.progress_slip ?? 0,

@@ -1,7 +1,6 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel } from "@/lib/ai-model";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { buildAgentTipContext } from "@/lib/tech-tips/context";
 import { buildAgentTipPrompt } from "@/lib/tech-tips/prompt";
@@ -10,7 +9,6 @@ import { AgentTechTipSchema } from "@/lib/tech-tips/schema";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Technical-tip card for the signed-in specialist: a tip tied to their
 // top-priority task (with project grounding) + a general best-practice tip for
@@ -38,7 +36,7 @@ export async function POST(request: Request) {
   ]);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicGen"),
     schema: AgentTechTipSchema,
     maxRetries: 2,
     prompt: buildAgentTipPrompt(ctx, knowledge, locale),

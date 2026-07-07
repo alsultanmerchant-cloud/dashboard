@@ -53,6 +53,15 @@ export const INDICATOR_CODES = [...RISK_INDICATORS, ...OPERATIONAL_INDICATORS] a
 export const INDICATOR_SOURCES = ["client", "technical", "tasks"] as const;
 // Who a delay / problem is attributed to.
 export const DELAY_OWNERS = ["client", "account_manager", "team", "department", "unknown"] as const;
+// How a complaint's responsibility attaches to a person (or to a process, when
+// there is no single owner). Mirrors the accountability engine's basis.
+export const ACCOUNTABILITY_BASES = [
+  "stage_owner", // owns the stage the task is stuck in
+  "assignee", // the executing المنفّذ
+  "account_manager", // the AM (approvals / brief / client comms)
+  "team_manager", // the reviewing manager (manager_review)
+  "process_gap", // no single person — a structural gap (dormant task, silent AM…)
+] as const;
 // The rolled-up account health label (the "big picture").
 export const ACCOUNT_HEALTH = ["healthy", "watch", "at_risk", "critical"] as const;
 export const RESPONSE_SPEEDS = ["fast", "medium", "slow", "unknown"] as const;
@@ -212,9 +221,47 @@ export const SatisfactionSchema = z.object({
         problem: z.string(),
         rootCause: z.string(),
         owner: z.enum(DELAY_OWNERS).catch("unknown"),
+        // The specific person accountable, drawn from the team roster when the
+        // sources name one. null when it is a role-level / process cause.
+        ownerName: z.string().nullable().catch(null).default(null),
       }),
     )
     .max(8)
+    .default([]),
+
+  // ---- Accountability: complaint → service → finding → responsible person(s) →
+  // evidencing tasks. This is the audit spine — it connects what the client
+  // complains about to the real delivery work and the people behind it. Names
+  // and task codes MUST come from the "الفريق والمسؤوليات" roster block; the
+  // server re-validates and drops anything invented (persistSatisfaction). ----
+  accountability: z
+    .array(
+      z.object({
+        // The client's actual complaint — a quote or faithful summary.
+        complaint: z.string(),
+        // Which service line it maps to (from the roster), null if unclear.
+        service: z.string().nullable().catch(null).default(null),
+        // Where the problem actually sits — a neutral diagnostic, not a verdict.
+        finding: z.string(),
+        // Who is operationally responsible (max 3). Names MUST be from the roster.
+        responsible: z
+          .array(
+            z.object({
+              name: z.string(),
+              role: z.string(), // role label as shown in the roster
+              basis: z.enum(ACCOUNTABILITY_BASES).catch("process_gap"),
+            }),
+          )
+          .max(3)
+          .default([]),
+        // The tasks that evidence the finding — codes MUST be from the roster.
+        taskCodes: z.array(z.string()).max(5).default([]),
+        // The factual chain: task X stuck in stage Y for Z days, last action by W.
+        evidence: z.string(),
+        confidence: z.enum(["high", "medium", "low"]).catch("medium"),
+      }),
+    )
+    .max(6)
     .default([]),
 
   highlights: z
@@ -263,6 +310,7 @@ export type SatisfactionHighlightAudience = (typeof HIGHLIGHT_AUDIENCES)[number]
 export type SatisfactionIndicatorCode = (typeof INDICATOR_CODES)[number];
 export type SatisfactionIndicatorSource = (typeof INDICATOR_SOURCES)[number];
 export type DelayOwner = (typeof DELAY_OWNERS)[number];
+export type AccountabilityBasis = (typeof ACCOUNTABILITY_BASES)[number];
 export type AccountHealth = (typeof ACCOUNT_HEALTH)[number];
 
 // Which tier a code belongs to (drives severity + UI grouping).

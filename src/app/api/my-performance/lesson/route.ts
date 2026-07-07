@@ -1,7 +1,6 @@
 import { streamObject } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { getServerSession } from "@/lib/auth-server";
-import { GEMINI_MODEL } from "@/lib/ai-model";
+import { aiModel, MODELS } from "@/lib/ai-model";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { getMyFailureDetail } from "@/lib/data/my-performance";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -16,7 +15,6 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Cheap cache check: returns the persisted lesson for one task (or null), so
 // the modal renders instantly without a Gemini call when one was generated
@@ -90,7 +88,7 @@ export async function POST(request: Request) {
   const signature = lessonSignature(detail);
 
   const result = streamObject({
-    model: google(GEMINI_MODEL),
+    model: aiModel("arabicGen"),
     schema: FailureLessonSchema,
     maxRetries: 2,
     prompt: buildFailureLessonPrompt(detail, specialization, knowledge, locale),
@@ -103,7 +101,7 @@ export async function POST(request: Request) {
           employeeId,
           taskId,
           signature,
-          GEMINI_MODEL,
+          MODELS.arabicGen,
           object,
         );
       } catch {
