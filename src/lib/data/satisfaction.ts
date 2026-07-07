@@ -316,7 +316,7 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, messagesRes, projectsRes, brief, displayNames] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, hasMessages, projectsRes, brief, displayNames] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -349,11 +349,11 @@ async function _getClientSatisfactionDetail(
       .eq("client_id", clientId)
       .order("created_at", { ascending: false })
       .limit(40),
-    supabaseAdmin
-      .from("wa_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", orgId)
-      .eq("client_id", clientId),
+    // Resolve message existence via the link graph (chat_id), NOT the frozen
+    // wa_messages.client_id — otherwise link-connected clients (no direct stamp)
+    // wrongly report "no messages" and get their analyze buttons disabled even
+    // though they can be (and have been) analyzed.
+    clientHasResolvedMessages(orgId, clientId),
     supabaseAdmin
       .from("projects")
       .select("id, name")
@@ -416,7 +416,7 @@ async function _getClientSatisfactionDetail(
     // Contract-sheet name (folded across merged twins), falling back to the raw name.
     clientName: displayNames.get(clientId) ?? (clientRes.data.name as string),
     imports: { client: clientImp, technical: techImp },
-    hasMessages: (messagesRes.count ?? 0) > 0,
+    hasMessages,
     analysis,
     history,
     activeProjects: ((projectsRes.data ?? []) as Array<{ id: string; name: string }>).map((p) => ({
@@ -501,6 +501,25 @@ async function resolveClientGroupChats(
     add(r.chat_id, r.group_kind);
   return out;
 }
+
+// Does the client have any analyzable WhatsApp messages? Resolved via the SAME
+// link graph the analysis uses (chat_id), NOT the frozen wa_messages.client_id
+// stamp — that stamp goes stale/empty when a group is re-linked or a new number
+// joins, so counting by it wrongly reported "no messages" and DISABLED the
+// analyze buttons for clients that actually have (and were) analyzed. Keeping
+// this consistent with buildClientTranscripts is what makes the button state
+// match reality. See [[project_satisfaction_transcript_resolution]].
+async function _clientHasResolvedMessages(orgId: string, clientId: string): Promise<boolean> {
+  const chatIds = Array.from((await resolveClientGroupChats(orgId, clientId)).keys());
+  if (chatIds.length === 0) return false;
+  const { count } = await supabaseAdmin
+    .from("wa_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .in("chat_id", chatIds);
+  return (count ?? 0) > 0;
+}
+export const clientHasResolvedMessages = cache(_clientHasResolvedMessages);
 
 async function _buildClientTranscripts(
   orgId: string,
