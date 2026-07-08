@@ -7,8 +7,7 @@ import { cn } from "@/lib/utils";
 
 // Executive Indicators section (client spec — docs/EXECUTIVE_INDICATORS_SPEC.md).
 // Each card = a big Main KPI Value (current live state) + a Trend chip (Selected
-// vs Previous Equivalent Period) with a hover tooltip. Below the four headline
-// cards sits the per-service delivery table (KPI 4).
+// vs Previous Equivalent Period) with a hover tooltip.
 
 type T = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -145,7 +144,7 @@ function StatCard({
 
 export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicators }) {
   const t = await getTranslations("Executive.indicators");
-  const { projectsAtRisk: risk, highRisk, onTime, overdue, clientChanges: cc, serviceDelivery, periods } = data;
+  const { projectsAtRisk: risk, highRisk, onTime, overdue, clientChanges: cc, periods } = data;
 
   return (
     <section className="mb-8">
@@ -218,73 +217,6 @@ export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicato
           percentMode
         />
       </div>
-
-      {serviceDelivery.length > 0 ? (
-        <ServiceDeliveryTable rows={serviceDelivery} periods={periods} t={t} />
-      ) : null}
     </section>
-  );
-}
-
-function ServiceDeliveryTable({
-  rows,
-  periods,
-  t,
-}: {
-  rows: ExecutiveIndicators["serviceDelivery"];
-  periods: { selected: Period; previous: Period };
-  t: T;
-}) {
-  return (
-    <div className="mt-4 overflow-hidden rounded-2xl border border-cyan/15 bg-card">
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{t("service.title")}</h3>
-        <span className="text-[10px] text-muted-foreground/60">{fmtPeriod(periods.selected)}</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
-              <th className="px-4 py-2 text-start font-medium">{t("service.colService")}</th>
-              <th className="px-4 py-2 text-center font-medium">{t("service.colOnTime")}</th>
-              <th className="px-4 py-2 text-center font-medium">{t("service.colCompleted")}</th>
-              <th className="px-4 py-2 text-center font-medium">{t("service.colChanges")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const pctTone = r.onTimePct === null ? "text-muted-foreground" : r.onTimePct >= 85 ? "text-cc-green" : r.onTimePct >= 70 ? "text-amber" : "text-cc-red";
-              return (
-                <tr key={r.service} className="border-t border-border/40 hover:bg-soft-1/40">
-                  <td className="px-4 py-2.5 text-start">
-                    <span className="font-medium">{r.service}</span>
-                    {r.includesRenewals ? (
-                      <span className="ms-2 rounded-full bg-soft-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                        {t("service.renewalBadge")}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-2.5 text-center">
-                    <div className="inline-flex items-center gap-1.5">
-                      <span className={cn("font-semibold tabular-nums", pctTone)}>
-                        {r.onTimePct === null ? "—" : `${r.onTimePct}%`}
-                      </span>
-                      <TrendChip trend={r.onTimeTrend} higherIsBetter unit="%" label={`${r.service} · ${t("service.colOnTime")}`} periods={periods} t={t} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5 text-center tabular-nums text-muted-foreground">{r.completedCount}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    <div className="inline-flex items-center gap-1.5">
-                      <span className="font-semibold tabular-nums">{r.clientChanges}</span>
-                      <TrendChip trend={r.clientChangesTrend} higherIsBetter={false} label={`${r.service} · ${t("service.colChanges")}`} periods={periods} t={t} />
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
   );
 }
