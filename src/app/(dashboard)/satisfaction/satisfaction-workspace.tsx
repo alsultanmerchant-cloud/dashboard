@@ -1379,7 +1379,95 @@ function AnalysisView({
           t={t}
         />
       )}
+
+      <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
+  );
+}
+
+// ---- Past-analyses history ----------------------------------------------
+// Team asked to keep this: it's the audit trail of every scored snapshot.
+// Default to the 4 most recent (history is newest-first) with a "show more"
+// toggle so a client with a long analysis history doesn't flood the panel.
+const HISTORY_DEFAULT = 4;
+function HistoryList({
+  history,
+  clientId,
+  shownId,
+  t,
+}: {
+  history: AnalysisHistoryItem[];
+  clientId: string;
+  shownId: string;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (history.length <= 1) return null;
+  const shown = expanded ? history : history.slice(0, HISTORY_DEFAULT);
+  const hidden = history.length - shown.length;
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
+          <History className="size-4 text-cyan" /> {t("history.title")}
+          <MetricInfo
+            text={t("metricTooltips.satisfaction_historyScore")}
+            label={t("history.title")}
+          />
+        </p>
+        <ul className="space-y-1.5">
+          {shown.map((h) => {
+            const tone = scoreTone(h.satisfactionScore);
+            const isShown = h.id === shownId;
+            const href = h.isCurrent
+              ? `/satisfaction?client=${clientId}`
+              : `/satisfaction?client=${clientId}&analysis=${h.id}`;
+            return (
+              <li key={h.id}>
+                <Link
+                  href={href}
+                  className={cn(
+                    "flex items-center justify-between gap-3 rounded-lg border px-2.5 py-2 text-[13px] transition-colors",
+                    isShown
+                      ? "border-cyan/40 bg-soft-1"
+                      : "border-border bg-card hover:border-cyan/30 hover:bg-soft-1",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={cn("text-base font-bold tabular-nums", tone.text)}>
+                      {h.satisfactionScore ?? "—"}
+                    </span>
+                    <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {t(`window.${h.windowKind}`)}
+                    </span>
+                    {h.isCurrent && (
+                      <span className="rounded bg-cc-green/15 px-1.5 py-0.5 text-[10px] font-medium text-cc-green">
+                        {t("history.current")}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>{h.sentiment ? t(`sentiment.${h.sentiment}`) : "—"}</span>
+                    <span className="tabular-nums text-muted-foreground/70">
+                      {h.createdAt.slice(0, 10)}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        {history.length > HISTORY_DEFAULT && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-2.5 w-full rounded-lg border border-border bg-card py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:border-cyan/30 hover:text-foreground"
+          >
+            {expanded ? t("history.showLess") : t("history.showMore", { count: hidden })}
+          </button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isPlaceholderClient } from "@/lib/match/client-match";
 
 /**
  * Lightweight clients-as-options fetcher for pickers (new-contract modal,
@@ -121,7 +122,7 @@ async function _foldedContractsByCanonical(
   const [clientsRes, contractsRes] = await Promise.all([
     supabaseAdmin
       .from("clients")
-      .select("id, merged_into_client_id")
+      .select("id, name, merged_into_client_id")
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("contracts")
@@ -133,8 +134,19 @@ async function _foldedContractsByCanonical(
 
   // tombstone id → canonical id (one hop; merge targets are never themselves merged).
   const mergeMap = new Map<string, string>();
-  for (const c of (clientsRes.data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
+  // Catch-all placeholder clients (e.g. "عميل غير محدد") own a bucket of stray
+  // projects. A real contract whose project happens to sit in that bucket must
+  // NEVER rename the placeholder — else the placeholder shows a real brand's
+  // name and appears as a phantom duplicate in every picker. Mirror the merge
+  // guard: placeholders never absorb contract identity.
+  const placeholderIds = new Set<string>();
+  for (const c of (clientsRes.data ?? []) as Array<{
+    id: string;
+    name: string | null;
+    merged_into_client_id: string | null;
+  }>) {
     if (c.merged_into_client_id) mergeMap.set(c.id, c.merged_into_client_id);
+    if (isPlaceholderClient(c.name)) placeholderIds.add(c.id);
   }
 
   type ContractRow = {
@@ -150,6 +162,7 @@ async function _foldedContractsByCanonical(
   const add = (clientId: string | null | undefined, k: ContractRow) => {
     if (!clientId) return;
     const canon = mergeMap.get(clientId) ?? clientId;
+    if (placeholderIds.has(canon)) return; // never fold a brand onto the catch-all bucket
     const key = k.id ?? `${k.sheet_client_name ?? ""}:${k.start_date ?? ""}`;
     const seenForClient = seen.get(canon) ?? new Set<string>();
     if (seenForClient.has(key)) return;

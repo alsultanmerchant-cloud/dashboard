@@ -3941,7 +3941,9 @@
       "empty": "No past analyses yet",
       "current": "Current",
       "viewingPast": "You're viewing a past analysis — it doesn't reflect the client's current status",
-      "backToCurrent": "Back to current analysis"
+      "backToCurrent": "Back to current analysis",
+      "showMore": "Show more ({count})",
+      "showLess": "Show less"
     },
     "analyzing": "Analyzing…"
   },
