@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listClientOptions, getClientSearchKeywords } from "@/lib/data/clients";
+import { listContractClientOptions, getClientSearchKeywords } from "@/lib/data/clients";
 import {
   getSatisfactionRows,
   getClientSatisfactionDetail,
@@ -25,7 +25,10 @@ export default async function SatisfactionPage({
   const initialRisk = sp.risk === "1";
 
   const [clients, keywords, rows, detail, execution, financeMap] = await Promise.all([
-    listClientOptions(session.orgId),
+    // Picker lists CONTRACT clients only — the agency's actual client book,
+    // named from the contract sheet. No-contract Odoo/lead rows (tests,
+    // placeholders, un-signed leads) are excluded. See [[project_clients_centralization]].
+    listContractClientOptions(session.orgId),
     getClientSearchKeywords(session.orgId),
     getSatisfactionRows(session.orgId),
     selectedId
@@ -42,6 +45,17 @@ export default async function SatisfactionPage({
     label: c.name as string,
     keywords: keywords.get(c.id as string) ?? null,
   }));
+
+  // The picker lists contract clients only, but a no-contract client can still be
+  // reached from the board (e.g. an analyzed WhatsApp-only client). Keep the
+  // current selection visible in the dropdown so its name shows as selected.
+  if (selectedId && detail && !options.some((o) => o.value === selectedId)) {
+    options.push({
+      value: selectedId,
+      label: detail.clientName,
+      keywords: keywords.get(selectedId) ?? null,
+    });
+  }
 
   // Same keyword blob, but as a plain record so the overview board/table search
   // can match a client by ANY identifier (project / group / contract), not just
