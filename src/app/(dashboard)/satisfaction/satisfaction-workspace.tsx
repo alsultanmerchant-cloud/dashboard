@@ -1244,60 +1244,71 @@ function AnalysisView({
               </span>
             </Explained>
           </div>
-          <div className="flex flex-wrap items-center gap-6 border-t border-border pt-4">
-          <div className="flex items-center gap-3">
-            <Ring score={analysis.satisfactionScore} size={84} />
-            <div>
-              <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                {t("satisfactionScore")}
-                <MetricInfo
-                  text={t("metricTooltips.satisfaction_score")}
-                  label={t("satisfactionScore")}
-                />
-              </p>
-              <p className={cn("text-sm font-semibold", tone.text)}>
-                {sentimentLabel(analysis.sentiment)}
-              </p>
-              <p className="mt-1 inline-flex items-center gap-1 rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                <CalendarRange className="size-3" />
-                {t(`window.${analysis.windowKind}`)}
-                {range(analysis) && <span className="tabular-nums">· {range(analysis)}</span>}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 border-s border-border ps-6">
-            {briefMissing ? (
-              <span className="flex size-16 shrink-0 items-center justify-center rounded-full border border-dashed border-amber/50 bg-amber/10 text-amber">
-                <FileQuestion className="size-6" />
-              </span>
-            ) : (
-              <Ring score={analysis.briefAdherenceScore} size={64} />
-            )}
-            <div>
-              <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                {t("briefAdherence")}
-                <MetricInfo
-                  text={t("metricTooltips.satisfaction_briefAdherence")}
-                  label={t("briefAdherence")}
-                />
-              </p>
-              {brief ? (
-                <BriefManager
-                  brief={brief}
-                  clientId={clientId}
-                  activeProjects={activeProjects}
-                  t={t}
-                />
-              ) : briefMissing ? (
-                <p className="mt-1 text-[11px] font-medium text-amber">
-                  {t("briefMissingShort")}
+          <div className="flex flex-wrap items-stretch gap-x-6 gap-y-4 border-t border-border pt-4">
+          {/* درجة الرضا — score + the one-line "why this score" directly beneath it */}
+          <div className="min-w-[16rem] flex-1 space-y-2.5">
+            <div className="flex items-center gap-3">
+              <Ring score={analysis.satisfactionScore} size={84} />
+              <div>
+                <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  {t("satisfactionScore")}
+                  <MetricInfo
+                    text={t("metricTooltips.satisfaction_score")}
+                    label={t("satisfactionScore")}
+                  />
                 </p>
-              ) : null}
+                <p className={cn("text-sm font-semibold", tone.text)}>
+                  {sentimentLabel(analysis.sentiment)}
+                </p>
+                <p className="mt-1 inline-flex items-center gap-1 rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <CalendarRange className="size-3" />
+                  {t(`window.${analysis.windowKind}`)}
+                  {range(analysis) && <span className="tabular-nums">· {range(analysis)}</span>}
+                </p>
+              </div>
             </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {analysis.risks[0] ?? t("executive.noMajorRisk")}
+            </p>
           </div>
-          <p className="min-w-[12rem] flex-1 text-sm leading-relaxed text-muted-foreground">
-            {analysis.risks[0] ?? t("executive.noMajorRisk")}
-          </p>
+          {/* الالتزام بالبريف — score + its own one-line reason directly beneath it */}
+          <div className="min-w-[16rem] flex-1 space-y-2.5 sm:border-s sm:border-border sm:ps-6">
+            <div className="flex items-center gap-3">
+              {briefMissing ? (
+                <span className="flex size-16 shrink-0 items-center justify-center rounded-full border border-dashed border-amber/50 bg-amber/10 text-amber">
+                  <FileQuestion className="size-6" />
+                </span>
+              ) : (
+                <Ring score={analysis.briefAdherenceScore} size={64} />
+              )}
+              <div>
+                <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  {t("briefAdherence")}
+                  <MetricInfo
+                    text={t("metricTooltips.satisfaction_briefAdherence")}
+                    label={t("briefAdherence")}
+                  />
+                </p>
+                {brief ? (
+                  <BriefManager
+                    brief={brief}
+                    clientId={clientId}
+                    activeProjects={activeProjects}
+                    t={t}
+                  />
+                ) : briefMissing ? (
+                  <p className="mt-1 text-[11px] font-medium text-amber">
+                    {t("briefMissingShort")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {!briefMissing && analysis.briefAdherence?.reason && (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {analysis.briefAdherence.reason}
+              </p>
+            )}
+          </div>
           </div>
         </CardContent>
       </Card>
@@ -2071,11 +2082,7 @@ function BriefAdherencePanel({
             )}
           </div>
         </div>
-        {breakdown.reason && (
-          <p className="mb-3 rounded-lg border border-border bg-soft-1 p-3 text-[13px] leading-relaxed">
-            {breakdown.reason}
-          </p>
-        )}
+        {/* reason now shown beneath the الالتزام بالبريف ring in the headline card */}
         {sorted.length > 0 ? (
           <ul className="space-y-2">
             {sorted.map((it, i) => {
