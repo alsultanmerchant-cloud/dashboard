@@ -135,7 +135,7 @@ export function SatisfactionWorkspace({
   initialRisk = false,
 }: Props) {
   const t = useTranslations("SatisfactionPage");
-  const tStages = useTranslations("TasksPage.stages");
+  const tStages = useTranslations("TaskLabels.stage");
   const router = useRouter();
   const [analyzing, setAnalyzing] = useState<"week" | "all" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -945,30 +945,32 @@ function ExecutionPanel({
         {/* worst-stuck tasks */}
         <ul className="mt-3 space-y-1.5">
           {snapshot.topTasks.map((task, i) => (
-            <li
-              key={i}
-              className="flex items-center justify-between gap-3 rounded-lg bg-soft-1/60 px-2.5 py-1.5 text-[13px]"
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                {task.taskCode && (
-                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
-                    {task.taskCode}
-                  </span>
-                )}
-                <span className="truncate">{task.title}</span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2 text-[11px]">
-                <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
-                  {stageLabel(task.stage)}
-                </span>
-                {task.daysStuck !== null && (
-                  <Explained text={t("metricTooltips.satisfaction_execDaysStuck")}>
-                    <span className="tabular-nums text-amber">
-                      {t("execution.daysStuck", { n: task.daysStuck })}
+            <li key={task.id ?? i}>
+              <Link
+                href={`/tasks/${task.id}`}
+                className="flex items-center justify-between gap-3 rounded-lg bg-soft-1/60 px-2.5 py-1.5 text-[13px] transition-colors hover:bg-soft-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/40"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {task.taskCode && (
+                    <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70">
+                      {task.taskCode}
                     </span>
-                  </Explained>
-                )}
-              </span>
+                  )}
+                  <span className="truncate">{task.title}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 text-[11px]">
+                  <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
+                    {stageLabel(task.stage)}
+                  </span>
+                  {task.daysStuck !== null && (
+                    <Explained text={t("metricTooltips.satisfaction_execDaysStuck")}>
+                      <span className="tabular-nums text-amber">
+                        {t("execution.daysStuck", { n: task.daysStuck })}
+                      </span>
+                    </Explained>
+                  )}
+                </span>
+              </Link>
             </li>
           ))}
         </ul>

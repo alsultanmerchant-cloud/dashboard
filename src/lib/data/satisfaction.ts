@@ -6,6 +6,12 @@ import type { ClientTeamActivitySnapshot } from "@/lib/data/satisfaction-team";
 import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
 import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
+import { isClientRelationshipActive } from "@/lib/data/satisfaction-rules";
+import { getClientMergeMap, resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
+
+// Re-export identity helpers so existing importers of these from this module
+// (and its many consumers) keep resolving without churn.
+export { getClientMergeMap, resolveClientProjectIds };
 
 // =========================================================================
 // Client-satisfaction data layer (/satisfaction + Quality executive index).
@@ -62,7 +68,7 @@ export interface SatisfactionRow {
   hasClient: boolean;
   hasTechnical: boolean;
   hasMessages: boolean; // has live wa_messages → analyzable even without a .txt import
-  hasActiveProject: boolean; // false → archived/lost (has projects, ALL archived); separated in the UI
+  hasActiveProject: boolean; // false → archived/lost (no live project: all archived or HOLD/LOST-tagged, or no project + all contracts closed/lost); separated in the UI
   manuallyArchived: boolean; // operator flagged clients.status !== 'active'
   satisfactionScore: number | null;
   briefAdherenceScore: number | null;
@@ -79,62 +85,113 @@ export interface SatisfactionRow {
 async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   const knowledgeStamp = await getKnowledgeStamp(orgId);
   const displayNames = await getClientDisplayNameMap(orgId);
-  const [importsRes, analysesRes, clientsRes, projectsRes, linksRes] = await Promise.all([
-    supabaseAdmin
-      .from("client_chat_imports")
-      .select("client_id, group_kind")
-      .eq("organization_id", orgId),
-    supabaseAdmin
-      .from("client_satisfaction_analyses")
-      .select("client_id, satisfaction_score, brief_adherence_score, sentiment, created_at")
-      .eq("organization_id", orgId)
-      .eq("is_current", true),
-    supabaseAdmin.from("clients").select("id, name, status").eq("organization_id", orgId),
-    supabaseAdmin
-      .from("projects")
-      .select("id, client_id, status")
-      .eq("organization_id", orgId),
-    supabaseAdmin
-      .from("wa_group_links")
-      .select("client_id, message_count, projects:wa_group_projects(project_id)")
-      .eq("organization_id", orgId)
-      .not("client_id", "is", null),
-  ]);
+  const [importsRes, analysesRes, clientsRes, projectsRes, linksRes, holdLostRes, contractsRes] =
+    await Promise.all([
+      supabaseAdmin
+        .from("client_chat_imports")
+        .select("client_id, group_kind")
+        .eq("organization_id", orgId),
+      supabaseAdmin
+        .from("client_satisfaction_analyses")
+        .select("client_id, satisfaction_score, brief_adherence_score, sentiment, created_at")
+        .eq("organization_id", orgId)
+        .eq("is_current", true),
+      supabaseAdmin
+        .from("clients")
+        .select("id, name, status, merged_into_client_id")
+        .eq("organization_id", orgId),
+      supabaseAdmin
+        .from("projects")
+        .select("id, client_id, status")
+        .eq("organization_id", orgId),
+      supabaseAdmin
+        .from("wa_group_links")
+        .select("client_id, message_count, projects:wa_group_projects(project_id)")
+        .eq("organization_id", orgId)
+        .not("client_id", "is", null),
+      // Projects carrying a HOLD / LOST tag (Odoo project tags). These flag a
+      // paused/churned relationship the operator hasn't archived in Rawasm yet,
+      // so satisfaction must treat such a project as NOT live (team feedback).
+      supabaseAdmin
+        .from("project_tag_assignments")
+        .select("project_id, tag:project_tags!inner(name)")
+        .eq("organization_id", orgId)
+        .in("tag.name", ["HOLD", "LOST"]),
+      // Contract statuses per client — the fallback signal for clients that live
+      // only on the contracts sheet (no Rawasm project). A no-project client whose
+      // contracts are ALL closed/lost is a churned relationship, not an active one.
+      supabaseAdmin
+        .from("contracts")
+        .select("client_id, status")
+        .eq("organization_id", orgId)
+        .not("client_id", "is", null),
+    ]);
   if (importsRes.error) throw importsRes.error;
   if (analysesRes.error) throw analysesRes.error;
   if (clientsRes.error) throw clientsRes.error;
   if (projectsRes.error) throw projectsRes.error;
   if (linksRes.error) throw linksRes.error;
+  if (holdLostRes.error) throw holdLostRes.error;
+  if (contractsRes.error) throw contractsRes.error;
 
   const names = new Map<string, string>();
   // Manual archive flag: clients.status !== 'active' (e.g. 'archived'/'lost'/
   // 'cancelled') is an explicit override — the relationship is dead even if a
   // project still looks active (cancelled contract not yet archived in Rawasm).
   const manualStatus = new Map<string, string | null>();
-  for (const c of (clientsRes.data ?? []) as Array<{ id: string; name: string; status: string | null }>) {
+  // child clientId → canonical (merged-into) clientId, to fold sheet twins' contracts.
+  const mergeMap = new Map<string, string>();
+  for (const c of (clientsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    status: string | null;
+    merged_into_client_id: string | null;
+  }>) {
     // Contracts are the source of truth for a client's name — prefer the
     // contract-sheet name over the Odoo project name. See [[project_clients_centralization]].
     names.set(c.id, displayNames.get(c.id) ?? c.name);
     manualStatus.set(c.id, c.status);
+    if (c.merged_into_client_id) mergeMap.set(c.id, c.merged_into_client_id);
+  }
+  const canonClient = (id: string) => mergeMap.get(id) ?? id;
+
+  // Project ids tagged HOLD/LOST → treated as non-live regardless of project.status.
+  const holdLostProjectIds = new Set<string>();
+  for (const r of (holdLostRes.data ?? []) as Array<{ project_id: string }>)
+    holdLostProjectIds.add(r.project_id);
+
+  // Contract statuses folded onto the canonical client (contracts usually sit on
+  // the merged sheet twin, not the project/chat-bearing canonical row).
+  const contractStatusesByClient = new Map<string, Set<string>>();
+  for (const r of (contractsRes.data ?? []) as Array<{ client_id: string | null; status: string | null }>) {
+    if (!r.client_id) continue;
+    const key = canonClient(r.client_id);
+    const set = contractStatusesByClient.get(key) ?? new Set<string>();
+    set.add((r.status ?? "").toLowerCase());
+    contractStatusesByClient.set(key, set);
   }
 
-  // Archived rule. A client is "lost/archived" when EITHER:
+  // Archived rule. A client is "lost/archived" when ANY of:
   //  - it is manually flagged (clients.status !== 'active'), OR
-  //  - every project it is associated with is archived.
+  //  - it has projects but NONE is live — a live project is non-archived AND not
+  //    tagged HOLD/LOST (the HOLD/LOST tag pauses/churns the account even before
+  //    Rawasm archives it), OR
+  //  - it has NO project but its contracts are ALL closed/lost (a churned
+  //    contracts-sheet-only client).
   // "Associated" means projects it OWNS *plus* projects its WhatsApp groups
   // LINK TO — because duplicate client rows split the relationship: the group
   // is mapped to a project-less copy while the real (archived) project lives on
   // the twin (e.g. مجوهرات نها / جزيرة الريف). Following the group link's
-  // project_id recovers the true status. A client with NO associated project
-  // at all stays active (genuine no-signal duplicate/sheet case).
+  // project_id recovers the true status. A client with NO project and no
+  // (or a still-live/renewable) contract stays active.
   const projectStatusById = new Map<string, string | null>();
-  const ownedStatuses = new Map<string, string[]>();
+  const ownedProjectIds = new Map<string, string[]>();
   for (const p of (projectsRes.data ?? []) as Array<{ id: string; client_id: string | null; status: string | null }>) {
     projectStatusById.set(p.id, p.status);
     if (!p.client_id) continue;
-    const arr = ownedStatuses.get(p.client_id) ?? [];
-    arr.push(p.status ?? "");
-    ownedStatuses.set(p.client_id, arr);
+    const arr = ownedProjectIds.get(p.client_id) ?? [];
+    arr.push(p.id);
+    ownedProjectIds.set(p.client_id, arr);
   }
   // Projects reached via each client's WhatsApp group links (may belong to a
   // twin). 0203: a group can link to several projects, so union them all.
@@ -149,15 +206,24 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     linkedProjectIds.set(l.client_id, s);
   }
 
+  // Assemble the classification signals for a client and delegate to the pure,
+  // unit-tested rule (isClientRelationshipActive in satisfaction-rules.ts) so the
+  // three team-approved rules can never silently regress.
   const isActiveClient = (clientId: string) => {
-    const st = manualStatus.get(clientId);
-    if (st && st !== "active") return false; // manual archive/cancel wins
-    const statuses: Array<string | null> = [...(ownedStatuses.get(clientId) ?? [])];
+    // Every project associated with the client: those it owns + those reached via
+    // its WhatsApp group links (a twin may hold the real project).
+    const pids = new Set<string>(ownedProjectIds.get(clientId) ?? []);
     for (const pid of linkedProjectIds.get(clientId) ?? []) {
-      if (projectStatusById.has(pid)) statuses.push(projectStatusById.get(pid)!);
+      if (projectStatusById.has(pid)) pids.add(pid);
     }
-    if (statuses.length === 0) return true; // no project signal → keep active
-    return statuses.some((s) => s !== "archived"); // any non-archived project → active
+    return isClientRelationshipActive({
+      manualStatus: manualStatus.get(clientId) ?? null,
+      projects: [...pids].map((pid) => ({
+        status: projectStatusById.get(pid) ?? null,
+        holdLost: holdLostProjectIds.has(pid),
+      })),
+      contractStatuses: [...(contractStatusesByClient.get(canonClient(clientId)) ?? [])],
+    });
   };
 
   // A client has live coverage if any of its mapped groups carry ingested messages.
@@ -612,14 +678,25 @@ export const buildClientTranscripts = cache(_buildClientTranscripts);
 // primary "how late" signal is days stuck in the current stage (stage_entered_at,
 // fully populated). Stage grouping shows whether delays cluster in one phase.
 export interface ExecutionTask {
+  id: string; // task uuid → deep-link to /tasks/[id]
   taskCode: string | null;
   title: string;
   stage: string;
   daysStuck: number | null; // whole days since entering the current stage
   delayDays: number | null; // working-days overdue, when the data exists
+  // How overdue the task was, in calendar days: delay_days when present, else
+  // (archived_at | today) − planned_date. Drives which ARCHIVED tasks are worth
+  // surfacing in a full-period run ("the ones that had big delays").
+  overdueDays: number | null;
   dueDate: string | null;
   stageEnteredAt: string | null;
+  archived: boolean; // Odoo-archived task (historical; only in full-period runs)
 }
+
+// Full-period runs surface only the WORST archived delays (not every archived
+// task): those overdue by at least this many days, capped to the top few.
+const ARCHIVED_BIG_DELAY_DAYS = 5;
+const ARCHIVED_TASK_CAP = 5;
 export interface ClientExecutionSnapshot {
   overdueCount: number;
   totalTasks: number;
@@ -635,43 +712,77 @@ export interface ClientExecutionSnapshot {
 async function _getClientExecutionSnapshot(
   orgId: string,
   clientId: string,
+  includeArchived = false,
 ): Promise<ClientExecutionSnapshot | null> {
+  // ALL of the client's projects (owned + WA-linked + twins), not just owned —
+  // otherwise a split client's tasks are silently missed.
+  const projectIds = await resolveClientProjectIds(orgId, clientId);
+  if (projectIds.length === 0) return null;
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "task_code, title, stage, delay_days, due_date, stage_entered_at, is_overdue, project:projects!inner(client_id, status)",
+      "id, task_code, title, stage, delay_days, due_date, planned_date, stage_entered_at, is_overdue, archived_at",
     )
     .eq("organization_id", orgId)
-    .eq("project.client_id", clientId)
-    .neq("project.status", "archived");
+    .in("project_id", projectIds);
   if (error || !data) return null;
 
   type Row = {
+    id: string;
     task_code: string | null;
     title: string | null;
     stage: string | null;
     delay_days: number | null;
     due_date: string | null;
+    planned_date: string | null;
     stage_entered_at: string | null;
     is_overdue: boolean | null;
+    archived_at: string | null;
   };
   const rows = data as unknown as Row[];
-  const overdue = rows.filter((r) => r.is_overdue);
-  if (overdue.length === 0) return null;
 
   const now = Date.now();
   const daysSince = (iso: string | null): number | null =>
     iso ? Math.max(0, Math.floor((now - new Date(iso).getTime()) / 86_400_000)) : null;
-
-  const tasks: ExecutionTask[] = overdue.map((r) => ({
+  // Overdue magnitude in calendar days: working-days delay_days when present,
+  // else (archived_at | today) − planned_date. Used to rank archived tasks.
+  const overdueDaysOf = (r: Row): number | null => {
+    if (r.delay_days != null) return r.delay_days;
+    if (!r.planned_date) return null;
+    const ref = r.archived_at ? new Date(r.archived_at).getTime() : now;
+    const d = Math.floor((ref - new Date(r.planned_date).getTime()) / 86_400_000);
+    return d > 0 ? d : null;
+  };
+  const toTask = (r: Row): ExecutionTask => ({
+    id: r.id,
     taskCode: r.task_code,
     title: (r.title ?? "").trim() || "—",
     stage: r.stage ?? "new",
     daysStuck: daysSince(r.stage_entered_at),
     delayDays: r.delay_days,
+    overdueDays: overdueDaysOf(r),
     dueDate: r.due_date,
     stageEnteredAt: r.stage_entered_at,
-  }));
+    archived: !!r.archived_at,
+  });
+
+  // Odoo-archived tasks keep is_overdue=true forever (the flag is never cleared
+  // on archive), so ~88% of "overdue" rows are archived work whose cycle ended.
+  // Current/weekly view = LIVE overdue only. Full-period view additionally brings
+  // the WORST archived delays (overdue ≥ ARCHIVED_BIG_DELAY_DAYS, top few) as
+  // historical problems. See [[project_satisfaction_execution_scope_fix]].
+  const overdueRows = rows.filter((r) => r.is_overdue);
+  const liveTasks = overdueRows.filter((r) => !r.archived_at).map(toTask);
+  const archivedBigDelay = includeArchived
+    ? overdueRows
+        .filter((r) => r.archived_at)
+        .map(toTask)
+        .filter((t) => (t.overdueDays ?? 0) >= ARCHIVED_BIG_DELAY_DAYS)
+        .sort((a, b) => (b.overdueDays ?? 0) - (a.overdueDays ?? 0))
+        .slice(0, ARCHIVED_TASK_CAP)
+    : [];
+  const tasks = [...liveTasks, ...archivedBigDelay];
+  if (tasks.length === 0) return null;
 
   const stageCounts = new Map<string, number>();
   for (const t of tasks) stageCounts.set(t.stage, (stageCounts.get(t.stage) ?? 0) + 1);
@@ -682,16 +793,22 @@ async function _getClientExecutionSnapshot(
   // Bottleneck = each stuck stage as a share of all overdue tasks. Keep the
   // stages that account for the bulk of the delay (top 3, or any ≥ 25%).
   const bottlenecks = byStage
-    .map((s) => ({ stage: s.stage, count: s.count, pct: Math.round((s.count / overdue.length) * 100) }))
+    .map((s) => ({ stage: s.stage, count: s.count, pct: Math.round((s.count / tasks.length) * 100) }))
     .filter((s, i) => i < 3 || s.pct >= 25);
 
+  // Live tasks first, then archived/historical; within each, worst-delay first.
   const topTasks = [...tasks]
-    .sort((a, b) => (b.daysStuck ?? -1) - (a.daysStuck ?? -1))
+    .sort((a, b) => {
+      if (a.archived !== b.archived) return a.archived ? 1 : -1;
+      return (b.overdueDays ?? b.daysStuck ?? -1) - (a.overdueDays ?? a.daysStuck ?? -1);
+    })
     .slice(0, 8);
-  const maxDaysStuck = topTasks.length ? topTasks[0].daysStuck : null;
+  const maxDaysStuck = liveTasks.length
+    ? Math.max(...liveTasks.map((t) => t.daysStuck ?? 0))
+    : (topTasks[0]?.daysStuck ?? null);
 
   return {
-    overdueCount: overdue.length,
+    overdueCount: tasks.length,
     totalTasks: rows.length,
     maxDaysStuck,
     byStage,
@@ -712,20 +829,8 @@ export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);
 // ids whose contracts/activity belong to the same real client so the commercial
 // dimension reaches the model.
 
-// child clientId → canonical (merged_into) clientId, for every merged row.
-async function _getClientMergeMap(orgId: string): Promise<Map<string, string>> {
-  const { data } = await supabaseAdmin
-    .from("clients")
-    .select("id, merged_into_client_id")
-    .eq("organization_id", orgId)
-    .not("merged_into_client_id", "is", null);
-  const m = new Map<string, string>();
-  for (const r of (data ?? []) as Array<{ id: string; merged_into_client_id: string | null }>) {
-    if (r.merged_into_client_id) m.set(r.id, r.merged_into_client_id);
-  }
-  return m;
-}
-export const getClientMergeMap = cache(_getClientMergeMap);
+// getClientMergeMap now lives in satisfaction-identity.ts (re-exported below so
+// existing importers of it from this module keep working).
 
 // Every client id that shares this client's commercial identity: itself, the
 // rows merged INTO it (sheet twins), and — if it is itself a merged sheet row —
@@ -771,6 +876,10 @@ export interface ContractLine {
   status: ContractStatus;
   totalValue: number;
   paidValue: number;
+  // The sheet's own collection flag: 'Complete' | 'Installments' | null. This is
+  // the SOURCE OF TRUTH for whether money is still owed — paidValue lags on
+  // installment contracts, so a total−paid gap does NOT mean an outstanding due.
+  paymentStatus: string | null;
   startDate: string;
   endDate: string | null;
 }
@@ -804,7 +913,7 @@ async function _getClientContractContext(
   const ids = await getClientContractIdentity(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contracts")
-    .select("contract_code, target, status, total_value, paid_value, start_date, end_date")
+    .select("contract_code, target, status, total_value, paid_value, payment_status, start_date, end_date")
     .eq("organization_id", orgId)
     .in("client_id", ids)
     .order("start_date", { ascending: false });
@@ -816,6 +925,7 @@ async function _getClientContractContext(
     status: ContractStatus | null;
     total_value: number | null;
     paid_value: number | null;
+    payment_status: string | null;
     start_date: string;
     end_date: string | null;
   };
@@ -826,6 +936,7 @@ async function _getClientContractContext(
     status: r.status ?? "active",
     totalValue: r.total_value ?? 0,
     paidValue: r.paid_value ?? 0,
+    paymentStatus: r.payment_status ?? null,
     startDate: r.start_date,
     endDate: r.end_date,
   });

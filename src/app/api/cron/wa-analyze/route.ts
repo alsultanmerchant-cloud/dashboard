@@ -6,6 +6,7 @@ import {
   NoTranscriptError,
   NoRecentActivityError,
 } from "@/lib/satisfaction-analyze";
+import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 
 // Daily re-analysis of client satisfaction for clients whose WhatsApp groups
 // received new messages. Auth: CRON_SECRET (x-cron-secret header or ?secret=).
@@ -75,8 +76,32 @@ async function handle(request: NextRequest) {
     return !last || last < (newestByClient.get(id) as string);
   });
 
+  // Knowledge-staleness backlog: analyses produced BEFORE the org's latest
+  // instruction/rule change are outdated and must be regenerated even if the
+  // client's groups have been quiet. Without this a rule fix (or a taught
+  // correction) only reaches chatty clients and the same wrong output lingers
+  // on everyone else forever. We fill the run's leftover slots with the oldest
+  // stale analyses so the whole org drains over successive daily runs.
+  const stamp = await getKnowledgeStamp(orgId);
+  let staleDue: string[] = [];
+  if (stamp) {
+    const { data: allCurrent } = await supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select("client_id, created_at")
+      .eq("organization_id", orgId)
+      .eq("is_current", true)
+      .order("created_at", { ascending: true });
+    const dueSet = new Set(due);
+    staleDue = ((allCurrent ?? []) as Array<{ client_id: string; created_at: string }>)
+      .filter((a) => !dueSet.has(a.client_id) && isStaleAgainstKnowledge(a.created_at, stamp))
+      .map((a) => a.client_id);
+  }
+
+  // New-activity clients first, then fill remaining slots with the stale backlog.
+  const queue = [...due, ...staleDue].slice(0, MAX_PER_RUN);
+
   const results: Array<{ clientId: string; ok: boolean; score?: number; error?: string }> = [];
-  for (const clientId of due.slice(0, MAX_PER_RUN)) {
+  for (const clientId of queue) {
     try {
       const { result } = await analyzeClientSatisfaction(orgId, clientId, null);
       results.push({ clientId, ok: true, score: result.satisfactionScore });
@@ -90,8 +115,9 @@ async function handle(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     candidates: due.length,
+    staleBacklog: staleDue.length,
     analyzed: results.filter((r) => r.ok).length,
-    capped: due.length > MAX_PER_RUN,
+    capped: due.length + staleDue.length > MAX_PER_RUN,
     results,
   });
 }

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "bun test --preload ./scripts/_preload-stub-server-only.ts",
     "sync:odoo": "bun run scripts/sync-odoo.ts",
     "sync:stage-history": "bun run scripts/sync-stage-history.ts",
     "sync:followers": "bun run scripts/sync-project-followers.ts",

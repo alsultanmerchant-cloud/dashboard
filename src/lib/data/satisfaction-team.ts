@@ -2,6 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
+import { isLeadershipSql } from "@/lib/data/leadership";
+import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
 
 // =========================================================================
 // Client team-activity snapshot — the ACCOUNTABILITY layer of /satisfaction.
@@ -54,6 +56,7 @@ export interface StuckTask {
   stage: string;
   service: string | null;
   daysStuck: number | null;
+  archived: boolean; // task is Odoo-archived (historical; only present in full-period runs)
   executor: string | null; // role_type='agent' assignee (المنفّذ)
   accountManager: string | null; // role_type='account_manager' assignee
   stageOwner: string | null; // person whose position owns the CURRENT stage
@@ -98,10 +101,32 @@ const MAX_PEOPLE = 12;
 async function _getClientTeamActivitySnapshot(
   orgId: string,
   clientId: string,
+  includeArchived = false,
 ): Promise<ClientTeamActivitySnapshot> {
-  const org = assertUuid(orgId, "orgId");
-  const cid = assertUuid(clientId, "clientId");
-  const proj = `select id from projects where organization_id='${org}' and client_id='${cid}' and status <> 'archived'`;
+  assertUuid(orgId, "orgId");
+  assertUuid(clientId, "clientId");
+  // EVERY project the client's identity touches (owned + WA-group-linked + merged
+  // twins), not just owned — so a split client's real delivery work is analyzed.
+  const projectIds = (await resolveClientProjectIds(orgId, clientId)).map((id) =>
+    assertUuid(id, "projectId"),
+  );
+  if (projectIds.length === 0) {
+    return {
+      accountManager: null,
+      services: [],
+      stuckTasks: [],
+      people: [],
+      gaps: [],
+      hasData: false,
+    };
+  }
+  const proj = `select unnest(array[${projectIds.map((id) => `'${id}'`).join(",")}]::uuid[]) as id`;
+  // Odoo-archived tasks keep is_overdue=true forever (the flag is never cleared
+  // on archive), so ~88% of "overdue" rows are actually archived work whose cycle
+  // ended. The current/weekly view must show ONLY live tasks; a full-period run
+  // additionally surfaces archived tasks (flagged historical) as past problems.
+  // See [[project_satisfaction_execution_scope_fix]].
+  const notArchived = includeArchived ? "" : "and t.archived_at is null";
 
   // Query A — the stuck work behind complaints (overdue tasks, fully resolved).
   const stuckRows = await runSql<{
@@ -110,6 +135,7 @@ async function _getClientTeamActivitySnapshot(
     stage: string;
     service: string | null;
     days_stuck: number | null;
+    archived: boolean;
     executor: string | null;
     account_manager: string | null;
     stage_owner: string | null;
@@ -122,9 +148,19 @@ async function _getClientTeamActivitySnapshot(
 with cli_projects as (${proj})
 select t.task_code, t.title, t.stage::text as stage, s.name as service,
   extract(day from now() - t.stage_entered_at)::int as days_stuck,
+  (t.archived_at is not null) as archived,
   public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text) as owner_role,
+  -- المنفّذ = the executing SPECIALIST, not a team leader/manager who is also
+  -- tagged as an 'agent' on the task. Rank non-leadership first, then specialists,
+  -- so a task assigned to (team_lead + specialist + manager) attributes to the
+  -- specialist. See [[project_agents_only_performance]].
   (select e.full_name from task_assignees ta join employee_profiles e on e.id = ta.employee_id
-     where ta.task_id = t.id and ta.role_type = 'agent' limit 1) as executor,
+     left join positions pos on pos.id = e.position_id
+     where ta.task_id = t.id and ta.role_type = 'agent'
+     order by (case when ${isLeadershipSql("pos")} then 1 else 0 end),
+              (case when pos.role = 'specialist' then 0 else 1 end),
+              e.full_name
+     limit 1) as executor,
   (select e.full_name from task_assignees ta join employee_profiles e on e.id = ta.employee_id
      where ta.task_id = t.id and ta.role_type = 'account_manager' limit 1) as account_manager,
   (select string_agg(distinct e.full_name, ', ')
@@ -143,8 +179,8 @@ select t.task_code, t.title, t.stage::text as stage, s.name as service,
 from tasks t
 join cli_projects cp on cp.id = t.project_id
 left join services s on s.id = t.service_id
-where t.is_overdue = true
-order by t.stage_entered_at asc
+where t.is_overdue = true ${notArchived}
+order by (t.archived_at is not null) asc, t.stage_entered_at asc
 limit ${MAX_STUCK}`);
 
   // Query B — service lines across all open work (context for the AI).
@@ -156,7 +192,7 @@ select coalesce(s.name, 'أخرى') as service,
 from tasks t
 join cli_projects cp on cp.id = t.project_id
 left join services s on s.id = t.service_id
-where t.stage <> 'done'
+where t.stage <> 'done' ${notArchived}
 group by 1
 order by overdue desc, total_open desc`);
 
@@ -173,7 +209,7 @@ order by overdue desc, total_open desc`);
     last_action_at: string | null;
   }>(`
 with cli_projects as (${proj}),
-cli_tasks as (select t.id, t.is_overdue, t.stage::text as stage from tasks t join cli_projects cp on cp.id = t.project_id)
+cli_tasks as (select t.id, t.is_overdue, t.stage::text as stage from tasks t join cli_projects cp on cp.id = t.project_id where true ${notArchived})
 select e.id as employee_id, e.full_name as name, pos.role as position_role, d.name as department,
   count(distinct ct.id) filter (where ct.stage <> 'done') as open_tasks,
   count(distinct ct.id) filter (where ct.is_overdue) as overdue_tasks,
@@ -198,6 +234,7 @@ limit ${MAX_PEOPLE}`);
     stage: r.stage,
     service: r.service,
     daysStuck: r.days_stuck,
+    archived: Boolean(r.archived),
     executor: r.executor,
     accountManager: r.account_manager,
     stageOwner: r.stage_owner,
@@ -297,7 +334,7 @@ export function renderTeamActivityBlock(snap: ClientTeamActivitySnapshot): strin
             ? `مالك المرحلة: ${t.stageOwner}`
             : "مالك المرحلة: غير محدد";
       lines.push(
-        `- ${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — خدمة: ${t.service ?? "غير مصنّفة"} — مرحلة «${t.stage}»${
+        `- ${t.archived ? "🗄️ (مؤرشفة/تاريخية) " : ""}${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — خدمة: ${t.service ?? "غير مصنّفة"} — مرحلة «${t.stage}»${
           t.daysStuck != null ? ` منذ ${t.daysStuck} يوم` : ""
         } — المنفّذ: ${t.executor ?? "غير معيّن"} — ${owner} — نشاط ٣٠ يوم: ${t.notes30d} تعليق/${t.moves30d} نقلة — آخر إجراء: ${
           t.lastActionBy ?? "لا يوجد"

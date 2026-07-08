@@ -1,6 +1,7 @@
 import "server-only";
 import * as XLSX from "xlsx";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
 
 // Locate and fetch a client's BRIEF document so satisfaction analysis can score
 // brief-adherence against the client's DOCUMENTED requirements (a Google Doc
@@ -179,14 +180,9 @@ function toCand(source: "project" | "task", r: AttRow): Cand | null {
 // fetcher (getClientBrief) and the lightweight reference lookup
 // (getClientBriefRef) so both agree on which document is "the brief".
 async function findBriefCandidates(orgId: string, clientId: string): Promise<Cand[]> {
-  // The client's live (non-archived) projects.
-  const { data: projects } = await supabaseAdmin
-    .from("projects")
-    .select("id")
-    .eq("organization_id", orgId)
-    .eq("client_id", clientId)
-    .neq("status", "archived");
-  const projectIds = (projects ?? []).map((p) => p.id as string);
+  // ALL of the client's live projects across its identity (owned + WA-group-linked
+  // + merged twins), so a brief attached to the twin's project is still found.
+  const projectIds = await resolveClientProjectIds(orgId, clientId);
   if (projectIds.length === 0) return [];
 
   const [projAtt, taskAtt] = await Promise.all([

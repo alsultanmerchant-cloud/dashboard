@@ -15,6 +15,7 @@ import {
 } from "@/lib/wa/openwa-client";
 import { matchGroups, detectGroupKind } from "@/lib/wa/match-groups";
 import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
+import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
 
 const UploadSchema = z.object({
   clientId: z.string().uuid("اختر عميلًا"),
@@ -63,15 +64,20 @@ async function resolveBriefProject(
   clientId: string,
   projectId?: string,
 ): Promise<{ id: string; name: string } | null> {
-  const q = supabaseAdmin
+  // Resolve across the client's FULL identity (owned + WA-group-linked + merged
+  // twins) — otherwise a client whose project sits on a twin row (or who owns no
+  // project directly) can never get a brief attached.
+  const ids = await resolveClientProjectIds(orgId, clientId);
+  if (ids.length === 0) return null;
+  // Honour an explicit project only when it belongs to this client's identity.
+  const scoped = projectId && ids.includes(projectId) ? [projectId] : ids;
+  const { data } = await supabaseAdmin
     .from("projects")
     .select("id, name")
     .eq("organization_id", orgId)
-    .eq("client_id", clientId)
-    .neq("status", "archived");
-  const { data } = projectId
-    ? await q.eq("id", projectId)
-    : await q.order("created_at", { ascending: false }).limit(1);
+    .in("id", scoped)
+    .order("created_at", { ascending: false })
+    .limit(1);
   return (data?.[0] as { id: string; name: string } | undefined) ?? null;
 }
 
@@ -90,19 +96,11 @@ export async function attachClientBriefLinkAction(input: {
   const parsed = BriefLinkSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
 
-  const projectQuery = supabaseAdmin
-    .from("projects")
-    .select("id, name")
-    .eq("organization_id", session.orgId)
-    .eq("client_id", parsed.data.clientId)
-    .neq("status", "archived");
-
-  const { data: projects, error: projectErr } = parsed.data.projectId
-    ? await projectQuery.eq("id", parsed.data.projectId)
-    : await projectQuery.order("created_at", { ascending: false }).limit(1);
-  if (projectErr) return { error: projectErr.message };
-
-  const project = projects?.[0] as { id: string; name: string } | undefined;
+  const project = await resolveBriefProject(
+    session.orgId,
+    parsed.data.clientId,
+    parsed.data.projectId,
+  );
   if (!project) return { error: "لا يوجد مشروع نشط لهذا العميل لإرفاق البريف عليه" };
 
   const externalId = `${project.id}:${parsed.data.url}`.slice(0, 240);

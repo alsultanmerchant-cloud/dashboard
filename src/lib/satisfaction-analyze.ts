@@ -19,6 +19,10 @@ import {
   type ClientTeamActivitySnapshot,
 } from "@/lib/data/satisfaction-team";
 import { getClientBrief } from "@/lib/satisfaction-brief";
+import {
+  isContractPaymentComplete,
+  summarizeContractPayments,
+} from "@/lib/data/satisfaction-rules";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { aiModel, MODELS } from "@/lib/ai-model";
@@ -156,27 +160,37 @@ export async function buildSatisfactionInput(
     ? `\n\n=== البريف (وثيقة متطلبات العميل من ملفات المشروع) ===\nالمصدر: ${brief.filename} (${brief.source}, ${brief.kind})\n${trim(brief.text, Math.min(brief.text.length, 15_000))}`
     : "\n\n=== البريف ===\n(لم يتم العثور على نص بريف قابل للقراءة من ملفات المشروع/المهام لهذا العميل)";
 
-  const execution = await getClientExecutionSnapshot(orgId, clientId);
+  // Weekly ("current status") → live tasks only. Full-period → also include
+  // archived/historical tasks as past problems. See satisfaction-team.ts.
+  const includeArchivedTasks = windowKind === "all";
+  const execution = await getClientExecutionSnapshot(orgId, clientId, includeArchivedTasks);
   const bottleneckLine =
     execution && execution.bottlenecks.length
       ? `\nBottlenecks (تركّز التأخير): ${execution.bottlenecks
           .map((b) => `${b.stage} ${b.pct}% (${b.count})`)
           .join("، ")}`
       : "";
+  const executionScopeNote = includeArchivedTasks
+    ? "(نطاق كامل التاريخ: تشمل القائمة مهامًا حالية ومهامًا مؤرشفة/تاريخية — المؤرشفة معلّمة 🗄️ وتمثّل مشاكل سابقة، لا الوضع الحالي.)"
+    : "(الوضع الحالي: مهام نشطة فقط — المهام المؤرشفة مستبعدة لأن دورتها انتهت.)";
   const executionBlock = execution
-    ? `\n\n=== التاسكات والمشروع (مواعيد التسليم + Bottlenecks) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
+    ? `\n\n=== التاسكات والمشروع (مواعيد التسليم + Bottlenecks) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\n${executionScopeNote}\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
         execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
       }${bottleneckLine}\nأبرز المهام العالقة (مع موعد التسليم إن وُجد):\n${execution.topTasks
         .map(
           (t) =>
-            `- ${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
+            `- ${t.archived ? "🗄️ (مؤرشفة/تاريخية) " : ""}${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
               t.dueDate ? ` — موعد التسليم: ${t.dueDate}` : ""
             }${t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""}${
-              t.delayDays != null ? ` — متأخرة ${t.delayDays} يوم عمل` : ""
+              t.delayDays != null
+                ? ` — متأخرة ${t.delayDays} يوم عمل`
+                : t.archived && t.overdueDays != null
+                  ? ` — كان تأخّرها ~${t.overdueDays} يوم`
+                  : ""
             }`,
         )
         .join("\n")}`
-    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام متأخرة مسجّلة لهذا العميل في رواسم)";
+    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام متأخرة نشطة مسجّلة لهذا العميل في رواسم)";
 
   const contract = await getClientContractContext(orgId, clientId);
   const activity = await getClientContractActivity(orgId, clientId);
@@ -193,26 +207,50 @@ export async function buildSatisfactionInput(
   // A client commonly holds SEVERAL contracts at once (one per service/project).
   // List every live contract, then give the portfolio aggregate, so the
   // commercial dimension reflects the whole relationship — not one row.
+  //
+  // Payment: `payment_status` (Complete/Installments) is the SOURCE OF TRUTH for
+  // whether money is still owed. paid_value lags on installment contracts, so a
+  // total−paid gap is NOT an outstanding due when payment is Complete — surfacing
+  // it produced false "client owes X" claims (team feedback). A remaining figure
+  // is shown ONLY for non-complete payments, flagged as possibly-stale sheet data.
+  const paymentPhrase = (c: {
+    paymentStatus: string | null;
+    totalValue: number;
+    paidValue: number;
+  }) => {
+    const remaining = Math.max(0, c.totalValue - c.paidValue);
+    if (isContractPaymentComplete(c.paymentStatus)) return `الدفع: مكتمل ✅ (لا مستحقات مالية)`;
+    if ((c.paymentStatus ?? "").toLowerCase() === "installments")
+      return `الدفع: أقساط — مدفوع ${c.paidValue} من ${c.totalValue}${
+        remaining ? ` (متبقٍّ حسب آخر تحديث للشيت ${remaining} — رقم قد لا يعكس آخر دفعة)` : ""
+      }`;
+    return `الدفع: غير محدّد — مدفوع ${c.paidValue} من ${c.totalValue}`;
+  };
   const contractLines =
     contract && contract.contracts.length
       ? contract.contracts
           .map(
             (c, i) =>
-              `  ${i + 1}) ${c.contractCode ? `[${c.contractCode}] ` : ""}الوضع: ${c.target} — الحالة: ${c.status} — القيمة: ${c.totalValue} (مدفوع ${c.paidValue}، متبقّي ${c.totalValue - c.paidValue}) — من ${c.startDate}${c.endDate ? ` إلى ${c.endDate}` : ""}`,
+              `  ${i + 1}) ${c.contractCode ? `[${c.contractCode}] ` : ""}الوضع: ${c.target} — الحالة: ${c.status} — القيمة: ${c.totalValue} — ${paymentPhrase(c)} — من ${c.startDate}${c.endDate ? ` إلى ${c.endDate}` : ""}`,
           )
           .join("\n")
       : "";
+  // Outstanding + all-complete come from the shared, unit-tested payment rule so
+  // a completed-but-stale paid_value can never resurface as a false due.
+  const { outstanding, allComplete } = summarizeContractPayments(contract?.contracts ?? []);
   const contractBlock = contract
-    ? `\n\n=== حالة العقد (${contract.contractCount} عقد${contract.contractCount > 1 ? " — محفظة العميل" : ""}) ===\n${contractLines}\nالإجمالي عبر العقود: القيمة ${contract.totalValue} — المدفوع ${contract.paidValue} — المتبقّي ${
-        contract.totalValue - contract.paidValue
-      } — أسوأ وضع (target): ${contract.target} — الحالة الغالبة: ${contract.status}${activityBlock}`
+    ? `\n\n=== حالة العقد (${contract.contractCount} عقد${contract.contractCount > 1 ? " — محفظة العميل" : ""}) ===\n${contractLines}\nالإجمالي عبر العقود: القيمة ${contract.totalValue} — المدفوع ${contract.paidValue} — ${
+        allComplete
+          ? "المدفوعات مكتملة لكل العقود ✅ (لا مستحقات)"
+          : `مستحقات غير مكتملة الدفع: ${outstanding} (من عقود الأقساط غير المكتملة فقط — قد تكون دُفعت ولم يُحدَّث الشيت)`
+      } — أسوأ وضع (target): ${contract.target} — الحالة الغالبة: ${contract.status}\nملاحظة مالية: اعتمد حالة الدفع (مكتمل/أقساط) لا فرق القيمة. لا تذكر «مستحقات مالية متبقية» أو أن العميل «عليه دفعة» إلا إذا كانت حالة الدفع غير مكتملة فعلاً، ووضّح أنها بيانات شيت قد تكون متأخرة التحديث. التحصيل مسؤولية قسم الحسابات وليس مؤشّر رضا.${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
   // The accountability roster: who works the client's tasks, who owns the stuck
   // stages, and how much each has actually done. Rides OUTSIDE the transcript
   // budget (like the contract/execution blocks) so the retry-shrink loop never
   // amputates it.
-  const team = await getClientTeamActivitySnapshot(orgId, clientId);
+  const team = await getClientTeamActivitySnapshot(orgId, clientId, includeArchivedTasks);
   const teamBlock = renderTeamActivityBlock(team);
 
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
