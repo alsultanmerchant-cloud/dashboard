@@ -57,6 +57,13 @@ export default async function SatisfactionPage({
     });
   }
 
+  // The whole page is scoped to the CONTRACT BOOK. The board/table only shows
+  // clients connected to a contract (the same set the picker lists) — no-contract
+  // Odoo/lead rows are dropped even if they carry WhatsApp chats. This mirrors the
+  // picker so a client can never appear here with its raw project name.
+  const contractClientIds = new Set(clients.map((c) => c.id as string));
+  const boardRows = rows.filter((r) => contractClientIds.has(r.clientId));
+
   // Same keyword blob, but as a plain record so the overview board/table search
   // can match a client by ANY identifier (project / group / contract), not just
   // its display name — mirroring the top picker. See [[project_clients_centralization]].
@@ -68,7 +75,7 @@ export default async function SatisfactionPage({
       <SatisfactionWorkspace
         options={options}
         searchKeywords={searchKeywords}
-        rows={rows}
+        rows={boardRows}
         detail={detail}
         financeMap={financeMap}
         execution={execution}
