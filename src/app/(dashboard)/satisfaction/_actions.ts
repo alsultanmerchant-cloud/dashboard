@@ -1077,7 +1077,7 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
         // Whichever enrolled number is actually in this group serves its history.
         const hit = await fetchChatHistoryViaSessions(chatId, sessionNames, HISTORY_LIMIT);
         const msgs: NormalMessage[] = (hit?.messages ?? [])
-          .filter((m) => m.body && m.body.trim().length > 0)
+          .filter((m) => (m.body && m.body.trim().length > 0) || m.media)
           .map((m) => ({
             chatId,
             chatName,
@@ -1089,6 +1089,7 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
             messageType: m.type,
             isFromMe: m.fromMe,
             sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
+            media: m.media ?? null,
           }));
         if (msgs.length > 0) {
           const res = await ingestWaMessages(msgs, hit?.sessionName ?? null);

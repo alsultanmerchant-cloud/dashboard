@@ -8,16 +8,18 @@
 //
 // Model choices are backed by a Sonnet-4.6-judged bake-off on the hardest
 // (client-satisfaction) surface + the live gateway price list:
-//   flagship  gemini-3.1-pro   accuracy 73  — kept for high-stakes analysis
-//   arabicHiQ gemini-3-flash   accuracy 61  — exec-read wording (CEO brief)
+//   flagship  gemini-3-flash   accuracy 61  — default for high-volume analysis
+//   premium   gemini-3.1-pro   accuracy 73  — reserve for explicit escalations
 //   arabicGen gemini-2.5-flash-lite         — Arabic narrative, ~25× cheaper
 //   mechanical gpt-5-nano                    — SIMPLE JSON only (fails rich schemas)
 import { gateway } from "ai";
 import type { LanguageModel } from "ai";
 
 export const MODELS = {
-  /** Highest-stakes Arabic analysis (feeds exec decisions) — satisfaction. */
-  flagship: "google/gemini-3.1-pro-preview", // $2 / $12
+  /** High-volume structured Arabic analysis — satisfaction. */
+  flagship: "google/gemini-3-flash", // $0.50 / $3
+  /** Highest-stakes manual escalation only. Do not use in cron/batch paths. */
+  premium: "google/gemini-3.1-pro-preview", // $2 / $12
   /** Exec-read Arabic wording where tone matters most — CEO brief. */
   arabicHiQ: "google/gemini-3-flash", // $0.50 / $3
   /** Arabic narrative, lower stakes — insights, reports, tips, coaching. */

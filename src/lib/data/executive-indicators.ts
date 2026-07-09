@@ -231,6 +231,25 @@ async function excludedClientIds(orgId: string): Promise<Set<string>> {
   return excluded;
 }
 
+// Project ids carrying a HOLD or LOST project-level tag. This is Sky Light's
+// authoritative "wound-down" signal for the Projects-At-Risk card: at-risk =
+// active project with ≥1 late task, MINUS HOLD/LOST-tagged projects (= 37,
+// verified 2026-07-09). Contract status (excludedClientIds) is a separate,
+// laggier signal and is NOT used for this card — the project tag is.
+async function excludedProjectIdsByTag(orgId: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const { data, error } = await supabaseAdmin
+    .from("project_tag_assignments")
+    .select("project_id, tag:project_tags!inner(name)")
+    .eq("organization_id", orgId)
+    .in("tag.name", ["HOLD", "LOST"]);
+  if (error) return out;
+  for (const r of (data ?? []) as Array<{ project_id: string | null }>) {
+    if (r.project_id) out.add(r.project_id);
+  }
+  return out;
+}
+
 // ── Snapshot & interval predicates ─────────────────────────────────────────
 // Open + overdue as of end-of-day D (Riyadh).
 function openOverdueAsOf(f: TaskFact, dateIso: string): boolean {
@@ -258,12 +277,23 @@ function overdueDuringPeriod(f: TaskFact, s: string, e: string, nowMs: number): 
 }
 
 // ── KPI 1 — Projects At Risk ───────────────────────────────────────────────
-function atRiskCount(
+// The exact project ids behind the card: projects with ≥ threshold open tasks
+// past their deadline (any stage, incl. not-started — Sky Light counts those),
+// active project only, HOLD/LOST/closed clients excluded.
+interface AtRiskOpts {
+  activeOnly?: boolean;
+  /** Exclude these CLIENT ids (contract HOLD/LOST/closed). */
+  excluded?: Set<string>;
+  /** Exclude these PROJECT ids (project-level HOLD/LOST tag — the team's
+   *  authoritative wound-down signal for the Projects-At-Risk card). */
+  excludedProjectIds?: Set<string>;
+}
+function atRiskProjectIds(
   facts: TaskFact[],
   dateIso: string,
   threshold: number,
-  opts: { activeOnly?: boolean; excluded?: Set<string> },
-): number {
+  opts: AtRiskOpts,
+): string[] {
   const perProject = new Map<string, { count: number; clientId: string | null; active: boolean }>();
   for (const f of facts) {
     if (!openOverdueAsOf(f, dateIso)) continue;
@@ -271,14 +301,23 @@ function atRiskCount(
     cur.count += 1;
     perProject.set(f.projectId, cur);
   }
-  let n = 0;
-  for (const p of perProject.values()) {
+  const ids: string[] = [];
+  for (const [projectId, p] of perProject) {
     if (p.count < threshold) continue;
     if (opts.activeOnly && !p.active) continue;
     if (opts.excluded && p.clientId && opts.excluded.has(p.clientId)) continue;
-    n += 1;
+    if (opts.excludedProjectIds && opts.excludedProjectIds.has(projectId)) continue;
+    ids.push(projectId);
   }
-  return n;
+  return ids;
+}
+function atRiskCount(
+  facts: TaskFact[],
+  dateIso: string,
+  threshold: number,
+  opts: AtRiskOpts,
+): number {
+  return atRiskProjectIds(facts, dateIso, threshold, opts).length;
 }
 
 // Exact historical endpoints via SQL (migration 0234). They use
@@ -323,9 +362,10 @@ async function _getExecutiveIndicatorsForWindow(
   // Load once, reuse for the snapshot/interval KPIs. `since` = the earliest
   // period start we evaluate, so we keep every task that could be open in-window.
   const since = startOfDayMs(previous.from);
-  const [facts, excluded, completedRows, ccEntries] = await Promise.all([
+  const [facts, excluded, excludedProjectIds, completedRows, ccEntries] = await Promise.all([
     loadOpenOrRecent(orgId, new Date(since).toISOString()),
     excludedClientIds(orgId),
+    excludedProjectIdsByTag(orgId),
     loadCompleted(orgId, previous.from, range.to),
     loadClientChanges(orgId, previous.from, range.to),
   ]);
@@ -340,7 +380,7 @@ async function _getExecutiveIndicatorsForWindow(
     atRiskAsOfRpc(orgId, previous.to, threshold),
   ]);
   const projectsAtRisk: ProjectsAtRiskKpi = {
-    mainValue: atRiskCount(facts, today, AT_RISK_MIN, { activeOnly: true, excluded }),
+    mainValue: atRiskCount(facts, today, AT_RISK_MIN, { activeOnly: true, excludedProjectIds }),
     threshold: AT_RISK_MIN,
     trend: trendOf(
       riskCur ?? atRiskCount(facts, range.to, AT_RISK_MIN, {}),
@@ -350,7 +390,7 @@ async function _getExecutiveIndicatorsForWindow(
     validation: { ok: true, missing: [] },
   };
   const highRisk: ProjectsAtRiskKpi = {
-    mainValue: atRiskCount(facts, today, threshold, { activeOnly: true, excluded }),
+    mainValue: atRiskCount(facts, today, threshold, { activeOnly: true, excludedProjectIds }),
     threshold,
     trend: trendOf(
       highCur ?? atRiskCount(facts, range.to, threshold, {}),
@@ -433,6 +473,23 @@ export function getExecutiveIndicators(
 ): Promise<ExecutiveIndicators> {
   return getExecutiveIndicatorsForWindow(orgId, range.from, range.to, range.preset, range.days);
 }
+
+// Exact project-id set behind the "Projects At Risk" (threshold 1) and
+// "High-Risk" (configured threshold) cards, so the /projects?atRisk=1 drill-down
+// lands on the SAME projects the card counts — identical definition and Riyadh
+// "today". This is the single source of truth shared by the card and the list
+// filter (see resolveOverdueProjectIds in data/projects.ts).
+async function _getProjectsAtRiskIds(orgId: string, threshold: number): Promise<string[]> {
+  const today = riyadhTodayIso();
+  const [facts, excludedProjectIds] = await Promise.all([
+    // sinceIso = now → the second (recently-completed) page is ~empty; we only
+    // need the open-task set for a point-in-time "today" snapshot.
+    loadOpenOrRecent(orgId, new Date().toISOString()),
+    excludedProjectIdsByTag(orgId),
+  ]);
+  return atRiskProjectIds(facts, today, Math.max(1, threshold), { activeOnly: true, excludedProjectIds });
+}
+export const getProjectsAtRiskIds = cache(_getProjectsAtRiskIds);
 
 // ── KPI 2 / 4 helpers — completed tasks in a window ────────────────────────
 interface CompletedRow {

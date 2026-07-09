@@ -19,6 +19,7 @@ import {
   getProjectTotals,
   listProjectsPaged,
 } from "@/lib/data/projects";
+import { getProjectsAtRiskIds } from "@/lib/data/executive-indicators";
 import { ProjectsOverviewBadgesSkeleton } from "@/components/skeletons";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
@@ -42,6 +43,11 @@ function toEnabled(value: string | string[] | undefined) {
 // Mirror that: the filter is on unless the URL explicitly carries `=0`.
 function toEnabledDefaultOn(value: string | string[] | undefined) {
   return value !== "0" && value !== "false";
+}
+
+function toPositiveInt(value: string | string[] | undefined): number | undefined {
+  const n = parseInt(typeof value === "string" ? value : "", 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function toStr(value: string | string[] | undefined): string {
@@ -126,6 +132,7 @@ export default async function ProjectsPage({
     allCategoriesArchived: toEnabled(sp.allCategoriesArchived),
     overTimesheets: toEnabled(sp.overTimesheets),
     onlyWithOverdue: toEnabled(sp.atRisk),
+    overdueThreshold: toPositiveInt(sp.min),
     startDateFrom: toStr(sp.startDateFrom),
     startDateTo: toStr(sp.startDateTo),
     endDateFrom: toStr(sp.endDateFrom),
@@ -174,6 +181,7 @@ export default async function ProjectsPage({
             allCategoriesArchived: toEnabled(sp.allCategoriesArchived),
             overTimesheets: toEnabled(sp.overTimesheets),
             atRisk: toEnabled(sp.atRisk),
+            min: toStr(sp.min),
             startDateFrom: toStr(sp.startDateFrom),
             startDateTo: toStr(sp.startDateTo),
             endDateFrom: toStr(sp.endDateFrom),
@@ -200,9 +208,10 @@ async function ProjectsOverviewBadges({
   orgId: string;
   searchParams: Record<string, string | string[] | undefined>;
 }) {
-  const [totals, smartData] = await Promise.all([
+  const [totals, smartData, atRiskIds] = await Promise.all([
     getProjectTotals(orgId),
     getProjectSmartBadgeData(orgId),
+    getProjectsAtRiskIds(orgId, 1),
   ]);
   const avgTasksPerProject = totals.projects
     ? Math.round(totals.tasks / totals.projects)
@@ -247,6 +256,14 @@ async function ProjectsOverviewBadges({
       badgeClass: "border-primary/20 ring-1 ring-primary/10",
       iconClass: "border-primary/20 bg-primary/10 text-primary",
       valueClass: "text-primary",
+    },
+    {
+      label: "مشاريع متأخرة",
+      value: atRiskIds.length,
+      hint: "بها مهمة متأخرة واحدة على الأقل",
+      href: buildOverviewHref(searchParams, { bool: { atRisk: true } }),
+      icon: <AlertTriangle className="size-4" />,
+      iconClass: "border-cc-red/18 bg-red-dim text-cc-red",
     },
     {
       label: "كل المشاريع",

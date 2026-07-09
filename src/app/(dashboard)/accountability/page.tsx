@@ -4,9 +4,12 @@ import {
   getAccountabilityOverview,
   getEmployeeAccountabilityEvidence,
 } from "@/lib/data/accountability";
+import { getAccountabilityCases } from "@/lib/data/accountability-cases";
+import { getAccountabilityRoster } from "@/lib/data/accountability-roster";
+import { syncAndGetCaseMeta } from "@/lib/data/accountability-cases-store";
 import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
-import { AccountabilityWorkspace } from "./accountability-workspace";
+import { AccountabilityShell } from "./accountability-shell";
 
 // Accountability Engine — CEO/department-head scorecard built on the Odoo
 // stage-history mirror. Every aggregate opens its evidence list; AI-derived
@@ -16,15 +19,26 @@ import { AccountabilityWorkspace } from "./accountability-workspace";
 export default async function AccountabilityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ emp?: string }>;
+  searchParams: Promise<{ emp?: string; employee?: string; view?: string }>;
 }) {
   const session = await requirePagePermission("people.analytics.view");
   const t = await getTranslations("AccountabilityPage");
-  const { emp } = await searchParams;
-  const selectedId = emp ?? null;
+  const { emp, employee, view } = await searchParams;
+  const selectedId = emp ?? employee ?? null;
+  const initialView =
+    view === "scorecard" || selectedId
+      ? "scorecard"
+      : view === "cases"
+        ? "cases"
+        : "team";
 
-  const [overview, evidence, financeMap] = await Promise.all([
+  // getAccountabilityCases / getAccountabilityRoster reuse getAccountabilityOverview
+  // via React cache(), so these calls dedupe to a single overview compute.
+  const [overview, cases, roster, caseMeta, evidence, financeMap] = await Promise.all([
     getAccountabilityOverview(session.orgId),
+    getAccountabilityCases(session.orgId),
+    getAccountabilityRoster(session.orgId),
+    syncAndGetCaseMeta(session.orgId),
     selectedId
       ? getEmployeeAccountabilityEvidence(session.orgId, selectedId)
       : Promise.resolve(null),
@@ -34,11 +48,15 @@ export default async function AccountabilityPage({
   return (
     <div>
       <PageHeader title={t("title")} description={t("subtitle")} />
-      <AccountabilityWorkspace
+      <AccountabilityShell
+        roster={roster}
+        cases={cases}
+        caseMeta={caseMeta}
         overview={overview}
         evidence={evidence}
         selectedId={selectedId}
         financeMap={financeMap}
+        initialView={initialView}
       />
     </div>
   );

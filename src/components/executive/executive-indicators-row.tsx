@@ -160,7 +160,7 @@ export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicato
           value={risk.mainValue}
           sub={t("projectsAtRisk.minHint")}
           accent={risk.mainValue === null ? "neutral" : risk.mainValue > 0 ? "warning" : "ok"}
-          href="/projects"
+          href="/projects?atRisk=1"
           trend={risk.trend}
           higherIsBetter={false}
           periods={periods}
@@ -172,7 +172,7 @@ export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicato
           value={highRisk.mainValue}
           sub={t("highRisk.thresholdHint", { threshold: highRisk.threshold })}
           accent={highRisk.mainValue === null ? "neutral" : highRisk.mainValue > 0 ? "danger" : "ok"}
-          href="/projects"
+          href={`/projects?atRisk=1&min=${highRisk.threshold}`}
           trend={highRisk.trend}
           higherIsBetter={false}
           periods={periods}

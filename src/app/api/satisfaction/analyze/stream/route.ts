@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     model: aiModel("flagship"),
     schema: SatisfactionSchema,
     maxRetries: 2,
-    prompt: input.makePrompt(SATISFACTION_MAX_CHARS),
+    prompt: input.makeMessages(SATISFACTION_MAX_CHARS),
     onFinish: async ({ object, error }) => {
       if (error || !object) return;
       try {

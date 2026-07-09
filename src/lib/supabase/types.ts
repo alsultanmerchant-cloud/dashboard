@@ -14,6 +14,197 @@ export type Database = {
   }
   public: {
     Tables: {
+      accountability_advice_cache: {
+        Row: {
+          employee_id: string
+          generated_at: string
+          model: string | null
+          organization_id: string
+          result_json: Json
+          signature: string
+        }
+        Insert: {
+          employee_id: string
+          generated_at?: string
+          model?: string | null
+          organization_id: string
+          result_json: Json
+          signature: string
+        }
+        Update: {
+          employee_id?: string
+          generated_at?: string
+          model?: string | null
+          organization_id?: string
+          result_json?: Json
+          signature?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accountability_advice_cache_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_advice_cache_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      accountability_case_events: {
+        Row: {
+          actor_employee_id: string | null
+          case_id: string
+          created_at: string
+          id: string
+          kind: string
+          note: string | null
+          organization_id: string
+          severity: string | null
+          status: string | null
+        }
+        Insert: {
+          actor_employee_id?: string | null
+          case_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          note?: string | null
+          organization_id: string
+          severity?: string | null
+          status?: string | null
+        }
+        Update: {
+          actor_employee_id?: string | null
+          case_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          organization_id?: string
+          severity?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accountability_case_events_actor_employee_id_fkey"
+            columns: ["actor_employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_case_events_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "accountability_cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_case_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      accountability_cases: {
+        Row: {
+          client_names: string[]
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          employee_id: string
+          first_seen_at: string
+          id: string
+          is_current: boolean
+          last_seen_at: string
+          last_seen_date: string
+          ledger: Json | null
+          organization_id: string
+          problem_tags: string[]
+          proof: Json
+          severity: string
+          status: string
+          streams: string[]
+          times_seen: number
+          updated_at: string
+        }
+        Insert: {
+          client_names?: string[]
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          employee_id: string
+          first_seen_at?: string
+          id?: string
+          is_current?: boolean
+          last_seen_at?: string
+          last_seen_date?: string
+          ledger?: Json | null
+          organization_id: string
+          problem_tags?: string[]
+          proof?: Json
+          severity: string
+          status?: string
+          streams?: string[]
+          times_seen?: number
+          updated_at?: string
+        }
+        Update: {
+          client_names?: string[]
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          employee_id?: string
+          first_seen_at?: string
+          id?: string
+          is_current?: boolean
+          last_seen_at?: string
+          last_seen_date?: string
+          ledger?: Json | null
+          organization_id?: string
+          problem_tags?: string[]
+          proof?: Json
+          severity?: string
+          status?: string
+          streams?: string[]
+          times_seen?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accountability_cases_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_cases_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_cases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accountability_scorecard: {
         Row: {
           avg_dwell: number | null
@@ -816,6 +1007,7 @@ export type Database = {
       }
       client_satisfaction_analyses: {
         Row: {
+          accountability: Json | null
           analyzed_by: string | null
           big_picture: Json | null
           brief_adherence: Json | null
@@ -838,6 +1030,7 @@ export type Database = {
           sentiment: string | null
           sentiment_timeline: Json
           summary: string | null
+          team_context: Json | null
           technical_group_signals: Json | null
           technical_import_id: string | null
           window_end: string | null
@@ -845,6 +1038,7 @@ export type Database = {
           window_start: string | null
         }
         Insert: {
+          accountability?: Json | null
           analyzed_by?: string | null
           big_picture?: Json | null
           brief_adherence?: Json | null
@@ -867,6 +1061,7 @@ export type Database = {
           sentiment?: string | null
           sentiment_timeline?: Json
           summary?: string | null
+          team_context?: Json | null
           technical_group_signals?: Json | null
           technical_import_id?: string | null
           window_end?: string | null
@@ -874,6 +1069,7 @@ export type Database = {
           window_start?: string | null
         }
         Update: {
+          accountability?: Json | null
           analyzed_by?: string | null
           big_picture?: Json | null
           brief_adherence?: Json | null
@@ -896,6 +1092,7 @@ export type Database = {
           sentiment?: string | null
           sentiment_timeline?: Json
           summary?: string | null
+          team_context?: Json | null
           technical_group_signals?: Json | null
           technical_import_id?: string | null
           window_end?: string | null
@@ -6754,6 +6951,7 @@ export type Database = {
           sequence: number
           service_id: string | null
           sla_override_minutes: number | null
+          source_created_at: string | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
           stage_owner_positions: Json | null
@@ -6818,6 +7016,7 @@ export type Database = {
           sequence?: number
           service_id?: string | null
           sla_override_minutes?: number | null
+          source_created_at?: string | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
           stage_owner_positions?: Json | null
@@ -6882,6 +7081,7 @@ export type Database = {
           sequence?: number
           service_id?: string | null
           sla_override_minutes?: number | null
+          source_created_at?: string | null
           stage?: Database["public"]["Enums"]["task_stage"]
           stage_entered_at?: string
           stage_owner_positions?: Json | null
@@ -8269,6 +8469,7 @@ export type Database = {
           sequence: number
           service_id: string | null
           sla_override_minutes: number | null
+          source_created_at: string | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
           stage_owner_positions: Json | null
@@ -8635,6 +8836,7 @@ export type Database = {
           sequence: number
           service_id: string | null
           sla_override_minutes: number | null
+          source_created_at: string | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
           stage_owner_positions: Json | null
@@ -8708,6 +8910,7 @@ export type Database = {
           sequence: number
           service_id: string | null
           sla_override_minutes: number | null
+          source_created_at: string | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
           stage_owner_positions: Json | null
@@ -8785,6 +8988,7 @@ export type Database = {
           sequence: number
           service_id: string | null
           sla_override_minutes: number | null
+          source_created_at: string | null
           stage: Database["public"]["Enums"]["task_stage"]
           stage_entered_at: string
           stage_owner_positions: Json | null

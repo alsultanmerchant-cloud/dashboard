@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 // Look-back window for "new activity" and a per-run cap to bound Gemini cost.
 const LOOKBACK_HOURS = 36;
-const MAX_PER_RUN = 12;
+const MAX_PER_RUN = 4;
 
 async function handle(request: NextRequest) {
   const expected = process.env.CRON_SECRET;

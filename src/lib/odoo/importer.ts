@@ -1413,7 +1413,14 @@ async function importTasks(ctx: ImportContext): Promise<number> {
   };
   for (const [taskUuid, s] of stagedByTaskUuid) {
     for (const eid of s.agentEmployeeIds) {
-      if (s.amEmployeeId && eid === s.amEmployeeId) continue;
+      // role_type='agent' must faithfully mirror Odoo task.user_ids (the real
+      // assignee = the person's own to-do list). Do NOT skip when the assignee
+      // is also the project AM: an account manager who is genuinely assigned to
+      // execute a task (e.g. a renewal/AM task) IS its executor. Skipping it
+      // collapsed his direct-assignee tasks into the account_manager blanket,
+      // so his open count read as the WHOLE account's load (كريم: 47/32) instead
+      // of his real 10. The unique index (task_id, employee_id, role_type) lets
+      // him hold both roles; the account_manager blanket is still inserted below.
       assigneeInserts.push({
         organization_id: ctx.organizationId,
         task_id: taskUuid,
@@ -2559,7 +2566,10 @@ export async function syncOneTask(
     team_manager_employee_id: string | null;
   }[] = [];
   for (const eid of agentIds) {
-    if (amId && eid === amId) continue;
+    // Mirror Odoo user_ids faithfully — keep the agent row even when the
+    // assignee is the project AM (an AM assigned to execute IS an executor).
+    // See the bulk-path note above; collapsing this made كريم's open read as
+    // the whole account's load instead of his own tasks.
     assigneeInserts.push({
       organization_id: organizationId,
       task_id: taskUuid,

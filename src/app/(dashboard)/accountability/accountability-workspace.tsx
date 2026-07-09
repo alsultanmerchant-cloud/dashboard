@@ -1,36 +1,40 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import {
   AlertTriangle,
+  BookOpenCheck,
+  CheckCircle2,
   ChevronDown,
   ClipboardCheck,
   Eye,
   Gauge,
   Hourglass,
   Info,
+  Loader2,
+  MousePointerClick,
   Quote,
   RefreshCw,
   Scale,
   Sparkles,
   Timer,
+  TrendingDown,
   Users,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { refreshAccountabilityScorecardAction } from "./_actions";
+import {
+  getAccountabilityEvidenceAction,
+  refreshAccountabilityScorecardAction,
+} from "./_actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/filter-bar";
 import { FilterChip } from "@/components/filter-chip";
 import { cn } from "@/lib/utils";
-import {
-  TASK_OWNER_ROLE_KEYS,
-  TASK_OWNER_ROLE_LABELS,
-} from "@/lib/labels";
+import { TASK_OWNER_ROLE_KEYS, TASK_OWNER_ROLE_LABELS } from "@/lib/labels";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import { Explained, MetricInfo } from "@/components/metric-info";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
@@ -43,9 +47,27 @@ import type {
 } from "@/lib/data/accountability";
 
 const NA = "—";
-const SCORECARD_PAGE_SIZE = 5;
 // Filter bucket key for employees with no position set on /organization/employees.
 const NONE_KEY = "__none__";
+
+type SortKey = "onTime" | "overdue" | "score" | "name";
+
+type CoachIssueKind = "deadline" | "sla" | "rework" | "review" | "pending_review";
+
+interface CoachIssue {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  position: string | null;
+  kind: CoachIssueKind;
+  severity: "critical" | "warning" | "watch";
+  title: string;
+  why: string;
+  evidence: string;
+  nextAction: string;
+  source: string;
+  sort: number;
+}
 
 interface Props {
   overview: AccountabilityOverview;
@@ -77,48 +99,201 @@ function median(nums: number[]): number | null {
   return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
 }
 
+function severityTone(severity: CoachIssue["severity"]): string {
+  if (severity === "critical") return "border-cc-red/30 bg-red-dim text-cc-red";
+  if (severity === "warning") return "border-amber/30 bg-amber-dim text-amber";
+  return "border-cyan/25 bg-cyan/10 text-cyan";
+}
+
+function severityLabel(severity: CoachIssue["severity"]): string {
+  if (severity === "critical") return "حرج";
+  if (severity === "warning") return "يحتاج متابعة";
+  return "راقب";
+}
+
+function strongerSeverity(
+  a: CoachIssue["severity"],
+  b: CoachIssue["severity"],
+): CoachIssue["severity"] {
+  const rank: Record<CoachIssue["severity"], number> = { critical: 3, warning: 2, watch: 1 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+function coachIconFor(kind: CoachIssueKind) {
+  if (kind === "deadline") return AlertTriangle;
+  if (kind === "sla") return Timer;
+  if (kind === "rework") return TrendingDown;
+  if (kind === "review") return CheckCircle2;
+  return Hourglass;
+}
+
+function buildCoachingIssues(
+  rows: AccountabilityScorecardRow[],
+  reviewers: AccountabilityOverview["reviewers"],
+): CoachIssue[] {
+  const issues: CoachIssue[] = [];
+
+  for (const r of rows) {
+    const low = r.confidence === "low";
+    const position = r.positionLabel ?? r.jobTitle;
+    const nonOverdue = r.openTasks > 0 ? Math.round(100 * (1 - r.overdueOwned / r.openTasks)) : null;
+
+    if (r.overdueOwned > 0) {
+      issues.push({
+        id: `${r.employeeId}:deadline`,
+        employeeId: r.employeeId,
+        employeeName: r.fullName,
+        position,
+        kind: "deadline",
+        severity: r.overdueOwned >= 3 ? "critical" : "warning",
+        title: "ترك مهام في العهدة بعد موعدها",
+        why: "هذا خطأ لأنه يحوّل التأخير من مشكلة داخلية إلى خطر ظاهر على العميل والمشروع، خصوصًا عندما تكون المرحلة الحالية مملوكة لهذا الدور من قالب المهمة.",
+        evidence: `${r.overdueOwned} مهمة متأخرة من ${r.openTasks} قيد العمل الآن${nonOverdue === null ? "" : `، ونسبة غير المتأخر ${nonOverdue}%`}.`,
+        nextAction: "يفتح مهامه المتأخرة يوميًا، يكتب سبب التعطّل كتحديث واضح، ثم يحرّك المهمة أو يطلب إزالة العائق قبل نهاية يوم العمل.",
+        source: "المهام + ملكية المرحلة من قوالب المهام",
+        sort: 1000 + r.overdueOwned * 80 + (100 - (r.onTimeRate ?? 100)),
+      });
+    }
+
+    if (!low && r.onTimeRate !== null && r.onTimeRate < 70) {
+      issues.push({
+        id: `${r.employeeId}:sla`,
+        employeeId: r.employeeId,
+        employeeName: r.fullName,
+        position,
+        kind: "sla",
+        severity: r.onTimeRate < 45 ? "critical" : "warning",
+        title: "لا يلتزم بزمن المرحلة المتفق عليه",
+        why: "هذا خطأ لأن زمن كل مرحلة هو وعد تشغيلي. عندما يتكرر كسر الـ SLA يصبح المشروع غير قابل للتوقع حتى لو أُنجزت المهمة في النهاية.",
+        evidence: `الالتزام بالمواعيد ${r.onTimeRate}% عبر ${r.slaSampleSize} حدثًا قابلًا للقياس في آخر 30 يومًا.`,
+        nextAction: "قبل استلام أي مهمة جديدة، يراجع سقف المرحلة، يقسم العمل إلى خطوة اليوم، ويصعّد مبكرًا إذا لن يسلّم داخل الوقت بدل الانتظار حتى تظهر كمخالفة.",
+        source: "سجل المراحل + إعدادات SLA",
+        sort: 900 + (70 - r.onTimeRate) * 8,
+      });
+    }
+
+    if (r.reworkReturns30d > 0) {
+      issues.push({
+        id: `${r.employeeId}:rework`,
+        employeeId: r.employeeId,
+        employeeName: r.fullName,
+        position,
+        kind: "rework",
+        severity: r.reworkReturns30d >= 3 ? "warning" : "watch",
+        title: "عمله يرجع بعد أن يتقدّم",
+        why: "هذا خطأ لأنه يعني أن التسليم لم يُطابق المطلوب من أول مرة، فيستهلك وقت مراجعة جديد ويزيد الاحتكاك مع العميل.",
+        evidence: `${r.reworkReturns30d} ارتداد إلى in_progress أو client_changes خلال آخر 30 يومًا.`,
+        nextAction: "قبل نقل المهمة للمراجعة، يقارن الناتج مع البريف وقالب المهمة، ويضيف ملاحظة تسليم توضّح ما تم وما يحتاج اعتمادًا.",
+        source: "سجل المراحل + البريف + قوالب المهام",
+        sort: 700 + r.reworkReturns30d * 60,
+      });
+    }
+  }
+
+  for (const section of [reviewers.managerReview, reviewers.specialistReview]) {
+    for (const r of section) {
+      const low = r.confidence === "low";
+      if (!low && r.fastReviewShare !== null && r.fastReviewShare >= 30) {
+        issues.push({
+          id: `${r.employeeId}:review`,
+          employeeId: r.employeeId,
+          employeeName: r.fullName,
+          position: null,
+          kind: "review",
+          severity: r.fastReviewShare >= 50 ? "warning" : "watch",
+          title: "مراجعاته سريعة بشكل مقلق",
+          why: "هذا خطأ عندما تتحول المراجعة إلى تمرير شكلي. دور المراجعة هو منع الخطأ قبل وصوله للمرحلة التالية، لا مجرد تحريك البطاقة.",
+          evidence: `${r.fastReviewShare}% من ${r.reviewsCompleted} مراجعة أُغلقت في أقل من 10 دقائق عمل.`,
+          nextAction: "يستخدم قائمة فحص قصيرة قبل الاعتماد: المطلوب من البريف، جودة المخرَج، المرفقات، وتعليق واضح إذا أعادها للتعديل.",
+          source: "صرامة المراجعة + سجل المراحل",
+          sort: 650 + r.fastReviewShare,
+        });
+      }
+
+      if (r.pendingReviews > 0 && r.oldestPendingBusinessMinutes !== null) {
+        issues.push({
+          id: `${r.employeeId}:pending-review`,
+          employeeId: r.employeeId,
+          employeeName: r.fullName,
+          position: null,
+          kind: "pending_review",
+          severity: r.pendingReviews >= 3 ? "warning" : "watch",
+          title: "مراجعات تنتظر قراره",
+          why: "هذا خطأ لأن العمل لا يستطيع التقدم بدون قرار واضح: اعتماد، رفض بسبب محدد، أو طلب تعديل.",
+          evidence: `${r.pendingReviews} مراجعة مفتوحة، أقدمها منتظرة ${Math.round(r.oldestPendingBusinessMinutes / 60)} ساعة عمل تقريبًا.`,
+          nextAction: "يفتح طابور المراجعات مرتين يوميًا، ويغلق كل مراجعة بقرار واحد واضح وتعليق مختصر يشرح السبب.",
+          source: "طابور المراجعة الحالي",
+          sort: 600 + r.pendingReviews * 40,
+        });
+      }
+    }
+  }
+
+  return issues.sort((a, b) => b.sort - a.sort);
+}
+
 export function AccountabilityWorkspace({ overview, evidence, selectedId, financeMap }: Props) {
   const t = useTranslations("AccountabilityPage");
   const tStages = useTranslations("TasksBoard.stages");
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [refreshing, startRefresh] = useTransition();
+
+  // Filtering + selection stay client-side (instant). getAccountabilityOverview
+  // already loaded every row; evidence for the selected person is pulled lazily
+  // via a server action and cached, so drilling down never triggers a full-page
+  // navigation (which would scroll-jump and re-render the whole tree). URL state
+  // is mirrored via history.replaceState so links/refresh restore the view.
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
+  const [roleFilter, setRoleFilter] = useState<string>(() => searchParams.get("role") ?? "all");
+  const [sortKey, setSortKey] = useState<SortKey>(
+    () => (searchParams.get("sort") as SortKey) ?? "onTime",
+  );
+  const [selId, setSelId] = useState<string | null>(selectedId);
+  const [evidenceCache, setEvidenceCache] = useState<Record<string, AccountabilityEvidence | null>>(
+    () => (selectedId && evidence ? { [selectedId]: evidence } : {}),
+  );
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
   const handleRefresh = () =>
     startRefresh(async () => {
       const res = await refreshAccountabilityScorecardAction();
       if (res.ok) {
         toast.success("تم تحديث البيانات");
-        router.refresh();
+        setEvidenceCache({}); // force re-fetch of evidence against fresh numbers
+        window.location.reload();
       } else {
         toast.error(res.error ?? "تعذّر التحديث");
       }
     });
-  // Filtering stays client-side (instant) because getAccountabilityOverview is
-  // an expensive live-compute that already loads every row — re-running it per
-  // keystroke would be wrong. We still mirror state to the URL via
-  // history.replaceState so links/refresh restore the view WITHOUT a server
-  // round-trip, and seed initial state from the URL on mount.
-  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
-  // Filter by the employee's real POSITION (positions.role), not the
-  // accountability/stage attribution — so the chips agree with the الدور
-  // column. "all" = no filter; NONE_KEY = employees with no position set.
-  const [roleFilter, setRoleFilter] = useState<string>(
-    () => searchParams.get("role") ?? "all",
-  );
 
-  // Mirror toolbar state into the URL bar without triggering a Next navigation
-  // (which would re-run the expensive server component). `emp` is preserved.
-  const mirrorUrl = (next: { q?: string; role?: string }) => {
+  const mirrorUrl = (next: { q?: string; role?: string; sort?: SortKey; emp?: string | null }) => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const q = next.q ?? query;
     const role = next.role ?? roleFilter;
+    const sort = next.sort ?? sortKey;
+    const emp = next.emp === undefined ? selId : next.emp;
     if (q.trim()) params.set("q", q.trim());
     else params.delete("q");
     if (role !== "all") params.set("role", role);
     else params.delete("role");
+    if (sort !== "onTime") params.set("sort", sort);
+    else params.delete("sort");
+    if (emp) params.set("emp", emp);
+    else params.delete("emp");
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  };
+
+  const select = (id: string) => {
+    setSelId(id);
+    mirrorUrl({ emp: id });
+    if (id in evidenceCache) return; // cached (null included) — no refetch
+    setLoadingId(id);
+    getAccountabilityEvidenceAction(id).then((res) => {
+      setEvidenceCache((c) => ({ ...c, [id]: res.ok ? res.evidence : null }));
+      setLoadingId((cur) => (cur === id ? null : cur));
+    });
   };
 
   const onQueryChange = (value: string) => {
@@ -128,6 +303,10 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const onRoleChange = (key: string) => {
     setRoleFilter(key);
     mirrorUrl({ role: key });
+  };
+  const onSortChange = (key: SortKey) => {
+    setSortKey(key);
+    mirrorUrl({ sort: key });
   };
 
   const stageLabel = (s: string) => {
@@ -143,13 +322,10 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
     const m = Math.round(min);
     if (m < 60) return t("fmt.minutes", { n: m });
     const h = m / 60;
-    // 8h business day (Sun–Thu 09:00–17:00 Riyadh) — matches business_minutes_between.
     if (h < 8) return t("fmt.hours", { n: Math.round(h * 10) / 10 });
     return t("fmt.workdays", { n: Math.round((h / 8) * 10) / 10 });
   };
 
-  // Position-role filter groups, in canonical order, only those present. A
-  // trailing bucket collects employees with no position set.
   const positionGroups = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of overview.rows) {
@@ -166,46 +342,80 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
     return groups;
   }, [overview.rows]);
 
+  const coachingIssues = useMemo(
+    () => buildCoachingIssues(overview.rows, overview.reviewers),
+    [overview.rows, overview.reviewers],
+  );
+
+  // Per-employee coaching issues (already globally sorted by severity/impact).
+  const coachingByEmployee = useMemo(() => {
+    const m = new Map<string, CoachIssue[]>();
+    for (const i of coachingIssues) {
+      const arr = m.get(i.employeeId);
+      if (arr) arr.push(i);
+      else m.set(i.employeeId, [i]);
+    }
+    return m;
+  }, [coachingIssues]);
+
+  // Per-employee reviewer rows, tagged with which review stage they came from.
+  const reviewerByEmployee = useMemo(() => {
+    const m = new Map<string, { stage: "manager" | "specialist"; row: ReviewerRigorRow }[]>();
+    const push = (stage: "manager" | "specialist", rows: ReviewerRigorRow[]) => {
+      for (const row of rows) {
+        const arr = m.get(row.employeeId);
+        if (arr) arr.push({ stage, row });
+        else m.set(row.employeeId, [{ stage, row }]);
+      }
+    };
+    push("manager", overview.reviewers.managerReview);
+    push("specialist", overview.reviewers.specialistReview);
+    return m;
+  }, [overview.reviewers]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return overview.rows
-      .filter((r) => {
-        if (roleFilter !== "all" && (r.positionRole ?? NONE_KEY) !== roleFilter)
-          return false;
-        if (q && !r.fullName.toLowerCase().includes(q)) return false;
-        return true;
-      })
-      // Ordered by on-time commitment (الالتزام بالمواعيد) ascending — worst
-      // first — per the team's request: the composite score's makeup wasn't
-      // obvious, whereas on-time % is the single metric they steer by. Rows with
-      // no/low-confidence SLA sample still sink to the end so a 2-event sample
-      // never headlines the board.
-      .sort((a, b) => {
-        const rank = (r: AccountabilityScorecardRow) =>
-          r.onTimeRate === null ? 2 : r.confidence === "low" ? 1 : 0;
-        const d = rank(a) - rank(b);
-        if (d !== 0) return d;
-        return (a.onTimeRate ?? 999) - (b.onTimeRate ?? 999);
-      });
-  }, [overview.rows, query, roleFilter]);
+    const rank = (r: AccountabilityScorecardRow) =>
+      r.onTimeRate === null ? 2 : r.confidence === "low" ? 1 : 0;
+    const base = overview.rows.filter((r) => {
+      if (roleFilter !== "all" && (r.positionRole ?? NONE_KEY) !== roleFilter) return false;
+      if (q && !r.fullName.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    // Low/no-confidence rows always sink so a 2-event sample never headlines.
+    return base.sort((a, b) => {
+      if (sortKey === "name") return a.fullName.localeCompare(b.fullName, "ar");
+      if (sortKey === "overdue") {
+        if (b.overdueOwned !== a.overdueOwned) return b.overdueOwned - a.overdueOwned;
+        return rank(a) - rank(b);
+      }
+      const d = rank(a) - rank(b);
+      if (d !== 0) return d;
+      if (sortKey === "score") return (a.score ?? 999) - (b.score ?? 999);
+      return (a.onTimeRate ?? 999) - (b.onTimeRate ?? 999);
+    });
+  }, [overview.rows, query, roleFilter, sortKey]);
+
+  // Keep a valid selection: if the selected person drops out of the filter (or
+  // nothing is selected yet), fall back to the top row so the detail pane is
+  // never empty. Guarded so it doesn't fight an explicit click.
+  const filteredKey = filtered.map((r) => r.employeeId).join(",");
+  useEffect(() => {
+    if (filtered.length === 0) return;
+    if (selId && filtered.some((r) => r.employeeId === selId)) return;
+    select(filtered[0].employeeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredKey]);
 
   const stats = useMemo(() => {
-    const measured = overview.rows.filter(
-      (r) => r.score !== null && r.confidence === "high",
-    );
+    const measured = overview.rows.filter((r) => r.score !== null && r.confidence === "high");
     return {
       measured: overview.rows.length,
       median: median(measured.map((r) => r.score as number)),
-      // Distinct task count — per-row overdueOwned fans out across
-      // co-assignees, so summing rows would double-count one delay.
       overdueOwned: overview.coverage.distinctOverdueTasks,
-      lowConfidence: overview.rows.filter(
-        (r) => r.confidence === "low" || r.score === null,
-      ).length,
+      lowConfidence: overview.rows.filter((r) => r.confidence === "low" || r.score === null).length,
     };
   }, [overview.rows, overview.coverage.distinctOverdueTasks]);
-
-  const select = (id: string) => router.push(`/accountability?emp=${id}`);
 
   const headStats = [
     {
@@ -238,41 +448,29 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
     },
   ];
 
+  const selectedRow = filtered.find((r) => r.employeeId === selId) ?? null;
+  const sortOptions: { key: SortKey; label: string }[] = [
+    { key: "onTime", label: "الالتزام" },
+    { key: "overdue", label: "الأكثر تأخّرًا" },
+    { key: "score", label: "الأدنى درجة" },
+    { key: "name", label: "الاسم" },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Refresh: recompute the cached scorecard on demand (else every 10 min) */}
-      <div className="flex justify-end">
+      {/* Top bar: methodology (collapsible) + refresh */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <MethodologyNote methodology={t("methodology")} evidenceRule={t("evidenceRule")} />
         <button
           type="button"
           onClick={handleRefresh}
           disabled={refreshing}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-soft-1 disabled:opacity-60"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-soft-1 disabled:opacity-60"
         >
           <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
           {refreshing ? "جارٍ التحديث…" : "تحديث البيانات"}
         </button>
       </div>
-
-      {/* Honesty banner: how dwell is computed + attribution + N/A rules */}
-      <div className="flex items-start gap-2 rounded-xl border border-cyan/20 bg-cyan/5 p-3 text-[11px] leading-relaxed text-muted-foreground">
-        <Info className="mt-0.5 size-3.5 shrink-0 text-cyan" />
-        <p>
-          {t("methodology")}{" "}
-          <span className="text-foreground/80">{t("evidenceRule")}</span>
-        </p>
-      </div>
-
-      {/* Evidence drill-down for the selected employee */}
-      {selectedId && (
-        <EvidencePanel
-          evidence={evidence}
-          row={overview.rows.find((r) => r.employeeId === selectedId) ?? null}
-          stageLabel={stageLabel}
-          fmtMinutes={fmtMinutes}
-          onClose={() => router.push("/accountability")}
-          t={t}
-        />
-      )}
 
       {/* Head stats */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -293,7 +491,7 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
         ))}
       </div>
 
-      {/* Toolbar: search + role filter (shared FilterBar / FilterChip) */}
+      {/* Toolbar: search + role filter */}
       <FilterBar
         className="mb-0"
         search={{ value: query, onChange: onQueryChange, placeholder: t("search") }}
@@ -304,32 +502,54 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
           mirrorUrl({ q: "", role: "all" });
         }}
       >
-        {[
-          { key: "all", label: t("roleFilter.all"), count: overview.rows.length },
-          ...positionGroups,
-        ].map((g) => (
-          <FilterChip
-            key={g.key}
-            as="button"
-            active={roleFilter === g.key}
-            count={g.count}
-            onClick={() => onRoleChange(g.key)}
-          >
-            {g.label}
-          </FilterChip>
-        ))}
+        {[{ key: "all", label: t("roleFilter.all"), count: overview.rows.length }, ...positionGroups].map(
+          (g) => (
+            <FilterChip
+              key={g.key}
+              as="button"
+              active={roleFilter === g.key}
+              count={g.count}
+              onClick={() => onRoleChange(g.key)}
+            >
+              {g.label}
+            </FilterChip>
+          ),
+        )}
       </FilterBar>
 
-      {/* Scorecard board */}
-      <ScorecardTable
-        key={`${roleFilter}:${query}`}
-        rows={filtered}
-        selectedId={selectedId}
-        onSelect={select}
-        fmtMinutes={fmtMinutes}
-        t={t}
-      />
+      {/* Master–detail: ranked people list ←→ contextual evidence pane */}
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={<ClipboardCheck className="size-6" />}
+          title={t("emptyTitle")}
+          description={t("emptyDescription")}
+        />
+      ) : (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+          <MasterList
+            rows={filtered}
+            selectedId={selId}
+            onSelect={select}
+            coachingByEmployee={coachingByEmployee}
+            sortOptions={sortOptions}
+            sortKey={sortKey}
+            onSortChange={onSortChange}
+            t={t}
+          />
+          <DetailPane
+            row={selectedRow}
+            issues={selectedRow ? coachingByEmployee.get(selectedRow.employeeId) ?? [] : []}
+            reviewerRows={selectedRow ? reviewerByEmployee.get(selectedRow.employeeId) ?? [] : []}
+            evidence={selId ? evidenceCache[selId] ?? null : null}
+            loading={loadingId === selId}
+            stageLabel={stageLabel}
+            fmtMinutes={fmtMinutes}
+            t={t}
+          />
+        </div>
+      )}
 
+      {/* Secondary: cross-team reviewer audit (collapsed by default) */}
       <ReviewerRigorSection
         reviewers={overview.reviewers}
         onSelect={select}
@@ -340,7 +560,7 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
       {/* Tier-B: AI-linked signals — always quoted, always labeled, never scored */}
       <AiLinkedSection signals={overview.aiSignals} financeMap={financeMap} t={t} />
 
-      <p className="text-end text-[10px] text-muted-foreground/60">
+      <p className="text-end text-[11px] text-muted-foreground/60">
         {t("generatedAt")}{" "}
         <span dir="ltr" className="tabular-nums">
           {overview.generatedAt.slice(0, 16).replace("T", " ")}
@@ -350,371 +570,459 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   );
 }
 
-// ---- Scorecard table ------------------------------------------------------
-function ScorecardTable({
+// ---- Methodology note (collapsible so it stops eating vertical space) -------
+function MethodologyNote({
+  methodology,
+  evidenceRule,
+}: {
+  methodology: string;
+  evidenceRule: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="min-w-0 flex-1 rounded-xl border border-cyan/20 bg-cyan/5 px-3 py-2 text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 text-start"
+        aria-expanded={open}
+      >
+        <Info className="size-3.5 shrink-0 text-cyan" />
+        <span className="font-medium text-foreground/80">كيف تُحتسب هذه الأرقام؟</span>
+        <ChevronDown className={cn("ms-auto size-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <p className="mt-2 leading-relaxed">
+          {methodology} <span className="text-foreground/80">{evidenceRule}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---- Master list (ranked, scannable, single-click select) ------------------
+function MasterList({
   rows,
   selectedId,
   onSelect,
-  fmtMinutes,
+  coachingByEmployee,
+  sortOptions,
+  sortKey,
+  onSortChange,
   t,
 }: {
   rows: AccountabilityScorecardRow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  fmtMinutes: (min: number | null) => string;
+  coachingByEmployee: Map<string, CoachIssue[]>;
+  sortOptions: { key: SortKey; label: string }[];
+  sortKey: SortKey;
+  onSortChange: (key: SortKey) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const [visibleCount, setVisibleCount] = useState(SCORECARD_PAGE_SIZE);
-
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<ClipboardCheck className="size-6" />}
-        title={t("emptyTitle")}
-        description={t("emptyDescription")}
-      />
-    );
-  }
-
-  const visibleRows = rows.slice(0, visibleCount);
-  const canLoadMore = visibleRows.length < rows.length;
-
   return (
     <Card className="overflow-hidden border-border/80 bg-card/95 shadow-sm">
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-soft-1/80">
-              <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-3 text-start font-semibold">{t("col.employee")}</th>
-                <th className="px-3 py-3 text-start font-semibold">{t("col.role")}</th>
-                <th className="px-3 py-3 text-start font-semibold text-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.score")}
-                    <MetricInfo text={t("help.score")} label={t("col.score")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.onTime")}
-                    <MetricInfo text={t("help.onTime")} label={t("col.onTime")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.avgDwell")}
-                    <MetricInfo text={t("metricTooltips.accountability_avgDwell")} label={t("col.avgDwell")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.rework")}
-                    <MetricInfo text={t("metricTooltips.accountability_rework")} label={t("col.rework")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.openTasks")}
-                    <MetricInfo text={t("metricTooltips.accountability_openTasks")} label={t("col.openTasks")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.overdue")}
-                    <MetricInfo text={t("metricTooltips.accountability_overdue")} label={t("col.overdue")} />
-                  </span>
-                </th>
-                <th className="px-3 py-3 text-center font-semibold">
-                  <span className="inline-flex items-center gap-1">
-                    {t("col.sample")}
-                    <MetricInfo text={t("metricTooltips.accountability_sample")} label={t("col.sample")} />
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {visibleRows.map((r) => {
-                const low = r.confidence === "low";
-                // Per-employee breakdown of how the composite score was formed,
-                // so hovering the badge shows the actual makeup (not just the formula).
-                const nonOverdue =
-                  r.openTasks > 0
-                    ? Math.round(100 * (1 - r.overdueOwned / r.openTasks))
-                    : null;
-                const otStr = r.onTimeRate === null ? NA : `${r.onTimeRate}%`;
-                const scoreBreakdown =
-                  nonOverdue === null
-                    ? t("help.scoreBreakdownNoOpen", { onTime: otStr })
-                    : t("help.scoreBreakdown", { onTime: otStr, nonOverdue: `${nonOverdue}%` });
-                return (
-                  <tr
-                    key={r.employeeId}
-                    onClick={() => onSelect(r.employeeId)}
-                    className={cn(
-                      "group cursor-pointer border-s-2 border-s-transparent transition-colors hover:bg-soft-1/70",
-                      selectedId === r.employeeId && "border-s-cyan bg-cyan/5",
-                    )}
-                    title={t("evidenceRule")}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-semibold tracking-[0px] group-hover:text-cyan">
+        {/* Sort control */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-soft-1/60 px-3 py-2">
+          <span className="text-[11px] font-medium text-muted-foreground">الترتيب</span>
+          <div className="inline-flex flex-wrap gap-1">
+            {sortOptions.map((o) => (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => onSortChange(o.key)}
+                aria-pressed={sortKey === o.key}
+                className={cn(
+                  "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+                  sortKey === o.key
+                    ? "bg-cyan-dim text-cyan"
+                    : "text-muted-foreground hover:bg-soft-2 hover:text-foreground",
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <span className="ms-auto text-[11px] text-muted-foreground">
+            {t("showingRows", { shown: rows.length, total: rows.length })}
+          </span>
+        </div>
+
+        <ul className="divide-y divide-border/60">
+          {rows.map((r) => {
+            const low = r.confidence === "low";
+            const issues = coachingByEmployee.get(r.employeeId) ?? [];
+            const severity = issues.reduce<CoachIssue["severity"] | null>(
+              (acc, i) => (acc ? strongerSeverity(acc, i.severity) : i.severity),
+              null,
+            );
+            const active = selectedId === r.employeeId;
+            return (
+              <li key={r.employeeId}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(r.employeeId)}
+                  aria-current={active}
+                  className={cn(
+                    "flex w-full items-center gap-3 border-s-2 border-s-transparent px-3 py-2.5 text-start transition-colors hover:bg-soft-1/70",
+                    active && "border-s-cyan bg-cyan/5",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("truncate text-sm font-semibold", active && "text-cyan")}>
                         {r.fullName}
-                      </div>
-                      {r.jobTitle && (
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          {r.jobTitle}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="rounded-md border border-border/60 bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        {r.positionLabel ?? t(`role.${r.role}`)}
                       </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        {r.score === null ? (
-                          <span
-                            className={cn(
-                              "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-sm font-bold tabular-nums",
-                              scoreBadgeTone(r.score, low),
-                            )}
-                            dir="ltr"
-                          >
-                            {NA}
-                          </span>
-                        ) : (
-                          <Explained text={scoreBreakdown}>
-                            <span
-                              className={cn(
-                                "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-sm font-bold tabular-nums",
-                                scoreBadgeTone(r.score, low),
-                              )}
-                              dir="ltr"
-                            >
-                              {`${r.score}%`}
-                            </span>
-                          </Explained>
-                        )}
-                        {r.score === null ? (
-                          <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                            {t("noScore")}
-                          </span>
-                        ) : low ? (
-                          <span
-                            className="rounded border border-border bg-soft-1 px-1.5 py-0.5 text-[9px] text-muted-foreground"
-                            title={t("lowSampleHint")}
-                          >
-                            {t("lowSample", { n: r.slaSampleSize })}
-                          </span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td
+                      {severity && (
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+                            severityTone(severity),
+                          )}
+                          title={`${issues.length} نقطة تدريب`}
+                        >
+                          <BookOpenCheck className="size-3" />
+                          {issues.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="truncate">{r.positionLabel ?? t(`role.${r.role}`)}</span>
+                      {r.overdueOwned > 0 && (
+                        <span className="inline-flex shrink-0 items-center gap-0.5 font-medium text-cc-red">
+                          <AlertTriangle className="size-3" />
+                          {t("col.overdue")} {r.overdueOwned}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* On-time — the metric the team steers by */}
+                  <div className="shrink-0 text-end">
+                    <div
                       className={cn(
-                        "px-3 py-3 text-center font-medium tabular-nums",
+                        "text-sm font-bold tabular-nums",
                         scoreTone(r.onTimeRate, low),
                       )}
+                      dir="ltr"
                     >
-                      <span dir="ltr">{r.onTimeRate === null ? NA : `${r.onTimeRate}%`}</span>
-                    </td>
-                    <td className="px-3 py-3 text-center tabular-nums text-muted-foreground">
-                      {fmtMinutes(r.avgDwellBusinessMinutes)}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-3 py-3 text-center tabular-nums",
-                        r.reworkReturns30d > 0 ? "text-amber" : "text-muted-foreground",
-                      )}
-                    >
-                      {r.reworkReturns30d}
-                    </td>
-                    <td className="px-3 py-3 text-center tabular-nums text-foreground/80">
-                      {r.openTasks}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-3 py-3 text-center tabular-nums",
-                        r.overdueOwned > 0 && "font-semibold text-cc-red",
-                      )}
-                    >
-                      {r.overdueOwned}
-                    </td>
-                    <td className="px-3 py-3 text-center tabular-nums text-muted-foreground">
-                      {r.sampleSize}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {canLoadMore && (
-          <div className="flex items-center justify-between gap-3 border-t border-border bg-soft-1/40 px-4 py-3">
-            <p className="text-[11px] text-muted-foreground">
-              {t("showingRows", { shown: visibleRows.length, total: rows.length })}
-            </p>
-            <button
-              type="button"
-              onClick={() => setVisibleCount((count) => count + SCORECARD_PAGE_SIZE)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-cyan/20 bg-cyan/10 px-3 py-1.5 text-xs font-semibold text-cyan transition-colors hover:bg-cyan/15"
-            >
-              {t("loadMore")}
-              <ChevronDown className="size-3.5" />
-            </button>
-          </div>
-        )}
+                      {r.onTimeRate === null ? NA : `${r.onTimeRate}%`}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">{t("col.onTime")}</div>
+                  </div>
+                  {/* Composite score badge */}
+                  <span
+                    className={cn(
+                      "inline-flex min-w-11 shrink-0 justify-center rounded-md border px-1.5 py-1 text-xs font-bold tabular-nums",
+                      scoreBadgeTone(r.score, low),
+                    )}
+                    dir="ltr"
+                  >
+                    {r.score === null ? NA : `${r.score}%`}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       </CardContent>
     </Card>
   );
 }
 
-// ---- Evidence drill-down ---------------------------------------------------
-function EvidencePanel({
-  evidence,
+// ---- Detail pane (everything about the selected person) --------------------
+function DetailPane({
   row,
+  issues,
+  reviewerRows,
+  evidence,
+  loading,
   stageLabel,
   fmtMinutes,
-  onClose,
   t,
 }: {
-  evidence: AccountabilityEvidence | null;
   row: AccountabilityScorecardRow | null;
+  issues: CoachIssue[];
+  reviewerRows: { stage: "manager" | "specialist"; row: ReviewerRigorRow }[];
+  evidence: AccountabilityEvidence | null;
+  loading: boolean;
   stageLabel: (s: string) => string;
   fmtMinutes: (min: number | null) => string;
-  onClose: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const lowConf = row?.confidence === "low";
-  // The person's full المساءلة metrics, mirrored above the evidence so the
-  // reader doesn't scroll back to the table to read what a number is built on.
-  const metricBar: { label: string; value: string; tone?: string }[] = row
-    ? [
-        {
-          label: t("col.score"),
-          value: row.score === null ? "—" : String(row.score),
-          tone: scoreTone(row.score, lowConf),
-        },
-        {
-          label: t("col.onTime"),
-          value: row.onTimeRate === null ? "—" : `${row.onTimeRate}%`,
-          tone: lowConf ? "text-muted-foreground" : undefined,
-        },
-        {
-          label: t("col.overdue"),
-          value: String(row.overdueOwned),
-          tone: row.overdueOwned > 0 ? "text-cc-red" : "text-cc-green",
-        },
-        { label: t("col.openTasks"), value: String(row.openTasks) },
-        { label: t("col.avgDwell"), value: fmtMinutes(row.avgDwellBusinessMinutes) },
-        { label: t("col.sample"), value: String(row.sampleSize) },
-        { label: t("col.rework"), value: String(row.reworkReturns30d) },
-      ]
-    : [];
+  if (!row) {
+    return (
+      <Card className="border-border lg:sticky lg:top-4">
+        <CardContent className="p-8">
+          <EmptyState
+            variant="compact"
+            icon={<MousePointerClick className="size-6" />}
+            title="اختر موظفًا من القائمة"
+            description="ستظهر هنا درجاته، أخطاؤه التدريبية، سلوك مراجعته، والأدلة التفصيلية."
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const low = row.confidence === "low";
+  const metricBar: { label: string; value: string; tone?: string }[] = [
+    { label: t("col.score"), value: row.score === null ? NA : `${row.score}%`, tone: scoreTone(row.score, low) },
+    {
+      label: t("col.onTime"),
+      value: row.onTimeRate === null ? NA : `${row.onTimeRate}%`,
+      tone: scoreTone(row.onTimeRate, low),
+    },
+    {
+      label: t("col.overdue"),
+      value: String(row.overdueOwned),
+      tone: row.overdueOwned > 0 ? "text-cc-red" : "text-cc-green",
+    },
+    { label: t("col.openTasks"), value: String(row.openTasks) },
+    { label: t("col.avgDwell"), value: fmtMinutes(row.avgDwellBusinessMinutes) },
+    {
+      label: t("col.rework"),
+      value: String(row.reworkReturns30d),
+      tone: row.reworkReturns30d > 0 ? "text-amber" : undefined,
+    },
+    { label: t("col.sample"), value: String(row.sampleSize) },
+  ];
+
   return (
-    <Card className="border-cyan/30">
-      <CardContent className="p-4">
+    <Card className="border-cyan/30 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+      <CardContent className="space-y-4 p-4">
+        {/* Header */}
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="inline-flex items-center gap-2 text-sm font-semibold">
-              <Eye className="size-4 text-cyan" />
-              {evidence
-                ? t("evidence.title", { name: evidence.fullName })
-                : t("evidence.notFound")}
-              {evidence && (
-                <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {t(`role.${evidence.role}`)}
-                </span>
-              )}
-            </p>
-            <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              {t("evidence.hint")}
-              <MetricInfo text={t("metricTooltips.accountability_evidenceDwell")} label={t("col.avgDwell")} />
+          <div className="min-w-0">
+            <p className="truncate text-base font-bold">{row.fullName}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="rounded-md border border-border/60 bg-soft-2 px-1.5 py-0.5 font-medium">
+                {row.positionLabel ?? t(`role.${row.role}`)}
+              </span>
+              {row.jobTitle && <span className="truncate">{row.jobTitle}</span>}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("evidence.close")}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-soft-1 hover:text-foreground"
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center justify-center rounded-lg border px-2.5 py-1.5 text-base font-bold tabular-nums",
+              scoreBadgeTone(row.score, low),
+            )}
+            dir="ltr"
           >
-            <X className="size-4" />
-          </button>
+            {row.score === null ? NA : `${row.score}%`}
+          </span>
         </div>
 
-        {/* Full المساءلة metric bar — so this person's numbers are right here. */}
-        {metricBar.length > 0 && (
-          <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4 lg:grid-cols-7">
-            {metricBar.map((m) => (
-              <div key={m.label} className="bg-card px-2.5 py-2 text-center">
-                <p className={cn("text-sm font-bold tabular-nums", m.tone ?? "text-foreground")}>
-                  {m.value}
-                </p>
-                <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{m.label}</p>
-              </div>
-            ))}
-          </div>
+        {/* Metric bar */}
+        <div className="grid grid-cols-4 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-7 lg:grid-cols-4 xl:grid-cols-7">
+          {metricBar.map((m) => (
+            <div key={m.label} className="bg-card px-2 py-2 text-center">
+              <p className={cn("text-sm font-bold tabular-nums", m.tone ?? "text-foreground")} dir="ltr">
+                {m.value}
+              </p>
+              <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{m.label}</p>
+            </div>
+          ))}
+        </div>
+        {low && (
+          <p className="rounded-md border border-border bg-soft-1 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+            {t("lowSampleHint")}
+          </p>
         )}
 
-        {!evidence || evidence.items.length === 0 ? (
-          <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
-            {t("evidence.empty")}
+        {/* Coaching — this person's flagged mistakes */}
+        <section>
+          <p className="inline-flex items-center gap-1.5 text-xs font-semibold">
+            <BookOpenCheck className="size-4 text-cyan" />
+            سجل الأخطاء والتدريب
           </p>
-        ) : (
-          <ul className="mt-3 max-h-80 space-y-1.5 overflow-y-auto pe-1">
-            {evidence.items.map((item) => (
-              <li key={`${item.taskId}-${item.stage}-${item.enteredAt}`}>
-                <Link
-                  href={`/tasks/${item.taskId}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] transition-colors hover:border-cyan/30 hover:bg-soft-1"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    {item.taskCode && (
+          {issues.length === 0 ? (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-cc-green/20 bg-green-dim/40 px-2.5 py-2 text-[11px] text-cc-green">
+              <CheckCircle2 className="size-3.5" />
+              لا توجد أخطاء تدريبية واضحة لهذا الموظف في النافذة الحالية.
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {issues.map((issue) => {
+                const Icon = coachIconFor(issue.kind);
+                return (
+                  <div key={issue.id} className="rounded-lg border border-border bg-card p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="inline-flex items-center gap-1.5 text-[13px] font-semibold leading-snug">
+                        <Icon className={cn("size-3.5", severityTone(issue.severity).split(" ").at(-1))} />
+                        {issue.title}
+                      </p>
                       <span
-                        dir="ltr"
-                        className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground/70"
+                        className={cn(
+                          "rounded-md border px-2 py-0.5 text-[10px] font-semibold",
+                          severityTone(issue.severity),
+                        )}
                       >
-                        {item.taskCode}
+                        {severityLabel(issue.severity)}
                       </span>
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <p className="text-[11px] font-semibold text-muted-foreground">لماذا خطأ؟</p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-foreground/85">{issue.why}</p>
+                      </div>
+                      <div className="rounded-md border border-border bg-soft-1/70 p-2">
+                        <p className="text-[11px] font-semibold text-muted-foreground">الدليل</p>
+                        <p className="mt-0.5 text-xs leading-relaxed">{issue.evidence}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-muted-foreground">كيف يتجنبها؟</p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-foreground/85">
+                          {issue.nextAction}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-2 border-t border-border/70 pt-1.5 text-[10px] text-muted-foreground">
+                      {issue.source}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Review behavior — only when this person reviews */}
+        {reviewerRows.length > 0 && (
+          <section>
+            <p className="inline-flex items-center gap-1.5 text-xs font-semibold">
+              <Scale className="size-4 text-cyan" />
+              سلوك المراجعة
+            </p>
+            <div className="mt-2 space-y-2">
+              {reviewerRows.map(({ stage, row: rev }) => {
+                const revLow = rev.confidence === "low";
+                const rubberStamp = !revLow && rev.fastReviewShare !== null && rev.fastReviewShare >= 30;
+                return (
+                  <div key={`${stage}-${rev.employeeId}`} className="rounded-lg border border-border bg-card p-3">
+                    <p className="text-[11px] font-semibold text-foreground/90">
+                      {stage === "manager"
+                        ? t("reviewers.managerReviewTitle")
+                        : t("reviewers.specialistReviewTitle")}
+                    </p>
+                    <div className="mt-2 grid grid-cols-4 gap-2 text-center">
+                      <div>
+                        <p className="text-sm font-bold tabular-nums">{rev.reviewsCompleted}</p>
+                        <p className="text-[10px] text-muted-foreground">{t("reviewers.col.reviews")}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold tabular-nums text-muted-foreground">
+                          {fmtMinutes(rev.medianReviewBusinessMinutes)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">{t("reviewers.col.medianTime")}</p>
+                      </div>
+                      <div>
+                        <p
+                          className={cn(
+                            "text-sm font-bold tabular-nums",
+                            rubberStamp ? "text-amber" : "text-muted-foreground",
+                          )}
+                          dir="ltr"
+                        >
+                          {rev.fastReviewShare === null ? NA : `${rev.fastReviewShare}%`}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">{t("reviewers.col.fastShare")}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold tabular-nums">{rev.pendingReviews}</p>
+                        <p className="text-[10px] text-muted-foreground">{t("reviewers.col.pending")}</p>
+                      </div>
+                    </div>
+                    {rubberStamp && (
+                      <p className="mt-2 inline-flex items-center gap-1 text-[10px] text-amber">
+                        <Timer className="size-3" />
+                        {t("reviewers.rubberStamp")}
+                      </p>
                     )}
-                    <span className="max-w-[18rem] truncate">{item.title}</span>
-                    {item.clientName && (
-                      <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
-                        {item.clientName}
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2 text-[11px]">
-                    <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
-                      {stageLabel(item.stage)}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {fmtMinutes(item.dwellBusinessMinutes)}
-                    </span>
-                    {item.exitedAt === null && (
-                      <span className="rounded bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
-                        {t("evidence.inStageNow")}
-                      </span>
-                    )}
-                    {item.isOverdue && (
-                      <span className="rounded bg-red-dim px-1.5 py-0.5 text-[10px] font-medium text-cc-red">
-                        {item.delayDays !== null
-                          ? t("evidence.delayDays", { n: item.delayDays })
-                          : t("evidence.overdue")}
-                      </span>
-                    )}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         )}
+
+        {/* Evidence — the tasks behind the numbers */}
+        <section>
+          <p className="inline-flex items-center gap-1.5 text-xs font-semibold">
+            <Eye className="size-4 text-cyan" />
+            الأدلة
+            <MetricInfo
+              text={t("metricTooltips.accountability_evidenceDwell")}
+              label={t("col.avgDwell")}
+            />
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{t("evidence.hint")}</p>
+
+          {loading ? (
+            <div className="mt-2 flex items-center justify-center gap-2 rounded-lg bg-soft-1/60 px-3 py-6 text-xs text-muted-foreground">
+              <Loader2 className="size-4 animate-spin text-cyan" />
+              جارٍ تحميل الأدلة…
+            </div>
+          ) : !evidence || evidence.items.length === 0 ? (
+            <p className="mt-2 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
+              {t("evidence.empty")}
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {evidence.items.map((item) => (
+                <li key={`${item.taskId}-${item.stage}-${item.enteredAt}`}>
+                  <Link
+                    href={`/tasks/${item.taskId}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] transition-colors hover:border-cyan/30 hover:bg-soft-1"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {item.taskCode && (
+                        <span
+                          dir="ltr"
+                          className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground/70"
+                        >
+                          {item.taskCode}
+                        </span>
+                      )}
+                      <span className="max-w-[16rem] truncate">{item.title}</span>
+                      {item.clientName && (
+                        <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+                          {item.clientName}
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2 text-[11px]">
+                      <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
+                        {stageLabel(item.stage)}
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {fmtMinutes(item.dwellBusinessMinutes)}
+                      </span>
+                      {item.exitedAt === null && (
+                        <span className="rounded bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+                          {t("evidence.inStageNow")}
+                        </span>
+                      )}
+                      {item.isOverdue && (
+                        <span className="rounded bg-red-dim px-1.5 py-0.5 text-[10px] font-medium text-cc-red">
+                          {item.delayDays !== null
+                            ? t("evidence.delayDays", { n: item.delayDays })
+                            : t("evidence.overdue")}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </CardContent>
     </Card>
   );
 }
 
-// ---- Reviewer rigor ---------------------------------------------------------
+// ---- Reviewer rigor (cross-team audit, collapsed by default) ---------------
 function ReviewerRigorSection({
   reviewers,
   onSelect,
@@ -726,43 +1034,52 @@ function ReviewerRigorSection({
   fmtMinutes: (min: number | null) => string;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [open, setOpen] = useState(false);
+  const total = reviewers.managerReview.length + reviewers.specialistReview.length;
+
   return (
     <Card>
       <CardContent className="p-4">
-        <p className="inline-flex items-center gap-2 text-sm font-semibold">
-          <Scale className="size-4 text-cyan" /> {t("reviewers.title")}
-        </p>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          {t("reviewers.hint")}
-        </p>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 text-start"
+        >
+          <Scale className="size-4 text-cyan" />
+          <span className="text-sm font-semibold">{t("reviewers.title")}</span>
+          <span className="rounded-full border border-border bg-soft-1 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {total}
+          </span>
+          <ChevronDown className={cn("ms-auto size-4 transition-transform", open && "rotate-180")} />
+        </button>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("reviewers.hint")}</p>
 
-        {/* Two distinct review stages, each credited to a different role:
-            Manager Review → the Manager/Head; Specialist Review → the executing
-            specialist (task assignee). Shown as separate sections. */}
-        <div className="mt-4 space-y-6">
-          <ReviewerStageBlock
-            title={t("reviewers.managerReviewTitle")}
-            subtitle={t("reviewers.managerReviewSubtitle")}
-            rows={reviewers.managerReview}
-            onSelect={onSelect}
-            fmtMinutes={fmtMinutes}
-            t={t}
-          />
-          <ReviewerStageBlock
-            title={t("reviewers.specialistReviewTitle")}
-            subtitle={t("reviewers.specialistReviewSubtitle")}
-            rows={reviewers.specialistReview}
-            onSelect={onSelect}
-            fmtMinutes={fmtMinutes}
-            t={t}
-          />
-        </div>
+        {open && (
+          <div className="mt-4 space-y-6">
+            <ReviewerStageBlock
+              title={t("reviewers.managerReviewTitle")}
+              subtitle={t("reviewers.managerReviewSubtitle")}
+              rows={reviewers.managerReview}
+              onSelect={onSelect}
+              fmtMinutes={fmtMinutes}
+              t={t}
+            />
+            <ReviewerStageBlock
+              title={t("reviewers.specialistReviewTitle")}
+              subtitle={t("reviewers.specialistReviewSubtitle")}
+              rows={reviewers.specialistReview}
+              onSelect={onSelect}
+              fmtMinutes={fmtMinutes}
+              t={t}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-// One review stage's reviewer table (Manager Review or Specialist Review).
 function ReviewerStageBlock({
   title,
   subtitle,
@@ -781,11 +1098,9 @@ function ReviewerStageBlock({
   return (
     <div>
       <p className="text-xs font-semibold text-foreground/90">{title}</p>
-      <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{subtitle}</p>
-      {/* Honesty label: stage-history mode credits the assigned person, not
-          whoever actually moved the task. */}
+      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{subtitle}</p>
       {rows.some((r) => r.attribution === "stage_history_assignment") && (
-        <p className="mt-2 rounded-md border border-amber/20 bg-amber/5 px-2.5 py-1.5 text-[10px] leading-snug text-muted-foreground">
+        <p className="mt-2 rounded-md border border-amber/20 bg-amber/5 px-2.5 py-1.5 text-[11px] leading-snug text-muted-foreground">
           {t("reviewers.attributedNote")}
         </p>
       )}
@@ -796,122 +1111,113 @@ function ReviewerStageBlock({
         </p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
-                  <th className="p-2 text-start font-medium">{t("reviewers.col.reviewer")}</th>
-                  <th className="p-2 text-center font-medium">
-                    <span className="inline-flex items-center gap-1">
-                      {t("reviewers.col.reviews")}
-                      <MetricInfo text={t("metricTooltips.accountability_reviewerReviews")} label={t("reviewers.col.reviews")} />
-                    </span>
-                  </th>
-                  <th className="p-2 text-center font-medium">
-                    <span className="inline-flex items-center gap-1">
-                      {t("reviewers.col.medianTime")}
-                      <MetricInfo text={t("metricTooltips.accountability_reviewerMedianTime")} label={t("reviewers.col.medianTime")} />
-                    </span>
-                  </th>
-                  <th className="p-2 text-center font-medium">
-                    <span className="inline-flex items-center gap-1">
-                      {t("reviewers.col.fastShare")}
-                      <MetricInfo text={t("metricTooltips.accountability_reviewerFastShare")} label={t("reviewers.col.fastShare")} />
-                    </span>
-                  </th>
-                  <th className="p-2 text-center font-medium">
-                    <span className="inline-flex items-center gap-1">
-                      {t("reviewers.col.rework")}
-                      <MetricInfo text={t("metricTooltips.accountability_reviewerRework")} label={t("reviewers.col.rework")} />
-                    </span>
-                  </th>
-                  <th className="p-2 text-center font-medium">
-                    <span className="inline-flex items-center gap-1">
-                      {t("reviewers.col.pending")}
-                      <MetricInfo text={t("metricTooltips.accountability_reviewerPending")} label={t("reviewers.col.pending")} />
-                    </span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const low = r.confidence === "low";
-                  // High fast-review share = possible rubber-stamping. Only an
-                  // amber flag at high confidence — small samples stay neutral.
-                  const rubberStamp =
-                    !low && r.fastReviewShare !== null && r.fastReviewShare >= 30;
-                  return (
-                    <tr
-                      key={r.employeeId}
-                      onClick={() => onSelect(r.employeeId)}
-                      className="cursor-pointer border-b border-border/50 transition-colors hover:bg-soft-1"
-                      title={t("evidenceRule")}
-                    >
-                      <td className="p-2">
-                        <span className="font-medium hover:text-cyan">{r.fullName}</span>
-                        {low && (
-                          <span
-                            className="ms-1.5 rounded border border-border bg-soft-1 px-1 py-0.5 text-[9px] text-muted-foreground"
-                            title={t("lowSampleHint")}
-                          >
-                            {t("lowSample", { n: r.sampleSize })}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-2 text-center tabular-nums">{r.reviewsCompleted}</td>
-                      <td className="p-2 text-center tabular-nums text-muted-foreground">
-                        {fmtMinutes(r.medianReviewBusinessMinutes)}
-                      </td>
-                      <td className="p-2 text-center">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="p-2 text-start font-medium">{t("reviewers.col.reviewer")}</th>
+                <th className="p-2 text-center font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {t("reviewers.col.reviews")}
+                    <MetricInfo text={t("metricTooltips.accountability_reviewerReviews")} label={t("reviewers.col.reviews")} />
+                  </span>
+                </th>
+                <th className="p-2 text-center font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {t("reviewers.col.medianTime")}
+                    <MetricInfo text={t("metricTooltips.accountability_reviewerMedianTime")} label={t("reviewers.col.medianTime")} />
+                  </span>
+                </th>
+                <th className="p-2 text-center font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {t("reviewers.col.fastShare")}
+                    <MetricInfo text={t("metricTooltips.accountability_reviewerFastShare")} label={t("reviewers.col.fastShare")} />
+                  </span>
+                </th>
+                <th className="p-2 text-center font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {t("reviewers.col.rework")}
+                    <MetricInfo text={t("metricTooltips.accountability_reviewerRework")} label={t("reviewers.col.rework")} />
+                  </span>
+                </th>
+                <th className="p-2 text-center font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {t("reviewers.col.pending")}
+                    <MetricInfo text={t("metricTooltips.accountability_reviewerPending")} label={t("reviewers.col.pending")} />
+                  </span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const low = r.confidence === "low";
+                const rubberStamp = !low && r.fastReviewShare !== null && r.fastReviewShare >= 30;
+                return (
+                  <tr
+                    key={r.employeeId}
+                    onClick={() => onSelect(r.employeeId)}
+                    className="cursor-pointer border-b border-border/50 transition-colors hover:bg-soft-1"
+                    title={t("evidenceRule")}
+                  >
+                    <td className="p-2">
+                      <span className="font-medium hover:text-cyan">{r.fullName}</span>
+                      {low && (
                         <span
-                          className={cn(
-                            "inline-flex items-center gap-1 tabular-nums",
-                            rubberStamp ? "font-semibold text-amber" : "text-muted-foreground",
-                          )}
+                          className="ms-1.5 rounded border border-border bg-soft-1 px-1 py-0.5 text-[10px] text-muted-foreground"
+                          title={t("lowSampleHint")}
                         >
-                          {rubberStamp && <Timer className="size-3" />}
-                          <span dir="ltr">
-                            {r.fastReviewShare === null ? NA : `${r.fastReviewShare}%`}
-                          </span>
+                          {t("lowSample", { n: r.sampleSize })}
                         </span>
-                        {rubberStamp && (
-                          <div className="text-[9px] text-amber">{t("reviewers.rubberStamp")}</div>
+                      )}
+                    </td>
+                    <td className="p-2 text-center tabular-nums">{r.reviewsCompleted}</td>
+                    <td className="p-2 text-center tabular-nums text-muted-foreground">
+                      {fmtMinutes(r.medianReviewBusinessMinutes)}
+                    </td>
+                    <td className="p-2 text-center">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 tabular-nums",
+                          rubberStamp ? "font-semibold text-amber" : "text-muted-foreground",
                         )}
-                      </td>
-                      <td className="p-2 text-center">
-                        <span
-                          className={cn(
-                            "tabular-nums",
-                            !low && r.reworkAfterPassRate !== null && r.reworkAfterPassRate >= 30
-                              ? "font-semibold text-amber"
-                              : "text-muted-foreground",
-                          )}
-                          dir="ltr"
-                        >
-                          {r.reworkAfterPassRate === null ? NA : `${r.reworkAfterPassRate}%`}
-                        </span>
-                        {r.passCount > 0 && (
-                          <div className="text-[9px] tabular-nums text-muted-foreground">
-                            {t("reviewers.reworkDetail", { k: r.reworkCount, n: r.passCount })}
-                          </div>
+                      >
+                        {rubberStamp && <Timer className="size-3" />}
+                        <span dir="ltr">{r.fastReviewShare === null ? NA : `${r.fastReviewShare}%`}</span>
+                      </span>
+                      {rubberStamp && <div className="text-[10px] text-amber">{t("reviewers.rubberStamp")}</div>}
+                    </td>
+                    <td className="p-2 text-center">
+                      <span
+                        className={cn(
+                          "tabular-nums",
+                          !low && r.reworkAfterPassRate !== null && r.reworkAfterPassRate >= 30
+                            ? "font-semibold text-amber"
+                            : "text-muted-foreground",
                         )}
-                      </td>
-                      <td className="p-2 text-center">
-                        <span className="tabular-nums">{r.pendingReviews}</span>
-                        {r.oldestPendingBusinessMinutes !== null && r.pendingReviews > 0 && (
-                          <div className="text-[9px] tabular-nums text-muted-foreground">
-                            {t("reviewers.oldestPending", {
-                              v: fmtMinutes(r.oldestPendingBusinessMinutes),
-                            })}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                        dir="ltr"
+                      >
+                        {r.reworkAfterPassRate === null ? NA : `${r.reworkAfterPassRate}%`}
+                      </span>
+                      {r.passCount > 0 && (
+                        <div className="text-[10px] tabular-nums text-muted-foreground">
+                          {t("reviewers.reworkDetail", { k: r.reworkCount, n: r.passCount })}
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-2 text-center">
+                      <span className="tabular-nums">{r.pendingReviews}</span>
+                      {r.oldestPendingBusinessMinutes !== null && r.pendingReviews > 0 && (
+                        <div className="text-[10px] tabular-nums text-muted-foreground">
+                          {t("reviewers.oldestPending", { v: fmtMinutes(r.oldestPendingBusinessMinutes) })}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -928,9 +1234,6 @@ function AiLinkedSection({
 }) {
   const [range, setRange] = useState<"today" | "week">("week");
 
-  // Latest COMPLAINT per client within the selected window. The task↔complaint
-  // linkage proved unreliable, so we drop "related tasks" and keep this concise:
-  // one freshest complaint per client, with its source quote.
   const complaints = useMemo(() => {
     const cutoff = new Date();
     if (range === "today") cutoff.setHours(0, 0, 0, 0);
@@ -946,8 +1249,7 @@ function AiLinkedSection({
       if (!prev || new Date(prev.occurredAt as string).getTime() < ts) latest.set(key, s);
     }
     return [...latest.values()].sort(
-      (a, b) =>
-        new Date(b.occurredAt as string).getTime() - new Date(a.occurredAt as string).getTime(),
+      (a, b) => new Date(b.occurredAt as string).getTime() - new Date(a.occurredAt as string).getTime(),
     );
   }, [signals, range]);
 
@@ -958,9 +1260,7 @@ function AiLinkedSection({
       aria-pressed={range === key}
       className={cn(
         "rounded-md px-2.5 py-1 text-[11px] transition-colors",
-        range === key
-          ? "bg-cyan-dim text-cyan font-medium"
-          : "text-muted-foreground hover:text-foreground",
+        range === key ? "bg-cyan-dim text-cyan font-medium" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {label}
@@ -978,15 +1278,12 @@ function AiLinkedSection({
           <span className="rounded-full border border-cyan/30 bg-cyan/10 px-2 py-0.5 text-[10px] font-medium text-cyan">
             {t("ai.badge")}
           </span>
-          {/* Today / This week toggle */}
           <div className="ms-auto inline-flex rounded-lg border border-soft bg-card/60 p-0.5">
             {rangeBtn("today", t("ai.windowToday"))}
             {rangeBtn("week", t("ai.windowWeek"))}
           </div>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          {t("ai.complaintsHint")}
-        </p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("ai.complaintsHint")}</p>
 
         {complaints.length === 0 ? (
           <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
@@ -995,31 +1292,23 @@ function AiLinkedSection({
         ) : (
           <ul className="mt-3 grid gap-2 lg:grid-cols-2">
             {complaints.map((s) => (
-              <li
-                key={s.id}
-                className="rounded-lg border border-border bg-card p-3 text-[13px]"
-              >
+              <li key={s.id} className="rounded-lg border border-border bg-card p-3 text-[13px]">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
-                    {s.clientName && (
-                      <span className="truncate font-semibold text-foreground">
-                        {s.clientName}
-                      </span>
-                    )}
+                    {s.clientName && <span className="truncate font-semibold text-foreground">{s.clientName}</span>}
                     {s.clientId && <ClientFinanceBadges badge={financeMap[s.clientId]} />}
                   </span>
                   {s.occurredAt && (
-                    <span dir="ltr" className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                    <span dir="ltr" className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
                       {s.occurredAt.slice(0, 10)}
                     </span>
                   )}
                 </div>
-                {/* Source quote — always rendered, per the trust posture */}
                 <blockquote className="mt-2 flex gap-2 rounded-md bg-soft-1/60 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
                   <Quote className="mt-0.5 size-3 shrink-0 text-cc-red" />
                   <span>{s.quote}</span>
                 </blockquote>
-                <div className="mt-2 text-[10px] text-muted-foreground">
+                <div className="mt-2 text-[11px] text-muted-foreground">
                   <span className="rounded bg-soft-2 px-1.5 py-0.5">
                     {t("ai.sourceLabel")}: {s.source}
                   </span>

@@ -824,15 +824,59 @@ async function _getAccountabilityScorecard(
 
 export const getAccountabilityScorecard = cache(_getAccountabilityScorecard);
 
+// Empty coverage so a degraded load still renders. distinctOverdueTasks is
+// derived from the scorecard as a floor when the live coverage query fails
+// (see below) — never silently shown as a confident zero.
+const EMPTY_COVERAGE: AccountabilityCoverage = {
+  totalTasks: 0,
+  tasksWithHistory: 0,
+  tasksWithAgent: 0,
+  tasksWithAccountManager: 0,
+  archivedExcluded: 0,
+  distinctOverdueTasks: 0,
+  windowStart: null,
+  windowEnd: null,
+};
+
 async function _getAccountabilityOverview(orgId: string): Promise<AccountabilityOverview> {
   const org = assertUuid(orgId, "organization id");
-  const [rows, reviewers, coverage, aiSignals] = await Promise.all([
+  // The scorecard reads the precomputed cache (0193) and is the page's core —
+  // if it fails, the page genuinely can't render, so we let it throw. The other
+  // three are live analytics queries under a 12s statement timeout; a timeout on
+  // any of them must NOT white-screen the whole page, so they degrade to empty.
+  const [rows, reviewersR, coverageR, aiSignalsR] = await Promise.all([
     getAccountabilityScorecard(orgId),
-    loadReviewers(org),
-    loadCoverage(org),
-    loadAiSignals(org),
+    loadReviewers(org).catch((e) => {
+      console.error("[accountability] loadReviewers failed, degrading:", e);
+      return { managerReview: [], specialistReview: [] };
+    }),
+    loadCoverage(org).catch((e) => {
+      console.error("[accountability] loadCoverage failed, degrading:", e);
+      return null;
+    }),
+    loadAiSignals(org).catch((e) => {
+      console.error("[accountability] loadAiSignals failed, degrading:", e);
+      return [] as AiLinkedSignal[];
+    }),
   ]);
-  return { generatedAt: new Date().toISOString(), rows, reviewers, aiSignals, coverage };
+
+  // When coverage times out, fall back to a distinct-overdue floor derived from
+  // the scorecard rows (the max any single row reports — since overdueOwned fans
+  // out across co-assignees, no row exceeds the true distinct count, so max is a
+  // safe lower bound rather than a fabricated total).
+  const coverage: AccountabilityCoverage =
+    coverageR ?? {
+      ...EMPTY_COVERAGE,
+      distinctOverdueTasks: rows.reduce((m, r) => Math.max(m, r.overdueOwned), 0),
+    };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    rows,
+    reviewers: reviewersR,
+    aiSignals: aiSignalsR,
+    coverage,
+  };
 }
 
 export const getAccountabilityOverview = cache(_getAccountabilityOverview);

@@ -20,7 +20,7 @@ const SmartSearchBar = dynamic(
       default: mod.SmartSearchBar,
     })),
   {
-    loading: () => <div className="h-10 rounded-xl border border-white/30 bg-white/8" />,
+    loading: () => <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />,
   },
 );
 
@@ -30,7 +30,7 @@ const ProjectsSearchBar = dynamic(
       default: mod.ProjectsSearchBar,
     })),
   {
-    loading: () => <div className="h-10 rounded-xl border border-white/30 bg-white/8" />,
+    loading: () => <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />,
   },
 );
 
@@ -77,12 +77,12 @@ export function Topbar({
       }).format(new Date(lastUpdatedAt))
     : null;
   const utilityChip =
-    "rounded-xl border border-white/16 bg-white/12 text-white/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md hover:bg-white/18 hover:text-white dark:border-soft dark:bg-soft-2 dark:text-muted-foreground";
+    "rounded-xl border border-white/70 bg-white/95 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] backdrop-blur-md hover:bg-white hover:text-primary dark:border-soft dark:bg-soft-2 dark:text-muted-foreground dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:hover:bg-white/18 dark:hover:text-white";
   const iconChip = `shrink-0 ${utilityChip}`;
   const searchTriggerClass =
-    "inline-flex items-center gap-2 rounded-xl border border-white/45 bg-white/8 px-3 py-2 text-xs text-white transition-colors hover:bg-white/14 hover:border-white/60";
+    "inline-flex items-center gap-2 rounded-xl border border-white/70 bg-white/95 px-3 py-2 text-xs text-primary transition-colors hover:border-white hover:bg-white dark:border-white/45 dark:bg-white/8 dark:text-white dark:hover:border-white/60 dark:hover:bg-white/14";
   const primaryCreateClass =
-    "inline-flex items-center gap-1.5 rounded-xl border border-white/45 bg-white/8 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/14 hover:border-white/60";
+    "inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/95 px-3.5 py-2 text-xs font-semibold text-primary transition-colors hover:border-white hover:bg-white dark:border-white/45 dark:bg-white/8 dark:text-white dark:hover:border-white/60 dark:hover:bg-white/14";
 
   return (
     <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
@@ -94,7 +94,7 @@ export function Topbar({
             className={`lg:hidden ${iconChip}`}
             onClick={onMenuClick}
           >
-            <Menu className="w-5 h-5 text-white/90 dark:text-muted-foreground" />
+            <Menu className="w-5 h-5 text-primary dark:text-muted-foreground" />
           </Button>
 
           {/* Odoo-style 9-dot app switcher.
@@ -161,7 +161,7 @@ export function Topbar({
             aria-label="المحادثات"
             className={`inline-flex h-9 w-9 items-center justify-center relative sm:rounded-2xl ${iconChip}`}
           >
-            <MessageCircle className="w-4 h-4 text-cyan" />
+            <MessageCircle className="w-4 h-4 text-primary dark:text-cyan" />
             {dmUnreadCount > 0 && (
               <span className="absolute -top-0.5 -start-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
                 {dmUnreadCount}
@@ -171,7 +171,7 @@ export function Topbar({
 
           <div className="relative shrink-0" data-bell-root>
             <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
-              <Bell className="w-4 h-4 text-amber" />
+              <Bell className="w-4 h-4 text-status-warning dark:text-amber" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -start-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">
                   {unreadCount}

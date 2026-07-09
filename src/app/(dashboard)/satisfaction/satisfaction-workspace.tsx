@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { useTranslations } from "next-intl";
 import { SatisfactionSchema } from "@/lib/satisfaction-schema";
@@ -63,6 +63,7 @@ import { cn } from "@/lib/utils";
 import type {
   AnalysisHistoryItem,
   ClientExecutionSnapshot,
+  ClientMediaExchange,
   ClientSatisfactionDetail,
   SatisfactionRow,
 } from "@/lib/data/satisfaction";
@@ -75,6 +76,7 @@ interface Props {
   rows: SatisfactionRow[];
   detail: ClientSatisfactionDetail | null;
   execution: ClientExecutionSnapshot | null;
+  media: ClientMediaExchange | null;
   selectedId: string | null;
   selectedAnalysisId: string | null;
   financeMap: ClientFinanceMap;
@@ -129,6 +131,7 @@ export function SatisfactionWorkspace({
   rows,
   detail,
   execution,
+  media,
   selectedId,
   selectedAnalysisId,
   financeMap,
@@ -390,6 +393,7 @@ export function SatisfactionWorkspace({
               analysis={detail.analysis}
               history={detail.history}
               execution={execution}
+              media={media}
               clientId={selectedId}
               activeProjects={detail.activeProjects}
               brief={detail.brief}
@@ -1137,6 +1141,7 @@ function AnalysisView({
   analysis,
   history,
   execution,
+  media,
   clientId,
   activeProjects,
   brief,
@@ -1146,6 +1151,7 @@ function AnalysisView({
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
   history: AnalysisHistoryItem[];
   execution: ClientExecutionSnapshot | null;
+  media: ClientMediaExchange | null;
   clientId: string;
   activeProjects: ClientSatisfactionDetail["activeProjects"];
   brief: ClientSatisfactionDetail["brief"];
@@ -1170,6 +1176,17 @@ function AnalysisView({
     () => buildFallbackRecommendations(analysis, execution),
     [analysis, execution],
   );
+  // Deep-link scroll: cross-page links (e.g. the accountability cases feed) land
+  // on `/satisfaction?client=X#accountability`. The target section only exists
+  // once this analysis renders — after data fetch + hydration — so the browser's
+  // native hash scroll fires too early and no-ops. Re-run the scroll once the
+  // analysis is present so we land on the section the click referred to.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [analysis.id]);
   const visibleTimelineEvents = useMemo(() => {
     const anchorDate = Math.max(
       parseTime(analysis.createdAt),
@@ -1393,8 +1410,63 @@ function AnalysisView({
         />
       )}
 
+      {/* الوسائط والملفات المتبادلة — evidence of what was shared in the chats */}
+      <MediaExchangePanel media={media} t={t} />
+
       <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
     </div>
+  );
+}
+
+// ---- Media & files exchanged --------------------------------------------
+// Evidence surfaced from the chats. We never stored the media BINARY (no
+// pixels/bytes), so the panel stays intentionally aggregate-only.
+function MediaExchangePanel({
+  media,
+  t,
+}: {
+  media: ClientMediaExchange | null;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (!media || media.totalMedia === 0) return null;
+  const categories = [
+    { icon: FileText, label: t("media.documents"), n: media.documentCount ?? media.documents.length },
+    { icon: FileQuestion, label: t("media.images"), n: media.imageCount ?? media.images.length + media.silentImages },
+    { icon: TrendingUp, label: t("media.videos"), n: media.videoCount ?? media.videos.length },
+    { icon: MessagesSquare, label: t("media.voiceNotes"), n: media.voiceNotes },
+    { icon: Link2, label: t("media.others"), n: media.otherCount ?? media.others.length },
+  ].filter((category) => category.n > 0);
+
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <FileUp className="size-4 text-muted-foreground" /> {t("media.title")}
+          </p>
+          <span className="text-[11px] text-muted-foreground">
+            {t("media.count", { n: media.totalMedia })}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("media.hint")}</p>
+        <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
+          {categories.map((category) => (
+            <li
+              key={category.label}
+              className="flex items-center justify-between gap-3 rounded-md border border-border bg-soft-1 px-2.5 py-1.5 text-[12px]"
+            >
+              <span className="inline-flex items-center gap-2 text-muted-foreground">
+                <category.icon className="size-3.5" />
+                {category.label}
+              </span>
+              <span className="rounded-full bg-soft-2 px-2 font-semibold tabular-nums text-foreground">
+                {category.n}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2178,8 +2250,17 @@ function AccountabilityPanel({
   for (const p of teamContext?.people ?? []) {
     idByName.set(p.name.replace(/\s+/g, " ").trim(), p.employeeId);
   }
+  // code → { title, id }: the AI only carries task CODES into accountability rows,
+  // but the frozen roster (stuckTasks) holds the human title + task uuid. Every
+  // rendered code is guaranteed to exist here (analyze-time validation filters
+  // accountability codes to roster codes), so the task NAME always resolves and
+  // the chip can deep-link to the real task instead of a code-search that misses.
+  const taskByCode = new Map<string, { title: string; id: string | null }>();
+  for (const st of teamContext?.stuckTasks ?? []) {
+    if (st.taskCode) taskByCode.set(st.taskCode, { title: st.title, id: st.taskId ?? null });
+  }
   return (
-    <Card className="border-cc-red/25">
+    <Card id="accountability" className="scroll-mt-24 border-cc-red/25">
       <CardContent className="p-4">
         <p className="inline-flex items-center gap-2 text-sm font-semibold">
           <Scale className="size-4 text-cc-red" /> {t("accountability.title")}
@@ -2255,16 +2336,23 @@ function AccountabilityPanel({
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                     {t("accountability.tasks")}:
                   </span>
-                  {row.taskCodes.map((code) => (
-                    <Link
-                      key={code}
-                      href={`/tasks?q=${encodeURIComponent(code)}`}
-                      className="inline-flex items-center gap-1 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground hover:text-foreground"
-                    >
-                      <ClipboardList className="size-3" />
-                      {code}
-                    </Link>
-                  ))}
+                  {row.taskCodes.map((code) => {
+                    const task = taskByCode.get(code);
+                    // Deep-link to the task detail when we know its id; otherwise
+                    // fall back to the tasks search (RPC now matches task_code).
+                    const href = task?.id ? `/tasks/${task.id}` : `/tasks?q=${encodeURIComponent(code)}`;
+                    return (
+                      <Link
+                        key={code}
+                        href={href}
+                        title={code}
+                        className="inline-flex max-w-[16rem] items-center gap-1 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                      >
+                        <ClipboardList className="size-3 shrink-0" />
+                        <span className="truncate">{task?.title ?? code}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
 

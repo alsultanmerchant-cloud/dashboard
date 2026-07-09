@@ -45,7 +45,7 @@ export function AppSwitcher({ className }: { className?: string }) {
       <DropdownMenuTrigger
         aria-label={t("openLabel")}
         className={cn(
-          "inline-flex size-9 items-center justify-center rounded-2xl border border-white/16 bg-white/12 text-white/92 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md hover:bg-white/18 hover:text-white transition-colors dark:border-soft dark:bg-soft-2 dark:text-muted-foreground",
+          "inline-flex size-9 items-center justify-center rounded-2xl border border-white/70 bg-white/95 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] backdrop-blur-md transition-colors hover:bg-white hover:text-primary dark:border-soft dark:bg-soft-2 dark:text-muted-foreground dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] dark:hover:bg-white/18 dark:hover:text-white",
           className,
         )}
       >

@@ -5,6 +5,7 @@ import {
   getSatisfactionRows,
   getClientSatisfactionDetail,
   getClientExecutionSnapshot,
+  getClientMediaExchange,
 } from "@/lib/data/satisfaction";
 import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
@@ -24,7 +25,7 @@ export default async function SatisfactionPage({
   // at-risk-only view. See [[project_ceo_insights_panel]].
   const initialRisk = sp.risk === "1";
 
-  const [clients, keywords, rows, detail, execution, financeMap] = await Promise.all([
+  const [clients, keywords, rows, detail, execution, media, financeMap] = await Promise.all([
     // Picker lists CONTRACT clients only — the agency's actual client book,
     // named from the contract sheet. No-contract Odoo/lead rows (tests,
     // placeholders, un-signed leads) are excluded. See [[project_clients_centralization]].
@@ -35,6 +36,7 @@ export default async function SatisfactionPage({
       ? getClientSatisfactionDetail(session.orgId, selectedId, selectedAnalysisId)
       : Promise.resolve(null),
     selectedId ? getClientExecutionSnapshot(session.orgId, selectedId) : Promise.resolve(null),
+    selectedId ? getClientMediaExchange(session.orgId, selectedId) : Promise.resolve(null),
     getClientFinanceMap(session.orgId),
   ]);
 
@@ -79,6 +81,7 @@ export default async function SatisfactionPage({
         detail={detail}
         financeMap={financeMap}
         execution={execution}
+        media={media}
         selectedId={selectedId}
         selectedAnalysisId={selectedAnalysisId}
         initialRisk={initialRisk}

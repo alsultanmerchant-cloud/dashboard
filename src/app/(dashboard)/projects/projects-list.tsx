@@ -85,6 +85,10 @@ export function ProjectsList({ initial, initialTotal, pageSize }: Props) {
       allCategoriesArchived: flag("allCategoriesArchived"),
       overTimesheets: flag("overTimesheets"),
       onlyWithOverdue: flag("atRisk"),
+      overdueThreshold: (() => {
+        const n = parseInt(params.get("min") ?? "", 10);
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+      })(),
       startDateFrom: str("startDateFrom"),
       startDateTo: str("startDateTo"),
       endDateFrom: str("endDateFrom"),

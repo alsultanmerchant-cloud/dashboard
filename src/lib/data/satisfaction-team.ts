@@ -51,6 +51,7 @@ const roleLabel = (role: string | null): string =>
 
 // ---- Types ---------------------------------------------------------------
 export interface StuckTask {
+  taskId: string | null; // task uuid → deep-link to /tasks/[id]
   taskCode: string | null;
   title: string;
   stage: string;
@@ -126,10 +127,34 @@ async function _getClientTeamActivitySnapshot(
   // ended. The current/weekly view must show ONLY live tasks; a full-period run
   // additionally surfaces archived tasks (flagged historical) as past problems.
   // See [[project_satisfaction_execution_scope_fix]].
-  const notArchived = includeArchived ? "" : "and t.archived_at is null";
+  //
+  // EXCEPT a wound-down (lost/closed) client, whose project was archived wholesale
+  // in Odoo: it has ZERO live tasks, so the strict weekly filter leaves an empty
+  // roster and the analysis' accountability rows get dropped (roster guardrail) —
+  // going blind on exactly the client whose delivery record matters. Probe first:
+  // if there are no live tasks but archived ones exist, treat the weekly run as a
+  // full record so the roster (and accountability) still resolve. Active clients
+  // have live tasks, so this never loosens the filter for them.
+  // Mirror the execution snapshot's fallback condition EXACTLY (liveTasks empty):
+  // no live overdue tasks but archived overdue ones exist ⇒ wound-down client, so
+  // surface its archived work instead of an empty roster. Unstarted `new` tasks do
+  // NOT count as live work — a lost client often keeps a few never-started rows.
+  let effectiveIncludeArchived = includeArchived;
+  if (!includeArchived) {
+    const [probe] = await runSql<{ live_overdue: number; archived_overdue: number }>(`
+with cli_projects as (${proj})
+select
+  count(*) filter (where t.is_overdue and t.archived_at is null) as live_overdue,
+  count(*) filter (where t.is_overdue and t.archived_at is not null) as archived_overdue
+from tasks t join cli_projects cp on cp.id = t.project_id`);
+    if (Number(probe?.live_overdue ?? 0) === 0 && Number(probe?.archived_overdue ?? 0) > 0)
+      effectiveIncludeArchived = true;
+  }
+  const notArchived = effectiveIncludeArchived ? "" : "and t.archived_at is null";
 
   // Query A — the stuck work behind complaints (overdue tasks, fully resolved).
   const stuckRows = await runSql<{
+    id: string;
     task_code: string | null;
     title: string | null;
     stage: string;
@@ -146,7 +171,7 @@ async function _getClientTeamActivitySnapshot(
     last_action_at: string | null;
   }>(`
 with cli_projects as (${proj})
-select t.task_code, t.title, t.stage::text as stage, s.name as service,
+select t.id, t.task_code, t.title, t.stage::text as stage, s.name as service,
   extract(day from now() - t.stage_entered_at)::int as days_stuck,
   (t.archived_at is not null) as archived,
   public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text) as owner_role,
@@ -198,10 +223,20 @@ order by overdue desc, total_open desc`);
 
   // Query C — people roster: everyone assigned to the client's open tasks, with
   // their open/overdue load + author-attributed 30-day activity on this client.
+  //
+  // open/overdue counts are DIRECT-ASSIGNEE only (ta.role_type='agent' = Odoo
+  // task.user_ids) — the person's own to-do list, matching Odoo's "Assignees"
+  // filter. The `account_manager` role is a PROJECT-level slot the sync stamps
+  // onto EVERY task in the project (see importer.ts buildTaskAssignees ~L1425),
+  // so counting it makes an account manager appear to "own" the whole account's
+  // open load (كريم: 47 on one account vs 10 real assignee tasks in Odoo). AMs
+  // still appear in the roster (join keeps their rows) but their number reflects
+  // only what they're personally assigned to execute. See [[project_satisfaction_accountability]].
   const peopleRows = await runSql<{
     employee_id: string;
     name: string;
     position_role: string | null;
+    position_name: string | null;
     department: string | null;
     open_tasks: number;
     overdue_tasks: number;
@@ -210,9 +245,9 @@ order by overdue desc, total_open desc`);
   }>(`
 with cli_projects as (${proj}),
 cli_tasks as (select t.id, t.is_overdue, t.stage::text as stage from tasks t join cli_projects cp on cp.id = t.project_id where true ${notArchived})
-select e.id as employee_id, e.full_name as name, pos.role as position_role, d.name as department,
-  count(distinct ct.id) filter (where ct.stage <> 'done') as open_tasks,
-  count(distinct ct.id) filter (where ct.is_overdue) as overdue_tasks,
+select e.id as employee_id, e.full_name as name, pos.role as position_role, pos.name as position_name, d.name as department,
+  count(distinct ct.id) filter (where ct.stage <> 'done' and ta.role_type = 'agent') as open_tasks,
+  count(distinct ct.id) filter (where ct.is_overdue and ta.role_type = 'agent') as overdue_tasks,
   (select count(*) from task_comments tc
      where tc.actor_employee_id = e.id and tc.task_id in (select id from cli_tasks)
        and tc.created_at > now() - interval '30 days') as actions_30d,
@@ -224,11 +259,12 @@ join employee_profiles e on e.id = ta.employee_id
 left join positions pos on pos.id = e.position_id
 left join departments d on d.id = e.department_id
 where ta.role_type in ('agent', 'account_manager')
-group by e.id, e.full_name, pos.role, d.name
+group by e.id, e.full_name, pos.role, pos.name, d.name
 order by overdue_tasks desc, actions_30d desc, open_tasks desc
 limit ${MAX_PEOPLE}`);
 
   const stuckTasks: StuckTask[] = stuckRows.map((r) => ({
+    taskId: r.id,
     taskCode: r.task_code,
     title: (r.title ?? "").trim() || "—",
     stage: r.stage,
@@ -255,7 +291,12 @@ limit ${MAX_PEOPLE}`);
     employeeId: r.employee_id,
     name: r.name,
     positionRole: r.position_role,
-    positionLabel: roleLabel(r.position_role),
+    // Prefer the real position TITLE (centralized from Odoo, e.g. "مدير قسم
+    // إدارة الحسابات") over the coarse role enum. `positions.role` conflates org
+    // rank with task-attribution role — a department manager carries
+    // role='account_manager'/'specialist' — so labeling by role alone mislabels
+    // leadership. See leadership.ts + [[project_org_hierarchy_levels]].
+    positionLabel: r.position_name?.trim() || roleLabel(r.position_role),
     department: r.department,
     openTasks: Number(r.open_tasks ?? 0),
     overdueTasks: Number(r.overdue_tasks ?? 0),

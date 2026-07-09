@@ -6,6 +6,7 @@ import type { LiveProject } from "@/lib/odoo/live";
 import { compileFilterTree } from "@/lib/custom-filter/postgrest";
 import { getProjectField } from "@/lib/custom-filter/projects-fields";
 import type { FilterTree } from "@/lib/custom-filter/types";
+import { getProjectsAtRiskIds } from "@/lib/data/executive-indicators";
 
 export interface ListProjectsPagedResult {
   rows: LiveProject[];
@@ -42,11 +43,17 @@ export interface ListProjectsPagedOpts {
   allCategoriesArchived?: boolean;
   /** Project has at least one task where logged hours exceed allocated. */
   overTimesheets?: boolean;
-  /** "At risk": project has at least one OPEN (non-archived, not done) overdue
-   *  task. Mirrors the executive scores card's `riskProjects` count exactly, so
-   *  the dashboard drill-down lands on the same project set. Resolved to an id
-   *  whitelist (like the agent scope) rather than a new RPC param. */
+  /** "At risk": project has at least `overdueThreshold` OPEN tasks past their
+   *  deadline (any stage). Mirrors the Executive-Indicators "Projects At Risk"
+   *  (threshold 1) / "High-Risk" (configured threshold) cards EXACTLY via the
+   *  shared getProjectsAtRiskIds() source of truth, so the dashboard drill-down
+   *  lands on the same project set the card counted. Resolved to an id whitelist
+   *  (like the agent scope) rather than a new RPC param. */
   onlyWithOverdue?: boolean;
+  /** Min open-overdue tasks per project for the `onlyWithOverdue` set. Default
+   *  1 (the "Projects At Risk" card); the "High-Risk" drill-down passes its
+   *  configured threshold so its list matches its smaller count. */
+  overdueThreshold?: number;
   /** ISO YYYY-MM-DD bounds. */
   startDateFrom?: string;
   startDateTo?: string;
@@ -184,34 +191,16 @@ function safeTarget(v: string | null): LiveProject["target"] {
  * counts).
  */
 /**
- * Distinct project ids that have at least one OPEN (non-archived, not done)
- * overdue task. Same predicate as the executive scores card's `riskProjects`
- * (executive-scores.ts), so the dashboard "مشاريع معرضة للخطر" drill-down opens
- * exactly that project set. Paginated to stay correct past PostgREST's 1000-row
- * cap even though the open-task set is currently small.
+ * Distinct project ids behind the dashboard "مشاريع معرضة للخطر" card. Delegates
+ * to the shared getProjectsAtRiskIds() so the drill-down opens EXACTLY the set
+ * the card counted — same definition (≥ threshold open tasks past deadline, any
+ * stage, active project, HOLD/LOST/closed clients excluded) and same Riyadh
+ * "today". Previously this used the `is_overdue` column, which excludes the
+ * not-started `new` stage and so returned a different (smaller) set than the
+ * card — the "card says 39, list shows 23" mismatch (Sky Light 2026-07-09).
  */
-async function resolveOverdueProjectIds(orgId: string): Promise<string[]> {
-  const ids = new Set<string>();
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseAdmin
-      .from("tasks")
-      .select("project_id")
-      .eq("organization_id", orgId)
-      .is("archived_at", null)
-      .neq("stage", "done")
-      .eq("is_overdue", true)
-      .not("project_id", "is", null)
-      .range(from, from + PAGE - 1);
-    if (error) {
-      console.warn(`[resolveOverdueProjectIds] ${error.message}`);
-      break;
-    }
-    const rows = (data ?? []) as Array<{ project_id: string | null }>;
-    for (const r of rows) if (r.project_id) ids.add(r.project_id);
-    if (rows.length < PAGE) break;
-  }
-  return [...ids];
+async function resolveOverdueProjectIds(orgId: string, threshold = 1): Promise<string[]> {
+  return getProjectsAtRiskIds(orgId, threshold);
 }
 
 export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<ListProjectsPagedResult> {
@@ -233,7 +222,7 @@ export async function listProjectsPaged(opts: ListProjectsPagedOpts): Promise<Li
 
   // "At risk" drill-down: intersect with projects carrying an open overdue task.
   if (opts.onlyWithOverdue) {
-    const overdueIds = await resolveOverdueProjectIds(opts.organizationId);
+    const overdueIds = await resolveOverdueProjectIds(opts.organizationId, opts.overdueThreshold ?? 1);
     const allowed = new Set(overdueIds);
     customIds = customIds == null
       ? [...allowed]

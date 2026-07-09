@@ -1,6 +1,7 @@
 // TEMPORARY batch re-analysis route — forces fresh client-satisfaction analyses
-// on the current GEMINI_MODEL, bypassing the daily cron's dedup, so the board
-// reflects the new model + corrected structure. Auth: CRON_SECRET. DELETE after.
+// through analyzeClientSatisfaction(), bypassing the daily cron's dedup, so the
+// board reflects the current satisfaction model + corrected structure.
+// Auth: CRON_SECRET. DELETE after.
 //
 //   ?limit=N   how many clients to process this call (default 3)
 //   ?offset=N  slice start into the deterministic eligible list (default 0)

@@ -17,7 +17,7 @@ export function TopbarCalendarPopover({ className }: { className?: string }) {
       title="جدول الأنشطة"
       prefetch={false}
     >
-      <CalendarDays className="size-4 text-white/90 dark:text-muted-foreground" />
+      <CalendarDays className="size-4 text-primary dark:text-muted-foreground" />
       <span className="sr-only">الأنشطة المجدولة</span>
     </Link>
   );

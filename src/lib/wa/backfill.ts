@@ -74,7 +74,7 @@ export async function backfillAccountHistory(
       try {
         const hist = await fetchChatHistory(chatId, HISTORY_LIMIT, sessionId);
         const msgs: NormalMessage[] = hist
-          .filter((m) => m.body && m.body.trim().length > 0)
+          .filter((m) => (m.body && m.body.trim().length > 0) || m.media)
           .map((m) => ({
             chatId,
             chatName,
@@ -86,6 +86,7 @@ export async function backfillAccountHistory(
             messageType: m.type,
             isFromMe: m.fromMe,
             sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
+            media: m.media ?? null,
           }));
         let added = 0;
         if (msgs.length > 0) {

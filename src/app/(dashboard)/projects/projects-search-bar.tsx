@@ -373,15 +373,15 @@ export function ProjectsSearchBar() {
     <div ref={wrapperRef} className="relative min-w-0 flex-1">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border border-white/45 bg-white/8 px-3 py-1.5 text-xs text-white backdrop-blur-md transition-colors",
-          open && "border-white/60 ring-2 ring-white/20",
+          "flex items-center gap-2 rounded-full border border-white/75 bg-white/95 px-3 py-1.5 text-xs text-foreground shadow-[0_14px_34px_rgba(20,16,60,0.16)] backdrop-blur-md transition-colors dark:border-white/45 dark:bg-white/8 dark:text-white",
+          open && "border-white ring-2 ring-primary/20 dark:border-white/60 dark:ring-white/20",
         )}
       >
         <button
           type="button"
           aria-label={t("aria.projectFilters")}
           onClick={() => setOpen((v) => !v)}
-          className="grid size-6 shrink-0 place-items-center rounded-full bg-white/10 text-white/80 transition-colors hover:bg-white/16 hover:text-white"
+          className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/10 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/16 dark:hover:text-white"
         >
           <Filter className="size-3.5" />
         </button>
@@ -423,7 +423,7 @@ export function ProjectsSearchBar() {
           </span>
         )}
         {groupBy && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-dim px-2 py-0.5 text-[11px] font-medium text-status-warning dark:bg-amber-400/15 dark:text-amber-200">
             {t("chips.groupedBy", {
               label: groupOptions.find((g) => g.key === groupBy)?.label ?? groupBy,
             })}
@@ -438,7 +438,7 @@ export function ProjectsSearchBar() {
         )}
         {/* Custom-filter pill — clicking the body re-opens the rule dialog. */}
         {customTree && customFilterLabel && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-violet-400/15 px-2 py-0.5 text-[11px] font-medium text-violet-100">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary dark:bg-violet-400/15 dark:text-violet-100">
             <button
               type="button"
               onClick={(event) => {
@@ -489,7 +489,7 @@ export function ProjectsSearchBar() {
             </span>
           </span>
         ))}
-        <Search className="size-3.5 shrink-0 text-white/80" />
+        <Search className="size-3.5 shrink-0 text-primary/70 dark:text-white/80" />
         <input
           type="search"
           value={query}
@@ -507,14 +507,14 @@ export function ProjectsSearchBar() {
             }
           }}
           placeholder={t("searchPlaceholder")}
-          className="min-w-0 flex-1 bg-transparent text-white placeholder:text-white/60 focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-foreground placeholder:text-muted-foreground/70 focus:outline-none dark:text-white dark:placeholder:text-white/60"
         />
         {query && (
           <button
             type="button"
             onClick={clearQuery}
             aria-label={t("aria.clearSearch")}
-            className="text-white/80 transition-colors hover:text-white"
+            className="text-primary/75 transition-colors hover:text-primary dark:text-white/80 dark:hover:text-white"
           >
             <X className="size-3.5" />
           </button>
@@ -524,8 +524,8 @@ export function ProjectsSearchBar() {
           onClick={() => setOpen((v) => !v)}
           aria-label={t("aria.openProjectOptions")}
           className={cn(
-            "rounded p-0.5 text-white/80 transition-colors hover:text-white",
-            open && "text-cyan",
+            "rounded p-0.5 text-primary/75 transition-colors hover:text-primary dark:text-white/80 dark:hover:text-white",
+            open && "text-primary dark:text-cyan",
           )}
         >
           <ChevronDown

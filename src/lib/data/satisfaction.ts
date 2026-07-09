@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
-import type { ClientTeamActivitySnapshot } from "@/lib/data/satisfaction-team";
+import type { ClientTeamActivitySnapshot, StuckTask } from "@/lib/data/satisfaction-team";
 import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
 import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
@@ -377,6 +377,29 @@ async function _getAnalysisById(
 }
 export const getAnalysisById = cache(_getAnalysisById);
 
+// Fill in taskId on a frozen roster's stuck tasks by resolving their task_code
+// against the live tasks table. Mutates in place. Only queries codes still
+// missing an id, so re-running on already-hydrated snapshots is a no-op.
+async function hydrateStuckTaskIds(orgId: string, stuckTasks: StuckTask[]): Promise<void> {
+  const codes = [
+    ...new Set(stuckTasks.filter((t) => !t.taskId && t.taskCode).map((t) => t.taskCode as string)),
+  ];
+  if (codes.length === 0) return;
+  const { data } = await supabaseAdmin
+    .from("tasks")
+    .select("id, task_code")
+    .eq("organization_id", orgId)
+    .in("task_code", codes);
+  if (!data?.length) return;
+  const idByCode = new Map<string, string>();
+  for (const r of data as Array<{ id: string; task_code: string | null }>) {
+    if (r.task_code) idByCode.set(r.task_code, r.id);
+  }
+  for (const t of stuckTasks) {
+    if (!t.taskId && t.taskCode) t.taskId = idByCode.get(t.taskCode) ?? null;
+  }
+}
+
 async function _getClientSatisfactionDetail(
   orgId: string,
   clientId: string,
@@ -464,6 +487,17 @@ async function _getClientSatisfactionDetail(
     if (picked) analysis = picked;
   }
 
+  // Resolve task_code → task id for the shown analysis's roster. The frozen
+  // team_context only carries taskId for analyses run after that field was
+  // added, so older snapshots have null ids and their accountability chips would
+  // fall back to a code search. Hydrate the ids here (one query) so every chip
+  // deep-links straight to /tasks/[id]. Every accountability taskCode is
+  // guaranteed to be a stuckTasks code (analyze-time roster validation), so
+  // resolving stuckTasks covers the panel.
+  if (analysis?.teamContext?.stuckTasks?.length) {
+    await hydrateStuckTaskIds(orgId, analysis.teamContext.stuckTasks);
+  }
+
   const history: AnalysisHistoryItem[] = (
     (historyRes.data ?? []) as Array<Record<string, unknown>>
   ).map((r) => ({
@@ -505,6 +539,44 @@ export interface MergedTranscripts {
 function renderWaLine(sentAt: string | null, sender: string | null, body: string): string {
   const ts = sentAt ? sentAt.slice(0, 16).replace("T", " ") : "?";
   return `[${ts}] ${sender ?? "—"}: ${body}`;
+}
+
+// Turn a WhatsApp message into the transcript text the model reads — MEDIA-AWARE.
+// Media itself (image pixels, PDF/audio contents) is never stored, so we can't
+// read it. But the TEXT that rides with media is real, high-value client signal
+// and used to be dropped entirely:
+//   - image/video caption  → the client's own words (approvals, complaints, asks)
+//   - document filename     → what was exchanged ("عقد.pdf", "التقرير الشهري")
+//   - vcard/location body   → the shared contact / place
+// We label the media-borne lines so the model knows a file/image accompanied the
+// text (and must NOT invent the file's contents). Returns null to skip a message
+// with no usable text (pure sticker/voice-note/empty image, or a system notice).
+function waMessageText(type: string, body: string): string | null {
+  const t = (type || "chat").toLowerCase();
+  const b = body.trim();
+  switch (t) {
+    case "chat":
+    case "text":
+      return b || null;
+    // Caption-bearing media: the caption is the client speaking, prefixed so the
+    // model knows an image/video was attached.
+    case "image":
+      return b ? `[صورة] ${b}` : null;
+    case "video":
+      return b ? `[فيديو] ${b}` : null;
+    // A shared document — the filename is the signal (brief/contract/report/invoice).
+    case "document":
+      return b ? `[ملف: ${b}]` : null;
+    case "vcard":
+      return b ? `[جهة اتصال: ${b}]` : null;
+    case "location":
+      return b ? `[موقع: ${b}]` : null;
+    // Pure media with no text (voice notes, stickers, albums, empty images) and
+    // system notices (gp2 group events, e2e/history notices) carry no client
+    // signal for satisfaction — skip rather than fabricate a placeholder.
+    default:
+      return null;
+  }
 }
 
 // Resolve the FULL set of WhatsApp groups that belong to a client from the
@@ -651,11 +723,12 @@ async function _buildClientTranscripts(
   }>) {
     const kind: GroupKind =
       (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
-    const type = r.message_type ?? "chat";
-    if (type !== "chat" && type !== "text") continue;
-    const body = (r.body ?? "").trim();
-    if (!body) continue;
-    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, body));
+    // Media-aware: keep image/video captions, document filenames, and shared
+    // contacts/locations (labeled) — not just plain chat. Skips messages with no
+    // usable text. See waMessageText().
+    const text = waMessageText(r.message_type ?? "chat", r.body ?? "");
+    if (!text) continue;
+    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, text));
     counts[kind] += 1;
   }
 
@@ -670,6 +743,221 @@ async function _buildClientTranscripts(
   };
 }
 export const buildClientTranscripts = cache(_buildClientTranscripts);
+
+// ---- Media & files exchanged (evidence surfaced next to the analysis) ------
+// We never store the media BINARY (no image pixels / PDF bytes), only the text
+// that rode with it: document filenames, image/video captions, shared
+// contacts/locations. This surfaces that exchange as evidence — what the client
+// sent (briefs, reports, contracts, screenshots) and when — resolved via the
+// SAME link graph the transcript uses, so it matches what the analysis read.
+export interface MediaItem {
+  kind: GroupKind; // client 💫 vs technical 📍 group
+  sender: string | null;
+  date: string | null; // ISO
+  text: string; // filename (documents) or caption (image/video/…)
+}
+export interface ClientMediaExchange {
+  documents: MediaItem[]; // files shared (filename is the signal)
+  images: MediaItem[]; // captioned images
+  videos: MediaItem[]; // captioned videos
+  others: MediaItem[]; // vcard / location (with text)
+  documentCount: number;
+  imageCount: number;
+  videoCount: number;
+  otherCount: number;
+  voiceNotes: number; // ptt count (no text — not stored)
+  silentImages: number; // images with no caption (pixels not stored)
+  totalMedia: number; // every non-chat media message in scope
+}
+
+const MEDIA_PER_CATEGORY = 20;
+
+async function _getClientMediaExchange(
+  orgId: string,
+  clientId: string,
+): Promise<ClientMediaExchange> {
+  const chatKinds = await resolveClientGroupChats(orgId, clientId);
+  const chatIds = Array.from(chatKinds.keys());
+  const empty: ClientMediaExchange = {
+    documents: [],
+    images: [],
+    videos: [],
+    others: [],
+    documentCount: 0,
+    imageCount: 0,
+    videoCount: 0,
+    otherCount: 0,
+    voiceNotes: 0,
+    silentImages: 0,
+    totalMedia: 0,
+  };
+  if (chatIds.length === 0) return empty;
+
+  const { data } = await supabaseAdmin
+    .from("wa_messages")
+    .select("chat_id, group_kind, sender, body, sent_at, message_type")
+    .eq("organization_id", orgId)
+    .in("chat_id", chatIds)
+    .in("message_type", ["document", "image", "video", "ptt", "audio", "vcard", "location"])
+    .order("sent_at", { ascending: false })
+    .limit(2000);
+  if (!data || data.length === 0) return empty;
+
+  const out: ClientMediaExchange = { ...empty, documents: [], images: [], videos: [], others: [] };
+  for (const r of data as Array<{
+    chat_id: string | null;
+    group_kind: GroupKind | null;
+    sender: string | null;
+    body: string | null;
+    sent_at: string | null;
+    message_type: string | null;
+  }>) {
+    out.totalMedia += 1;
+    const kind: GroupKind =
+      (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
+    const type = (r.message_type ?? "").toLowerCase();
+    const text = (r.body ?? "").trim();
+    const item: MediaItem = { kind, sender: r.sender, date: r.sent_at, text };
+    if (type === "ptt" || type === "audio") {
+      out.voiceNotes += 1;
+    } else if (type === "document") {
+      out.documentCount += 1;
+      if (text && out.documents.length < MEDIA_PER_CATEGORY) out.documents.push(item);
+    } else if (type === "image") {
+      out.imageCount += 1;
+      if (!text) out.silentImages += 1;
+      else if (out.images.length < MEDIA_PER_CATEGORY) out.images.push(item);
+    } else if (type === "video") {
+      out.videoCount += 1;
+      if (text && out.videos.length < MEDIA_PER_CATEGORY) out.videos.push(item);
+    } else if (type === "vcard" || type === "location") {
+      out.otherCount += 1;
+      if (text && out.others.length < MEDIA_PER_CATEGORY)
+        out.others.push({ ...item, text: `${type === "vcard" ? "جهة اتصال" : "موقع"}: ${text}` });
+    }
+  }
+  return out;
+}
+export const getClientMediaExchange = cache(_getClientMediaExchange);
+
+// ---- Stored media for multimodal satisfaction analysis --------------------
+// These are the actual bytes captured by the WhatsApp webhook. Historical rows
+// before migration 0241 may only have captions/filenames, so this returns only
+// media that was physically stored in the private `wa-media` bucket.
+export interface ClientStoredMediaAttachment {
+  label: string;
+  messageType: string;
+  mimeType: string;
+  filename: string | null;
+  sentAt: string | null;
+  sender: string | null;
+  groupKind: GroupKind;
+  bytes: Buffer;
+}
+
+const AI_MEDIA_MAX_ITEMS = 16;
+const AI_MEDIA_MAX_ITEM_BYTES = 8 * 1024 * 1024;
+const AI_MEDIA_MAX_TOTAL_BYTES = 35 * 1024 * 1024;
+
+function aiReadableMime(mime: string | null, messageType: string | null): string | null {
+  const m = (mime ?? "").toLowerCase();
+  const t = (messageType ?? "").toLowerCase();
+  if (m.startsWith("image/")) return m;
+  if (m === "application/pdf") return m;
+  if (m.startsWith("audio/")) return m;
+  if (m.startsWith("video/")) return m;
+  if (t === "image") return "image/jpeg";
+  if (t === "video") return "video/mp4";
+  if (t === "audio" || t === "ptt") return "audio/ogg";
+  return null;
+}
+
+async function _getClientStoredMediaAttachments(
+  orgId: string,
+  clientId: string,
+  opts?: { sinceDays?: number },
+): Promise<ClientStoredMediaAttachment[]> {
+  const chatKinds = await resolveClientGroupChats(orgId, clientId);
+  const chatIds = Array.from(chatKinds.keys());
+  if (chatIds.length === 0) return [];
+
+  let query = supabaseAdmin
+    .from("wa_messages")
+    .select(
+      "chat_id, group_kind, sender, body, sent_at, message_type, media_storage_path, media_mime_type, media_filename, media_size_bytes",
+    )
+    .eq("organization_id", orgId)
+    .in("chat_id", chatIds)
+    .not("media_storage_path", "is", null)
+    .order("sent_at", { ascending: false })
+    .limit(80);
+
+  if (opts?.sinceDays) {
+    query = query.gte(
+      "sent_at",
+      new Date(Date.now() - opts.sinceDays * 86_400_000).toISOString(),
+    );
+  }
+
+  const { data } = await query;
+  const out: ClientStoredMediaAttachment[] = [];
+  let totalBytes = 0;
+
+  for (const r of (data ?? []) as Array<{
+    chat_id: string | null;
+    group_kind: GroupKind | null;
+    sender: string | null;
+    body: string | null;
+    sent_at: string | null;
+    message_type: string | null;
+    media_storage_path: string | null;
+    media_mime_type: string | null;
+    media_filename: string | null;
+    media_size_bytes: number | null;
+  }>) {
+    if (!r.media_storage_path) continue;
+    const mimeType = aiReadableMime(r.media_mime_type, r.message_type);
+    if (!mimeType) continue;
+    if ((r.media_size_bytes ?? 0) > AI_MEDIA_MAX_ITEM_BYTES) continue;
+    if (out.length >= AI_MEDIA_MAX_ITEMS) break;
+
+    const { data: blob, error } = await supabaseAdmin.storage
+      .from("wa-media")
+      .download(r.media_storage_path);
+    if (error || !blob) continue;
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > AI_MEDIA_MAX_ITEM_BYTES) continue;
+    if (totalBytes + bytes.byteLength > AI_MEDIA_MAX_TOTAL_BYTES) break;
+
+    totalBytes += bytes.byteLength;
+    const kind: GroupKind =
+      (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
+    const date = r.sent_at ? r.sent_at.slice(0, 16).replace("T", " ") : "?";
+    const typeLabel =
+      r.message_type === "image"
+        ? "صورة"
+        : r.message_type === "video"
+          ? "فيديو"
+          : r.message_type === "ptt" || r.message_type === "audio"
+            ? "ملف صوتي"
+            : "ملف";
+    out.push({
+      label: `[${date}] ${kind === "client" ? "مجموعة العميل" : "مجموعة الفريق"} — ${r.sender ?? "—"} — ${typeLabel}${
+        r.media_filename ? ` (${r.media_filename})` : ""
+      }${r.body ? ` — النص المصاحب: ${r.body.trim().slice(0, 280)}` : ""}`,
+      messageType: r.message_type ?? "file",
+      mimeType,
+      filename: r.media_filename,
+      sentAt: r.sent_at,
+      sender: r.sender,
+      groupKind: kind,
+      bytes,
+    });
+  }
+
+  return out.reverse();
+}
+export const getClientStoredMediaAttachments = cache(_getClientStoredMediaAttachments);
 
 // ---- Client execution snapshot (ties satisfaction to real delivery work) -
 // Surfaces the client's actually-delayed tasks next to the AI analysis, so a
@@ -691,6 +979,7 @@ export interface ExecutionTask {
   dueDate: string | null;
   stageEnteredAt: string | null;
   archived: boolean; // Odoo-archived task (historical; only in full-period runs)
+  done: boolean; // task is completed (stage = done) — used by the delivery-state list
 }
 
 // Full-period runs surface only the WORST archived delays (not every archived
@@ -707,6 +996,16 @@ export interface ClientExecutionSnapshot {
   // Bottlenecks line and the UI.
   bottlenecks: Array<{ stage: string; count: number; pct: number }>;
   topTasks: ExecutionTask[]; // worst-stuck first
+  // Actual delivery state, independent of overdue: the client's in-flight tasks
+  // (stage not in new/done) plus recent completed milestones. Lets the AI
+  // cross-check chat-derived claims ("الحملة لم تُطلق") against real task states
+  // (إطلاق الحملة = done) instead of guessing. Includes archived tasks so a
+  // wound-down client's delivery record stays visible.
+  keyTasks: ExecutionTask[];
+  // True when the ONLY tasks we could surface are Odoo-archived — i.e. the whole
+  // project was wound down (lost/closed client). Signals the prompt to frame the
+  // task data as the delivery record of a closed engagement, not "current work".
+  allArchived: boolean;
 }
 
 async function _getClientExecutionSnapshot(
@@ -764,6 +1063,7 @@ async function _getClientExecutionSnapshot(
     dueDate: r.due_date,
     stageEnteredAt: r.stage_entered_at,
     archived: !!r.archived_at,
+    done: (r.stage ?? "") === "done",
   });
 
   // Odoo-archived tasks keep is_overdue=true forever (the flag is never cleared
@@ -773,16 +1073,68 @@ async function _getClientExecutionSnapshot(
   // historical problems. See [[project_satisfaction_execution_scope_fix]].
   const overdueRows = rows.filter((r) => r.is_overdue);
   const liveTasks = overdueRows.filter((r) => !r.archived_at).map(toTask);
-  const archivedBigDelay = includeArchived
-    ? overdueRows
-        .filter((r) => r.archived_at)
-        .map(toTask)
-        .filter((t) => (t.overdueDays ?? 0) >= ARCHIVED_BIG_DELAY_DAYS)
-        .sort((a, b) => (b.overdueDays ?? 0) - (a.overdueDays ?? 0))
-        .slice(0, ARCHIVED_TASK_CAP)
-    : [];
+  const worstArchived = overdueRows
+    .filter((r) => r.archived_at)
+    .map(toTask)
+    .filter((t) => (t.overdueDays ?? 0) >= ARCHIVED_BIG_DELAY_DAYS)
+    .sort((a, b) => (b.overdueDays ?? 0) - (a.overdueDays ?? 0))
+    .slice(0, ARCHIVED_TASK_CAP);
+  // A wound-down (lost/closed) client has EVERY task archived, so the live-only
+  // weekly view returns nothing and the AI is told "no tasks" — going blind on
+  // exactly the client whose delivery history matters most. When there are no
+  // live overdue tasks, fall back to the worst archived delays even in the weekly
+  // view (flagged historical), so the analysis still sees the real delivery
+  // record instead of a false "no delays". Active clients keep live tasks, so
+  // this fallback never adds stale noise for them.
+  // See [[project_satisfaction_execution_scope_fix]].
+  const archivedBigDelay = includeArchived || liveTasks.length === 0 ? worstArchived : [];
   const tasks = [...liveTasks, ...archivedBigDelay];
-  if (tasks.length === 0) return null;
+
+  // Part 2 — actual delivery state, NOT gated on overdue. In-flight tasks (being
+  // worked or awaiting the client) + recently completed milestones, archived or
+  // not. This is what lets the model verify claims like "الحملة لم تُطلق" against
+  // the real state (إطلاق الحملة = done) rather than guessing from chat alone.
+  const IN_FLIGHT = new Set([
+    "in_progress",
+    "specialist_review",
+    "manager_review",
+    "ready_to_send",
+    "sent_to_client",
+    "client_changes",
+  ]);
+  const RECENT_DONE_DAYS = 60;
+  const KEY_TASK_CAP = 26;
+  // Live (non-archived) work first, then most recent. Keeps an active client's
+  // current tasks ahead of any archived old-cycle rows; for a wound-down client
+  // (all archived) it's a no-op but floats non-archived milestones up.
+  const recency = (a: ExecutionTask, b: ExecutionTask) =>
+    Number(a.archived) - Number(b.archived) ||
+    (b.dueDate ?? "").localeCompare(a.dueDate ?? "") ||
+    (b.stageEnteredAt ?? "").localeCompare(a.stageEnteredAt ?? "");
+  // In-flight work (being worked / awaiting client) is the load-bearing signal —
+  // it must NEVER be crowded out of the cap by completed tasks. Take ALL in-flight
+  // first, then fill remaining slots with the most recent completed milestones.
+  const inFlightTasks = rows
+    .filter((r) => IN_FLIGHT.has(r.stage ?? ""))
+    .map(toTask)
+    .sort(recency);
+  const recentDone = rows
+    .filter((r) => {
+      if ((r.stage ?? "") !== "done") return false;
+      const d = daysSince(r.planned_date ?? r.stage_entered_at);
+      return d != null && d <= RECENT_DONE_DAYS;
+    })
+    .map(toTask)
+    .sort(recency);
+  const keyTasks = [...inFlightTasks, ...recentDone].slice(0, KEY_TASK_CAP);
+
+  // Wound-down = every in-flight task (being worked or awaiting client) is
+  // Odoo-archived, i.e. the whole engagement was closed. Completed (done) tasks
+  // may be non-archived without changing this — it's the LIVE work that's gone.
+  const inFlightRows = rows.filter((r) => IN_FLIGHT.has(r.stage ?? ""));
+  const allArchived = inFlightRows.length > 0 && inFlightRows.every((r) => !!r.archived_at);
+
+  if (tasks.length === 0 && keyTasks.length === 0) return null;
 
   const stageCounts = new Map<string, number>();
   for (const t of tasks) stageCounts.set(t.stage, (stageCounts.get(t.stage) ?? 0) + 1);
@@ -814,6 +1166,8 @@ async function _getClientExecutionSnapshot(
     byStage,
     bottlenecks,
     topTasks,
+    keyTasks,
+    allArchived,
   };
 }
 export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);

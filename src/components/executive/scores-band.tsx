@@ -6,10 +6,8 @@ import {
   AlertTriangle,
   ChevronLeft,
   Hourglass,
-  RefreshCw,
   ShieldCheck,
   Sparkles,
-  Timer,
   TrendingDown,
   TrendingUp,
   Minus,
@@ -230,10 +228,6 @@ const REVIEW_HREF = `/tasks?view=list&sf=${encodeURIComponent(
     { field: "stage", value: "manager_review" },
   ]),
 )}`;
-const CHANGES_HREF = `/tasks?view=list&sf=${encodeURIComponent(
-  JSON.stringify([{ field: "stage", value: "client_changes" }]),
-)}`;
-
 export async function ExecutiveScoresBand({
   data,
   windowLabel,
@@ -244,7 +238,6 @@ export async function ExecutiveScoresBand({
   operational?: OperationalKpis;
 }) {
   const t = await getTranslations("Executive.scores");
-  const th = await getTranslations("Executive.hero");
   const tw = await getTranslations("Executive.workflow");
   const grade = (g: ScoreGrade) => t(`grades.${g}`);
   const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
@@ -303,18 +296,12 @@ export async function ExecutiveScoresBand({
             </span>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center sm:grid-cols-4">
-            <Link
-              href="/projects?atRisk=1"
-              className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
-            >
-              <p className="text-base font-semibold tabular-nums text-amber group-hover:underline">
-                {stability.riskProjects}
-              </p>
-              <Explained text={t("stability.riskProjectsTip")}>
-                <p className="text-[9px] text-muted-foreground">{t("stability.riskProjects")}</p>
-              </Explained>
-            </Link>
+          {/* "مشاريع معرضة للخطر" pill removed here (Sky Light feedback
+              2026-07-09): it duplicated — and contradicted — the headline
+              Projects-At-Risk card in the Executive Indicators row above, which
+              is now the single source for that KPI. The remaining three pills
+              are signals unique to the stability composite. */}
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3 text-center sm:grid-cols-3">
             <Link
               href="/satisfaction?risk=1"
               className="group rounded-xl p-1.5 transition-colors hover:bg-soft-2"
@@ -525,54 +512,14 @@ export async function ExecutiveScoresBand({
         </div>
       </div>
 
-      {/* Operational KPI row — the four at-a-glance counts (on-time, overdue,
-          review backlog, client changes), de-emphasised into compact cards that
-          sit under the indices rather than as their own headline sections. */}
+      {/* Review backlog — the one workflow count that is NOT already shown in
+          the Executive Indicators row above. On-time, overdue and client-changes
+          were removed from here (Sky Light feedback 2026-07-09): on-time/overdue
+          were exact duplicates of the top indicator cards, and the client-changes
+          WIP count even contradicted the top card (current-in-stage vs entered-
+          over-window). Each KPI now appears exactly once on the dashboard. */}
       {operational && (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiMini
-            icon={<Timer className="size-4" />}
-            label={th("onTimeLabel")}
-            value={operational.onTimePct === null ? "—" : `${operational.onTimePct}%`}
-            valueTone={
-              operational.onTimePct === null
-                ? "text-muted-foreground"
-                : operational.onTimePct >= 85
-                  ? "text-cc-green"
-                  : operational.onTimePct >= 70
-                    ? "text-amber"
-                    : "text-cc-red"
-            }
-            delta={<OnTimeDelta trend={operational.onTimeTrend} label={t("vsPrev")} />}
-            sub={
-              `${th("completedToday", { n: operational.completedToday })}` +
-              (operational.delivered > 0
-                ? ` · ${operational.windowLabel} · ${th("onTimeSample", { sample: operational.delivered })}`
-                : ` · ${operational.windowLabel}`)
-            }
-            href="/reports"
-            tip={th("metricTooltips.dashboard_heroOnTime")}
-          />
-          <KpiMini
-            icon={<AlertTriangle className="size-4" />}
-            label={th("overdueLabel")}
-            value={String(operational.overdue)}
-            valueTone={
-              operational.overdue > 50
-                ? "text-cc-red"
-                : operational.overdue > 0
-                  ? "text-amber"
-                  : "text-foreground"
-            }
-            sub={operational.asOf}
-            delta={
-              operational.overdueTrend.available ? (
-                <OverdueDelta delta={operational.overdueTrend.difference} label={t("vsPrev")} />
-              ) : null
-            }
-            href="/tasks?f=overdue"
-            tip={th("metricTooltips.dashboard_heroOverdue")}
-          />
+        <div className="mt-3 sm:max-w-xs">
           <KpiMini
             icon={<Hourglass className="size-4" />}
             label={tw("reviewLabel")}
@@ -587,21 +534,6 @@ export async function ExecutiveScoresBand({
             sub={`${tw("oldest")}: ${days(operational.reviewOldest)} · ${tw("avgDwell")}: ${days(operational.reviewAvg)}`}
             href={REVIEW_HREF}
             tip={tw("metricTooltips.dashboard_reviewIndicator")}
-          />
-          <KpiMini
-            icon={<RefreshCw className="size-4" />}
-            label={tw("changesLabel")}
-            value={String(operational.changesCount)}
-            valueTone={
-              operational.changesCount > 30
-                ? "text-cc-red"
-                : operational.changesCount > 0
-                  ? "text-amber"
-                  : "text-foreground"
-            }
-            sub={`${tw("oldest")}: ${days(operational.changesOldest)} · ${tw("avgDwell")}: ${days(operational.changesAvg)}`}
-            href={CHANGES_HREF}
-            tip={tw("metricTooltips.dashboard_changesIndicator")}
           />
         </div>
       )}
@@ -663,43 +595,3 @@ function KpiMini({
   );
 }
 
-// On-time trend chip: on-time % rising vs the previous period = good (green).
-// (spec KPI 2.D — selected vs previous equivalent period)
-// Shows the percentage-point difference (spec KPI 2.D). Hidden when there is no
-// comparable previous period or the change is flat.
-function OnTimeDelta({ trend, label }: { trend: KpiTrend; label: string }) {
-  if (!trend.available || trend.difference === 0) return null;
-  const up = trend.difference > 0;
-  const Icon = up ? TrendingUp : TrendingDown;
-  return (
-    <span
-      className={cn(
-        "mb-1 inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 text-[10px] font-medium",
-        up ? "text-cc-green" : "text-cc-red",
-      )}
-      title={label}
-    >
-      <Icon className="size-3" />
-      {up ? `+${trend.difference}` : trend.difference}%
-    </span>
-  );
-}
-
-// Overdue WoW chip: positive = more overdue this week = bad (red).
-function OverdueDelta({ delta, label }: { delta: number; label: string }) {
-  if (delta === 0) return null;
-  const up = delta > 0;
-  const Icon = up ? TrendingUp : TrendingDown;
-  return (
-    <span
-      className={cn(
-        "mb-1 inline-flex items-center gap-1 rounded-full bg-soft-1 px-1.5 py-0.5 text-[10px] font-medium",
-        up ? "text-cc-red" : "text-cc-green",
-      )}
-      title={label}
-    >
-      <Icon className="size-3" />
-      {up ? `+${delta}` : delta}
-    </span>
-  );
-}

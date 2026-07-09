@@ -1,5 +1,6 @@
 import "server-only";
 import { generateObject } from "ai";
+import type { ModelMessage, UserContent } from "ai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logAudit, logAiEvent } from "@/lib/audit";
 import {
@@ -12,6 +13,8 @@ import {
   getClientExecutionSnapshot,
   getClientContractContext,
   getClientContractActivity,
+  getClientStoredMediaAttachments,
+  type ExecutionTask,
 } from "@/lib/data/satisfaction";
 import {
   getClientTeamActivitySnapshot,
@@ -91,6 +94,7 @@ export interface SatisfactionInput {
   // output — any name/task-code not present here is dropped on persist.
   team: ClientTeamActivitySnapshot;
   makePrompt: (budget: number) => string;
+  makeMessages: (budget: number) => ModelMessage[];
 }
 
 // Step 1 — assemble the four sources + brief + knowledge into a prompt builder.
@@ -170,27 +174,49 @@ export async function buildSatisfactionInput(
           .map((b) => `${b.stage} ${b.pct}% (${b.count})`)
           .join("، ")}`
       : "";
-  const executionScopeNote = includeArchivedTasks
-    ? "(نطاق كامل التاريخ: تشمل القائمة مهامًا حالية ومهامًا مؤرشفة/تاريخية — المؤرشفة معلّمة 🗄️ وتمثّل مشاكل سابقة، لا الوضع الحالي.)"
-    : "(الوضع الحالي: مهام نشطة فقط — المهام المؤرشفة مستبعدة لأن دورتها انتهت.)";
+  // A wound-down (lost/closed) client has EVERY task archived, so the snapshot's
+  // task data IS the delivery record of a closed engagement — frame it that way
+  // instead of "current work" or "stale historical noise".
+  const executionScopeNote = execution?.allArchived
+    ? "(هذا العميل عقده منتهٍ/مغلق وكل مهامه مؤرشفة في أودو 🗄️ — القائمة أدناه هي سجل التنفيذ الفعلي للتعامل المنتهي، وليست «مهامًا خاملة». اعتمدها كدليل على ما نُفّذ/تأخّر فعلاً.)"
+    : includeArchivedTasks
+      ? "(نطاق كامل التاريخ: تشمل القائمة مهامًا حالية ومهامًا مؤرشفة/تاريخية — المؤرشفة معلّمة 🗄️ وتمثّل مشاكل سابقة، لا الوضع الحالي.)"
+      : "(الوضع الحالي: مهام نشطة فقط — المهام المؤرشفة مستبعدة لأن دورتها انتهت، إلا إن كان العميل منتهيًا فتُعرض مهامه المؤرشفة كسجل تنفيذ.)";
+  const renderTask = (t: ExecutionTask) =>
+    `- ${t.archived ? "🗄️ (مؤرشفة/تاريخية) " : ""}${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
+      t.dueDate ? ` — موعد التسليم: ${t.dueDate}` : ""
+    }${t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""}${
+      t.delayDays != null
+        ? ` — متأخرة ${t.delayDays} يوم عمل`
+        : t.archived && t.overdueDays != null
+          ? ` — كان تأخّرها ~${t.overdueDays} يوم`
+          : ""
+    }`;
+  // Delivery-state list (NOT gated on overdue): shows the AI what was actually
+  // delivered vs still in-flight, so it can verify chat claims (e.g. "الحملة لم
+  // تُطلق") against real task states (إطلاق الحملة = done) instead of guessing.
+  const deliveryStateBlock =
+    execution && execution.keyTasks.length
+      ? `\nحالة التنفيذ الفعلية (منفّذ ✅ أو قيد التنفيذ — استخدمها للتحقق من مزاعم المحادثة قبل نسب أي تقصير):\n${execution.keyTasks
+          .map(
+            (t) =>
+              `- ${t.done ? "✅ منفّذ" : "⏳ قيد التنفيذ"} ${t.archived ? "🗄️ " : ""}${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
+                t.dueDate ? ` — موعد التسليم: ${t.dueDate}` : ""
+              }`,
+          )
+          .join("\n")}`
+      : "";
+  const stuckBlock =
+    execution && execution.topTasks.length
+      ? `\nأبرز المهام العالقة/المتأخرة (مع موعد التسليم إن وُجد):\n${execution.topTasks
+          .map(renderTask)
+          .join("\n")}`
+      : "";
   const executionBlock = execution
     ? `\n\n=== التاسكات والمشروع (مواعيد التسليم + Bottlenecks) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\n${executionScopeNote}\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
         execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
-      }${bottleneckLine}\nأبرز المهام العالقة (مع موعد التسليم إن وُجد):\n${execution.topTasks
-        .map(
-          (t) =>
-            `- ${t.archived ? "🗄️ (مؤرشفة/تاريخية) " : ""}${t.taskCode ? `[${t.taskCode}] ` : ""}${t.title} — مرحلة: ${t.stage}${
-              t.dueDate ? ` — موعد التسليم: ${t.dueDate}` : ""
-            }${t.daysStuck != null ? ` — في هذه المرحلة منذ ~${t.daysStuck} يوم` : ""}${
-              t.delayDays != null
-                ? ` — متأخرة ${t.delayDays} يوم عمل`
-                : t.archived && t.overdueDays != null
-                  ? ` — كان تأخّرها ~${t.overdueDays} يوم`
-                  : ""
-            }`,
-        )
-        .join("\n")}`
-    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام متأخرة نشطة مسجّلة لهذا العميل في رواسم)";
+      }${bottleneckLine}${deliveryStateBlock}${stuckBlock}`
+    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام مسجّلة لهذا العميل في رواسم)";
 
   const contract = await getClientContractContext(orgId, clientId);
   const activity = await getClientContractActivity(orgId, clientId);
@@ -254,6 +280,12 @@ export async function buildSatisfactionInput(
   const teamBlock = renderTeamActivityBlock(team);
 
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
+  const storedMedia = await getClientStoredMediaAttachments(orgId, clientId, {
+    sinceDays: effectiveDays,
+  });
+  const storedMediaBlock = storedMedia.length
+    ? `\n\n=== وسائط مرفقة للتحليل البصري/السمعي ===\nتم إرفاق ${storedMedia.length} ملفًا حقيقيًا من محادثات واتساب في رسالة النموذج نفسها. افحص الصور/الملفات/الصوت كمراجع مباشرة مثل عضو جودة يراجع الدردشة، واربط أي استنتاج بالرسالة/المرسل/التاريخ الظاهر في وصف كل مرفق. لا تعتمد على التخمين إن كان الملف غير واضح.`
+    : "\n\n=== وسائط مرفقة للتحليل البصري/السمعي ===\n(لا توجد ملفات وسائط محفوظة كبيانات قابلة للإرسال للنموذج في هذا النطاق؛ استخدم فقط الكابتشن/أسماء الملفات الموجودة في نص المحادثة.)";
 
   const makePrompt = (budget: number) =>
     `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${clientName}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
@@ -266,6 +298,8 @@ ${
         ? `\n⏱️ النطاق الزمني: آخر ${effectiveDays} يومًا (لا توجد رسائل في آخر ٧ أيام، فتم توسيع النطاق لأحدث محادثة متاحة). قيّم الوضع الحالي بناءً على أحدث تواصل متوفر.\n`
         : `\n⏱️ النطاق الزمني: كامل تاريخ التعامل المتاح (لا توجد محادثة حديثة، استُخدم كامل السجل لأحدث صورة ممكنة).\n`
 }
+ملاحظة عن الوسائط في المحادثات: بعض الأسطر تحمل وسمًا يدل على مرفق: «[صورة] …» و«[فيديو] …» = نص/تعليق أرسله صاحبه مع صورة أو فيديو. إذا كان الملف مرفقًا فعليًا في قسم "وسائط مرفقة"، افحص محتواه مباشرة واستعمله كدليل جودة. إذا لم يكن مرفقًا فعليًا، فالنص/الكابتشن فقط متاح ولا يجوز اختراع محتوى الصورة/الفيديو. «[ملف: اسم]» = العميل/الفريق شارك ملفًا بهذا الاسم؛ إذا كان الملف مرفقًا فعليًا افحصه، وإلا استدل بالاسم فقط. «[جهة اتصال]» و«[موقع]» = مشاركة جهة اتصال أو موقع. اعتبر مشاركة ملف تقرير/تسليم إشارة تسليم، ومشاركة العميل لملف متطلبات/بريف إشارة على تزويد مدخلات.
+
 وصف المصادر:
 1) "مجموعة العميل 💫" — التواصل المباشر مع العميل (الرضا، الشكاوى، التعديلات، الاعتمادات، نبرة العميل).
 2) "مجموعة الفريق التقني 📍" — التنسيق الداخلي (المشاكل التي تمنع التنفيذ، أسباب التأخير، تقييم الفريق للحساب). سياق فقط — ليست طلبات العميل.
@@ -339,7 +373,25 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني 📍 ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${teamBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${teamBlock}${storedMediaBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
+
+  const makeMessages = (budget: number): ModelMessage[] => {
+    const content: UserContent = [{ type: "text", text: makePrompt(budget) }];
+    for (const media of storedMedia) {
+      content.push({ type: "text", text: `\nمرفق واتساب للتحليل: ${media.label}` });
+      if (media.mimeType.startsWith("image/")) {
+        content.push({ type: "image", image: media.bytes, mediaType: media.mimeType });
+      } else {
+        content.push({
+          type: "file",
+          data: media.bytes,
+          mediaType: media.mimeType,
+          filename: media.filename ?? undefined,
+        });
+      }
+    }
+    return [{ role: "user", content }];
+  };
 
   return {
     clientName,
@@ -351,6 +403,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${t
     activity,
     team,
     makePrompt,
+    makeMessages,
   };
 }
 
@@ -516,7 +569,7 @@ export async function analyzeClientSatisfaction(
         model: aiModel("flagship"),
         maxRetries: 2,
         schema: SatisfactionSchema,
-        prompt: input.makePrompt(budget),
+        prompt: input.makeMessages(budget),
       });
       result = object;
       break;

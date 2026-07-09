@@ -3732,6 +3732,18 @@
         "process_gap": "Process gap"
       }
     },
+    "media": {
+      "title": "Media & files exchanged",
+      "hint": "Total files, images and clips shared in the chats by type. The file contents aren't stored.",
+      "count": "{n} media messages",
+      "documents": "Documents",
+      "images": "Images",
+      "videos": "Videos",
+      "voiceNotes": "Audio files",
+      "others": "Other",
+      "captions": "Image & video captions",
+      "silentImages": "+ {n} image(s) with no caption (not readable — pixels aren't stored)"
+    },
     "team": {
       "title": "Team on this account",
       "hint": "Who works this client's tasks and how active they've been (last 30 days).",

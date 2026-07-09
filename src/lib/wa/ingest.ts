@@ -53,6 +53,14 @@ export interface NormalMessage {
   messageType: string;
   isFromMe: boolean;
   sentAt: string | null; // ISO
+  media?: NormalMedia | null;
+}
+
+export interface NormalMedia {
+  dataBase64: string;
+  mimeType: string;
+  filename: string | null;
+  sizeBytes: number | null;
 }
 
 function str(v: unknown): string | null {
@@ -117,6 +125,55 @@ function pickMessageObjects(payload: unknown): Record<string, unknown>[] {
   return [];
 }
 
+function pickObj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return null;
+}
+
+function cleanBase64Data(value: string): string {
+  const comma = value.indexOf(",");
+  return (comma >= 0 ? value.slice(comma + 1) : value).replace(/\s+/g, "");
+}
+
+function extractMedia(m: Record<string, unknown>): NormalMedia | null {
+  const media = pickObj(m.media) ?? pickObj(m.mediaData) ?? pickObj(m._data);
+  const data = firstString(
+    m.data,
+    m.fileData,
+    media?.data,
+    media?.body,
+    media?.fileData,
+  );
+  if (!data) return null;
+
+  const mimeType =
+    firstString(m.mimetype, m.mimeType, media?.mimetype, media?.mimeType) ??
+    "application/octet-stream";
+  const filename = firstString(m.filename, m.fileName, media?.filename, media?.fileName);
+  const sizeBytes = firstNumber(m.size, m.filesize, m.fileSize, media?.size, media?.fileSize);
+
+  return {
+    dataBase64: cleanBase64Data(data),
+    mimeType,
+    filename,
+    sizeBytes,
+  };
+}
+
 export function normalizeWaEvents(payload: unknown): NormalMessage[] {
   const objs = pickMessageObjects(payload);
   const out: NormalMessage[] = [];
@@ -171,6 +228,7 @@ export function normalizeWaEvents(payload: unknown): NormalMessage[] {
       messageType: type,
       isFromMe: m.fromMe === true,
       sentAt,
+      media: extractMedia(m),
     });
   }
   return out;
@@ -181,6 +239,56 @@ export interface IngestResult {
   ingested: number;
   skipped: number;
   chats: string[];
+}
+
+const MAX_WA_MEDIA_BYTES = 15 * 1024 * 1024;
+
+function safePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "file";
+}
+
+function extensionForMime(mime: string): string {
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/gif") return "gif";
+  if (mime === "video/mp4") return "mp4";
+  if (mime === "audio/mpeg") return "mp3";
+  if (mime === "audio/ogg" || mime === "audio/opus") return "ogg";
+  if (mime === "application/pdf") return "pdf";
+  return "bin";
+}
+
+async function persistWaMedia(orgId: string, message: NormalMessage) {
+  if (!message.media) return null;
+
+  const bytes = Buffer.from(message.media.dataBase64, "base64");
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_WA_MEDIA_BYTES) return null;
+
+  const filename =
+    message.media.filename ??
+    `${message.waMessageId}.${extensionForMime(message.media.mimeType)}`;
+  const storagePath = [
+    orgId,
+    safePathSegment(message.chatId),
+    `${safePathSegment(message.waMessageId)}-${safePathSegment(filename)}`,
+  ].join("/");
+
+  const { error } = await supabaseAdmin.storage.from("wa-media").upload(storagePath, bytes, {
+    contentType: message.media.mimeType,
+    upsert: true,
+  });
+  if (error) {
+    console.warn(`[wa] media upload failed for ${message.waMessageId}: ${error.message}`);
+    return null;
+  }
+
+  return {
+    media_storage_path: storagePath,
+    media_mime_type: message.media.mimeType,
+    media_filename: filename,
+    media_size_bytes: message.media.sizeBytes ?? bytes.byteLength,
+  };
 }
 
 // OpenWA may carry a session identifier on the event envelope (shape varies by
@@ -274,8 +382,14 @@ export async function ingestWaMessages(
   }
 
   // Upsert messages (idempotent on org+chat+wa_message_id).
+  const mediaByMessageId = new Map<string, Awaited<ReturnType<typeof persistWaMedia>>>();
+  for (const m of messages) {
+    mediaByMessageId.set(m.waMessageId, await persistWaMedia(orgId, m));
+  }
+
   const rows = messages.map((m) => {
     const link = links.get(m.chatId);
+    const media = mediaByMessageId.get(m.waMessageId);
     return {
       organization_id: orgId,
       chat_id: m.chatId,
@@ -290,12 +404,16 @@ export async function ingestWaMessages(
       message_type: m.messageType,
       is_from_me: m.isFromMe,
       sent_at: m.sentAt,
+      media_storage_path: media?.media_storage_path ?? null,
+      media_mime_type: media?.media_mime_type ?? m.media?.mimeType ?? null,
+      media_filename: media?.media_filename ?? m.media?.filename ?? null,
+      media_size_bytes: media?.media_size_bytes ?? m.media?.sizeBytes ?? null,
     };
   });
 
   const { data, error } = await supabaseAdmin
     .from("wa_messages")
-    .upsert(rows, {
+    .upsert(rows as never, {
       onConflict: "organization_id,chat_id,wa_message_id",
       ignoreDuplicates: true,
     })

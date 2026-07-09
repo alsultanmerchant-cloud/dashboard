@@ -614,25 +614,25 @@ export function SmartSearchBar({
 
   const shellClassName =
     variant === "topbar"
-      ? "border-white/40 bg-white/8 text-white shadow-[0_14px_34px_rgba(20,16,60,0.18)] backdrop-blur-xl"
+      ? "border-white/75 bg-white/95 text-foreground shadow-[0_14px_34px_rgba(20,16,60,0.16)] backdrop-blur-xl dark:border-white/40 dark:bg-white/8 dark:text-white"
       : "border-soft/90 bg-card/95 shadow-[0_12px_28px_rgba(82,65,195,0.08)]";
   const shellOpenClassName =
     variant === "topbar"
-      ? "border-white/65 ring-2 ring-white/20"
+      ? "border-white ring-2 ring-primary/20 dark:border-white/65 dark:ring-white/20"
       : "border-cyan/40 ring-2 ring-cyan/15";
   const iconClassName =
-    variant === "topbar" ? "text-white/80" : "text-muted-foreground";
+    variant === "topbar" ? "text-primary/75 dark:text-white/80" : "text-muted-foreground";
   const inputClassName =
     variant === "topbar"
-      ? "text-white placeholder:text-white/60"
+      ? "text-foreground placeholder:text-muted-foreground/70 dark:text-white dark:placeholder:text-white/60"
       : "text-xs placeholder:text-muted-foreground/60";
   const countClassName =
-    variant === "topbar" ? "text-white/75" : "text-muted-foreground";
+    variant === "topbar" ? "text-primary/70 dark:text-white/75" : "text-muted-foreground";
   const chevronClassName =
-    variant === "topbar" ? "hover:text-white" : "hover:text-foreground";
+    variant === "topbar" ? "hover:text-primary dark:hover:text-white" : "hover:text-foreground";
   const dropdownClassName =
     variant === "topbar"
-      ? "border-white/15 bg-popover/98 backdrop-blur-xl"
+      ? "border-soft/80 bg-popover/98 backdrop-blur-xl dark:border-white/15"
       : "border-soft/80 bg-popover/98 backdrop-blur-xl";
 
   return (
@@ -648,7 +648,7 @@ export function SmartSearchBar({
         <div
           className={cn(
             "flex size-8 shrink-0 items-center justify-center rounded-full",
-            variant === "topbar" ? "bg-white/10" : "bg-soft-1",
+            variant === "topbar" ? "bg-primary/10 dark:bg-white/10" : "bg-soft-1",
           )}
         >
           <Search className={cn("size-3.5 shrink-0", iconClassName)} />
@@ -817,7 +817,7 @@ export function SmartSearchBar({
             "rounded-full p-1 transition-colors",
             iconClassName,
             chevronClassName,
-            open && (variant === "topbar" ? "bg-white/10 text-white" : "bg-soft-1 text-cyan"),
+            open && (variant === "topbar" ? "bg-primary/10 text-primary dark:bg-white/10 dark:text-white" : "bg-soft-1 text-cyan"),
           )}
         >
           <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />

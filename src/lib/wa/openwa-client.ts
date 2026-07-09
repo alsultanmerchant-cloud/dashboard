@@ -349,6 +349,46 @@ export interface WaHistoryMessage {
   type: string;
   timestamp: number; // unix seconds
   fromMe: boolean;
+  media?: {
+    dataBase64: string;
+    mimeType: string;
+    filename: string | null;
+    sizeBytes: number | null;
+  } | null;
+}
+
+function historyObj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function historyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+function historyNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return null;
+}
+
+function historyMedia(m: Record<string, unknown>): WaHistoryMessage["media"] {
+  const media = historyObj(m.media) ?? historyObj(m.mediaData) ?? historyObj(m._data);
+  const data = historyString(m.data, m.fileData, media?.data, media?.body, media?.fileData);
+  if (!data) return null;
+  const comma = data.indexOf(",");
+  return {
+    dataBase64: (comma >= 0 ? data.slice(comma + 1) : data).replace(/\s+/g, ""),
+    mimeType:
+      historyString(m.mimetype, m.mimeType, media?.mimetype, media?.mimeType) ??
+      "application/octet-stream",
+    filename: historyString(m.filename, m.fileName, media?.filename, media?.fileName),
+    sizeBytes: historyNumber(m.size, m.filesize, m.fileSize, media?.size, media?.fileSize),
+  };
 }
 
 // Fetch historical messages for a chat from the WhatsApp-Web store via the
@@ -376,6 +416,7 @@ export async function fetchChatHistory(
     type: String(m.type ?? "chat"),
     timestamp: Number(m.timestamp ?? 0),
     fromMe: m.fromMe === true,
+    media: historyMedia(m),
   })).filter((m) => m.id);
 }
 
