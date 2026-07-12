@@ -3058,6 +3058,12 @@
         "label": "Client Changes",
         "sub": "Tasks that entered the Client Changes stage"
       },
+      "review": {
+        "label": "In review",
+        "sub": "Oldest waiting: {oldest} · Avg in stage: {avg}",
+        "daysValue": "{n}d",
+        "tooltip": "Open tasks waiting in a review stage (specialist review + manager review). 'Oldest waiting' is the longest one; 'Avg in stage' is the mean wait. Opens the filtered task list."
+      },
       "service": {
         "title": "Service Delivery Performance",
         "colService": "Service",

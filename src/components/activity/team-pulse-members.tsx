@@ -61,8 +61,10 @@ function CompletedSplit({ today, week }: { today: number; week: number }) {
   );
 }
 
-// مُعلقة — tasks whose current stage the person OWNS: how many are past their
-// deadline (SLA / deadline-commitment signal, red) out of the total on their desk.
+// مُعلقة — tasks whose current stage the person OWNS: how many have breached
+// their STAGE SLA (sat in the current stage longer than that stage's allowance,
+// red) out of the total on their desk. "Late" = per-stage SLA, NOT the ordinary
+// task-deadline overdue; only the 5 SLA-configured stages can be late.
 function PendingCell({ late, owned }: { late: number; owned: number }) {
   if (owned === 0) return <span className="text-muted-foreground">—</span>;
   return (
@@ -163,7 +165,7 @@ export function TeamPulseMembers({
                   <th className="px-3 py-2.5 font-medium text-center">مفتوحة</th>
                   <th
                     className="px-3 py-2.5 font-medium text-center"
-                    title="المهام التي يملك مرحلتها الحالية (على مكتبه الآن) — كم منها تجاوز موعده (متأخرة) من إجمالي ما على مكتبه. مقياس الالتزام بالمواعيد."
+                    title="المهام التي يملك مرحلتها الحالية (على مكتبه الآن) — كم منها تجاوز زمن SLA لمرحلته الحالية (متأخرة) من إجمالي ما على مكتبه. يُقاس التأخّر بحسب SLA المرحلة لا بموعد المهمة، وتُحتسب فقط المراحل الخمس التي لها SLA."
                   >
                     مُعلقة
                   </th>
@@ -189,6 +191,7 @@ export function TeamPulseMembers({
                                 "rounded px-1.5 py-0.5 text-[9px] font-medium",
                                 LOAD_META[m.loadFlag]!.cls,
                               )}
+                              title={`${m.activeProjects} مشروع نشط على مكتبه`}
                             >
                               {LOAD_META[m.loadFlag]!.label}
                             </span>

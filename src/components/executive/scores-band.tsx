@@ -5,7 +5,6 @@ import {
   Activity,
   AlertTriangle,
   ChevronLeft,
-  Hourglass,
   ShieldCheck,
   Sparkles,
   TrendingDown,
@@ -18,9 +17,8 @@ import {
   type ExecutiveScores,
   type ScoreGrade,
 } from "@/lib/data/executive-scores";
-import type { KpiTrend } from "@/lib/data/executive-indicators";
 import { cn } from "@/lib/utils";
-import { Explained, MetricInfo } from "@/components/metric-info";
+import { Explained } from "@/components/metric-info";
 
 // Executive index band: one big Operational Stability hero + the four
 // contributing indices. Each index is a 0-100 composite with a grade,
@@ -198,51 +196,17 @@ function IndexCard({
   );
 }
 
-// Operational KPIs folded into the indicators band (team feedback 2026-06-30):
-// the on-time %, overdue, review-backlog and client-changes cards used to be two
-// separate prominent sections above; they now live as a quieter row inside the
-// المؤشرات التنفيذية block so the dashboard reads as one indicator surface.
-export interface OperationalKpis {
-  onTimePct: number | null;
-  delivered: number;
-  /** ALL tasks completed today (live, Sky Light feedback 2026-07-07). */
-  completedToday: number;
-  /** On-time % trend: selected period vs previous equivalent period. */
-  onTimeTrend: KpiTrend;
-  windowLabel: string;
-  overdue: number;
-  /** Overdue trend: overdue-during-period vs the previous equivalent period. */
-  overdueTrend: KpiTrend;
-  asOf: string;
-  reviewCount: number;
-  reviewOldest: number | null;
-  reviewAvg: number | null;
-  changesCount: number;
-  changesOldest: number | null;
-  changesAvg: number | null;
-}
-
-const REVIEW_HREF = `/tasks?view=list&sf=${encodeURIComponent(
-  JSON.stringify([
-    { field: "stage", value: "specialist_review" },
-    { field: "stage", value: "manager_review" },
-  ]),
-)}`;
 export async function ExecutiveScoresBand({
   data,
   windowLabel,
-  operational,
 }: {
   data: ExecutiveScores;
   windowLabel?: string;
-  operational?: OperationalKpis;
 }) {
   const t = await getTranslations("Executive.scores");
-  const tw = await getTranslations("Executive.workflow");
   const grade = (g: ScoreGrade) => t(`grades.${g}`);
   const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
   const rate = (n: number) => `${Math.round(n * 100)}%`;
-  const days = (n: number | null) => (n === null ? "—" : tw("daysValue", { n }));
 
   const { quality, discipline, productivity, stability } = data;
   const stabilityTone = toneByScore(stability.score);
@@ -511,87 +475,6 @@ export async function ExecutiveScoresBand({
           />
         </div>
       </div>
-
-      {/* Review backlog — the one workflow count that is NOT already shown in
-          the Executive Indicators row above. On-time, overdue and client-changes
-          were removed from here (Sky Light feedback 2026-07-09): on-time/overdue
-          were exact duplicates of the top indicator cards, and the client-changes
-          WIP count even contradicted the top card (current-in-stage vs entered-
-          over-window). Each KPI now appears exactly once on the dashboard. */}
-      {operational && (
-        <div className="mt-3 sm:max-w-xs">
-          <KpiMini
-            icon={<Hourglass className="size-4" />}
-            label={tw("reviewLabel")}
-            value={String(operational.reviewCount)}
-            valueTone={
-              operational.reviewCount > 30
-                ? "text-cc-red"
-                : operational.reviewCount > 0
-                  ? "text-amber"
-                  : "text-foreground"
-            }
-            sub={`${tw("oldest")}: ${days(operational.reviewOldest)} · ${tw("avgDwell")}: ${days(operational.reviewAvg)}`}
-            href={REVIEW_HREF}
-            tip={tw("metricTooltips.dashboard_reviewIndicator")}
-          />
-        </div>
-      )}
     </section>
   );
 }
-
-// Compact operational-KPI card — quieter sibling of IndexCard, used for the
-// four counts folded into the band. One big number + a one-line context.
-function KpiMini({
-  icon,
-  label,
-  value,
-  valueTone,
-  sub,
-  delta,
-  href,
-  tip,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  valueTone: string;
-  sub: string;
-  delta?: ReactNode;
-  href: string;
-  tip?: string;
-}) {
-  return (
-    <div className="relative h-full">
-      {tip ? (
-        <span className="absolute end-3 top-3 z-10">
-          <MetricInfo text={tip} />
-        </span>
-      ) : null}
-      <Link
-        href={href}
-        className="group flex h-full flex-col rounded-2xl border border-soft bg-card p-4 transition-all hover:border-cyan/35"
-      >
-        <div className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-soft-2 text-cyan">
-            {icon}
-          </span>
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            {label}
-          </span>
-        </div>
-        <div className="mt-3 flex items-end gap-2">
-          <span className={cn("text-4xl font-bold tabular-nums leading-none", valueTone)}>
-            {value}
-          </span>
-          {delta}
-        </div>
-        <p className="mt-auto truncate pt-3 text-[11px] text-muted-foreground" title={sub}>
-          {sub}
-        </p>
-      </Link>
-    </div>
-  );
-}
-

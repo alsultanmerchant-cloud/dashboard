@@ -28,6 +28,8 @@ import {
   getStageFunnel,
   getApprovalBottlenecks,
   getServiceLineHealth,
+  getSupportingDepartmentHealth,
+  getTopRevisedTasks,
   getTopStuckProjects,
   getUpcomingDeadlines,
   getStageFlowMatrix,
@@ -50,6 +52,7 @@ import { ServiceHealthSection } from "@/components/executive/service-health";
 import { StuckProjectsSection } from "@/components/executive/stuck-projects";
 import { UpcomingDeadlinesSection } from "@/components/executive/upcoming-deadlines";
 import { StageFlowMatrixSection } from "@/components/executive/stage-flow-matrix";
+import { TopRevisedTasksSection } from "@/components/executive/top-revised";
 import { DashSection } from "@/components/executive/section-boundary";
 import { cn } from "@/lib/utils";
 
@@ -65,45 +68,25 @@ async function BriefSection({ orgId }: { orgId: string }) {
 async function ExecIndicators({ orgId, range }: { orgId: string; range: DashboardRange }) {
   // Executive Indicators (client spec) — each card is a Main live value + a
   // Trend vs the Previous Equivalent Period. docs/EXECUTIVE_INDICATORS_SPEC.md
-  const data = await getExecutiveIndicators(orgId, range);
-  return <ExecutiveIndicatorsRow data={data} />;
-}
-
-async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  // The four operational KPI cards (on-time, overdue, review backlog, client
-  // changes) are folded INTO this indicators band as a compact row, instead of
-  // sitting in their own headline sections above (team feedback 2026-06-30).
-  // On-time card is sourced from the client-spec Executive Indicators (KPI 2) so
-  // it matches the spec definition (selected-period on-time %, completed-today
-  // count, and a trend vs the previous equivalent period) — Sky Light feedback
-  // 2026-07-07. getExecutiveIndicators is React-cached, so this is deduped with
-  // the ExecIndicators section's own call.
-  const [data, exec, workflow] = await Promise.all([
-    getExecutiveScores(orgId, range),
+  const [data, workflow] = await Promise.all([
     getExecutiveIndicators(orgId, range),
     getWorkflowIndicators(orgId),
   ]);
-  // On-time AND overdue are sourced from the client-spec Executive Indicators so
-  // the number is spec-correct (HOLD/LOST-excluded) and carries a trend vs the
-  // previous equivalent period (Sky Light feedback 2026-07-07: the old point-in-
-  // time overdue count was wrong and didn't respond to the date filter).
-  const operational = {
-    onTimePct: exec.onTime.onTimePct,
-    delivered: exec.onTime.completedCount,
-    completedToday: exec.onTime.completedToday,
-    onTimeTrend: exec.onTime.trend,
-    windowLabel: rangeLabel(range),
-    overdue: exec.overdue.mainValue ?? 0,
-    overdueTrend: exec.overdue.trend,
-    asOf: asOfLabel({ ...range, to: riyadhTodayIso() }),
-    reviewCount: workflow.review.count,
-    reviewOldest: workflow.review.oldestDays,
-    reviewAvg: workflow.review.avgDwellDays,
-    changesCount: workflow.clientChanges.count,
-    changesOldest: workflow.clientChanges.oldestDays,
-    changesAvg: workflow.clientChanges.avgDwellDays,
-  };
-  return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} operational={operational} />;
+  return (
+    <ExecutiveIndicatorsRow
+      data={data}
+      review={{
+        count: workflow.review.count,
+        oldestDays: workflow.review.oldestDays,
+        avgDwellDays: workflow.review.avgDwellDays,
+      }}
+    />
+  );
+}
+
+async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const data = await getExecutiveScores(orgId, range);
+  return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} />;
 }
 
 async function PulseBand({ orgId }: { orgId: string }) {
@@ -123,6 +106,22 @@ async function ServiceHealth({ orgId, range }: { orgId: string; range: Dashboard
   return <ServiceHealthSection rows={rows} windowLabel={rangeLabel(range)} />;
 }
 
+// Supporting departments (الجرافيك / محتوى السيو) — no service line of their own,
+// so shown separately with the same KPIs, scoped by department membership.
+async function SupportingDeptHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const rows = await getSupportingDepartmentHealth(orgId, range);
+  if (rows.length === 0) return null;
+  return (
+    <ServiceHealthSection
+      rows={rows}
+      windowLabel={rangeLabel(range)}
+      title="صحة الأقسام المساندة"
+      description="الجرافيك ومحتوى السيو — تُقاس بمهام أعضاء القسم (لا تظهر كخدمة مستقلة)"
+      hrefBase="/team-activity?dept="
+    />
+  );
+}
+
 async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const data = await getStageFlowMatrix(orgId, range);
   return (
@@ -132,6 +131,13 @@ async function StageFlow({ orgId, range }: { orgId: string; range: DashboardRang
       windowRange={{ from: range.from, to: range.to }}
     />
   );
+}
+
+// مؤشر تعديلات العميل — tasks currently at client_changes + entered-this-week vs
+// last week + distribution by service.
+async function TopRevised({ orgId, range }: { orgId: string; range: DashboardRange }) {
+  const metrics = await getTopRevisedTasks(orgId, range);
+  return <TopRevisedTasksSection rows={metrics} windowLabel={rangeLabel(range)} />;
 }
 
 async function DeliveryFlow({ orgId }: { orgId: string }) {
@@ -297,8 +303,16 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
         <ServiceHealth orgId={orgId} range={range} />
       </DashSection>
 
+      <DashSection fallback={<SectionSkeleton h={160} />}>
+        <SupportingDeptHealth orgId={orgId} range={range} />
+      </DashSection>
+
       <DashSection fallback={<SectionSkeleton h={320} />}>
         <StageFlow orgId={orgId} range={range} />
+      </DashSection>
+
+      <DashSection fallback={<SectionSkeleton h={240} />}>
+        <TopRevised orgId={orgId} range={range} />
       </DashSection>
 
       <DashSection fallback={<SectionSkeleton h={360} />}>

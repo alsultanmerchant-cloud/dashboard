@@ -19,10 +19,12 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
   const worst = data.rows.filter((r) => r.status === "risk" || r.status === "watch").slice(0, 3);
 
   const stats = [
-    { icon: Zap, label: "يعمل الآن", value: String(t.activeCount), tone: "text-cc-green" },
-    { icon: Activity, label: "إجراء اليوم", value: String(t.actionsToday), tone: "text-cyan" },
-    { icon: Gauge, label: "محمّل زائد", value: String(t.overloadedCount), tone: "text-cc-red" },
-    { icon: AlertTriangle, label: "متوقّفة", value: String(t.stuckTasks), tone: "text-cc-red" },
+    { icon: Zap, label: "يعمل الآن", value: String(t.activeCount), tone: "text-cc-green", hint: "موظفون قاموا بإجراء اليوم" },
+    { icon: Activity, label: "إجراء اليوم", value: String(t.actionsToday), tone: "text-cyan", hint: "إجراءات رواسم اليوم" },
+    { icon: Gauge, label: "محمّل زائد", value: String(t.overloadedCount), tone: "text-cc-red", hint: "موظفون يتجاوز عدد مشاريعهم النشطة الحد المسموح" },
+    // مُعلقة متأخرة: tasks on desks that have breached their STAGE SLA (not the
+    // ordinary deadline-overdue). Only the 5 SLA-configured stages qualify.
+    { icon: AlertTriangle, label: "معلّقة متأخرة", value: String(t.pendingLate), tone: "text-cc-red", hint: "مهام على المكاتب تجاوزت زمن SLA لمرحلتها الحالية" },
   ];
 
   return (
@@ -38,7 +40,7 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
           </div>
           <div className="flex items-center gap-5">
             {stats.map((s) => (
-              <div key={s.label} className="text-center">
+              <div key={s.label} className="text-center" title={s.hint}>
                 <p className={cn("text-xl font-bold tabular-nums", s.tone)}>{s.value}</p>
                 <p className="text-[10px] text-muted-foreground">{s.label}</p>
               </div>

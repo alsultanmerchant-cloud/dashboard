@@ -1,4 +1,4 @@
-import { AlertTriangle, AlertOctagon, Timer, Clock, RefreshCcw, TrendingUp, TrendingDown, Minus, type LucideIcon } from "lucide-react";
+import { AlertTriangle, AlertOctagon, Timer, Clock, RefreshCcw, Hourglass, TrendingUp, TrendingDown, Minus, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import type { ExecutiveIndicators, KpiTrend, Period } from "@/lib/data/executive-indicators";
@@ -142,7 +142,69 @@ function StatCard({
   );
 }
 
-export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicators }) {
+const REVIEW_HREF = `/tasks?view=list&sf=${encodeURIComponent(
+  JSON.stringify([
+    { field: "stage", value: "specialist_review" },
+    { field: "stage", value: "manager_review" },
+  ]),
+)}`;
+
+function ReviewStatCard({
+  count,
+  oldestDays,
+  avgDwellDays,
+  t,
+}: {
+  count: number;
+  oldestDays: number | null;
+  avgDwellDays: number | null;
+  t: T;
+}) {
+  const tw = t;
+  const valueTone = count > 30 ? "text-cc-red" : count > 0 ? "text-amber" : "text-foreground";
+  const borderTone = count > 30 ? "border-cc-red/25" : count > 0 ? "border-amber/25" : "border-cyan/15";
+  const iconTone = count > 30 ? "text-cc-red bg-red-dim" : count > 0 ? "text-amber bg-amber-dim" : "text-muted-foreground bg-soft-2";
+  const days = (n: number | null) => (n === null ? "—" : tw("review.daysValue", { n }));
+
+  return (
+    <Link
+      href={REVIEW_HREF}
+      className={cn(
+        "group relative flex h-full min-h-[150px] flex-col overflow-hidden rounded-2xl border bg-gradient-to-br from-card to-card/50 p-4 transition-all hover:border-cyan/40 hover:shadow-[0_0_30px_rgba(0,212,255,0.06)]",
+        borderTone,
+      )}
+    >
+      <span className="absolute end-3 bottom-3 z-10">
+        <MetricInfo text={tw("review.tooltip")} />
+      </span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {tw("review.label")}
+        </div>
+        <span className={cn("flex size-8 items-center justify-center rounded-lg", iconTone)}>
+          <Hourglass className="size-4" />
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-baseline gap-1">
+        <span className={cn("text-[2.5rem] font-bold leading-none tabular-nums", valueTone)}>
+          {count}
+        </span>
+      </div>
+      <p className="mt-auto pe-6 pt-3 text-[11px] text-muted-foreground/80">
+        {tw("review.sub", { oldest: days(oldestDays), avg: days(avgDwellDays) })}
+      </p>
+    </Link>
+  );
+}
+
+export async function ExecutiveIndicatorsRow({
+  data,
+  review,
+}: {
+  data: ExecutiveIndicators;
+  review: { count: number; oldestDays: number | null; avgDwellDays: number | null };
+}) {
   const t = await getTranslations("Executive.indicators");
   const { projectsAtRisk: risk, highRisk, onTime, overdue, clientChanges: cc, periods } = data;
 
@@ -153,7 +215,7 @@ export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicato
         <span className="text-[10px] text-muted-foreground/60">{t("subtitle")}</span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           label={t("projectsAtRisk.label")}
           icon={AlertTriangle}
@@ -215,6 +277,12 @@ export async function ExecutiveIndicatorsRow({ data }: { data: ExecutiveIndicato
           periods={periods}
           t={t}
           percentMode
+        />
+        <ReviewStatCard
+          count={review.count}
+          oldestDays={review.oldestDays}
+          avgDwellDays={review.avgDwellDays}
+          t={t}
         />
       </div>
     </section>

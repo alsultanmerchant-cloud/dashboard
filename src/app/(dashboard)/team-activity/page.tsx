@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { requirePagePermission } from "@/lib/auth-server";
 import {
   getTeamPulseOverview,
@@ -8,6 +9,27 @@ import { PageHeader } from "@/components/page-header";
 import { TeamPulseBoard } from "@/components/activity/team-pulse-board";
 import { TeamPulseMembers } from "@/components/activity/team-pulse-members";
 import { TeamPulseAllMembers } from "@/components/activity/team-pulse-all-members";
+import { Card, CardContent } from "@/components/ui/card";
+
+async function AllMembersSection({ orgId }: { orgId: string }) {
+  const allMembers = await getAllMembersByActivity(orgId);
+  return <TeamPulseAllMembers members={allMembers} />;
+}
+
+function AllMembersSkeleton() {
+  return (
+    <Card className="mt-6">
+      <CardContent className="p-4">
+        <div className="h-4 w-48 animate-pulse rounded bg-soft-2" />
+        <div className="mt-3 space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-8 animate-pulse rounded bg-soft-1" />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 // CEO "نبض الفريق" — team-performance board. Two axes grounded in the data
 // the org actually produces: operational delivery (accountability engine on
@@ -25,10 +47,7 @@ export default async function TeamActivityPage({
   const data = await getTeamPulseOverview(session.orgId);
 
   const selected = dept ? data.rows.find((r) => r.departmentId === dept) : undefined;
-  const [members, allMembers] = await Promise.all([
-    selected ? getTeamMembers(session.orgId, selected.departmentId) : Promise.resolve([]),
-    getAllMembersByActivity(session.orgId),
-  ]);
+  const members = selected ? await getTeamMembers(session.orgId, selected.departmentId) : [];
 
   return (
     <div>
@@ -44,7 +63,9 @@ export default async function TeamActivityPage({
         />
       )}
       <TeamPulseBoard data={data} />
-      <TeamPulseAllMembers members={allMembers} />
+      <Suspense fallback={<AllMembersSkeleton />}>
+        <AllMembersSection orgId={session.orgId} />
+      </Suspense>
     </div>
   );
 }

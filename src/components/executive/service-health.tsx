@@ -54,24 +54,37 @@ const SERVICE_ICON_TONE: Record<string, string> = {
 export async function ServiceHealthSection({
   rows,
   windowLabel,
+  title,
+  description,
+  empty,
+  // Row destination. Services drill into their task list; other groupings (e.g.
+  // supporting departments, which have no service filter) override this.
+  hrefBase = "/tasks?service=",
 }: {
   rows: ServiceHealthRow[];
   windowLabel?: string;
+  title?: string;
+  description?: string;
+  empty?: string;
+  hrefBase?: string;
 }) {
   const t = await getTranslations("Executive.services");
+  const heading = title ?? t("title");
+  const desc = description ?? t("description");
+  const emptyText = empty ?? t("empty");
   const actions = windowLabel ? <WindowLabel label={windowLabel} /> : undefined;
   if (rows.length === 0) {
     return (
       <section className="mb-10">
-        <SectionTitle title={t("title")} description={t("description")} actions={actions} />
-        <EmptyState variant="compact" title={t("empty")} description="" />
+        <SectionTitle title={heading} description={desc} actions={actions} />
+        <EmptyState variant="compact" title={emptyText} description="" />
       </section>
     );
   }
 
   return (
     <section className="mb-10">
-      <SectionTitle title={t("title")} description={t("description")} actions={actions} />
+      <SectionTitle title={heading} description={desc} actions={actions} />
       <Card>
         <CardContent className="grid gap-0 divide-y divide-border/40 p-0">
           {rows.map((s) => {
@@ -80,7 +93,7 @@ export async function ServiceHealthSection({
             return (
               <Link
                 key={s.serviceId}
-                href={`/tasks?service=${s.serviceId}`}
+                href={`${hrefBase}${s.serviceId}`}
                 className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-soft-1 md:grid-cols-[1.4fr_1fr_auto_auto_auto]"
               >
                 <div className="flex items-center gap-3 min-w-0">

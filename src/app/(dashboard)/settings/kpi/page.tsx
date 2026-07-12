@@ -1,6 +1,6 @@
 import { Info } from "lucide-react";
 import { requirePagePermission, hasPermission } from "@/lib/auth-server";
-import { getRiskThreshold } from "@/lib/data/kpi-settings";
+import { getRiskThreshold, getOverloadProjectsThreshold } from "@/lib/data/kpi-settings";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { KpiForm } from "./kpi-form";
@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 // kpi_settings (migration 0233) and read live by the dashboard cards.
 export default async function KpiSettingsPage() {
   const session = await requirePagePermission("settings.manage");
-  const threshold = await getRiskThreshold(session.orgId);
+  const [threshold, overloadThreshold] = await Promise.all([
+    getRiskThreshold(session.orgId),
+    getOverloadProjectsThreshold(session.orgId),
+  ]);
 
   return (
     <div>
@@ -32,7 +35,11 @@ export default async function KpiSettingsPage() {
 
       <Card>
         <CardContent className="p-4">
-          <KpiForm threshold={threshold} canManage={hasPermission(session, "settings.manage")} />
+          <KpiForm
+            threshold={threshold}
+            overloadThreshold={overloadThreshold}
+            canManage={hasPermission(session, "settings.manage")}
+          />
         </CardContent>
       </Card>
     </div>

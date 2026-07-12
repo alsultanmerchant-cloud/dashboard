@@ -3,6 +3,7 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import { isLeadershipPosition, isLeadershipSql } from "@/lib/data/leadership";
+import { getOverloadProjectsThreshold } from "@/lib/data/kpi-settings";
 import { riyadhTodayIso, riyadhDaysAgoIso, riyadhDateOf } from "@/lib/tz";
 
 // =========================================================================
@@ -30,7 +31,9 @@ import { riyadhTodayIso, riyadhDaysAgoIso, riyadhDateOf } from "@/lib/tz";
 //   stalled  (غير نشط) = last action was before yesterday, or never
 export type ActivityStatus = "active" | "slow" | "stalled";
 export type PulseStatus = "good" | "watch" | "risk" | "na";
-// Workload vs the team: drowning / normal / has spare capacity.
+// Workload vs the team: drowning / normal / has spare capacity. Driven by how
+// many ACTIVE PROJECTS a person carries (context-switching load), NOT task count:
+// overloaded above the configured threshold (kpi_settings, default 10 projects).
 export type LoadFlag = "overloaded" | "balanced" | "light";
 
 // A task with no stage movement in this many days is "stuck" (needs a push).
@@ -56,12 +59,18 @@ export interface TeamMemberRow {
   completedThisWeek: number;
   openWip: number; // open live tasks owned
   // مُعلقة — tasks whose CURRENT stage this person owns (template stage-owner):
-  // how many sit on their desk, and how many of those are past their deadline
-  // (the SLA / deadline-commitment signal). From the accountability engine.
+  // how many sit on their desk (ownedOpen), and how many of those have breached
+  // their STAGE SLA (pendingLate). "Late" here is per-stage SLA (sla_rules) — the
+  // time a task is allowed to sit in its current stage — NOT the ordinary
+  // deadline-overdue used elsewhere. Only the 5 SLA-configured stages
+  // (client_changes / specialist_review / manager_review / ready_to_send /
+  // sent_to_client) can be late; new / in_progress carry no SLA, so they never
+  // count as late (Sky Light's decision).
   ownedOpen: number;
   pendingLate: number;
+  activeProjects: number; // distinct ACTIVE projects with open tasks (load unit)
   stuckTasks: number; // open tasks not moved in STUCK_DAYS+
-  loadFlag: LoadFlag; // workload vs the team median
+  loadFlag: LoadFlag; // workload vs the overload threshold (by active projects)
   lastUpdateAt: string | null; // most recent Log Note on their tasks
   updatesThisWeek: number; // Log Notes on their tasks in the last 7 days
   noUpdateTasks: number; // open tasks with no Log Note in STUCK_DAYS+
@@ -85,6 +94,8 @@ export interface TeamPulseRow {
   momentum: number;
   completedThisWeek: number;
   openWip: number;
+  ownedOpen: number; // مُعلقة — tasks on desks (current stage owned)
+  pendingLate: number; // مُعلقة متأخرة — of those, past their STAGE SLA
   stuckTasks: number;
   overloadedCount: number;
   lightCount: number;
@@ -104,6 +115,8 @@ export interface TeamPulseTotals {
   momentum: number;
   completedThisWeek: number;
   openWip: number;
+  ownedOpen: number;
+  pendingLate: number;
   stuckTasks: number;
   overloadedCount: number;
   lightCount: number;
@@ -206,6 +219,7 @@ interface ActivitySqlRow {
   no_update: number;
   owned_open: number;
   pending_late: number;
+  active_projects: number;
 }
 
 async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
@@ -231,12 +245,13 @@ function statusOf(lastAction: string | null): ActivityStatus {
 // tasks. Cached per request so the overview + drill-down reuse one query.
 async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
   if (!UUID_RE.test(orgId)) throw new Error("team-pulse: invalid org id");
-  // Read the precomputed team_activity_cache (0218), refreshed by pg_cron every
-  // 10 min. The live per-task aggregate over task_stage_history + task_comments
-  // is fast warm but spikes past the 12s RPC cap cold/under load → page error
-  // boundary. The cache makes this a trivial indexed join. Names / position /
-  // department are joined fresh so they never go stale; status / load / momentum
-  // are still derived live in TS from the cached counters.
+  // Editable overload cutoff (kpi_settings, default 10 active projects).
+  const overloadThreshold = await getOverloadProjectsThreshold(orgId);
+  // Read the precomputed team_activity_cache, refreshed by pg_cron every 10 min.
+  // The request path must stay to indexed cache joins only; live per-task
+  // aggregates over stage history/comments/SLA math have repeatedly crossed the
+  // 12s readonly SQL cap on cold loads. Names / position / department are joined
+  // fresh so they never go stale; status / load / momentum are derived in TS.
   // Start from active employees (so leadership shows even with no task activity)
   // and LEFT JOIN the cache. Keep only people who either have activity OR are
   // leadership — i.e. the executors with current work, plus قائد الفريق /
@@ -252,23 +267,12 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
            coalesce(c.open_wip,0) open_wip, coalesce(c.stalled,0) stalled,
            coalesce(c.done7,0) done7, coalesce(c.done_today,0) done_today,
            c.last_update, coalesce(c.updates7,0) updates7, coalesce(c.no_update,0) no_update,
-           coalesce(sc.owned_open,0) owned_open, coalesce(sc.pending_late,0) pending_late
+           coalesce(c.owned_open,0) owned_open, coalesce(c.pending_late,0) pending_late,
+           coalesce(c.active_projects,0) active_projects
       from employee_profiles e
       left join positions pp on pp.id = e.position_id
       left join team_activity_cache c
         on c.employee_id = e.id and c.organization_id = e.organization_id
-      -- مُعلقة: tasks whose CURRENT stage this person owns (template stage-owner,
-      -- accountable_position_for_stage) — total on their desk + the past-deadline
-      -- subset. Read from the accountability_scorecard cache so it matches
-      -- /accountability exactly (position-aware, refreshed every 10 min).
-      left join (
-        select employee_id,
-               sum(open_tasks) owned_open,
-               sum(overdue_owned) pending_late
-          from accountability_scorecard
-         where organization_id = '${orgId}'
-         group by employee_id
-      ) sc on sc.employee_id = e.id
      where e.organization_id = '${orgId}'
        and e.employment_status = 'active'
        and e.department_id is not null
@@ -305,6 +309,7 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
       openWip: r.open_wip,
       ownedOpen: r.owned_open,
       pendingLate: r.pending_late,
+      activeProjects: r.active_projects,
       stuckTasks: r.stalled,
       loadFlag: "balanced", // set in the capacity pass below
       lastUpdateAt: r.last_update,
@@ -314,18 +319,14 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
     });
   }
 
-  // Capacity pass: classify workload vs the team median WIP. Overloaded =
-  // well above median (and not trivially small); light = well below. This
-  // surfaces the load imbalance (median ~15 but some agents carry 200+).
-  const wips = out.map((m) => m.openWip).filter((v) => v > 0).sort((a, b) => a - b);
-  const median = wips.length
-    ? wips.length % 2
-      ? wips[(wips.length - 1) / 2]
-      : Math.round((wips[wips.length / 2 - 1] + wips[wips.length / 2]) / 2)
-    : 0;
+  // Capacity pass: classify workload by ACTIVE-PROJECT count vs the configured
+  // threshold (kpi_settings, default 10). Overloaded = MORE than the threshold;
+  // light = has clear spare capacity (a third of it or fewer, but not idle).
+  // Task count no longer drives this — a project is the real context-switch unit.
+  const lightCutoff = Math.max(1, Math.floor(overloadThreshold / 3));
   for (const m of out) {
-    if (median > 0 && m.openWip >= Math.max(8, median * 1.5)) m.loadFlag = "overloaded";
-    else if (median > 0 && m.openWip <= median * 0.5) m.loadFlag = "light";
+    if (m.activeProjects > overloadThreshold) m.loadFlag = "overloaded";
+    else if (m.activeProjects > 0 && m.activeProjects <= lightCutoff) m.loadFlag = "light";
     else m.loadFlag = "balanced";
   }
   return out;
@@ -400,6 +401,8 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
         a.momentum += m.momentum;
         a.completedThisWeek += m.completedThisWeek;
         a.openWip += m.openWip;
+        a.ownedOpen += m.ownedOpen;
+        a.pendingLate += m.pendingLate;
         a.stuckTasks += m.stuckTasks;
         a.overloadedCount += m.loadFlag === "overloaded" ? 1 : 0;
         a.lightCount += m.loadFlag === "light" ? 1 : 0;
@@ -416,6 +419,8 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
         momentum: 0,
         completedThisWeek: 0,
         openWip: 0,
+        ownedOpen: 0,
+        pendingLate: 0,
         stuckTasks: 0,
         overloadedCount: 0,
         lightCount: 0,
@@ -454,6 +459,8 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
       t.momentum += r.momentum;
       t.completedThisWeek += r.completedThisWeek;
       t.openWip += r.openWip;
+      t.ownedOpen += r.ownedOpen;
+      t.pendingLate += r.pendingLate;
       t.stuckTasks += r.stuckTasks;
       t.overloadedCount += r.overloadedCount;
       t.lightCount += r.lightCount;
@@ -472,6 +479,8 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
       momentum: 0,
       completedThisWeek: 0,
       openWip: 0,
+      ownedOpen: 0,
+      pendingLate: 0,
       stuckTasks: 0,
       overloadedCount: 0,
       lightCount: 0,

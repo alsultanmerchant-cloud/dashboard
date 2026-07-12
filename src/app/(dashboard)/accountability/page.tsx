@@ -32,17 +32,24 @@ export default async function AccountabilityPage({
         ? "cases"
         : "team";
 
-  // getAccountabilityCases / getAccountabilityRoster reuse getAccountabilityOverview
-  // via React cache(), so these calls dedupe to a single overview compute.
-  const [overview, cases, roster, caseMeta, evidence, financeMap] = await Promise.all([
-    getAccountabilityOverview(session.orgId),
+  const needsScorecard = initialView === "scorecard";
+  // Default /accountability opens on the team lens, so keep the initial payload
+  // to what that lens needs. Scorecard-only data (full overview serialization,
+  // finance badges, selected employee evidence) is loaded only for direct
+  // scorecard links: ?view=scorecard or ?emp=...
+  const [cases, roster, caseMeta, scorecardData] = await Promise.all([
     getAccountabilityCases(session.orgId),
     getAccountabilityRoster(session.orgId),
     syncAndGetCaseMeta(session.orgId),
-    selectedId
-      ? getEmployeeAccountabilityEvidence(session.orgId, selectedId)
+    needsScorecard
+      ? Promise.all([
+          getAccountabilityOverview(session.orgId),
+          selectedId
+            ? getEmployeeAccountabilityEvidence(session.orgId, selectedId)
+            : Promise.resolve(null),
+          getClientFinanceMap(session.orgId),
+        ]).then(([overview, evidence, financeMap]) => ({ overview, evidence, financeMap }))
       : Promise.resolve(null),
-    getClientFinanceMap(session.orgId),
   ]);
 
   return (
@@ -52,10 +59,10 @@ export default async function AccountabilityPage({
         roster={roster}
         cases={cases}
         caseMeta={caseMeta}
-        overview={overview}
-        evidence={evidence}
+        overview={scorecardData?.overview ?? null}
+        evidence={scorecardData?.evidence ?? null}
         selectedId={selectedId}
-        financeMap={financeMap}
+        financeMap={scorecardData?.financeMap ?? null}
         initialView={initialView}
       />
     </div>

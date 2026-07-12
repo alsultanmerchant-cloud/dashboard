@@ -1145,6 +1145,194 @@ async function _getServiceLineHealth(
 
 export const getServiceLineHealth = cache(_getServiceLineHealth);
 
+// ---- Supporting-department health ----------------------------------------
+// الجرافيك / محتوى السيو are SUPPORTING departments: their work is embedded
+// INSIDE service tasks (a Social-Media task carries a graphics assignee), so
+// they have no service_id of their own and never appear in the service-health
+// section above. This section shows the SAME KPIs (open / delivered / on-time% /
+// overdue-now / client-changes-in-period, each with a previous-period trend and
+// an on-time sparkline) but SCOPED BY DEPARTMENT MEMBERSHIP — every task where an
+// assignee belongs to the department. We scope by membership, NOT by the dept
+// HEAD's own assignments, because a supporting head is often not an assignee at
+// all (e.g. عمر الخيام, graphics head, has 0 task_assignees rows; the work sits
+// on the department's specialists). Add a department slug here to include it.
+const UUID_RE_EXEC = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SUPPORTING_DEPARTMENT_SLUGS = ["art-graphic", "seo-content"] as const;
+
+async function execRunSql<R = Record<string, unknown>>(sql: string): Promise<R[]> {
+  const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
+    p_sql: sql.trim(),
+  });
+  if (error) throw new Error(`supporting-dept query failed: ${error.message}`);
+  return (data ?? []) as R[];
+}
+
+async function _getSupportingDepartmentHealth(
+  orgId: string,
+  range: DashboardRange = resolveRange(undefined),
+): Promise<ServiceHealthRow[]> {
+  if (!UUID_RE_EXEC.test(orgId)) throw new Error("supporting-dept: invalid org id");
+
+  // Windowing — identical semantics to the service-health section.
+  const from = range.from;
+  const to = range.to;
+  const today = riyadhTodayIso();
+  const prevTo = addDaysIso(from, -1);
+  const prevFrom = addDaysIso(prevTo, -(range.days - 1));
+  const sinceTrend = addDaysIso(from, -6);
+
+  const slugList = SUPPORTING_DEPARTMENT_SLUGS.map((s) => `'${s}'`).join(", ");
+
+  // Shared scope CTEs: active members of the supporting departments, then the
+  // DISTINCT (department, task) pairs reachable through their task_assignees.
+  const scopeCte = `
+    dept_emp as (
+      select e.id emp, d.id dep
+        from employee_profiles e
+        join departments d on d.id = e.department_id
+       where e.organization_id = '${orgId}'
+         and e.employment_status = 'active'
+         and d.slug in (${slugList})
+    ),
+    td as (
+      select distinct de.dep, ta.task_id
+        from task_assignees ta
+        join dept_emp de on de.emp = ta.employee_id
+       where ta.organization_id = '${orgId}'
+    )`;
+
+  // Q1 — per-department scalars (open / overdue / delivered / on-time for the
+  // selected AND previous period) plus client-changes entered in each period.
+  const scalarSql = `
+    with ${scopeCte},
+    tk as (
+      select td.dep, t.stage, t.archived_at, t.completed_at, t.due_date, t.planned_date,
+             (t.completed_at at time zone 'Asia/Riyadh')::date cdate,
+             coalesce(t.due_date, t.planned_date) deadline
+        from td join tasks t on t.id = td.task_id
+    ),
+    cc as (
+      select td.dep,
+             count(distinct h.task_id) filter (
+               where (h.entered_at at time zone 'Asia/Riyadh')::date between '${from}' and '${to}') cc_sel,
+             count(distinct h.task_id) filter (
+               where (h.entered_at at time zone 'Asia/Riyadh')::date between '${prevFrom}' and '${prevTo}') cc_prev
+        from td
+        join task_stage_history h
+          on h.task_id = td.task_id and h.to_stage = 'client_changes'
+       where (h.entered_at at time zone 'Asia/Riyadh')::date between '${prevFrom}' and '${to}'
+       group by td.dep
+    )
+    select k.dep,
+      count(*) filter (where stage <> 'done' and archived_at is null) open_now,
+      count(*) filter (where stage <> 'done' and archived_at is null and planned_date < '${today}') overdue_now,
+      count(*) filter (where stage = 'done' and completed_at is not null
+                         and cdate between '${from}' and '${to}') delivered_sel,
+      count(*) filter (where stage = 'done' and completed_at is not null
+                         and cdate between '${from}' and '${to}'
+                         and deadline is not null and cdate <= deadline) ontime_sel,
+      count(*) filter (where stage = 'done' and completed_at is not null
+                         and cdate between '${prevFrom}' and '${prevTo}') delivered_prev,
+      count(*) filter (where stage = 'done' and completed_at is not null
+                         and cdate between '${prevFrom}' and '${prevTo}'
+                         and deadline is not null and cdate <= deadline) ontime_prev,
+      coalesce(max(cc.cc_sel), 0) cc_sel,
+      coalesce(max(cc.cc_prev), 0) cc_prev
+    from tk k
+    left join cc on cc.dep = k.dep
+    group by k.dep`;
+
+  // Q2 — per-department per-day delivered/on-time over the 37-day sparkline
+  // window (range + 6 lead-in days), for the rolling-7d on-time trend.
+  const dailySql = `
+    with ${scopeCte},
+    done as (
+      select td.dep, (t.completed_at at time zone 'Asia/Riyadh')::date cdate,
+             (coalesce(t.due_date, t.planned_date) is not null
+              and (t.completed_at at time zone 'Asia/Riyadh')::date <= coalesce(t.due_date, t.planned_date)) ontime
+        from td join tasks t on t.id = td.task_id
+       where t.stage = 'done' and t.completed_at is not null
+         and (t.completed_at at time zone 'Asia/Riyadh')::date between '${sinceTrend}' and '${to}'
+    )
+    select dep, cdate::text daykey, count(*) total, count(*) filter (where ontime) ontime
+      from done group by dep, cdate`;
+
+  const [deptRows, scalarRows, dailyRows] = await Promise.all([
+    supabaseAdmin
+      .from("departments")
+      .select("id, name, slug")
+      .eq("organization_id", orgId)
+      .in("slug", SUPPORTING_DEPARTMENT_SLUGS as unknown as string[]),
+    execRunSql<{
+      dep: string;
+      open_now: number;
+      overdue_now: number;
+      delivered_sel: number;
+      ontime_sel: number;
+      delivered_prev: number;
+      ontime_prev: number;
+      cc_sel: number;
+      cc_prev: number;
+    }>(scalarSql),
+    execRunSql<{ dep: string; daykey: string; total: number; ontime: number }>(dailySql),
+  ]);
+  if (deptRows.error) throw deptRows.error;
+
+  const scalarByDep = new Map(scalarRows.map((r) => [r.dep, r]));
+  const dailyByDep = new Map<string, Map<string, { total: number; onTime: number }>>();
+  for (const r of dailyRows) {
+    const m = dailyByDep.get(r.dep) ?? new Map();
+    m.set(r.daykey, { total: r.total, onTime: r.ontime });
+    dailyByDep.set(r.dep, m);
+  }
+
+  // 37-day axis (6 lead-in + range) — the rolling-7d series starts at index 6.
+  const days37: string[] = [];
+  for (let d = sinceTrend; d <= to; d = addDaysIso(d, 1)) days37.push(d);
+  const trendStart = 6;
+  const pctOf = (num: number, den: number): number | null =>
+    den > 0 ? Math.round((num / den) * 100) : null;
+
+  const rows: ServiceHealthRow[] = ((deptRows.data ?? []) as { id: string; name: string; slug: string }[]).map(
+    (d) => {
+      const s = scalarByDep.get(d.id);
+      const daily = dailyByDep.get(d.id) ?? new Map<string, { total: number; onTime: number }>();
+      const trend: Array<number | null> = [];
+      for (let i = trendStart; i < days37.length; i++) {
+        let total = 0;
+        let onTime = 0;
+        for (let j = i - 6; j <= i; j++) {
+          const cell = daily.get(days37[j]);
+          if (cell) {
+            total += cell.total;
+            onTime += cell.onTime;
+          }
+        }
+        trend.push(pctOf(onTime, total));
+      }
+      return {
+        serviceId: d.id,
+        name: d.name,
+        slug: d.slug,
+        openCount: s?.open_now ?? 0,
+        overdueCount: s?.overdue_now ?? 0,
+        delivered30d: s?.delivered_sel ?? 0,
+        onTimePct30d: pctOf(s?.ontime_sel ?? 0, s?.delivered_sel ?? 0),
+        onTimePctPrev: pctOf(s?.ontime_prev ?? 0, s?.delivered_prev ?? 0),
+        clientChanges: s?.cc_sel ?? 0,
+        clientChangesPrev: s?.cc_prev ?? 0,
+        trend,
+      };
+    },
+  );
+
+  return rows
+    .filter((r) => r.openCount > 0 || r.delivered30d > 0 || r.clientChanges > 0)
+    .sort((a, b) => b.openCount - a.openCount);
+}
+
+export const getSupportingDepartmentHealth = cache(_getSupportingDepartmentHealth);
+
 // ---- Top stuck projects (by overdue load) --------------------------------
 
 export interface StuckProjectRow {
@@ -1395,13 +1583,22 @@ async function _getStageFlowMatrix(
   // arbitrary 1000-row slice made a LARGER window return FEWER transitions — so
   // the counts SHRANK as the period grew (Sky Light feedback 2026-07-07).
   const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
-  type Row = { task_id: string; from_stage: TaskStage; to_stage: TaskStage };
+  type Row = {
+    task_id: string;
+    from_stage: TaskStage;
+    to_stage: TaskStage;
+    // Embedded so we can drop moves on ARCHIVED tasks — those never appear in the
+    // /tasks drill-down (it filters archived_at is null), so counting them made
+    // the cell (e.g. 4) exceed the tasks the drill-down showed (e.g. 2). Inner
+    // join = every history row still has its task. (Sky Light feedback 2026-07-12.)
+    task: { archived_at: string | null } | { archived_at: string | null }[] | null;
+  };
   const rows: Row[] = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabaseAdmin
       .from("task_stage_history")
-      .select("task_id, from_stage, to_stage")
+      .select("task_id, from_stage, to_stage, task:tasks!inner(archived_at)")
       .eq("organization_id", orgId)
       .gte("entered_at", start)
       .lt("entered_at", endExclusive)
@@ -1426,6 +1623,10 @@ async function _getStageFlowMatrix(
   let totalBackward = 0;
   for (const r of rows) {
     if (!r.from_stage || !r.to_stage || r.from_stage === r.to_stage) continue;
+    // Skip moves on archived tasks — the drill-down (/tasks) excludes them, so
+    // counting them here would inflate the cell above the tasks it lands on.
+    const task = Array.isArray(r.task) ? r.task[0] : r.task;
+    if (task?.archived_at != null) continue;
     const key = `${r.from_stage}>${r.to_stage}`;
     const set = edgeTasks.get(key) ?? new Set<string>();
     set.add(r.task_id);

@@ -21,10 +21,10 @@ interface Props {
   roster: AccountabilityRoster;
   cases: AccountabilityCasesResult;
   caseMeta: Record<string, PersistedCaseMeta>;
-  overview: AccountabilityOverview;
+  overview: AccountabilityOverview | null;
   evidence: AccountabilityEvidence | null;
   selectedId: string | null;
-  financeMap: ClientFinanceMap;
+  financeMap: ClientFinanceMap | null;
   initialView: View;
 }
 
@@ -53,6 +53,15 @@ export function AccountabilityShell({
   ];
 
   const switchTo = (next: View) => {
+    if (next === "scorecard" && !overview) {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        params.set("view", "scorecard");
+        const qs = params.toString();
+        window.location.assign(qs ? `?${qs}` : "?view=scorecard");
+      }
+      return;
+    }
     setView(next);
     // Mirror to the URL without a server round-trip so refresh/links restore it.
     if (typeof window !== "undefined") {
@@ -96,7 +105,7 @@ export function AccountabilityShell({
         <TeamWorkspace roster={roster} cases={cases.cases} caseMeta={caseMeta} />
       )}
       {view === "cases" && <CasesWorkspace data={cases} caseMeta={caseMeta} />}
-      {view === "scorecard" && (
+      {view === "scorecard" && overview && financeMap && (
         <AccountabilityWorkspace
           key={selectedId ?? "none"}
           overview={overview}
