@@ -80,7 +80,8 @@ function metricValue(p: TrendPoint, m: MetricKey): number | null {
 function fmtLabel(iso: string, grain: "week" | "month"): string {
   const d = new Date(iso + "T00:00:00Z");
   if (grain === "month")
-    return d.toLocaleDateString("ar-EG", { month: "short", year: "2-digit", timeZone: "UTC" });
+    // Full 4-digit year: a 2-digit year ("يونيو ٢٦") was misread as "day 26".
+    return d.toLocaleDateString("ar-EG", { month: "short", year: "numeric", timeZone: "UTC" });
   return d.toLocaleDateString("ar-EG", { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 }
 
@@ -123,18 +124,27 @@ export function CompareTrendModal({
   // the preset chips above. Inverted ranges are ignored.
   const inverted = !!from && !!to && from > to;
   const customActive = (!!from || !!to) && !inverted;
-  const grain: "week" | "month" = customActive ? "month" : cfg.grain;
+  // Grain for a bounded custom window: use WEEKLY when the span is short
+  // (≤ ~12 weeks) so a two-week selection actually renders week buckets;
+  // longer or open-ended windows stay monthly. Presets keep their own grain.
+  const customSpanDays =
+    !!from && !!to && !inverted
+      ? Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1
+      : null;
+  const grain: "week" | "month" = customActive
+    ? customSpanDays != null && customSpanDays <= 84
+      ? "week"
+      : "month"
+    : cfg.grain;
   const empSeries = (grain === "week" ? data?.weekly : data?.monthly) ?? [];
   const benchSeries = (grain === "week" ? data?.benchWeekly : data?.benchMonthly) ?? [];
-  // Compare on the year-month prefix so a same-month window (e.g. 02→30 Jun)
-  // still includes June, whose monthly point starts on the 1st.
-  const fromMonth = from.slice(0, 7);
-  const toMonth = to.slice(0, 7);
+  // Filter by actual date overlap of each bucket [periodStart, periodEnd) with
+  // the selected [from, to] — respects the chosen DAYS, not just the month
+  // (the old month-prefix compare pulled whole months regardless of the days).
   const emp = customActive
-    ? empSeries.filter((p) => {
-        const m = p.periodStart.slice(0, 7);
-        return (!from || m >= fromMonth) && (!to || m <= toMonth);
-      })
+    ? empSeries.filter(
+        (p) => (!to || p.periodStart <= to) && (!from || p.periodEnd > from),
+      )
     : empSeries.slice(-cfg.take);
   const benchByStart = new Map(benchSeries.map((b) => [b.periodStart, b]));
 

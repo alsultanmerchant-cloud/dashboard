@@ -119,6 +119,7 @@ export interface WaSessionInfo {
   status: WaSessionStatus;
   phone: string | null;
   pushname: string | null;
+  statusUpdatedAt?: string | null;
   detail?: string;
 }
 
@@ -152,6 +153,10 @@ function parseSessionPayload(json: unknown): WaSessionInfo {
       (data?.pushName as string) ??
       (data?.name as string) ??
       null,
+    statusUpdatedAt:
+      (data?.updatedAt as string) ??
+      (data?.updated_at as string) ??
+      null,
   };
 }
 
@@ -181,8 +186,13 @@ export async function getQrImage(sessionName: string = WA_SESSION_ID): Promise<s
     if (!ok) return null;
     // Real OpenWA response: { qrCode: "data:image/png;base64,...", status }.
     // Docs-shape fallback: { data: { image: "..." } }.
-    const top = json as { qrCode?: string; data?: { image?: string; qrCode?: string } };
-    return top.qrCode ?? top.data?.qrCode ?? top.data?.image ?? null;
+    if (typeof json === "string") return json;
+    const top = json as {
+      qrCode?: string;
+      image?: string;
+      data?: { image?: string; qrCode?: string };
+    };
+    return top.qrCode ?? top.image ?? top.data?.qrCode ?? top.data?.image ?? null;
   } catch {
     return null;
   }
@@ -214,12 +224,55 @@ export async function startSession(
     }
     if (!uuid) return { ok: false, error: "could not resolve session uuid" };
 
-    const started = await call(`/api/sessions/${uuid}/start`, { method: "POST" });
+    const started = await call(`/api/sessions/${uuid}/start`, {
+      method: "POST",
+      // Chromium startup on the VPS regularly exceeds the generic 8s API
+      // timeout even though the session goes on to connect successfully.
+      timeoutMs: 30_000,
+    });
     if (!started.ok && started.status !== 409) {
       return { ok: false, error: `start HTTP ${started.status}` };
     }
     await registerSessionWebhook(uuid, sessionName);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+// A session can remain wedged in `authenticating` while its browser process is
+// still registered as running. Calling start again then returns HTTP 400 and no
+// QR is ever produced. Force-kill is OpenWA's explicit recovery path for that
+// state; once teardown completes, starting the same session produces a fresh QR.
+export async function restartStuckSession(
+  sessionName: string = WA_SESSION_ID,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!waConfigured()) return { ok: false, error: "WA_API_URL غير مهيأ" };
+  try {
+    const uuid = await findSessionUuid(sessionName);
+    if (!uuid) return startSession(sessionName);
+
+    let stopped = await call(`/api/sessions/${uuid}/force-kill`, {
+      method: "POST",
+      timeoutMs: 15_000,
+    });
+    // Older OpenWA deployments predate force-kill but expose /stop, which is
+    // sufficient to tear down the stale engine before restarting it.
+    if (stopped.status === 404) {
+      stopped = await call(`/api/sessions/${uuid}/stop`, {
+        method: "POST",
+        timeoutMs: 15_000,
+      });
+    }
+    if (!stopped.ok) {
+      return { ok: false, error: `stop HTTP ${stopped.status}` };
+    }
+
+    // The response normally arrives after teardown, but allow a short grace
+    // period before starting Chromium again on slower gateways.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    sessionUuidCache.delete(sessionName);
+    return startSession(sessionName);
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -345,6 +398,7 @@ export async function logoutSession(
 export interface WaHistoryMessage {
   id: string;
   from: string | null;
+  senderName: string | null;
   body: string;
   type: string;
   timestamp: number; // unix seconds
@@ -355,6 +409,68 @@ export interface WaHistoryMessage {
     filename: string | null;
     sizeBytes: number | null;
   } | null;
+}
+
+export interface WaContactIdentity {
+  aliases: string[];
+  phoneJid: string | null;
+  name: string | null;
+}
+
+function historyContactId(value: unknown): string | null {
+  if (typeof value === "string" && value) return value;
+  const obj = historyObj(value);
+  if (!obj) return null;
+  const direct = historyString(obj._serialized, obj.serialized, obj.id, obj.phoneNumber, obj.phone);
+  if (direct) return direct;
+  const user = historyString(obj.user);
+  const server = historyString(obj.server);
+  return user && server ? `${user}@${server}` : null;
+}
+
+// Resolve modern opaque @lid participant IDs to their phone JIDs. The custom
+// gateway exposes the underlying OpenWA getAllContacts() result at /contacts;
+// callers tolerate an unavailable/disconnected session by receiving [].
+export async function fetchSessionContacts(
+  sessionName: string = WA_SESSION_ID,
+): Promise<WaContactIdentity[]> {
+  if (!waConfigured()) return [];
+  const uuid = await findSessionUuid(sessionName);
+  if (!uuid) return [];
+  const { ok, json } = await call(`/api/sessions/${uuid}/contacts`, { timeoutMs: 90_000 });
+  if (!ok || !json) return [];
+  const list = Array.isArray(json)
+    ? json
+    : ((json as { data?: unknown; contacts?: unknown }).data ??
+      (json as { contacts?: unknown }).contacts ??
+      []);
+  if (!Array.isArray(list)) return [];
+  const out: WaContactIdentity[] = [];
+  for (const raw of list as Array<Record<string, unknown>>) {
+    const idObj = historyObj(raw.id);
+    const candidates = [
+      historyContactId(raw.id),
+      historyContactId(raw.lid),
+      historyContactId(raw.lidId),
+      historyContactId(raw.phoneNumber),
+      historyContactId(raw.phone),
+      historyContactId(idObj?._serialized),
+    ].filter((value): value is string => Boolean(value));
+    const aliases = [...new Set(candidates)];
+    if (aliases.length === 0) continue;
+    const explicitPhone = historyString(raw.phoneNumber, raw.phone);
+    const phoneJid =
+      aliases.find((value) => /@(?:c\.us|s\.whatsapp\.net)$/i.test(value)) ??
+      (explicitPhone
+        ? `${explicitPhone.replace(/\D/g, "")}@c.us`
+        : null);
+    out.push({
+      aliases,
+      phoneJid,
+      name: historyString(raw.pushname, raw.pushName, raw.formattedName, raw.name),
+    });
+  }
+  return out;
 }
 
 function historyObj(v: unknown): Record<string, unknown> | null {
@@ -409,15 +525,38 @@ export async function fetchChatHistory(
   if (!ok || !json) return [];
   const arr = (json as { messages?: unknown }).messages;
   if (!Array.isArray(arr)) return [];
-  return (arr as Array<Record<string, unknown>>).map((m) => ({
-    id: String(m.id ?? ""),
-    from: typeof m.from === "string" ? m.from : null,
-    body: typeof m.body === "string" ? m.body : "",
-    type: String(m.type ?? "chat"),
-    timestamp: Number(m.timestamp ?? 0),
-    fromMe: m.fromMe === true,
-    media: historyMedia(m),
-  })).filter((m) => m.id);
+  return (arr as Array<Record<string, unknown>>)
+    .map((m) => {
+      const sender = historyObj(m.sender) ?? historyObj(m.contact);
+      const preferredContactId =
+        historyContactId(sender?.phoneNumber) ??
+        historyContactId(sender?.phone) ??
+        historyContactId(sender?.id);
+      return {
+        id: String(m.id ?? ""),
+        from:
+          (preferredContactId && !preferredContactId.endsWith("@lid")
+            ? preferredContactId
+            : null) ??
+          historyContactId(m.author) ??
+          historyContactId(m.participant) ??
+          historyContactId(m.from) ??
+          preferredContactId,
+        senderName: historyString(
+          sender?.pushname,
+          sender?.pushName,
+          sender?.formattedName,
+          sender?.name,
+          m.notifyName,
+        ),
+        body: typeof m.body === "string" ? m.body : "",
+        type: String(m.type ?? "chat"),
+        timestamp: Number(m.timestamp ?? 0),
+        fromMe: m.fromMe === true,
+        media: historyMedia(m),
+      };
+    })
+    .filter((m) => m.id);
 }
 
 export interface WaRemoteGroup {

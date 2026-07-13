@@ -203,12 +203,15 @@ async function _getExecutiveScores(
       .select("employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at)")
       .eq("organization_id", orgId)
       .eq("role_type", "agent"),
-    // Rework: client_changes transitions within the selected window.
+    // Rework: client_changes transitions within the selected window. Exclude
+    // archived (wound-down / lost-client) tasks so the rework score is scoped
+    // like the live counts and isn't skewed by a lost-client batch.
     supabaseAdmin
       .from("task_stage_history")
-      .select("id", { count: "exact", head: true })
+      .select("id, task:tasks!inner(archived_at)", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .eq("to_stage", "client_changes")
+      .is("task.archived_at", null)
       .gte("entered_at", rangeStart)
       .lt("entered_at", rangeEnd),
     // Rejections / decided approvals (lifetime decided — the rate is stable).

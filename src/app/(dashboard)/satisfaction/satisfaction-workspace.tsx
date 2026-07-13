@@ -309,6 +309,22 @@ export function SatisfactionWorkspace({
             <ClientFinanceBadges badge={financeMap[selectedId]} size="md" />
           )}
 
+          {detail.analysis && detail.hasNewMessagesSinceAnalysis === false && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber/35 bg-amber/10 px-4 py-3 text-sm text-amber">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="font-semibold">{t("freshness.noNewBeforeTitle")}</p>
+                <p className="mt-0.5 text-xs leading-6 text-foreground/70">
+                  {t("freshness.noNewBeforeBody", {
+                    date: detail.latestMessageAt
+                      ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
+                      : t("freshness.unknownDate"),
+                  })}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Analyze — two windows. Current week feeds the board; all time is
               an on-demand full-history snapshot. */}
           <div className="flex flex-wrap items-center gap-3">
@@ -350,9 +366,15 @@ export function SatisfactionWorkspace({
               );
             })()}
             {detail.analysis && (
-              <span className="text-xs text-muted-foreground">
-                {t("lastAnalyzed")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}
-              </span>
+              <div className="text-xs leading-5 text-muted-foreground">
+                <span>{t("freshness.analysisRunAt")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}</span>
+                <span className="mx-1.5">·</span>
+                <span>
+                  {t("freshness.lastMessageAt")}: {detail.analysis.sourceLatestMessageAt
+                    ? detail.analysis.sourceLatestMessageAt.slice(0, 16).replace("T", " ")
+                    : t("freshness.unknownDate")}
+                </span>
+              </div>
             )}
             <Button
               variant="ghost"
@@ -1214,6 +1236,21 @@ function AnalysisView({
       : null;
   return (
     <div className="space-y-4">
+      {analysis.hadNewMessages === false && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber/35 bg-amber/10 px-3 py-2 text-[13px] text-amber">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">{t("freshness.reanalyzedWithoutNew")}</p>
+            <p className="mt-0.5 text-xs leading-5 text-foreground/70">
+              {t("freshness.resultBody", {
+                date: analysis.sourceLatestMessageAt
+                  ? analysis.sourceLatestMessageAt.slice(0, 16).replace("T", " ")
+                  : t("freshness.unknownDate"),
+              })}
+            </p>
+          </div>
+        </div>
+      )}
       {/* viewing-a-past-snapshot banner */}
       {viewingPast && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-[13px]">
@@ -1428,12 +1465,13 @@ function MediaExchangePanel({
   media: ClientMediaExchange | null;
   t: ReturnType<typeof useTranslations>;
 }) {
-  if (!media || media.totalMedia === 0) return null;
+  if (!media || media.totalSharedItems === 0) return null;
   const categories = [
     { icon: FileText, label: t("media.documents"), n: media.documentCount ?? media.documents.length },
     { icon: FileQuestion, label: t("media.images"), n: media.imageCount ?? media.images.length + media.silentImages },
     { icon: TrendingUp, label: t("media.videos"), n: media.videoCount ?? media.videos.length },
     { icon: MessagesSquare, label: t("media.voiceNotes"), n: media.voiceNotes },
+    { icon: Link2, label: t("media.links"), n: media.linkCount },
     { icon: Link2, label: t("media.others"), n: media.otherCount ?? media.others.length },
   ].filter((category) => category.n > 0);
 
@@ -1445,10 +1483,10 @@ function MediaExchangePanel({
             <FileUp className="size-4 text-muted-foreground" /> {t("media.title")}
           </p>
           <span className="text-[11px] text-muted-foreground">
-            {t("media.count", { n: media.totalMedia })}
+            {media.isPartial ? t("media.countAtLeast", { n: media.totalSharedItems }) : t("media.count", { n: media.totalSharedItems })}
           </span>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("media.hint")}</p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("media.hintStored")}</p>
         <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
           {categories.map((category) => (
             <li

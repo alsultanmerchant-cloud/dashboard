@@ -20,6 +20,22 @@ function formatDateTime(value: string, locale: string): string {
   });
 }
 
+// Wall-clock dwell for one stage segment. We compute it from
+// entered_at/exited_at rather than the stored `duration_seconds` column:
+// for Odoo-imported rows that column mirrors Odoo's working-hours
+// `total_duration_seconds` (nights + weekends stripped), which reads far
+// lower than Odoo's own calendar-based stage pills. Wall-clock matches the
+// pills (see page.tsx §TASK-INFO-1).
+function wallClockSeconds(
+  enteredAt: string,
+  exitedAt: string | null,
+): number | null {
+  if (!exitedAt) return null; // open segment (current stage)
+  const secs =
+    (new Date(exitedAt).getTime() - new Date(enteredAt).getTime()) / 1000;
+  return secs > 0 ? secs : null;
+}
+
 function formatDuration(
   seconds: number | null,
   t: Awaited<ReturnType<typeof getTranslations<"TaskDetailPage.stageHistory">>>,
@@ -61,7 +77,10 @@ export async function StageHistoryTimeline({
   return (
     <ol className="relative space-y-4 ms-3 border-s border-soft-2 ps-4">
       {rows.map((row) => {
-        const duration = formatDuration(row.duration_seconds, t);
+        const duration = formatDuration(
+          wallClockSeconds(row.entered_at, row.exited_at),
+          t,
+        );
 
         return (
           <li key={row.id} className="relative">

@@ -86,6 +86,8 @@ export interface SatisfactionInput {
   windowKind: "week" | "all";
   windowStart: string | null;
   windowEnd: string;
+  sourceLatestMessageAt: string | null;
+  hadNewMessages: boolean | null;
   brief: Awaited<ReturnType<typeof getClientBrief>>;
   contract: Awaited<ReturnType<typeof getClientContractContext>>;
   activity: Awaited<ReturnType<typeof getClientContractActivity>>;
@@ -147,6 +149,25 @@ export async function buildSatisfactionInput(
   if (!transcripts.client && !transcripts.technical) {
     throw windowKind === "week" ? new NoRecentActivityError() : new NoTranscriptError();
   }
+  const { data: previousAnalysis } = await supabaseAdmin
+    .from("client_satisfaction_analyses")
+    .select("created_at, big_picture")
+    .eq("organization_id", orgId)
+    .eq("client_id", clientId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const previousBigPicture = previousAnalysis?.big_picture as {
+    _sourceLatestMessageAt?: string | null;
+  } | null;
+  const previousWatermark = previousAnalysis
+    ? (previousBigPicture?._sourceLatestMessageAt ?? previousAnalysis.created_at)
+    : null;
+  const sourceLatestMessageAt = transcripts.latestMessageAt;
+  const hadNewMessages = previousAnalysis
+    ? Boolean(sourceLatestMessageAt && previousWatermark && sourceLatestMessageAt > previousWatermark)
+    : null;
   const windowStart = effectiveDays
     ? new Date(Date.now() - effectiveDays * 86_400_000).toISOString()
     : null;
@@ -156,7 +177,7 @@ export async function buildSatisfactionInput(
 
   const brief = await getClientBrief(orgId, clientId);
   const briefInstruction = brief
-    ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات رواسم: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.
+    ? `- briefAdherenceScore (0-100): قيّم مدى الالتزام بالبريف من وثيقة "البريف" أدناه فقط. قارن بنود البريف المكتوبة (المخرجات/المتطلبات/النطاق) بما يظهر في محادثات العميل والفريق وبيانات Rwasem/Odoo المستوردة إلى Sky Light: منفّذ، قيد التنفيذ، غير منفّذ، أو لا يوجد دليل. الدرجة تعكس الالتزام ببنود البريف الموثقة، وليست رضا العميل العام. لا تخفضها بسبب شكاوى عامة غير موجودة في البريف. اربط أي خفض ببند بريف محدد.
 - briefAdherence: التفصيل الذي يفسّر الدرجة. { reason: جملة عربية واحدة تلخّص سبب هذه الدرجة، items: مصفوفة لكل بند مكتوب في البريف }. كل عنصر { requirement: نص البند/المخرج كما ورد في البريف، status: delivered (منفّذ) أو partial (جزئي) أو not_delivered (غير منفّذ) أو no_evidence (لا يوجد دليل في المصادر)، note: دليل قصير أو سبب الحالة (اقتباس/تلخيص أمين، أو null) }. اشمل البنود المنفّذة وغير المنفّذة معًا حتى يفهم الفريق أين الخلل بالضبط. لا تخترع بنوداً ليست في البريف.`
     : `- briefAdherenceScore: أعده null لأن نص وثيقة البريف غير متاح في مدخلات التحليل. لا تستنتج الالتزام بالبريف من مجموعة الفريق التقني أو من المحادثات.
 - briefAdherence: أعده null لنفس السبب.`;
@@ -216,7 +237,7 @@ export async function buildSatisfactionInput(
     ? `\n\n=== التاسكات والمشروع (مواعيد التسليم + Bottlenecks) ===\n(بيانات نظام تُزامَن دوريًا من أودو وقد تكون غير محدّثة لحظيًا؛ أرقام «في هذه المرحلة منذ» تقريبية وتقيس المدة منذ آخر تحديث للمرحلة فقط — ليست «مدة تأخير اعتماد» دقيقة.)\n${executionScopeNote}\nإجمالي المهام: ${execution.totalTasks} — متأخرة: ${execution.overdueCount}${
         execution.maxDaysStuck != null ? ` — أطول ركود: ${execution.maxDaysStuck} يوم` : ""
       }${bottleneckLine}${deliveryStateBlock}${stuckBlock}`
-    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام مسجّلة لهذا العميل في رواسم)";
+    : "\n\n=== التاسكات والمشروع ===\n(لا توجد مهام Rwasem/Odoo مستوردة لهذا العميل في Sky Light)";
 
   const contract = await getClientContractContext(orgId, clientId);
   const activity = await getClientContractActivity(orgId, clientId);
@@ -289,6 +310,14 @@ export async function buildSatisfactionInput(
 
   const makePrompt = (budget: number) =>
     `أنت محلل علاقات عملاء في وكالة تسويق سعودية (Sky Light). حلّل حالة العميل "${clientName}" من خلال أربعة مصادر مفصولة: مجموعة العميل 💫، مجموعة الفريق التقني 📍، التاسكات والمشروع، وحالة العقد — بالإضافة للبريف الموثق عند توفره. اقرأ كل مصدر على حدة، استخرج إشاراته الخاصة، ثم ادمج الكل في "الصورة الكبرى" (big picture).
+\n👥 هوية المرسلين (مصدر حقيقة): كل سطر محادثة موسوم مسبقًا بـ[موظف الشركة: الاسم] عند مطابقة رقم/اسم المرسل مع صفحة الموظفين، أو [فريق الشركة: الرقم المتصل]، أو [عميل/طرف خارجي]. لا تخمّن الدور من نبرة الرسالة ولا تنسب كلام موظف إلى العميل. تم التعرف على ${transcripts.identifiedEmployeeMessages} رسالة فريق و${transcripts.externalMessages} رسالة لطرف خارجي في النص المتاح. في مجموعة العميل، استخرج رضا/شكاوى العميل من الأسطر الموسومة [عميل/طرف خارجي] فقط؛ ردود [موظف الشركة] هي أداء الفريق وليست رأي العميل.\n
+${
+  hadNewMessages === false
+    ? `\n🚫 تنبيه إلزامي عن حداثة البيانات: لم تصل أي رسالة واتساب جديدة منذ التحليل السابق. أحدث رسالة متاحة تاريخها ${sourceLatestMessageAt ? sourceLatestMessageAt.slice(0, 16).replace("T", " ") : "غير معروف"}. هذا التشغيل هو إعادة قراءة لنفس المحادثة القديمة، وليس قراءة لتواصل جديد اليوم. يجب أن تبدأ summary بعبارة واضحة تفيد أن التحليل أُعيد دون رسائل جديدة، ولا تقل إن الوضع "اليوم" أو "حاليًا" جيد بسبب صمت المحادثة. ميّز أي تغيّر ناتج من التاسكات/العقد عن تغيّر نبرة العميل.\n`
+    : sourceLatestMessageAt
+      ? `\n🕓 أحدث رسالة واتساب دخلت هذا التحليل: ${sourceLatestMessageAt.slice(0, 16).replace("T", " ")}. وقت تشغيل التحليل ليس وقت آخر تواصل مع العميل.\n`
+      : ""
+}
 ${
   windowKind !== "week"
     ? `\n⏱️ النطاق الزمني: كامل تاريخ التعامل مع العميل (نظرة شاملة).\n`
@@ -362,7 +391,7 @@ ${briefInstruction}
 لا تخترع اسماً أو كوداً أو رقماً. إن لم توجد شكوى قابلة للربط أعِد مصفوفة فارغة. كذلك في causes، إن كان لسبب المشكلة مالك مذكور بالاسم في الروستر ضعه في ownerName (وإلا null).
 
 ضوابط عامة:
-- حدود رواسم: اذكر رقم «في هذه المرحلة منذ» كما ورد ولا تُعِد صياغته كـ«تأخّر اعتماد X أيام». لا تنسب لمهمة أثراً لم يُذكر صراحةً ما لم يقُله العميل في مجموعته.
+- حدود بيانات Rwasem/Odoo: اذكر رقم «في هذه المرحلة منذ» كما ورد ولا تُعِد صياغته كـ«تأخّر اعتماد X أيام». لا تنسب لمهمة أثراً لم يُذكر صراحةً ما لم يقُله العميل في مجموعته.
 - highlights: لكل عنصر audience: "client" (من العميل) أو "team" (تنسيق داخلي). نص كل عنصر اقتباس حقيقي أو تلخيص أمين — لا تخترع رسائل أو "تم الاعتماد/الانتهاء". milestone للمخرجات المعتمدة الجوهرية فقط؛ الاسترداد المالي/فسخ التعاقد/مغادرة العميل = escalation وليست milestone.
 - ميّز الاستفسار المحايد عن الشكوى. عدم الوفاء بوعد أو تكرار المتابعة دون رد أو احتكاك العملية = إشارات سلبية حقيقية.
 - درجات الرضا: 75+ تتطلب رضا/ثناءً صريحاً. علاقة فيها احتكاك لوجستي/تأخيرات = 55-70 (محايد/متباين) وليست إيجابية.
@@ -398,6 +427,8 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${t
     windowKind,
     windowStart,
     windowEnd,
+    sourceLatestMessageAt,
+    hadNewMessages,
     brief,
     contract,
     activity,
@@ -416,7 +447,17 @@ export async function persistSatisfaction(
   result: SatisfactionResult,
   input: SatisfactionInput,
 ): Promise<AnalyzeOutcome> {
-  const { brief, contract, activity, team, windowKind, windowStart, windowEnd } = input;
+  const {
+    brief,
+    contract,
+    activity,
+    team,
+    windowKind,
+    windowStart,
+    windowEnd,
+    sourceLatestMessageAt,
+    hadNewMessages,
+  } = input;
   // Brief text wasn't available → the model must not have inferred adherence.
   if (!brief) {
     result.briefAdherenceScore = null;
@@ -497,7 +538,14 @@ export async function persistSatisfaction(
       technical_group_signals: result.technicalGroupSignals,
       causes: result.causes,
       accountability: result.accountability,
-      big_picture: result.bigPicture,
+      // Freshness metadata lives with the frozen analysis snapshot. Keeping it
+      // in the existing JSON object makes this deploy backward-compatible with
+      // the current database schema while still persisting a source watermark.
+      big_picture: {
+        ...result.bigPicture,
+        _sourceLatestMessageAt: sourceLatestMessageAt,
+        _hadNewMessages: hadNewMessages,
+      },
       contract_context: contract ? { ...contract, recentActivity: activity } : null,
       team_context: team.hasData ? team : null,
       model: MODEL,
@@ -519,7 +567,13 @@ export async function persistSatisfaction(
     action: "client.satisfaction_analyzed",
     entityType: "client",
     entityId: clientId,
-    metadata: { score: result.satisfactionScore, sentiment: result.sentiment, windowKind },
+    metadata: {
+      score: result.satisfactionScore,
+      sentiment: result.sentiment,
+      windowKind,
+      sourceLatestMessageAt,
+      hadNewMessages,
+    },
   });
   await logAiEvent({
     organizationId: orgId,
@@ -537,6 +591,8 @@ export async function persistSatisfaction(
         .map((i) => i.code),
       briefUsed: brief ? { source: brief.source, kind: brief.kind, filename: brief.filename, url: brief.url } : null,
       windowKind,
+      sourceLatestMessageAt,
+      hadNewMessages,
     },
     importance:
       result.satisfactionScore < 50 ||

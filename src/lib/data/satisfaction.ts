@@ -41,6 +41,10 @@ export interface AnalysisInfo extends SatisfactionResult {
   windowKind: WindowKind;
   windowStart: string | null;
   windowEnd: string | null;
+  // WhatsApp freshness captured when this analysis ran. `hadNewMessages` is
+  // null only for legacy/first-run snapshots that had no earlier watermark.
+  sourceLatestMessageAt: string | null;
+  hadNewMessages: boolean | null;
   // The contract snapshot fed to the model when the analysis ran (UI shows the
   // pill; the model used it for the commercial dimension of the big picture).
   contractContext: ClientContractContext | null;
@@ -301,6 +305,8 @@ export interface ClientSatisfactionDetail {
   clientName: string;
   imports: { client: ImportInfo | null; technical: ImportInfo | null };
   hasMessages: boolean; // live wa_messages exist → analyzable without a .txt import
+  latestMessageAt: string | null; // newest linked live/imported WhatsApp message
+  hasNewMessagesSinceAnalysis: boolean | null;
   analysis: AnalysisInfo | null; // the shown analysis (selected, else current week)
   history: AnalysisHistoryItem[]; // all stored snapshots, newest first
   activeProjects: Array<{ id: string; name: string }>;
@@ -333,6 +339,11 @@ const EMPTY_TECH_SIGNALS: SatisfactionResult["technicalGroupSignals"] = {
 };
 
 function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
+  const storedBigPicture =
+    (a.big_picture as (SatisfactionResult["bigPicture"] & {
+      _sourceLatestMessageAt?: string | null;
+      _hadNewMessages?: boolean | null;
+    }) | null) ?? EMPTY_BIG_PICTURE;
   return {
     id: a.id as string,
     satisfactionScore: (a.satisfaction_score as number) ?? 0,
@@ -340,7 +351,7 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     briefAdherence: (a.brief_adherence as SatisfactionResult["briefAdherence"]) ?? null,
     sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
     summary: (a.summary as string) ?? "",
-    bigPicture: (a.big_picture as SatisfactionResult["bigPicture"]) ?? EMPTY_BIG_PICTURE,
+    bigPicture: storedBigPicture,
     indicators: (a.indicators as SatisfactionResult["indicators"]) ?? [],
     clientGroupSignals:
       (a.client_group_signals as SatisfactionResult["clientGroupSignals"]) ?? EMPTY_CLIENT_SIGNALS,
@@ -359,6 +370,8 @@ function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
     windowKind: ((a.window_kind as string) ?? "all") as WindowKind,
     windowStart: (a.window_start as string | null) ?? null,
     windowEnd: (a.window_end as string | null) ?? null,
+    sourceLatestMessageAt: storedBigPicture._sourceLatestMessageAt ?? null,
+    hadNewMessages: storedBigPicture._hadNewMessages ?? null,
   };
 }
 
@@ -405,7 +418,7 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, hasMessages, projectsRes, brief, displayNames] = await Promise.all([
+  const [clientRes, importsRes, analysisRes, historyRes, hasMessages, latestLiveMessageAt, projectsRes, brief, displayNames] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -443,6 +456,7 @@ async function _getClientSatisfactionDetail(
     // wrongly report "no messages" and get their analyze buttons disabled even
     // though they can be (and have been) analyzed.
     clientHasResolvedMessages(orgId, clientId),
+    getClientLatestLiveMessageAt(orgId, clientId),
     supabaseAdmin
       .from("projects")
       .select("id, name")
@@ -487,6 +501,39 @@ async function _getClientSatisfactionDetail(
     if (picked) analysis = picked;
   }
 
+  const latestMessageAt = [
+    latestLiveMessageAt,
+    clientImp?.lastMessageAt ?? null,
+    techImp?.lastMessageAt ?? null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  // Backfill the truth for legacy snapshots that predate the persisted
+  // watermark: when this is demonstrably a re-analysis (an older snapshot
+  // exists) and even today's newest available message predates the run, it ran
+  // without new chat evidence. This makes already-saved misleading results show
+  // the warning immediately, not only after their next re-analysis.
+  const hasEarlierAnalysis = analysis
+    ? ((historyRes.data ?? []) as Array<{ id: string; created_at: string }>).some(
+        (row) => row.id !== analysis.id && row.created_at < analysis.createdAt,
+      )
+    : false;
+  if (
+    analysis &&
+    analysis.hadNewMessages === null &&
+    hasEarlierAnalysis &&
+    latestMessageAt &&
+    latestMessageAt <= analysis.createdAt
+  ) {
+    analysis.hadNewMessages = false;
+    analysis.sourceLatestMessageAt = latestMessageAt;
+  }
+  const freshnessBaseline = analysis?.sourceLatestMessageAt ?? analysis?.createdAt ?? null;
+  const hasNewMessagesSinceAnalysis = analysis
+    ? Boolean(latestMessageAt && freshnessBaseline && latestMessageAt > freshnessBaseline)
+    : null;
+
   // Resolve task_code → task id for the shown analysis's roster. The frozen
   // team_context only carries taskId for analyses run after that field was
   // added, so older snapshots have null ids and their accountability chips would
@@ -517,6 +564,8 @@ async function _getClientSatisfactionDetail(
     clientName: displayNames.get(clientId) ?? (clientRes.data.name as string),
     imports: { client: clientImp, technical: techImp },
     hasMessages,
+    latestMessageAt,
+    hasNewMessagesSinceAnalysis,
     analysis,
     history,
     activeProjects: ((projectsRes.data ?? []) as Array<{ id: string; name: string }>).map((p) => ({
@@ -534,11 +583,111 @@ export interface MergedTranscripts {
   technical: string;
   clientMessages: number;
   technicalMessages: number;
+  latestMessageAt: string | null;
+  identifiedEmployeeMessages: number;
+  externalMessages: number;
 }
 
-function renderWaLine(sentAt: string | null, sender: string | null, body: string): string {
+interface EmployeeSenderIdentity {
+  name: string;
+  phone: string | null;
+}
+interface EmployeeSenderDirectory {
+  byPhone: Map<string, EmployeeSenderIdentity>;
+  byName: Map<string, EmployeeSenderIdentity>;
+}
+
+function normalizedPersonName(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("ar")
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+// Employee phones may be entered as +966 5…, 00966…, or 05…. WhatsApp's
+// phone JIDs use 966…@c.us. Canonicalise Saudi mobiles to their final 9 digits;
+// never treat an opaque @lid identifier as a phone because it is not one.
+export function normalizedWhatsAppPhone(value: string | null | undefined): string | null {
+  if (!value || /@lid$/i.test(value.trim())) return null;
+  let digits = value.replace(/@.*$/, "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (/^05\d{8}$/.test(digits)) return digits.slice(1);
+  if (/^9665\d{8}$/.test(digits)) return digits.slice(3);
+  return digits.length >= 7 ? digits : null;
+}
+
+async function getEmployeeSenderDirectory(orgId: string): Promise<EmployeeSenderDirectory> {
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("full_name, phone, employment_status")
+    .eq("organization_id", orgId)
+    .neq("employment_status", "terminated");
+  if (error) throw error;
+  const byPhone = new Map<string, EmployeeSenderIdentity>();
+  const byName = new Map<string, EmployeeSenderIdentity>();
+  for (const row of (data ?? []) as Array<{
+    full_name: string;
+    phone: string | null;
+    employment_status: string | null;
+  }>) {
+    const identity = { name: row.full_name, phone: row.phone };
+    const phone = normalizedWhatsAppPhone(row.phone);
+    const name = normalizedPersonName(row.full_name);
+    if (phone) byPhone.set(phone, identity);
+    // Exact normalized-name matching only. Ambiguous duplicate names are
+    // removed rather than risking attribution to the wrong employee.
+    if (name) {
+      if (byName.has(name)) byName.delete(name);
+      else byName.set(name, identity);
+    }
+  }
+  return { byPhone, byName };
+}
+const getEmployeeSenderDirectoryCached = cache(getEmployeeSenderDirectory);
+
+function annotateImportedTranscript(
+  transcript: string,
+  directory: EmployeeSenderDirectory,
+): { text: string; employees: number; external: number } {
+  let employees = 0;
+  let external = 0;
+  const text = transcript
+    .split("\n")
+    .map((line) => {
+      // WhatsApp exports commonly use either "[date, time] Sender: text" or
+      // "date, time - Sender: text". Preserve unrecognised/system lines.
+      const match =
+        line.match(/^(\[[^\]]+\]\s*)([^:]{1,100})(:\s.*)$/) ??
+        line.match(/^(.{5,40}\s-\s)([^:]{1,100})(:\s.*)$/);
+      if (!match) return line;
+      const identity = directory.byName.get(normalizedPersonName(match[2]));
+      if (identity) {
+        employees += 1;
+        return `${match[1]}[موظف الشركة: ${identity.name}] ${match[2]}${match[3]}`;
+      }
+      external += 1;
+      return `${match[1]}[عميل/طرف خارجي] ${match[2]}${match[3]}`;
+    })
+    .join("\n");
+  return { text, employees, external };
+}
+
+function renderWaLine(
+  sentAt: string | null,
+  sender: string | null,
+  body: string,
+  identity: EmployeeSenderIdentity | null,
+  isFromMe: boolean,
+): string {
   const ts = sentAt ? sentAt.slice(0, 16).replace("T", " ") : "?";
-  return `[${ts}] ${sender ?? "—"}: ${body}`;
+  const role = identity
+    ? `موظف الشركة: ${identity.name}`
+    : isFromMe
+      ? "فريق الشركة: الرقم المتصل"
+      : "عميل/طرف خارجي";
+  return `[${ts}] [${role}] ${sender ?? identity?.name ?? "مرسل غير معروف"}: ${body}`;
 }
 
 // Turn a WhatsApp message into the transcript text the model reads — MEDIA-AWARE.
@@ -659,6 +808,25 @@ async function _clientHasResolvedMessages(orgId: string, clientId: string): Prom
 }
 export const clientHasResolvedMessages = cache(_clientHasResolvedMessages);
 
+async function _getClientLatestLiveMessageAt(
+  orgId: string,
+  clientId: string,
+): Promise<string | null> {
+  const chatIds = Array.from((await resolveClientGroupChats(orgId, clientId)).keys());
+  if (chatIds.length === 0) return null;
+  const { data } = await supabaseAdmin
+    .from("wa_messages")
+    .select("sent_at")
+    .eq("organization_id", orgId)
+    .in("chat_id", chatIds)
+    .not("sent_at", "is", null)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.sent_at as string | null | undefined) ?? null;
+}
+export const getClientLatestLiveMessageAt = cache(_getClientLatestLiveMessageAt);
+
 async function _buildClientTranscripts(
   orgId: string,
   clientId: string,
@@ -676,12 +844,13 @@ async function _buildClientTranscripts(
   // The client's groups resolved from the live link graph (chat_id → kind).
   const chatKinds = await resolveClientGroupChats(orgId, clientId);
   const chatIds = Array.from(chatKinds.keys());
+  const employeeDirectoryPromise = getEmployeeSenderDirectoryCached(orgId);
 
   // Gather messages by GROUP (chat_id), not by the frozen message client_id.
   let waQuery = chatIds.length
     ? supabaseAdmin
         .from("wa_messages")
-        .select("chat_id, group_kind, sender, body, sent_at, message_type")
+        .select("chat_id, group_kind, sender, sender_id, body, sent_at, message_type, is_from_me")
         .eq("organization_id", orgId)
         .in("chat_id", chatIds)
         .order("sent_at", { ascending: true })
@@ -689,22 +858,30 @@ async function _buildClientTranscripts(
     : null;
   if (waQuery && since) waQuery = waQuery.gte("sent_at", since);
 
-  const [importsRes, waRes] = await Promise.all([
+  const [importsRes, waRes, employeeDirectory] = await Promise.all([
     since
       ? Promise.resolve({ data: [] as Array<{ group_kind: GroupKind; transcript: string }> })
       : supabaseAdmin
           .from("client_chat_imports")
-          .select("group_kind, transcript, created_at")
+          .select("group_kind, transcript, last_message_at, created_at")
           .eq("organization_id", orgId)
           .eq("client_id", clientId)
           .order("created_at", { ascending: false }),
     waQuery ?? Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+    employeeDirectoryPromise,
   ]);
 
   // Latest one-time import per kind (historical seed; empty for windowed runs).
-  const importByKind: Record<GroupKind, string> = { client: "", technical: "" };
-  for (const r of (importsRes.data ?? []) as Array<{ group_kind: GroupKind; transcript: string }>) {
-    if (!importByKind[r.group_kind]) importByKind[r.group_kind] = r.transcript ?? "";
+  const rawImportByKind: Record<GroupKind, string> = { client: "", technical: "" };
+  let latestMessageAt: string | null = null;
+  for (const r of (importsRes.data ?? []) as Array<{
+    group_kind: GroupKind;
+    transcript: string;
+    last_message_at?: string | null;
+  }>) {
+    if (!rawImportByKind[r.group_kind]) rawImportByKind[r.group_kind] = r.transcript ?? "";
+    if (r.last_message_at && (!latestMessageAt || r.last_message_at > latestMessageAt))
+      latestMessageAt = r.last_message_at;
   }
 
   // Live messages per kind (text only, non-empty). The group's CURRENT kind
@@ -713,14 +890,26 @@ async function _buildClientTranscripts(
   // silently skewed satisfaction scores too rosy (whole groups vanished).
   const liveByKind: Record<GroupKind, string[]> = { client: [], technical: [] };
   const counts: Record<GroupKind, number> = { client: 0, technical: 0 };
+  let identifiedEmployeeMessages = 0;
+  let externalMessages = 0;
+  const importByKind: Record<GroupKind, string> = { client: "", technical: "" };
+  for (const kind of ["client", "technical"] as const) {
+    const annotated = annotateImportedTranscript(rawImportByKind[kind], employeeDirectory);
+    importByKind[kind] = annotated.text;
+    identifiedEmployeeMessages += annotated.employees;
+    externalMessages += annotated.external;
+  }
   for (const r of (waRes.data ?? []) as Array<{
     chat_id: string | null;
     group_kind: GroupKind | null;
     sender: string | null;
+    sender_id: string | null;
     body: string | null;
     sent_at: string | null;
     message_type: string | null;
+    is_from_me: boolean;
   }>) {
+    if (r.sent_at && (!latestMessageAt || r.sent_at > latestMessageAt)) latestMessageAt = r.sent_at;
     const kind: GroupKind =
       (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
     // Media-aware: keep image/video captions, document filenames, and shared
@@ -728,7 +917,15 @@ async function _buildClientTranscripts(
     // usable text. See waMessageText().
     const text = waMessageText(r.message_type ?? "chat", r.body ?? "");
     if (!text) continue;
-    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, text));
+    const senderPhone = normalizedWhatsAppPhone(r.sender_id);
+    const senderName = normalizedPersonName(r.sender);
+    const identity =
+      (senderPhone ? employeeDirectory.byPhone.get(senderPhone) : null) ??
+      (senderName ? employeeDirectory.byName.get(senderName) : null) ??
+      null;
+    if (identity || r.is_from_me) identifiedEmployeeMessages += 1;
+    else externalMessages += 1;
+    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, text, identity, r.is_from_me));
     counts[kind] += 1;
   }
 
@@ -740,6 +937,9 @@ async function _buildClientTranscripts(
     technical: merge("technical"),
     clientMessages: counts.client,
     technicalMessages: counts.technical,
+    latestMessageAt,
+    identifiedEmployeeMessages,
+    externalMessages,
   };
 }
 export const buildClientTranscripts = cache(_buildClientTranscripts);
@@ -761,13 +961,17 @@ export interface ClientMediaExchange {
   images: MediaItem[]; // captioned images
   videos: MediaItem[]; // captioned videos
   others: MediaItem[]; // vcard / location (with text)
+  links: MediaItem[];
   documentCount: number;
   imageCount: number;
   videoCount: number;
   otherCount: number;
+  linkCount: number;
   voiceNotes: number; // ptt count (no text — not stored)
   silentImages: number; // images with no caption (pixels not stored)
   totalMedia: number; // every non-chat media message in scope
+  totalSharedItems: number; // media + messages containing links
+  isPartial: boolean; // query hit its safety cap; real stored total may be higher
 }
 
 const MEDIA_PER_CATEGORY = 20;
@@ -783,13 +987,17 @@ async function _getClientMediaExchange(
     images: [],
     videos: [],
     others: [],
+    links: [],
     documentCount: 0,
     imageCount: 0,
     videoCount: 0,
     otherCount: 0,
+    linkCount: 0,
     voiceNotes: 0,
     silentImages: 0,
     totalMedia: 0,
+    totalSharedItems: 0,
+    isPartial: false,
   };
   if (chatIds.length === 0) return empty;
 
@@ -798,12 +1006,31 @@ async function _getClientMediaExchange(
     .select("chat_id, group_kind, sender, body, sent_at, message_type")
     .eq("organization_id", orgId)
     .in("chat_id", chatIds)
-    .in("message_type", ["document", "image", "video", "ptt", "audio", "vcard", "location"])
     .order("sent_at", { ascending: false })
-    .limit(2000);
+    .limit(8000);
   if (!data || data.length === 0) return empty;
 
-  const out: ClientMediaExchange = { ...empty, documents: [], images: [], videos: [], others: [] };
+  const out: ClientMediaExchange = {
+    ...empty,
+    documents: [],
+    images: [],
+    videos: [],
+    others: [],
+    links: [],
+    isPartial: data.length === 8000,
+  };
+  const mediaTypes = new Set([
+    "document",
+    "image",
+    "sticker",
+    "video",
+    "gif",
+    "ptt",
+    "audio",
+    "vcard",
+    "location",
+  ]);
+  const urlPattern = /(?:https?:\/\/|www\.)[^\s]+/i;
   for (const r of data as Array<{
     chat_id: string | null;
     group_kind: GroupKind | null;
@@ -812,22 +1039,27 @@ async function _getClientMediaExchange(
     sent_at: string | null;
     message_type: string | null;
   }>) {
-    out.totalMedia += 1;
     const kind: GroupKind =
       (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
     const type = (r.message_type ?? "").toLowerCase();
     const text = (r.body ?? "").trim();
     const item: MediaItem = { kind, sender: r.sender, date: r.sent_at, text };
+    if (text && urlPattern.test(text)) {
+      out.linkCount += 1;
+      if (out.links.length < MEDIA_PER_CATEGORY) out.links.push(item);
+    }
+    if (!mediaTypes.has(type)) continue;
+    out.totalMedia += 1;
     if (type === "ptt" || type === "audio") {
       out.voiceNotes += 1;
     } else if (type === "document") {
       out.documentCount += 1;
       if (text && out.documents.length < MEDIA_PER_CATEGORY) out.documents.push(item);
-    } else if (type === "image") {
+    } else if (type === "image" || type === "sticker") {
       out.imageCount += 1;
       if (!text) out.silentImages += 1;
       else if (out.images.length < MEDIA_PER_CATEGORY) out.images.push(item);
-    } else if (type === "video") {
+    } else if (type === "video" || type === "gif") {
       out.videoCount += 1;
       if (text && out.videos.length < MEDIA_PER_CATEGORY) out.videos.push(item);
     } else if (type === "vcard" || type === "location") {
@@ -836,6 +1068,7 @@ async function _getClientMediaExchange(
         out.others.push({ ...item, text: `${type === "vcard" ? "جهة اتصال" : "موقع"}: ${text}` });
     }
   }
+  out.totalSharedItems = out.totalMedia + out.linkCount;
   return out;
 }
 export const getClientMediaExchange = cache(_getClientMediaExchange);

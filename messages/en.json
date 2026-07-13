@@ -3576,7 +3576,7 @@
     "summary": "Summary",
     "timeline": "Satisfaction trend",
     "risks": "Relationship risks",
-    "recommendations": "Recommendations (chat ↔ Rawasm tasks)",
+    "recommendations": "Recommendations (chat ↔ Rwasem/Odoo tasks)",
     "executive": {
       "title": "AI Executive Summary",
       "deliveryRisk": "{n} overdue task(s) should be handled in the follow-up plan.",
@@ -3741,11 +3741,14 @@
     "media": {
       "title": "Media & files exchanged",
       "hint": "Total files, images and clips shared in the chats by type. The file contents aren't stored.",
-      "count": "{n} media messages",
+      "hintStored": "This counts only items that reached the Sky Light system, not WhatsApp's full total. If it is lower, reconnect the number and run “Backfill history” from number management.",
+      "count": "{n} stored items",
+      "countAtLeast": "{n}+ stored items",
       "documents": "Documents",
       "images": "Images",
       "videos": "Videos",
       "voiceNotes": "Audio files",
+      "links": "Links",
       "others": "Other",
       "captions": "Image & video captions",
       "silentImages": "+ {n} image(s) with no caption (not readable — pixels aren't stored)"
@@ -3927,6 +3930,10 @@
       "reconnect": "Reconnect",
       "scanForLabel": "Scan to connect this number",
       "preparingQr": "Preparing QR code… this takes a few seconds",
+      "qrTakingLong": "The QR code is taking longer than expected. Restart the session to generate a new one.",
+      "generateNewQr": "Generate a new QR code",
+      "resettingQr": "Generating a new code…",
+      "resetQrFailed": "Could not restart the WhatsApp session",
       "neverSeen": "No activity yet",
       "backfillHistory": "Backfill history",
       "backfilling": "Pulling history…",
@@ -3939,12 +3946,27 @@
       "resyncDone": "Webhooks registered for {count}/{total} numbers",
       "resyncFail": "Could not register webhooks"
     },
+    "connectionBanner": {
+      "title": "A WhatsApp number needs attention",
+      "body": "These numbers are not fully connected: {names}. New messages will not arrive through them until setup is complete.",
+      "action": "Manage numbers and finish setup",
+      "contactAdmin": "Contact an administrator to finish setup"
+    },
     "analyzeWeek": "Analyze current week",
     "analyzeAll": "Analyze all time",
     "reanalyzeWeek": "Re-analyze week",
     "analyzeWeekHint": "Scores the client's current status from the last 7 days only",
     "analyzeAllHint": "Whole-history overview of the relationship",
     "noRecentActivity": "No recent messages in the last 7 days — try “Analyze all time”",
+    "freshness": {
+      "noNewBeforeTitle": "No new WhatsApp messages since the previous analysis",
+      "noNewBeforeBody": "The last message arrived at {date}. Re-analysis will review the same older conversation; only task or contract updates may change the result.",
+      "reanalyzedWithoutNew": "Re-analyzed without new WhatsApp messages",
+      "resultBody": "This result was generated now, but its newest message is from {date}. Do not treat it as confirmation that current client communication is healthy.",
+      "analysisRunAt": "Analysis run",
+      "lastMessageAt": "Latest message used",
+      "unknownDate": "Unknown"
+    },
     "archive": "Archive",
     "restore": "Restore",
     "archiveHint": "Mark this client as archived/cancelled so it leaves the Active list (e.g. cancelled contract not yet in Rawasm)",

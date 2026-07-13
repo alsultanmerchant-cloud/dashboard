@@ -42,6 +42,7 @@ interface Account {
   is_active: boolean;
   status: Status;
   last_seen_at: string | null;
+  status_updated_at?: string | null;
   pushname?: string | null;
 }
 
@@ -137,11 +138,29 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
     }
   };
 
+  const resetConnection = async (session: string) => {
+    setError(null);
+    setBusy(session);
+    try {
+      const resetRes = await fetch(`/api/wa/session?session=${encodeURIComponent(session)}`, {
+        method: "PATCH",
+      });
+      const resetData = await resetRes.json();
+      if (!resetRes.ok) setError(resetData.error ?? t("resetQrFailed"));
+      await poll();
+    } catch {
+      setError(t("resetQrFailed"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const backfill = async (session: string) => {
     setError(null);
     setBackfilling(session);
     try {
-      const res = await fetch(`/api/wa/accounts/backfill?session=${encodeURIComponent(session)}`, {
+      const refresh = backfillNote[session] ? "0" : "1";
+      const res = await fetch(`/api/wa/accounts/backfill?session=${encodeURIComponent(session)}&refresh=${refresh}`, {
         method: "POST",
       });
       const data = (await res.json()) as { imported?: number; remaining?: number; error?: string };
@@ -261,6 +280,7 @@ WA_PUBLIC_WEBHOOK_URL=https://<app>/api/wa/webhook`}</pre>
             nowMs={nowMs}
             t={t}
             onConnect={() => connect(a.session_id)}
+            onResetConnection={() => resetConnection(a.session_id)}
             onDisconnect={() => disconnect(a.session_id)}
             onBackfill={() => backfill(a.session_id)}
             onRemove={() => remove(a.session_id)}
@@ -304,6 +324,7 @@ function AccountCard({
   nowMs,
   t,
   onConnect,
+  onResetConnection,
   onDisconnect,
   onBackfill,
   onRemove,
@@ -317,6 +338,7 @@ function AccountCard({
   nowMs: number;
   t: ReturnType<typeof useTranslations>;
   onConnect: () => void;
+  onResetConnection: () => void;
   onDisconnect: () => void;
   onBackfill: () => void;
   onRemove: () => void;
@@ -331,6 +353,16 @@ function AccountCard({
     a.last_seen_at != null &&
     nowMs > 0 &&
     nowMs - new Date(a.last_seen_at).getTime() > 7 * 24 * 3600 * 1000;
+  const waitingForQr = s === "INITIALIZING" || s === "CONNECTING" || s === "SCAN_QR";
+  const qrWaitStartedAt = a.status_updated_at
+    ? new Date(a.status_updated_at).getTime()
+    : Number.NaN;
+  const qrStalled =
+    waitingForQr &&
+    !qr &&
+    nowMs > 0 &&
+    Number.isFinite(qrWaitStartedAt) &&
+    nowMs - qrWaitStartedAt > 90_000;
 
   return (
     <Card>
@@ -396,6 +428,16 @@ function AccountCard({
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
             <p className="text-xs text-muted-foreground">{t("preparingQr")}</p>
+          </div>
+        )}
+
+        {qrStalled && (
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-amber/30 bg-amber-dim p-4 text-center">
+            <p className="text-xs text-amber">{t("qrTakingLong")}</p>
+            <Button size="sm" variant="outline" onClick={onResetConnection} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              {busy ? t("resettingQr") : t("generateNewQr")}
+            </Button>
           </div>
         )}
 

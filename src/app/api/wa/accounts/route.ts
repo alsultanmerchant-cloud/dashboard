@@ -65,6 +65,7 @@ export async function GET() {
         status: live.status,
         phone: live.phone ?? a.phone,
         pushname: live.pushname,
+        status_updated_at: live.statusUpdatedAt ?? null,
       };
     }),
   );

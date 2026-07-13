@@ -204,12 +204,29 @@ export function normalizeWaEvents(payload: unknown): NormalMessage[] {
       str(m.chatName) ??
       null;
 
+    const senderObj = (m.sender as Record<string, unknown>) ?? {};
+    const senderIdObj = (senderObj.id as Record<string, unknown>) ?? {};
     const sender =
-      str((m.sender as Record<string, unknown>)?.pushname) ??
-      str((m.sender as Record<string, unknown>)?.formattedName) ??
+      str(senderObj.pushname) ??
+      str(senderObj.pushName) ??
+      str(senderObj.formattedName) ??
+      str(senderObj.name) ??
       str(m.notifyName) ??
       str(m.author) ??
       null;
+    // Prefer a real phone JID exposed by the contact object over `author`.
+    // Modern WhatsApp often emits author as an opaque @lid, which cannot be
+    // compared with employee_profiles.phone. Fall back to it only when the
+    // contact payload has no phone/c.us identity.
+    const contactSenderId =
+      str(senderObj.phoneNumber) ??
+      str(senderObj.phone) ??
+      str(senderObj.contactId) ??
+      str(senderIdObj._serialized) ??
+      str(senderIdObj.serialized) ??
+      (str(senderIdObj.user) && str(senderIdObj.server)
+        ? `${str(senderIdObj.user)}@${str(senderIdObj.server)}`
+        : null);
 
     const tsRaw = m.timestamp ?? m.t ?? null;
     let sentAt: string | null = null;
@@ -223,7 +240,12 @@ export function normalizeWaEvents(payload: unknown): NormalMessage[] {
       waMessageId,
       waRawId,
       sender,
-      senderId: str(m.author) ?? str(m.participant) ?? null,
+      senderId:
+        (contactSenderId && !contactSenderId.endsWith("@lid") ? contactSenderId : null) ??
+        str(m.author) ??
+        str(m.participant) ??
+        contactSenderId ??
+        null,
       body,
       messageType: type,
       isFromMe: m.fromMe === true,
@@ -305,6 +327,88 @@ export function extractSessionId(payload: unknown): string | null {
     (data && typeof data.session === "string" ? data.session : null) ??
     null
   );
+}
+
+export type IngestedWaSessionStatus =
+  | "INITIALIZING"
+  | "SCAN_QR"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "DISCONNECTED"
+  | "FAILED";
+
+// OpenWA sends `session.status` through the same webhook as messages. Keep the
+// parsing deliberately narrow so message delivery/read statuses can never be
+// mistaken for the connection status of the whole WhatsApp number.
+export function extractWaSessionStatus(payload: unknown): IngestedWaSessionStatus | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const data = p.data && typeof p.data === "object"
+    ? (p.data as Record<string, unknown>)
+    : null;
+  const eventPayload = p.payload && typeof p.payload === "object"
+    ? (p.payload as Record<string, unknown>)
+    : null;
+  const event = firstString(p.event, p.eventName, p.type, data?.event, data?.eventName)
+    ?.toLowerCase()
+    .replace(/[-_]/g, ".");
+  if (event !== "session.status") return null;
+
+  const raw = firstString(
+    p.status,
+    p.state,
+    data?.status,
+    data?.state,
+    eventPayload?.status,
+    eventPayload?.state,
+  )
+    ?.toLowerCase()
+    .replace(/-/g, "_");
+  switch (raw) {
+    case "created":
+    case "initializing":
+    case "starting":
+      return "INITIALIZING";
+    case "qr_ready":
+    case "scan_qr":
+    case "scan_code":
+      return "SCAN_QR";
+    case "authenticating":
+    case "connecting":
+      return "CONNECTING";
+    case "ready":
+    case "connected":
+    case "working":
+      return "CONNECTED";
+    case "disconnected":
+    case "logged_out":
+    case "stopped":
+      return "DISCONNECTED";
+    case "failed":
+    case "auth_failure":
+    case "error":
+      return "FAILED";
+    default:
+      return null;
+  }
+}
+
+export async function ingestWaSessionStatus(
+  status: IngestedWaSessionStatus,
+  accountSessionId: string | null,
+): Promise<boolean> {
+  if (!accountSessionId) return false;
+  const orgId = await getDefaultOrgId();
+  const { data, error } = await supabaseAdmin
+    .from("wa_accounts")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("organization_id", orgId)
+    .eq("session_id", accountSessionId)
+    .eq("is_active", true)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return data != null;
 }
 
 export async function ingestWaMessages(
@@ -438,4 +542,33 @@ export async function ingestWaMessages(
   }
 
   return { ingested, skipped: messages.length - ingested, chats: Array.from(byChat.keys()) };
+}
+
+// Enrich rows that already existed before a history refresh learned a sender's
+// phone/name (for example by resolving an @lid through OpenWA contacts). A
+// minimal upsert updates only identity columns and preserves bodies/media.
+export async function enrichWaMessageSenders(
+  orgId: string,
+  messages: NormalMessage[],
+): Promise<void> {
+  const rows = messages.flatMap((message) => {
+    if (!message.senderId && !message.sender) return [];
+    const { id } = bareWaMessageId(message.waMessageId);
+    if (!id) return [];
+    return [{
+      organization_id: orgId,
+      chat_id: message.chatId,
+      wa_message_id: id,
+      sender: message.sender,
+      sender_id: message.senderId,
+    }];
+  });
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await supabaseAdmin.from("wa_messages").upsert(rows.slice(i, i + 500), {
+      onConflict: "organization_id,chat_id,wa_message_id",
+      ignoreDuplicates: false,
+      defaultToNull: false,
+    });
+    if (error) throw error;
+  }
 }

@@ -750,8 +750,8 @@ async function _getPulseStats(orgId: string): Promise<PulseStats> {
     await Promise.all([
       countTaskStageEntered(orgId, "done", thisStart, undefined),
       countTaskStageEntered(orgId, "done", lastStart, lastEnd),
-      countTaskStageEntered(orgId, "client_changes", thisStart, undefined),
-      countTaskStageEntered(orgId, "client_changes", lastStart, lastEnd),
+      countTaskStageEntered(orgId, "client_changes", thisStart, undefined, true),
+      countTaskStageEntered(orgId, "client_changes", lastStart, lastEnd, true),
       countTasksCreated(orgId, thisStart, undefined),
       countTasksCreated(orgId, lastStart, lastEnd),
       countApprovalsResolved(orgId, thisStart, undefined),
@@ -773,13 +773,21 @@ async function countTaskStageEntered(
   stage: string,
   sinceIso: string,
   untilIso: string | undefined,
+  // Exclude archived (wound-down / lost-client) tasks. Opt-in so the "done"
+  // completed counter keeps its current scope; the client_changes counter
+  // sets it so its period count + trend match the live count.
+  excludeArchived = false,
 ): Promise<number> {
   let q = supabaseAdmin
     .from("task_stage_history")
-    .select("id", { count: "exact", head: true })
+    .select(excludeArchived ? "id, task:tasks!inner(archived_at)" : "id", {
+      count: "exact",
+      head: true,
+    })
     .eq("organization_id", orgId)
     .eq("to_stage", stage)
     .gte("entered_at", sinceIso);
+  if (excludeArchived) q = q.is("task.archived_at", null);
   if (untilIso) q = q.lt("entered_at", untilIso);
   const { count, error } = await q;
   if (error) return 0;
@@ -938,6 +946,10 @@ async function _getServiceLineHealth(
         .select("task_id, entered_at, task:tasks!inner(service_id)")
         .eq("organization_id", orgId)
         .eq("to_stage", "client_changes")
+        // Exclude archived tasks (wound-down / lost-client projects) so the
+        // period counter is scoped like the live count — otherwise a batch of
+        // archived tasks inflates the count AND can flip the trend sign.
+        .is("task.archived_at", null)
         .gte("entered_at", start)
         .lt("entered_at", endExclusive)
         .order("id", { ascending: true })
@@ -1157,7 +1169,23 @@ export const getServiceLineHealth = cache(_getServiceLineHealth);
 // all (e.g. عمر الخيام, graphics head, has 0 task_assignees rows; the work sits
 // on the department's specialists). Add a department slug here to include it.
 const UUID_RE_EXEC = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const SUPPORTING_DEPARTMENT_SLUGS = ["art-graphic", "seo-content"] as const;
+export const SUPPORTING_DEPARTMENT_SLUGS = [
+  "art-graphic",
+  // Motion is a separate supporting dept: it shares a head with الجرافيك but
+  // has its own specialists, and the metric is scoped by team membership (not
+  // the head's assignments), so it earns its own row.
+  "art-motion",
+  "seo-content",
+] as const;
+
+// Category exception (Sky Light, 2026-07-13): محتوى السيو (seo-content) supports
+// the SEO line specifically. Its head occasionally picks up simple one-off tasks
+// for OTHER services individually — those must NOT count as supporting-dept load.
+// So for seo-content only, tasks are filtered to the SEO service group
+// (🟠SEO + 🟠Renewal SEO, matched via serviceGroupKey). الجرافيك / الموشن are
+// unscoped (they support every service line).
+const CATEGORY_SCOPED_DEPT_SLUG = "seo-content";
+const CATEGORY_SCOPED_SERVICE_GROUP = "seo";
 
 async function execRunSql<R = Record<string, unknown>>(sql: string): Promise<R[]> {
   const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
@@ -1183,11 +1211,32 @@ async function _getSupportingDepartmentHealth(
 
   const slugList = SUPPORTING_DEPARTMENT_SLUGS.map((s) => `'${s}'`).join(", ");
 
+  // Resolve the SEO service group → concrete service ids, for the seo-content
+  // category exception. Matched via serviceGroupKey so both 🟠SEO and its
+  // 🟠Renewal SEO variant are included and future renamings still resolve.
+  const { data: svcRows, error: svcErr } = await supabaseAdmin
+    .from("services")
+    .select("id, name")
+    .eq("organization_id", orgId);
+  if (svcErr) throw svcErr;
+  const seoServiceIds = (svcRows ?? [])
+    .filter((s) => serviceGroupKey(s.name ?? "") === CATEGORY_SCOPED_SERVICE_GROUP)
+    .map((s) => s.id)
+    .filter((id) => UUID_RE_EXEC.test(id));
+  // Predicate applied ONLY to the category-scoped dept. If no SEO service
+  // resolves (shouldn't happen), fall back to `false` so we never silently
+  // widen the scope to every service.
+  const seoInList = seoServiceIds.length
+    ? `t.service_id in (${seoServiceIds.map((id) => `'${id}'`).join(", ")})`
+    : "false";
+
   // Shared scope CTEs: active members of the supporting departments, then the
   // DISTINCT (department, task) pairs reachable through their task_assignees.
+  // seo-content is category-scoped to the SEO line (see CATEGORY_SCOPED_*);
+  // the other supporting depts see all of their members' tasks.
   const scopeCte = `
     dept_emp as (
-      select e.id emp, d.id dep
+      select e.id emp, d.id dep, d.slug slug
         from employee_profiles e
         join departments d on d.id = e.department_id
        where e.organization_id = '${orgId}'
@@ -1198,7 +1247,9 @@ async function _getSupportingDepartmentHealth(
       select distinct de.dep, ta.task_id
         from task_assignees ta
         join dept_emp de on de.emp = ta.employee_id
+        join tasks t on t.id = ta.task_id
        where ta.organization_id = '${orgId}'
+         and (de.slug <> '${CATEGORY_SCOPED_DEPT_SLUG}' or ${seoInList})
     )`;
 
   // Q1 — per-department scalars (open / overdue / delivered / on-time for the
@@ -1218,6 +1269,7 @@ async function _getSupportingDepartmentHealth(
              count(distinct h.task_id) filter (
                where (h.entered_at at time zone 'Asia/Riyadh')::date between '${prevFrom}' and '${prevTo}') cc_prev
         from td
+        join tasks ct on ct.id = td.task_id and ct.archived_at is null
         join task_stage_history h
           on h.task_id = td.task_id and h.to_stage = 'client_changes'
        where (h.entered_at at time zone 'Asia/Riyadh')::date between '${prevFrom}' and '${to}'
@@ -1721,9 +1773,14 @@ async function _getTopRevisedTasks(
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabaseAdmin
         .from("task_stage_history")
-        .select("task_id, entered_at")
+        .select("task_id, entered_at, task:tasks!inner(archived_at)")
         .eq("organization_id", orgId)
         .eq("to_stage", "client_changes")
+        // Match the live count's scope: exclude archived (wound-down / lost-
+        // client) tasks. Otherwise the period count is inflated and its trend
+        // can invert (a lost-client batch in the prior window made client-
+        // changes look like they were falling when they were rising).
+        .is("task.archived_at", null)
         .gte("entered_at", priorStart)
         .lt("entered_at", endExclusive)
         .order("entered_at", { ascending: true })
@@ -1860,9 +1917,12 @@ async function countRevisionCommentsSince(orgId: string, isoTs: string): Promise
   // entered_at >= isoTs.
   const { count, error } = await supabaseAdmin
     .from("task_stage_history")
-    .select("id", { count: "exact", head: true })
+    .select("id, task:tasks!inner(archived_at)", { count: "exact", head: true })
     .eq("organization_id", orgId)
     .eq("to_stage", "client_changes")
+    // Exclude archived (wound-down / lost-client) tasks — consistent scoping
+    // with the live count so the score input isn't inflated.
+    .is("task.archived_at", null)
     .gte("entered_at", isoTs);
   if (error) return 0;
   return count ?? 0;

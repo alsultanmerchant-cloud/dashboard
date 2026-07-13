@@ -554,9 +554,12 @@ async function loadClientChanges(orgId: string, fromIso: string, toIso: string):
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabaseAdmin
       .from("task_stage_history")
-      .select("task_id, entered_at")
+      .select("task_id, entered_at, task:tasks!inner(archived_at)")
       .eq("organization_id", orgId)
       .eq("to_stage", "client_changes")
+      // Exclude archived (wound-down / lost-client) tasks so the period count
+      // and its trend are scoped like the live count. See getTopRevisedTasks.
+      .is("task.archived_at", null)
       .gte("entered_at", start)
       .lt("entered_at", end)
       .order("entered_at", { ascending: true })

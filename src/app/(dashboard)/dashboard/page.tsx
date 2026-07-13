@@ -106,8 +106,9 @@ async function ServiceHealth({ orgId, range }: { orgId: string; range: Dashboard
   return <ServiceHealthSection rows={rows} windowLabel={rangeLabel(range)} />;
 }
 
-// Supporting departments (الجرافيك / محتوى السيو) — no service line of their own,
-// so shown separately with the same KPIs, scoped by department membership.
+// Supporting departments (الجرافيك / الموشن / محتوى السيو) — no service line of
+// their own, so shown separately with the same KPIs, scoped by department
+// membership. محتوى السيو is additionally scoped to the SEO service category.
 async function SupportingDeptHealth({ orgId, range }: { orgId: string; range: DashboardRange }) {
   const rows = await getSupportingDepartmentHealth(orgId, range);
   if (rows.length === 0) return null;
@@ -116,7 +117,7 @@ async function SupportingDeptHealth({ orgId, range }: { orgId: string; range: Da
       rows={rows}
       windowLabel={rangeLabel(range)}
       title="صحة الأقسام المساندة"
-      description="الجرافيك ومحتوى السيو — تُقاس بمهام أعضاء القسم (لا تظهر كخدمة مستقلة)"
+      description="الجرافيك والموشن ومحتوى السيو — تُقاس بمهام أعضاء القسم (لا تظهر كخدمة مستقلة). محتوى السيو مقصور على تصنيف SEO / Renewal SEO"
       hrefBase="/team-activity?dept="
     />
   );

@@ -4,6 +4,8 @@ import {
   normalizeWaEvents,
   ingestWaMessages,
   extractSessionId,
+  extractWaSessionStatus,
+  ingestWaSessionStatus,
 } from "@/lib/wa/ingest";
 
 // OpenWA webhook receiver. The self-hosted OpenWA gateway posts group-message
@@ -33,6 +35,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
+  // Attribute all event types to a connected number: prefer the stable account
+  // query tag registered on the webhook, then fall back to the event envelope.
+  const accountSessionId =
+    req.nextUrl.searchParams.get("account") ?? extractSessionId(payload);
+  const sessionStatus = extractWaSessionStatus(payload);
+  let sessionStatusUpdated = false;
+  if (sessionStatus) {
+    try {
+      sessionStatusUpdated = await ingestWaSessionStatus(sessionStatus, accountSessionId);
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: `status ingest failed: ${(e as Error).message}` },
+        { status: 500 },
+      );
+    }
+  }
+
   let messages;
   try {
     messages = normalizeWaEvents(payload);
@@ -46,13 +65,13 @@ export async function POST(req: NextRequest) {
   // Nothing to store (non-message event, 1:1 chat, etc.) — ack so OpenWA
   // doesn't retry.
   if (messages.length === 0) {
-    return NextResponse.json({ ok: true, ingested: 0, note: "no group messages" });
+    return NextResponse.json({
+      ok: true,
+      ingested: 0,
+      sessionStatusUpdated,
+      note: "no group messages",
+    });
   }
-
-  // Attribute the events to a connected number: prefer the ?account=<name> tag
-  // we register webhook URLs with, fall back to any session id in the payload.
-  const accountSessionId =
-    req.nextUrl.searchParams.get("account") ?? extractSessionId(payload);
 
   try {
     const result = await ingestWaMessages(messages, accountSessionId);

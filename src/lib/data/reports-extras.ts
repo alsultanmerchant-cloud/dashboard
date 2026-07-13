@@ -4,22 +4,35 @@ import { isLeadershipPosition } from "@/lib/data/leadership";
 import type { TaskStage } from "@/lib/labels";
 
 // Avg dwell time per stage, computed from task_stage_history segments
-// that have already exited. duration_seconds is trigger-maintained.
+// that have already exited. Uses wall-clock (exited_at − entered_at), NOT
+// the stored duration_seconds column: for Odoo-imported rows that column
+// mirrors Odoo's working-hours `total_duration_seconds` (nights + weekends
+// stripped), which under-reports dwell vs Odoo's own calendar stage pills.
+// See project_stage_dwell_working_hours_bug.
 export async function getStageDwellAverages(
   orgId: string,
 ): Promise<Array<{ stage: TaskStage; avg_hours: number; segments: number }>> {
   const { data, error } = await supabaseAdmin
     .from("task_stage_history")
-    .select("to_stage, duration_seconds")
+    .select("to_stage, entered_at, exited_at")
     .eq("organization_id", orgId)
     .not("exited_at", "is", null);
   if (error) throw error;
 
   const sums = new Map<string, { total: number; count: number }>();
   for (const r of data ?? []) {
-    const stage = (r as { to_stage: string }).to_stage;
-    const dur = (r as { duration_seconds: number | null }).duration_seconds ?? 0;
-    if (!stage || dur <= 0) continue;
+    const row = r as {
+      to_stage: string;
+      entered_at: string | null;
+      exited_at: string | null;
+    };
+    const stage = row.to_stage;
+    if (!stage || !row.entered_at || !row.exited_at) continue;
+    const dur =
+      (new Date(row.exited_at).getTime() -
+        new Date(row.entered_at).getTime()) /
+      1000;
+    if (dur <= 0) continue;
     const cur = sums.get(stage) ?? { total: 0, count: 0 };
     cur.total += dur;
     cur.count += 1;

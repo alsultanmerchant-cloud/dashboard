@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth-server";
 import {
   getSessionInfo,
   startSession,
+  restartStuckSession,
   logoutSession,
   WA_SESSION_ID,
 } from "@/lib/wa/openwa-client";
@@ -37,6 +38,15 @@ export async function POST(req: NextRequest) {
   const denied = await guard();
   if (denied) return denied;
   const res = await startSession(sessionOf(req));
+  return Response.json(res, { status: res.ok ? 200 : 502 });
+}
+
+
+// Force-restart a wedged browser session so OpenWA emits a fresh QR code.
+export async function PATCH(req: NextRequest) {
+  const denied = await guard();
+  if (denied) return denied;
+  const res = await restartStuckSession(sessionOf(req));
   return Response.json(res, { status: res.ok ? 200 : 502 });
 }
 

@@ -1,7 +1,11 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { fetchChatHistory, waConfigured } from "@/lib/wa/openwa-client";
-import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
+import { fetchChatHistory, fetchSessionContacts, waConfigured } from "@/lib/wa/openwa-client";
+import {
+  enrichWaMessageSenders,
+  ingestWaMessages,
+  type NormalMessage,
+} from "@/lib/wa/ingest";
 
 // Per-account history backfill. For a newly-connected (often older) number, pull
 // its message history for the mapped client groups and ingest it ATTRIBUTED to
@@ -16,6 +20,17 @@ import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
 const HISTORY_LIMIT = 1000;
 const CONCURRENCY = 2;
 const GROUPS_PER_RUN = 40;
+const HISTORICAL_MEDIA_TYPES = new Set([
+  "image",
+  "sticker",
+  "video",
+  "gif",
+  "document",
+  "ptt",
+  "audio",
+  "vcard",
+  "location",
+]);
 
 export interface BackfillResult {
   ok?: true;
@@ -28,6 +43,7 @@ export interface BackfillResult {
 export async function backfillAccountHistory(
   orgId: string,
   sessionId: string,
+  opts?: { refresh?: boolean },
 ): Promise<BackfillResult> {
   if (!waConfigured()) {
     return { error: "WA_API_URL غير مهيأ — أضف عنوان خدمة OpenWA في متغيرات البيئة" };
@@ -35,12 +51,25 @@ export async function backfillAccountHistory(
 
   const { data: acct } = await supabaseAdmin
     .from("wa_accounts")
-    .select("id")
+    .select("id, phone")
     .eq("organization_id", orgId)
     .eq("session_id", sessionId)
     .maybeSingle();
   const accountId = (acct?.id as string | null) ?? null;
   if (!accountId) return { error: "account not found" };
+  const hostPhoneJid = acct?.phone ? `${String(acct.phone).replace(/\D/g, "")}@c.us` : null;
+  const contacts = await fetchSessionContacts(sessionId);
+  const contactByAlias = new Map<string, (typeof contacts)[number]>();
+  for (const contact of contacts) {
+    for (const alias of contact.aliases) contactByAlias.set(alias, contact);
+  }
+
+  // A manual refresh intentionally re-reads mapped groups. Ingestion remains
+  // idempotent, but this lets deployments recover media-only history that an
+  // older backfill incorrectly marked complete after dropping blank captions.
+  if (opts?.refresh) {
+    await supabaseAdmin.from("wa_account_backfills").delete().eq("account_id", accountId);
+  }
 
   // Mapped + active groups this account has NOT backfilled yet.
   const { data: links, error: lErr } = await supabaseAdmin
@@ -74,25 +103,34 @@ export async function backfillAccountHistory(
       try {
         const hist = await fetchChatHistory(chatId, HISTORY_LIMIT, sessionId);
         const msgs: NormalMessage[] = hist
-          .filter((m) => (m.body && m.body.trim().length > 0) || m.media)
-          .map((m) => ({
-            chatId,
-            chatName,
-            waMessageId: m.id,
-            waRawId: m.id,
-            sender: null,
-            senderId: m.from,
-            body: m.body,
-            messageType: m.type,
-            isFromMe: m.fromMe,
-            sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
-            media: m.media ?? null,
-          }));
+          .filter(
+            (m) =>
+              (m.body && m.body.trim().length > 0) ||
+              m.media ||
+              HISTORICAL_MEDIA_TYPES.has(m.type.toLowerCase()),
+          )
+          .map((m) => {
+            const contact = m.from ? contactByAlias.get(m.from) : null;
+            return {
+              chatId,
+              chatName,
+              waMessageId: m.id,
+              waRawId: m.id,
+              sender: contact?.name ?? m.senderName,
+              senderId: (m.fromMe ? hostPhoneJid : null) ?? contact?.phoneJid ?? m.from,
+              body: m.body,
+              messageType: m.type,
+              isFromMe: m.fromMe,
+              sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
+              media: m.media ?? null,
+            };
+          });
         let added = 0;
         if (msgs.length > 0) {
           const res = await ingestWaMessages(msgs, sessionId);
           added = res.ingested;
           imported += added;
+          await enrichWaMessageSenders(orgId, msgs);
         }
         // Mark this (account, group) seeded even if it returned nothing, so it
         // isn't retried forever. A thrown gateway error skips the stamp → retried.

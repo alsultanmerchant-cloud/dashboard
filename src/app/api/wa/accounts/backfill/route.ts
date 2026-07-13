@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
   if (!session) return Response.json({ error: "session required" }, { status: 400 });
 
   const orgId = await getDefaultOrgId();
-  const result = await backfillAccountHistory(orgId, session);
+  const refresh = req.nextUrl.searchParams.get("refresh") === "1";
+  const result = await backfillAccountHistory(orgId, session, { refresh });
   return Response.json(result, { status: result.error ? 502 : 200 });
 }

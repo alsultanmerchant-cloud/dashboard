@@ -135,13 +135,22 @@ export default async function TaskDetailPage({
       .limit(1),
     // §TASK-INFO-1 — per-stage dwell time displayed inline on each
     // completed stage chip. The DB trigger tg_task_stage_history
-    // (migration 0007) writes one row per stage transition; we sum
-    // duration_seconds by `to_stage` and let the client format the
-    // result. Tasks with no history pre-dating the trigger fall back to
-    // showing only the current stage's running timer.
+    // (migration 0007) writes one row per stage transition; we sum the
+    // wall-clock span (exited_at − entered_at) by `to_stage` and let the
+    // client format the result. Tasks with no history pre-dating the
+    // trigger fall back to showing only the current stage's running timer.
+    //
+    // NB: we deliberately DO NOT use the stored `duration_seconds` column.
+    // For Odoo-imported rows the sync mirrors Odoo's
+    // `task.stage.time.total_duration_seconds`, which is a WORKING-HOURS
+    // figure (nights + weekends stripped by the resource calendar). Odoo's
+    // own task-header stage pills ("New 4d", "In Progress 20d") show
+    // calendar wall-clock, so displaying duration_seconds made stuck tasks
+    // read far LOWER than Rawasm (e.g. 18h vs 4d). Wall-clock matches the
+    // pills and mirrors how the accountability engine computes dwell.
     supabaseAdmin
       .from("task_stage_history")
-      .select("to_stage, duration_seconds")
+      .select("to_stage, entered_at, exited_at")
       .eq("organization_id", session.orgId)
       .eq("task_id", id),
     listPositions(session.orgId),
@@ -317,10 +326,18 @@ export default async function TaskDetailPage({
             const m: Record<string, number> = {};
             for (const row of (stageHistoryForStepper.data ?? []) as Array<{
               to_stage: string;
-              duration_seconds: number | null;
+              entered_at: string | null;
+              exited_at: string | null;
             }>) {
-              if (typeof row.duration_seconds === "number") {
-                m[row.to_stage] = (m[row.to_stage] ?? 0) + row.duration_seconds;
+              // Wall-clock span; open segments (current stage) are skipped —
+              // the stepper shows a live counter for those.
+              if (!row.entered_at || !row.exited_at) continue;
+              const secs =
+                (new Date(row.exited_at).getTime() -
+                  new Date(row.entered_at).getTime()) /
+                1000;
+              if (secs > 0) {
+                m[row.to_stage] = (m[row.to_stage] ?? 0) + secs;
               }
             }
             return m;
