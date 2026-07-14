@@ -3345,6 +3345,8 @@
     },
     "brief": {
       "title": "Executive brief",
+      "expand": "Expand executive brief",
+      "collapse": "Collapse executive brief",
       "tagline": "Three questions: are we improving, where's the danger, what to do?",
       "analyzing": "Analyzing data…",
       "lastUpdated": "Updated {time}",

@@ -15,6 +15,7 @@ import {
   Minus,
   ArrowUpRight,
   ArrowDownRight,
+  ChevronDown,
   ChevronLeft,
   MessageCircleQuestion,
 } from "lucide-react";
@@ -539,6 +540,7 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
   const t = useTranslations("Executive.brief");
   const locale = useLocale();
   const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const [data, setData] = useState<CeoBriefResult | null>(initialBrief?.result ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -678,8 +680,14 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
 
   return (
     <section className="mb-8 rounded-2xl border border-soft bg-card/40 p-5">
-      <header className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+      <header className={cn("flex items-center justify-between gap-3", expanded && "mb-5")}>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          aria-controls="ceo-brief-content"
+          className="flex items-center gap-2.5 rounded-xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <div className="flex size-9 items-center justify-center rounded-xl bg-cyan-dim text-cyan">
             <Sparkles className="size-4" />
           </div>
@@ -693,7 +701,15 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
                   : t("tagline")}
             </p>
           </div>
-        </div>
+          <ChevronDown
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              expanded && "rotate-180",
+            )}
+            aria-hidden="true"
+          />
+          <span className="sr-only">{expanded ? t("collapse") : t("expand")}</span>
+        </button>
         <div className="flex items-center gap-1.5">
           {data && !loading && (
             <Button
@@ -731,45 +747,47 @@ export function CeoBriefCard({ initialBrief = null }: { initialBrief?: StoredCeo
         </div>
       </header>
 
-      {error && !loading && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-cc-red/30 bg-cc-red/[0.04] p-3.5">
-          <AlertTriangle className="size-4 shrink-0 text-cc-red" />
-          <p className="flex-1 text-xs text-muted-foreground">{error}</p>
-          <Button variant="ghost" size="sm" onClick={() => refresh(false)} className="h-7 text-xs">
-            {t("retry")}
-          </Button>
-        </div>
-      )}
-
-      {loading && <BriefSkeleton />}
-
-      {!loading && !data && !error && (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-soft p-8 text-center">
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-dim text-cyan">
-            <Sparkles className="size-5" />
+      <div id="ceo-brief-content" hidden={!expanded}>
+        {error && !loading && (
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-cc-red/30 bg-cc-red/[0.04] p-3.5">
+            <AlertTriangle className="size-4 shrink-0 text-cc-red" />
+            <p className="flex-1 text-xs text-muted-foreground">{error}</p>
+            <Button variant="ghost" size="sm" onClick={() => refresh(false)} className="h-7 text-xs">
+              {t("retry")}
+            </Button>
           </div>
-          <div className="space-y-1">
-            <p className="text-sm font-semibold">{t("emptyTitle")}</p>
-            <p className="max-w-md text-xs text-muted-foreground">{t("emptyDescription")}</p>
-          </div>
-          <Button onClick={() => refresh(false)} size="sm" className="gap-2">
-            <Sparkles className="size-4" />
-            {t("generateFirst")}
-          </Button>
-        </div>
-      )}
+        )}
 
-      {!loading && data && (
-        <BriefBody
-          data={data}
-          t={t}
-          traj={{ object: trajObj.object, isLoading: trajObj.isLoading, error: trajObj.error, run: () => trajObj.submit({}) }}
-          risksCtl={{ object: risksObj.object, isLoading: risksObj.isLoading, error: risksObj.error, run: () => risksObj.submit({}) }}
-          acts={{ object: actsObj.object, isLoading: actsObj.isLoading, error: actsObj.error, run: () => actsObj.submit({}) }}
-          synth={{ object: synthObj.object, isLoading: synthObj.isLoading, error: synthObj.error, run: () => synthObj.submit({}) }}
-          busy={loading || sectionBusy}
-        />
-      )}
+        {loading && <BriefSkeleton />}
+
+        {!loading && !data && !error && (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-soft p-8 text-center">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-dim text-cyan">
+              <Sparkles className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">{t("emptyTitle")}</p>
+              <p className="max-w-md text-xs text-muted-foreground">{t("emptyDescription")}</p>
+            </div>
+            <Button onClick={() => refresh(false)} size="sm" className="gap-2">
+              <Sparkles className="size-4" />
+              {t("generateFirst")}
+            </Button>
+          </div>
+        )}
+
+        {!loading && data && (
+          <BriefBody
+            data={data}
+            t={t}
+            traj={{ object: trajObj.object, isLoading: trajObj.isLoading, error: trajObj.error, run: () => trajObj.submit({}) }}
+            risksCtl={{ object: risksObj.object, isLoading: risksObj.isLoading, error: risksObj.error, run: () => risksObj.submit({}) }}
+            acts={{ object: actsObj.object, isLoading: actsObj.isLoading, error: actsObj.error, run: () => actsObj.submit({}) }}
+            synth={{ object: synthObj.object, isLoading: synthObj.isLoading, error: synthObj.error, run: () => synthObj.submit({}) }}
+            busy={loading || sectionBusy}
+          />
+        )}
+      </div>
     </section>
   );
 }
