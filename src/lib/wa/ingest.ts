@@ -17,7 +17,8 @@ async function _getDefaultOrgId(): Promise<string> {
     .from("organizations")
     .select("id")
     .eq("slug", DEFAULT_ORG_SLUG)
-    .maybeSingle();
+    .maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000));
   if (error || !data) throw new Error(`organization "${DEFAULT_ORG_SLUG}" not found`);
   return data.id as string;
 }
@@ -430,10 +431,13 @@ export async function ingestWaSessionStatus(
 export async function ingestWaMessages(
   messages: NormalMessage[],
   accountSessionId?: string | null,
-  options: { refreshMessageCounts?: boolean } = {},
+  options: { refreshMessageCounts?: boolean; signal?: AbortSignal } = {},
 ): Promise<IngestResult> {
   if (messages.length === 0) return { ingested: 0, skipped: 0, chats: [] };
   const orgId = await getDefaultOrgId();
+  // The webhook supplies one shared deadline for every database round trip.
+  // Historical jobs omit it and retain their longer-running behavior.
+  const signal = options.signal ?? new AbortController().signal;
 
   // Resolve which connected number delivered these events (provenance only —
   // never part of the dedup key). Bumps the account's heartbeat.
@@ -444,13 +448,15 @@ export async function ingestWaMessages(
       .select("id")
       .eq("organization_id", orgId)
       .eq("session_id", accountSessionId)
-      .maybeSingle();
+      .maybeSingle()
+      .abortSignal(signal);
     accountId = (acct?.id as string | null) ?? null;
     if (accountId) {
       await supabaseAdmin
         .from("wa_accounts")
         .update({ last_seen_at: new Date().toISOString(), status: "CONNECTED" })
-        .eq("id", accountId);
+        .eq("id", accountId)
+        .abortSignal(signal);
     }
   }
 
@@ -475,7 +481,8 @@ export async function ingestWaMessages(
       .select("client_id, group_kind")
       .eq("organization_id", orgId)
       .eq("chat_id", chatId)
-      .maybeSingle();
+      .maybeSingle()
+      .abortSignal(signal);
 
     if (existing) {
       links.set(chatId, {
@@ -490,15 +497,19 @@ export async function ingestWaMessages(
           updated_at: new Date().toISOString(),
         })
         .eq("organization_id", orgId)
-        .eq("chat_id", chatId);
+        .eq("chat_id", chatId)
+        .abortSignal(signal);
     } else {
       links.set(chatId, { clientId: null, groupKind: null });
-      await supabaseAdmin.from("wa_group_links").insert({
-        organization_id: orgId,
-        chat_id: chatId,
-        chat_name: name,
-        last_message_at: lastAt,
-      });
+      await supabaseAdmin
+        .from("wa_group_links")
+        .insert({
+          organization_id: orgId,
+          chat_id: chatId,
+          chat_name: name,
+          last_message_at: lastAt,
+        })
+        .abortSignal(signal);
     }
   }
 
@@ -546,7 +557,8 @@ export async function ingestWaMessages(
         onConflict: "organization_id,chat_id,wa_message_id",
         ignoreDuplicates: true,
       })
-      .select("id");
+      .select("id")
+      .abortSignal(signal);
 
   let result = await upsertRows(
     waMediaColumnsAvailable === false ? baseRows : (rowsWithMedia as typeof baseRows),

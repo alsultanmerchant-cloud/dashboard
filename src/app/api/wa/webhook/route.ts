@@ -74,12 +74,19 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await ingestWaMessages(messages, accountSessionId);
+    const result = await ingestWaMessages(messages, accountSessionId, {
+      signal: AbortSignal.timeout(8_000),
+    });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
+    const message = (e as Error).message;
+    const timedOut = /abort|timeout/i.test(`${(e as Error).name} ${message}`);
     return NextResponse.json(
-      { ok: false, error: `ingest failed: ${(e as Error).message}` },
-      { status: 500 },
+      { ok: false, error: `ingest failed: ${message}` },
+      {
+        status: timedOut ? 503 : 500,
+        headers: timedOut ? { "Retry-After": "15" } : undefined,
+      },
     );
   }
 }
