@@ -1175,7 +1175,9 @@ export async function importWaHistoryAction(): Promise<ImportHistoryState> {
             media: m.media ?? null,
           }));
         if (msgs.length > 0) {
-          const res = await ingestWaMessages(msgs, hit?.sessionName ?? null);
+          const res = await ingestWaMessages(msgs, hit?.sessionName ?? null, {
+            refreshMessageCounts: true,
+          });
           imported += res.ingested;
         }
         // Mark seeded ONLY when a member number actually served this group (even

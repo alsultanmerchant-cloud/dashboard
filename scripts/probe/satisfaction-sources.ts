@@ -54,7 +54,7 @@ if (doBackfill) {
       sender: null, senderId: m.from, body: m.body, messageType: m.type,
       isFromMe: m.fromMe, sentAt: m.timestamp ? new Date(m.timestamp * 1000).toISOString() : null,
     }));
-    const res = await ingestWaMessages(msgs, hit.sessionName);
+    const res = await ingestWaMessages(msgs, hit.sessionName, { refreshMessageCounts: true });
     console.log(`    • ${meta.name} [${meta.kind}]: via ${hit.sessionName} fetched ${msgs.length}, NEW ${res.ingested}`);
   }
 }

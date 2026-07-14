@@ -265,12 +265,13 @@ export interface IngestResult {
 
 const MAX_WA_MEDIA_BYTES = 15 * 1024 * 1024;
 
-// Migration 0241 adds the media columns. Keep ingestion available during a
-// deployment/schema drift incident: one missing-column response disables media
-// metadata for this server process, then the same messages are retried using
-// the pre-0241 shape. Text/chat ingestion must never be taken down by optional
-// media support.
-let waMediaColumnsAvailable: boolean | null = null;
+// Media persistence is deliberately opt-in. Migration 0241 must be applied
+// before WA_MEDIA_STORAGE_ENABLED=true is deployed; otherwise a media upload
+// and a known-to-fail schema write on every cold serverless instance can turn a
+// webhook backlog into a retry storm. Text/chat ingestion stays bounded by
+// default and the compatibility fallback still protects a misconfigured deploy.
+const waMediaStorageEnabled = process.env.WA_MEDIA_STORAGE_ENABLED === "true";
+let waMediaColumnsAvailable: boolean | null = waMediaStorageEnabled ? null : false;
 
 function isMissingWaMediaColumnError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -429,6 +430,7 @@ export async function ingestWaSessionStatus(
 export async function ingestWaMessages(
   messages: NormalMessage[],
   accountSessionId?: string | null,
+  options: { refreshMessageCounts?: boolean } = {},
 ): Promise<IngestResult> {
   if (messages.length === 0) return { ingested: 0, skipped: 0, chats: [] };
   const orgId = await getDefaultOrgId();
@@ -502,8 +504,10 @@ export async function ingestWaMessages(
 
   // Upsert messages (idempotent on org+chat+wa_message_id).
   const mediaByMessageId = new Map<string, Awaited<ReturnType<typeof persistWaMedia>>>();
-  for (const m of messages) {
-    mediaByMessageId.set(m.waMessageId, await persistWaMedia(orgId, m));
+  if (waMediaColumnsAvailable !== false) {
+    for (const m of messages) {
+      mediaByMessageId.set(m.waMessageId, await persistWaMedia(orgId, m));
+    }
   }
 
   const baseRows = messages.map((m) => {
@@ -557,19 +561,23 @@ export async function ingestWaMessages(
   if (result.error) throw result.error;
 
   const ingested = result.data?.length ?? 0;
-  // Refresh each touched link's stored message_count from the source of truth.
-  for (const chatId of byChat.keys()) {
-    const { count } = await supabaseAdmin
-      .from("wa_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", orgId)
-      .eq("chat_id", chatId);
-    if (count !== null) {
-      await supabaseAdmin
-        .from("wa_group_links")
-        .update({ message_count: count })
+  // Historical imports refresh exact counts once per touched chat. The live
+  // webhook skips this O(total chat history) query: doing a full recount for
+  // every individual message amplifies a delivery backlog and causes retries.
+  if (options.refreshMessageCounts) {
+    for (const chatId of byChat.keys()) {
+      const { count } = await supabaseAdmin
+        .from("wa_messages")
+        .select("id", { count: "exact", head: true })
         .eq("organization_id", orgId)
         .eq("chat_id", chatId);
+      if (count !== null) {
+        await supabaseAdmin
+          .from("wa_group_links")
+          .update({ message_count: count })
+          .eq("organization_id", orgId)
+          .eq("chat_id", chatId);
+      }
     }
   }
 

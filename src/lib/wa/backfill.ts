@@ -127,7 +127,7 @@ export async function backfillAccountHistory(
           });
         let added = 0;
         if (msgs.length > 0) {
-          const res = await ingestWaMessages(msgs, sessionId);
+          const res = await ingestWaMessages(msgs, sessionId, { refreshMessageCounts: true });
           added = res.ingested;
           imported += added;
           await enrichWaMessageSenders(orgId, msgs);
