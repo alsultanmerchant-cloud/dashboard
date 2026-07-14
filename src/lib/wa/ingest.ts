@@ -19,7 +19,8 @@ async function _getDefaultOrgId(): Promise<string> {
     .eq("slug", DEFAULT_ORG_SLUG)
     .maybeSingle()
     .abortSignal(AbortSignal.timeout(8_000));
-  if (error || !data) throw new Error(`organization "${DEFAULT_ORG_SLUG}" not found`);
+  if (error) throw error;
+  if (!data) throw new Error(`organization "${DEFAULT_ORG_SLUG}" not found`);
   return data.id as string;
 }
 export const getDefaultOrgId = cache(_getDefaultOrgId);
