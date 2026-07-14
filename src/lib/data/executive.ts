@@ -1718,9 +1718,10 @@ export const getStageFlowMatrix = cache(_getStageFlowMatrix);
 export interface ClientEditsMetrics {
   // Tasks currently sitting at client_changes right now.
   activeNow: number;
-  // Distinct tasks that entered client_changes in the selected window.
+  // Distinct tasks that were IN client_changes at any point during the selected
+  // window — entered during it OR carried over from before (still there).
   enteredThisWeek: number;
-  // Distinct tasks that entered client_changes in the same-length prior window.
+  // Distinct tasks that were IN client_changes at any point during the prior window.
   enteredLastWeek: number;
   // Per-service breakdown of tasks currently at client_changes.
   byService: Array<{ name: string; slug: string; count: number }>;
@@ -1742,7 +1743,7 @@ async function _getTopRevisedTasks(
   const { start: rangeStart } = riyadhDateRangeUtcBounds(rangeStartDay, range.to);
 
   type LiveRow = { id: string; service_id: string | null };
-  type HistRow = { task_id: string; entered_at: string };
+  type HistRow = { task_id: string; entered_at: string; exited_at: string | null };
 
   async function fetchLiveRows(): Promise<LiveRow[]> {
     const rows: LiveRow[] = [];
@@ -1773,7 +1774,7 @@ async function _getTopRevisedTasks(
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabaseAdmin
         .from("task_stage_history")
-        .select("task_id, entered_at, task:tasks!inner(archived_at)")
+        .select("task_id, entered_at, exited_at, task:tasks!inner(archived_at)")
         .eq("organization_id", orgId)
         .eq("to_stage", "client_changes")
         // Match the live count's scope: exclude archived (wound-down / lost-
@@ -1781,8 +1782,13 @@ async function _getTopRevisedTasks(
         // can invert (a lost-client batch in the prior window made client-
         // changes look like they were falling when they were rising).
         .is("task.archived_at", null)
-        .gte("entered_at", priorStart)
+        // Fetch every client_changes occupancy that OVERLAPS the combined
+        // [priorStart, endExclusive) window — i.e. entered before the window
+        // ended AND had not yet left when the window began. This captures tasks
+        // that entered earlier but were still sitting in the stage during the
+        // window (carried over), not just those that entered inside it.
         .lt("entered_at", endExclusive)
+        .or(`exited_at.is.null,exited_at.gt.${priorStart}`)
         .order("entered_at", { ascending: true })
         .range(from, from + PAGE - 1);
 
@@ -1810,17 +1816,30 @@ async function _getTopRevisedTasks(
 
   const activeNow = live.length;
 
-  // Period cards are activity counters: distinct tasks that entered
-  // client_changes during the selected window, even if they have since moved on.
+  // Period cards are occupancy counters: distinct tasks that were IN
+  // client_changes at any point during the window — whether they entered inside
+  // it OR carried over from before and were still there. A stage occupancy is
+  // the interval [entered_at, exited_at) (open-ended while still in the stage);
+  // it counts toward a window when that interval overlaps the window.
   const thisPeriodTaskIds = new Set<string>();
   const lastPeriodTaskIds = new Set<string>();
   for (const r of hist) {
-    if (r.entered_at >= rangeStart) {
+    // this window [rangeStart, endExclusive): entered before it ends (always
+    // true given the fetch) AND had not left before it began.
+    if (r.exited_at === null || r.exited_at > rangeStart) {
       thisPeriodTaskIds.add(r.task_id);
-    } else {
+    }
+    // prior window [priorStart, rangeStart): entered before it ends AND had not
+    // left before it began.
+    if (r.entered_at < rangeStart && (r.exited_at === null || r.exited_at > priorStart)) {
       lastPeriodTaskIds.add(r.task_id);
     }
   }
+  // Safety net: any task sitting in client_changes right now was, by definition,
+  // present during the current window — include it even if its history row is
+  // missing (data-quality gaps in imported stage history).
+  for (const t of live) thisPeriodTaskIds.add(t.id);
+
   const enteredThisWeek = thisPeriodTaskIds.size;
   const enteredLastWeek = lastPeriodTaskIds.size;
 
