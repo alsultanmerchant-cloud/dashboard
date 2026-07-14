@@ -1758,9 +1758,11 @@ async function _getTopRevisedTasks(
         .select("id, service_id")
         .eq("organization_id", orgId)
         .eq("stage", "client_changes")
-        // Count ALL tasks currently in the stage, archived included — this card
-        // mirrors the Odoo "Task Stage History" view (Active in true+false), so
-        // wound-down / lost-client tasks still sitting in client_changes count.
+        // Live snapshot: exclude archived so the hero ("قيد التعديل الآن") and the
+        // per-service breakdown reflect only tasks actually in play right now,
+        // not wound-down / lost-client tasks frozen in the stage. The period
+        // entered / existed counts stay all-tasks (they come from history below).
+        .is("archived_at", null)
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
 
