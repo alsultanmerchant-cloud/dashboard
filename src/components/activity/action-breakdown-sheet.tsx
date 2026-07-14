@@ -215,6 +215,8 @@ export function ActionBreakdownButton({
                 <div className="min-w-0">
                   <Link
                     href={`/tasks/${r.taskId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="block truncate text-sm font-medium hover:text-cyan hover:underline"
                   >
                     {r.taskCode ? `${r.taskCode} · ` : ""}

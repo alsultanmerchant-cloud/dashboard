@@ -149,10 +149,17 @@ export function CompareTrendModal({
   const benchByStart = new Map(benchSeries.map((b) => [b.periodStart, b]));
 
   const teamLabel = "بقية زملائه في القسم";
-  const chartData = emp.map((p) => {
+  const chartData = emp.map((p, index) => {
     const b = benchByStart.get(p.periodStart);
+    // Weekly snapshots are anchored to the start of their calendar bucket
+    // (Sunday). For a custom range, keep those values but clamp the two edge
+    // labels to the dates the user actually selected, so the axis visibly
+    // represents the requested window instead of showing dates outside it.
+    let displayDate = p.periodStart;
+    if (customActive && index === 0 && from && from > displayDate) displayDate = from;
+    if (customActive && index === emp.length - 1 && to && to < p.periodEnd) displayDate = to;
     const row: Record<string, string | number | null> = {
-      label: fmtLabel(p.periodStart, grain),
+      label: fmtLabel(displayDate, grain),
       [fullName]: metricValue(p, metric),
     };
     if (mcfg.comparable) row[teamLabel] = b ? metricValue(b, metric) : null;
@@ -270,21 +277,28 @@ export function CompareTrendModal({
                 {r.label}
               </button>
             ))}
-            {/* Explicit date window — overrides the preset (monthly grain). */}
+            {/* Explicit date window — stacked and visibly labelled for RTL clarity. */}
             <span className="mx-1 text-[11px] text-muted-foreground">أو</span>
-            <DateField
-              value={from}
-              max={to || undefined}
-              onChange={setFrom}
-              aria-label="من تاريخ"
-            />
-            <span className="text-[11px] text-muted-foreground">→</span>
-            <DateField
-              value={to}
-              min={from || undefined}
-              onChange={setTo}
-              aria-label="إلى تاريخ"
-            />
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span className="w-5 shrink-0 font-medium">من</span>
+                <DateField
+                  value={from}
+                  max={to || undefined}
+                  onChange={setFrom}
+                  aria-label="من تاريخ"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span className="w-5 shrink-0 font-medium">إلى</span>
+                <DateField
+                  value={to}
+                  min={from || undefined}
+                  onChange={setTo}
+                  aria-label="إلى تاريخ"
+                />
+              </label>
+            </div>
             {(!!from || !!to) && (
               <button
                 type="button"

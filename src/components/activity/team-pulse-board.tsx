@@ -164,7 +164,7 @@ export function TeamPulseBoard({ data }: { data: TeamPulseOverview }) {
               من يحرّك مهامه ومن توقّف الآن — اضغط على أي قسم لرؤية الموظفين.
             </p>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-4">
             <div className="text-center">
               <p className="text-2xl font-bold tabular-nums text-cc-green">{t.activeCount}</p>
               <p className="text-[10px] text-muted-foreground">موظف يعمل الآن</p>
@@ -173,6 +173,26 @@ export function TeamPulseBoard({ data }: { data: TeamPulseOverview }) {
               <p className="text-2xl font-bold tabular-nums text-cyan">{t.actionsToday}</p>
               <p className="text-[10px] text-muted-foreground">إجراء في رواسم اليوم</p>
             </div>
+            <Link
+              href="/team-activity?filter=overloaded#team-pulse-results"
+              className="rounded-lg border border-cc-red/20 bg-cc-red/5 px-3 py-1.5 text-center transition-colors hover:bg-cc-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-red"
+              aria-label={`${t.overloadedCount} موظف محمّل زائد. عرض الموظفين`}
+            >
+              <p className="text-2xl font-bold tabular-nums text-cc-red">{t.overloadedCount}</p>
+              <p className="text-[10px] text-muted-foreground">موظف محمّل زائد</p>
+              <p className="text-[9px] text-cc-red">
+                أكثر من {data.overloadProjectsThreshold} مشاريع نشطة
+              </p>
+            </Link>
+            <Link
+              href="/team-activity?filter=late-pending#team-pulse-results"
+              className="rounded-lg border border-cc-red/20 bg-cc-red/5 px-3 py-1.5 text-center transition-colors hover:bg-cc-red/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-red"
+              aria-label={`${t.pendingLate} مهمة معلّقة متأخرة. عرض المهام`}
+            >
+              <p className="text-2xl font-bold tabular-nums text-cc-red">{t.pendingLate}</p>
+              <p className="text-[10px] text-muted-foreground">مهمة معلّقة متأخرة</p>
+              <p className="text-[9px] text-cc-red">عرض التفاصيل</p>
+            </Link>
           </div>
         </CardContent>
       </Card>

@@ -18,13 +18,34 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
   const t = data.totals;
   const worst = data.rows.filter((r) => r.status === "risk" || r.status === "watch").slice(0, 3);
 
-  const stats = [
+  const stats: Array<{
+    icon: typeof Activity;
+    label: string;
+    value: string;
+    tone: string;
+    hint: string;
+    href?: string;
+  }> = [
     { icon: Zap, label: "يعمل الآن", value: String(t.activeCount), tone: "text-cc-green", hint: "موظفون قاموا بإجراء اليوم" },
     { icon: Activity, label: "إجراء اليوم", value: String(t.actionsToday), tone: "text-cyan", hint: "إجراءات رواسم اليوم" },
-    { icon: Gauge, label: "محمّل زائد", value: String(t.overloadedCount), tone: "text-cc-red", hint: "موظفون يتجاوز عدد مشاريعهم النشطة الحد المسموح" },
+    {
+      icon: Gauge,
+      label: "محمّل زائد",
+      value: String(t.overloadedCount),
+      tone: "text-cc-red",
+      hint: `موظفون لديهم أكثر من ${data.overloadProjectsThreshold} مشاريع نشطة`,
+      href: "/team-activity?filter=overloaded#team-pulse-results",
+    },
     // مُعلقة متأخرة: tasks on desks that have breached their STAGE SLA (not the
     // ordinary deadline-overdue). Only the 5 SLA-configured stages qualify.
-    { icon: AlertTriangle, label: "معلّقة متأخرة", value: String(t.pendingLate), tone: "text-cc-red", hint: "مهام على المكاتب تجاوزت زمن SLA لمرحلتها الحالية" },
+    {
+      icon: AlertTriangle,
+      label: "معلّقة متأخرة",
+      value: String(t.pendingLate),
+      tone: "text-cc-red",
+      hint: "مهام فريدة تجاوزت زمن SLA لمرحلتها الحالية",
+      href: "/team-activity?filter=late-pending#team-pulse-results",
+    },
   ];
 
   return (
@@ -39,12 +60,29 @@ export function TeamPulseBand({ data }: { data: TeamPulseOverview }) {
             </div>
           </div>
           <div className="flex items-center gap-5">
-            {stats.map((s) => (
-              <div key={s.label} className="text-center" title={s.hint}>
-                <p className={cn("text-xl font-bold tabular-nums", s.tone)}>{s.value}</p>
-                <p className="text-[10px] text-muted-foreground">{s.label}</p>
-              </div>
-            ))}
+            {stats.map((s) => {
+              const content = (
+                <>
+                  <p className={cn("text-xl font-bold tabular-nums", s.tone)}>{s.value}</p>
+                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                </>
+              );
+              return s.href ? (
+                <Link
+                  key={s.label}
+                  href={s.href}
+                  title={s.hint}
+                  aria-label={`${s.label}: ${s.value}. ${s.hint}`}
+                  className="rounded-lg px-2 py-1 text-center transition-colors hover:bg-soft-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan"
+                >
+                  {content}
+                </Link>
+              ) : (
+                <div key={s.label} className="text-center" title={s.hint}>
+                  {content}
+                </div>
+              );
+            })}
             <Link
               href="/team-activity"
               className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-xs hover:bg-soft-1"

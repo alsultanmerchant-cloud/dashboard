@@ -9,6 +9,7 @@ import {
   GitBranch,
   MessageSquare,
   Search,
+  Gauge,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
@@ -16,7 +17,9 @@ import { cn } from "@/lib/utils";
 import { riyadhDateOf, riyadhTodayIso, riyadhDaysAgoIso } from "@/lib/tz";
 import { CompareTrendModal } from "@/components/activity/compare-trend-modal";
 import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
-import type { AllMemberRow, ActivityStatus } from "@/lib/data/team-pulse";
+import { TeamPulsePendingCell } from "@/components/activity/team-pulse-pending-cell";
+import { TeamPulseActiveProjectsModal } from "@/components/activity/team-pulse-active-projects-modal";
+import type { AllMemberRow, ActivityStatus, LoadFlag } from "@/lib/data/team-pulse";
 
 const NA = "—";
 
@@ -25,6 +28,28 @@ const STATUS_META: Record<ActivityStatus, { label: string; tone: string; dot: st
   slow: { label: "خامل", tone: "text-amber", dot: "bg-amber" },
   stalled: { label: "غير نشط", tone: "text-cc-red", dot: "bg-cc-red" },
 };
+
+const LOAD_META: Record<LoadFlag, { label: string; cls: string } | null> = {
+  overloaded: { label: "محمّل زائد", cls: "bg-cc-red/10 text-cc-red" },
+  light: { label: "سعة متاحة", cls: "bg-soft-2 text-muted-foreground" },
+  balanced: null,
+};
+
+export type TeamMemberFilter = "all" | "overloaded" | "available";
+
+const FILTER_LINKS: Array<{ value: TeamMemberFilter; label: string; href: string }> = [
+  { value: "all", label: "كل الموظفين", href: "/team-activity#team-pulse-results" },
+  {
+    value: "overloaded",
+    label: "محمّل زائد",
+    href: "/team-activity?filter=overloaded#team-pulse-results",
+  },
+  {
+    value: "available",
+    label: "سعة متاحة",
+    href: "/team-activity?filter=available#team-pulse-results",
+  },
+];
 
 function ActionsSplit({ moves, notes }: { moves: number; notes: number }) {
   const total = moves + notes;
@@ -58,19 +83,6 @@ function CompletedSplit({ today, week }: { today: number; week: number }) {
         <span className="text-[9px] font-normal text-muted-foreground"> اليوم</span>
       </span>
       <span className="text-[10px] text-muted-foreground">{week} الأسبوع</span>
-    </div>
-  );
-}
-
-function PendingCell({ late, owned }: { late: number; owned: number }) {
-  if (owned === 0) return <span className="text-muted-foreground">—</span>;
-  return (
-    <div className="flex flex-col items-center leading-tight tabular-nums">
-      <span className={cn("font-semibold", late > 0 ? "text-cc-red" : "text-muted-foreground")}>
-        {late}
-        <span className="text-[9px] font-normal text-muted-foreground"> متأخرة</span>
-      </span>
-      <span className="text-[10px] text-muted-foreground">{owned} على مكتبه</span>
     </div>
   );
 }
@@ -112,43 +124,93 @@ function Momentum({ value }: { value: number }) {
 
 // كل الموظفين عبر الأقسام، مرتّبين من الأقل نشاطًا إلى الأكثر — مكان واحد لرصد من
 // توقّف في الشركة كلها بدل التنقّل بين الأقسام.
-export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
+export function TeamPulseAllMembers({
+  members,
+  filter = "all",
+  overloadProjectsThreshold,
+}: {
+  members: AllMemberRow[];
+  filter?: TeamMemberFilter;
+  overloadProjectsThreshold: number;
+}) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = norm(query);
-    if (!q) return members;
-    return members.filter(
+    const byLoad = members.filter((member) => {
+      if (filter === "overloaded") return !member.isLeadership && member.loadFlag === "overloaded";
+      if (filter === "available") return !member.isLeadership && member.loadFlag === "light";
+      return true;
+    });
+    const byQuery = !q
+      ? byLoad
+      : byLoad.filter(
       (m) =>
         norm(m.fullName).includes(q) ||
         norm(m.departmentName).includes(q) ||
         norm(m.positionLabel).includes(q),
-    );
-  }, [members, query]);
+      );
+    if (filter === "overloaded") {
+      return [...byQuery].sort((a, b) => b.activeProjects - a.activeProjects);
+    }
+    return byQuery;
+  }, [filter, members, query]);
+
+  const sectionTitle =
+    filter === "overloaded"
+      ? "الموظفون المحمّلون زائدًا"
+      : filter === "available"
+        ? "الموظفون ذوو السعة المتاحة"
+        : "كل الموظفين — مرتّبون من الأقل نشاطًا";
 
   return (
-    <Card className="mt-6">
+    <Card id="team-pulse-results" className="mt-6 scroll-mt-6">
       <CardContent className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <p className="inline-flex items-center gap-2 text-sm font-semibold">
-              <Users className="size-4 text-cyan" />
-              كل الموظفين — مرتّبون من الأقل نشاطًا
+              {filter === "overloaded" ? (
+                <Gauge className="size-4 text-cc-red" aria-hidden="true" />
+              ) : (
+                <Users className="size-4 text-cyan" aria-hidden="true" />
+              )}
+              {sectionTitle}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              نظرة واحدة على نشاط الفريق بالكامل عبر الأقسام ·{" "}
-              {query ? `${filtered.length} من ${members.length}` : `${members.length} موظف`}
+              {filter === "overloaded"
+                ? `أكثر من ${overloadProjectsThreshold} مشاريع نشطة — مرتّبون من الأعلى حملًا`
+                : "نظرة واحدة على نشاط الفريق بالكامل عبر الأقسام"}
+              {" · "}{filtered.length} موظف
             </p>
           </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="ابحث عن موظف أو قسم…"
-              aria-label="ابحث عن موظف"
-              className="w-56 rounded-lg border border-border bg-card py-1.5 pe-8 ps-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-cyan focus:outline-none"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <nav className="flex items-center rounded-lg border border-border bg-soft-1 p-0.5" aria-label="فلترة حمل الموظفين">
+              {FILTER_LINKS.map((item) => (
+                <Link
+                  key={item.value}
+                  href={item.href}
+                  aria-current={filter === item.value ? "page" : undefined}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[11px] transition-colors hover:bg-soft-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan",
+                    filter === item.value && "bg-card font-semibold text-foreground shadow-sm",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+            <div className="relative">
+              <Search className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                type="search"
+                name="team-member-search"
+                autoComplete="off"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="ابحث عن موظف أو قسم…"
+                aria-label="ابحث عن موظف أو قسم"
+                className="w-56 rounded-lg border border-border bg-card py-1.5 pe-8 ps-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus-visible:border-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/30"
+              />
+            </div>
           </div>
         </div>
 
@@ -165,6 +227,12 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                 <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
                   <th className="px-3 py-2.5 font-medium">الموظف</th>
                   <th className="px-3 py-2.5 font-medium">القسم</th>
+                  <th
+                    className="px-3 py-2.5 text-center font-medium"
+                    title="عدد المشاريع النشطة التي لدى الموظف مهام مفتوحة فيها"
+                  >
+                    المشاريع النشطة
+                  </th>
                   <th className="px-3 py-2.5 font-medium">الحالة</th>
                   <th className="px-3 py-2.5 font-medium">آخر إجراء</th>
                   <th
@@ -203,6 +271,16 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                               قيادة
                             </span>
                           )}
+                          {LOAD_META[m.loadFlag] && (
+                            <span
+                              className={cn(
+                                "rounded px-1.5 py-0.5 text-[9px] font-medium",
+                                LOAD_META[m.loadFlag]!.cls,
+                              )}
+                            >
+                              {LOAD_META[m.loadFlag]!.label}
+                            </span>
+                          )}
                         </div>
                         {m.positionLabel && (
                           <div className="text-[10px] text-muted-foreground">{m.positionLabel}</div>
@@ -210,6 +288,14 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                       </td>
                       <td className="px-3 py-2.5 text-[11px] text-muted-foreground">
                         {m.departmentName ?? NA}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <TeamPulseActiveProjectsModal
+                          employeeId={m.employeeId}
+                          fullName={m.fullName}
+                          activeProjects={m.activeProjects}
+                          overloaded={m.loadFlag === "overloaded"}
+                        />
                       </td>
                       <td className="px-3 py-2.5">
                         <span className={cn("inline-flex items-center gap-1.5 text-xs", meta.tone)}>
@@ -232,7 +318,12 @@ export function TeamPulseAllMembers({ members }: { members: AllMemberRow[] }) {
                       </td>
                       <td className="px-3 py-2.5 tabular-nums text-center">{m.openWip}</td>
                       <td className="px-3 py-2.5 text-center">
-                        <PendingCell late={m.pendingLate} owned={m.ownedOpen} />
+                        <TeamPulsePendingCell
+                          employeeId={m.employeeId}
+                          fullName={m.fullName}
+                          late={m.pendingLate}
+                          owned={m.ownedOpen}
+                        />
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-2">

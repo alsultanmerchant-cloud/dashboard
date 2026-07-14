@@ -4,16 +4,33 @@ import {
   getTeamPulseOverview,
   getTeamMembers,
   getAllMembersByActivity,
+  getPendingLateTasks,
 } from "@/lib/data/team-pulse";
 import { PageHeader } from "@/components/page-header";
 import { TeamPulseBoard } from "@/components/activity/team-pulse-board";
 import { TeamPulseMembers } from "@/components/activity/team-pulse-members";
 import { TeamPulseAllMembers } from "@/components/activity/team-pulse-all-members";
+import type { TeamMemberFilter } from "@/components/activity/team-pulse-all-members";
+import { TeamPulseLateTasks } from "@/components/activity/team-pulse-late-tasks";
 import { Card, CardContent } from "@/components/ui/card";
 
-async function AllMembersSection({ orgId }: { orgId: string }) {
+async function AllMembersSection({
+  orgId,
+  filter,
+  overloadProjectsThreshold,
+}: {
+  orgId: string;
+  filter: TeamMemberFilter;
+  overloadProjectsThreshold: number;
+}) {
   const allMembers = await getAllMembersByActivity(orgId);
-  return <TeamPulseAllMembers members={allMembers} />;
+  return (
+    <TeamPulseAllMembers
+      members={allMembers}
+      filter={filter}
+      overloadProjectsThreshold={overloadProjectsThreshold}
+    />
+  );
 }
 
 function AllMembersSkeleton() {
@@ -40,14 +57,18 @@ function AllMembersSkeleton() {
 export default async function TeamActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ dept?: string }>;
+  searchParams: Promise<{ dept?: string; filter?: string }>;
 }) {
   const session = await requirePagePermission("reports.view");
-  const { dept } = await searchParams;
+  const { dept, filter: rawFilter } = await searchParams;
+  const filter: TeamMemberFilter =
+    rawFilter === "overloaded" ? "overloaded" : rawFilter === "available" ? "available" : "all";
+  const showLatePending = rawFilter === "late-pending";
   const data = await getTeamPulseOverview(session.orgId);
 
-  const selected = dept ? data.rows.find((r) => r.departmentId === dept) : undefined;
+  const selected = !showLatePending && dept ? data.rows.find((r) => r.departmentId === dept) : undefined;
   const members = selected ? await getTeamMembers(session.orgId, selected.departmentId) : [];
+  const lateTasks = showLatePending ? await getPendingLateTasks(session.orgId) : [];
 
   return (
     <div>
@@ -55,17 +76,25 @@ export default async function TeamActivityPage({
         title="نبض الفريق"
         description="حركة العمل ونشاط الفِرق — من يحرّك مهامه الآن ومن توقّف، وأين تتكدّس المهام المتوقّفة. (جودة الالتزام بالمواعيد في صفحة المساءلة)"
       />
-      {selected && (
+      {selected ? (
         <TeamPulseMembers
           departmentName={selected.departmentName}
           headName={selected.headName}
           members={members}
         />
-      )}
+      ) : null}
       <TeamPulseBoard data={data} />
-      <Suspense fallback={<AllMembersSkeleton />}>
-        <AllMembersSection orgId={session.orgId} />
-      </Suspense>
+      {showLatePending ? (
+        <TeamPulseLateTasks tasks={lateTasks} />
+      ) : (
+        <Suspense fallback={<AllMembersSkeleton />}>
+          <AllMembersSection
+            orgId={session.orgId}
+            filter={filter}
+            overloadProjectsThreshold={data.overloadProjectsThreshold}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -128,8 +128,47 @@ export interface TeamPulseOverview {
   generatedAt: string;
   /** Most recent action timestamp across the org — the "last synced from Rwasem" freshness stamp. */
   lastActionAt: string | null;
+  /** Configured active-project cutoff. Overloaded means strictly greater than this value. */
+  overloadProjectsThreshold: number;
   rows: TeamPulseRow[];
   totals: TeamPulseTotals;
+}
+
+export interface PendingLateTaskRow {
+  taskId: string;
+  taskCode: string | null;
+  title: string;
+  projectName: string | null;
+  stage: string;
+  stageEnteredAt: string | null;
+  elapsedMinutes: number;
+  slaMinutes: number;
+  overdueMinutes: number;
+  slaSource: "task_override" | "template_snapshot" | "organization_default";
+  templateItemTitle: string | null;
+  currentTemplateSlaMinutes: number | null;
+  organizationSlaMinutes: number | null;
+  employeeNames: string[];
+  departmentNames: string[];
+}
+
+export interface OwnedDeskTaskRow {
+  taskId: string;
+  taskCode: string | null;
+  title: string;
+  projectName: string | null;
+  stage: string;
+  stageEnteredAt: string | null;
+  elapsedMinutes: number;
+  slaMinutes: number | null;
+  isLate: boolean;
+}
+
+export interface EmployeeActiveProjectRow {
+  projectId: string;
+  projectCode: string | null;
+  projectName: string;
+  openAssignedTasks: number;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -229,6 +268,250 @@ async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
   if (error) throw new Error(`team-pulse query failed: ${error.message}`);
   return (data ?? []) as T[];
 }
+
+interface PendingLateTaskSqlRow {
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
+  stage: string;
+  stage_entered_at: string | null;
+  elapsed_minutes: number | string;
+  sla_minutes: number | string;
+  overdue_minutes: number | string;
+  sla_source: PendingLateTaskRow["slaSource"];
+  template_item_title: string | null;
+  current_template_sla_minutes: number | string | null;
+  organization_sla_minutes: number | string | null;
+  employee_names: string[] | null;
+  department_names: string[] | null;
+}
+
+// Unique current-stage SLA breaches across the departments visible in Team
+// Pulse. This is deliberately task-grained: a task with two eligible owners is
+// one late task in the headline, while both owners remain visible in its
+// drill-down row. That keeps the dashboard total equal to the list it opens.
+async function queryPendingLateTasks(
+  orgId: string,
+  employeeId?: string,
+): Promise<PendingLateTaskRow[]> {
+  if (!UUID_RE.test(orgId)) throw new Error("team-pulse: invalid org id");
+  if (employeeId && !UUID_RE.test(employeeId)) return [];
+  const employeePredicate = employeeId ? `and e.id = '${employeeId}'` : "";
+  // The employee tables intentionally show leadership and their desk counts.
+  // Only the organization-wide executive headline excludes leadership. A
+  // per-employee modal must mirror the clicked row, including managers/leads.
+  const leadershipPredicate = employeeId
+    ? ""
+    : `and coalesce(${isLeadershipSql("pos")}, false) = false`;
+
+  const rows = await runSql<PendingLateTaskSqlRow>(`
+    select t.id task_id, t.task_code, t.title, p.name project_name,
+           t.stage::text stage, t.stage_entered_at,
+           public.business_minutes_between(t.stage_entered_at, now()) elapsed_minutes,
+           coalesce(t.sla_override_minutes,
+                    nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                    s.max_minutes) sla_minutes,
+           greatest(0, public.business_minutes_between(t.stage_entered_at, now())
+             - coalesce(t.sla_override_minutes,
+                        nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                        s.max_minutes)) overdue_minutes,
+           case
+             when t.sla_override_minutes is not null then 'task_override'
+             when nullif(t.stage_sla_overrides ->> t.stage::text, '') is not null
+               then 'template_snapshot'
+             else 'organization_default'
+           end sla_source,
+           ti.title template_item_title,
+           nullif(ti.stage_sla_overrides ->> t.stage::text, '')::numeric
+             current_template_sla_minutes,
+           s.max_minutes organization_sla_minutes,
+           array_agg(distinct e.full_name order by e.full_name)
+             filter (where e.full_name is not null) employee_names,
+           array_agg(distinct d.name order by d.name)
+             filter (where d.name is not null) department_names
+      from task_assignees ta
+      join employee_profiles e on e.id = ta.employee_id
+      join positions pos on pos.id = e.position_id
+      join departments d on d.id = e.department_id
+      join tasks t on t.id = ta.task_id
+      left join projects p on p.id = t.project_id
+      left join task_template_items ti on ti.id = t.created_from_template_item_id
+      left join sla_rules s
+        on s.organization_id = t.organization_id and s.stage_key = t.stage::text
+     where t.organization_id = '${orgId}'
+       and e.employment_status = 'active'
+       ${employeePredicate}
+       and coalesce(d.show_in_team_pulse, true)
+       and coalesce(d.slug, '') not in (
+         'sales-group', 'sales-team', 'sales', 'telesales', 'tele-sales',
+         'hr', 'sl-hr', 'hr-department', 'quality-control'
+       )
+       and lower(trim(translate(d.name, 'أإآىة', 'ااايه'))) not in (
+         'اداره المبيعات', 'المبيعات', 'الموارد البشريه', 'الموادر البشريه',
+         'البيع الهاتفي', 'ضبط الجوده', 'sales'
+       )
+       ${leadershipPredicate}
+       and t.archived_at is null
+       and t.stage <> 'done'
+       and pos.role = coalesce(
+             public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text),
+             case when t.stage = 'new'
+                  then coalesce(t.stage_owner_positions ->> 'new', 'specialist')
+             end)
+       and public.business_minutes_between(t.stage_entered_at, now())
+             > coalesce(t.sla_override_minutes,
+                        nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                        s.max_minutes)
+     group by t.id, t.task_code, t.title, p.name, t.stage, t.stage_entered_at,
+              t.sla_override_minutes, t.stage_sla_overrides, s.max_minutes,
+              ti.title, ti.stage_sla_overrides
+     order by overdue_minutes desc, t.stage_entered_at asc nulls last
+  `);
+
+  return rows.map((row) => ({
+    taskId: row.task_id,
+    taskCode: row.task_code,
+    title: row.title?.trim() || "—",
+    projectName: row.project_name,
+    stage: row.stage,
+    stageEnteredAt: row.stage_entered_at,
+    elapsedMinutes: Math.max(0, Number(row.elapsed_minutes) || 0),
+    slaMinutes: Math.max(0, Number(row.sla_minutes) || 0),
+    overdueMinutes: Math.max(0, Number(row.overdue_minutes) || 0),
+    slaSource: row.sla_source,
+    templateItemTitle: row.template_item_title,
+    currentTemplateSlaMinutes:
+      row.current_template_sla_minutes == null
+        ? null
+        : Math.max(0, Number(row.current_template_sla_minutes) || 0),
+    organizationSlaMinutes:
+      row.organization_sla_minutes == null
+        ? null
+        : Math.max(0, Number(row.organization_sla_minutes) || 0),
+    employeeNames: row.employee_names ?? [],
+    departmentNames: row.department_names ?? [],
+  }));
+}
+
+export const getPendingLateTasks = cache((orgId: string) => queryPendingLateTasks(orgId));
+export const getEmployeePendingLateTasks = cache((orgId: string, employeeId: string) =>
+  queryPendingLateTasks(orgId, employeeId),
+);
+
+interface OwnedDeskTaskSqlRow {
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
+  stage: string;
+  stage_entered_at: string | null;
+  elapsed_minutes: number | string;
+  sla_minutes: number | string | null;
+  is_late: boolean;
+}
+
+// Every open task whose CURRENT stage is owned by this employee's position.
+// This mirrors team_activity_cache.owned_open exactly, including New tasks
+// (which fall back to the template's New owner / specialist and may have no SLA).
+async function _getEmployeeOwnedDeskTasks(
+  orgId: string,
+  employeeId: string,
+): Promise<OwnedDeskTaskRow[]> {
+  if (!UUID_RE.test(orgId) || !UUID_RE.test(employeeId)) return [];
+
+  const rows = await runSql<OwnedDeskTaskSqlRow>(`
+    select distinct t.id task_id, t.task_code, t.title, p.name project_name,
+           t.stage::text stage, t.stage_entered_at,
+           public.business_minutes_between(t.stage_entered_at, now()) elapsed_minutes,
+           coalesce(t.sla_override_minutes,
+                    nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                    s.max_minutes) sla_minutes,
+           case when coalesce(t.sla_override_minutes,
+                              nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                              s.max_minutes) is null then false
+                else public.business_minutes_between(t.stage_entered_at, now())
+                       > coalesce(t.sla_override_minutes,
+                                  nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+                                  s.max_minutes)
+           end is_late
+      from task_assignees ta
+      join employee_profiles e on e.id = ta.employee_id
+      join positions pos on pos.id = e.position_id
+      join departments d on d.id = e.department_id
+      join tasks t on t.id = ta.task_id
+      left join projects p on p.id = t.project_id
+      left join sla_rules s
+        on s.organization_id = t.organization_id and s.stage_key = t.stage::text
+     where t.organization_id = '${orgId}'
+       and e.id = '${employeeId}'
+       and e.employment_status = 'active'
+       and coalesce(d.show_in_team_pulse, true)
+       and t.archived_at is null
+       and t.stage <> 'done'
+       and pos.role = coalesce(
+             public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text),
+             case when t.stage = 'new'
+                  then coalesce(t.stage_owner_positions ->> 'new', 'specialist')
+             end)
+     order by is_late desc, t.stage_entered_at asc nulls last
+  `);
+
+  return rows.map((row) => ({
+    taskId: row.task_id,
+    taskCode: row.task_code,
+    title: row.title?.trim() || "—",
+    projectName: row.project_name,
+    stage: row.stage,
+    stageEnteredAt: row.stage_entered_at,
+    elapsedMinutes: Math.max(0, Number(row.elapsed_minutes) || 0),
+    slaMinutes: row.sla_minutes == null ? null : Math.max(0, Number(row.sla_minutes) || 0),
+    isLate: row.is_late,
+  }));
+}
+
+export const getEmployeeOwnedDeskTasks = cache(_getEmployeeOwnedDeskTasks);
+
+interface EmployeeActiveProjectSqlRow {
+  project_id: string;
+  project_code: string | null;
+  project_name: string | null;
+  open_assigned_tasks: number;
+}
+
+// Mirrors team_activity_cache.active_projects: distinct ACTIVE projects where
+// this employee is an agent on at least one open, non-archived task.
+async function _getEmployeeActiveProjects(
+  orgId: string,
+  employeeId: string,
+): Promise<EmployeeActiveProjectRow[]> {
+  if (!UUID_RE.test(orgId) || !UUID_RE.test(employeeId)) return [];
+
+  const rows = await runSql<EmployeeActiveProjectSqlRow>(`
+    select p.id project_id, p.project_code, p.name project_name,
+           count(distinct t.id) open_assigned_tasks
+      from task_assignees ta
+      join tasks t on t.id = ta.task_id
+      join projects p on p.id = t.project_id
+     where ta.organization_id = '${orgId}'
+       and ta.employee_id = '${employeeId}'
+       and ta.role_type = 'agent'
+       and t.archived_at is null
+       and t.stage <> 'done'
+       and p.status = 'active'
+     group by p.id, p.project_code, p.name
+     order by open_assigned_tasks desc, p.name
+  `);
+
+  return rows.map((row) => ({
+    projectId: row.project_id,
+    projectCode: row.project_code,
+    projectName: row.project_name?.trim() || "—",
+    openAssignedTasks: Number(row.open_assigned_tasks) || 0,
+  }));
+}
+
+export const getEmployeeActiveProjects = cache(_getEmployeeActiveProjects);
 
 // Status from the most recent ACTION in Rwasem (stage move OR Log Note),
 // bucketed by Asia/Riyadh CALENDAR DAY (the team's definition): acted today →
@@ -335,18 +618,26 @@ async function _loadActivityRows(orgId: string): Promise<TeamMemberRow[]> {
 const loadActivityRows = cache(_loadActivityRows);
 
 async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> {
-  const members = await loadActivityRows(orgId);
+  const membersPromise = loadActivityRows(orgId);
+  const overloadThresholdPromise = getOverloadProjectsThreshold(orgId);
+  const pendingLateTasksPromise = getPendingLateTasks(orgId);
+  const departmentsPromise = supabaseAdmin
+    .from("departments")
+    .select("id, name, slug, head_employee_id, show_in_team_pulse")
+    .eq("organization_id", orgId);
+  const employeesPromise = supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name")
+    .eq("organization_id", orgId);
 
-  const [{ data: depts }, { data: emps }] = await Promise.all([
-    supabaseAdmin
-      .from("departments")
-      .select("id, name, slug, head_employee_id, show_in_team_pulse")
-      .eq("organization_id", orgId),
-    supabaseAdmin
-      .from("employee_profiles")
-      .select("id, full_name")
-      .eq("organization_id", orgId),
-  ]);
+  const [members, overloadProjectsThreshold, pendingLateTasks, { data: depts }, { data: emps }] =
+    await Promise.all([
+      membersPromise,
+      overloadThresholdPromise,
+      pendingLateTasksPromise,
+      departmentsPromise,
+      employeesPromise,
+    ]);
   const deptById = new Map(
     (
       (depts as
@@ -489,6 +780,10 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
     },
   );
 
+  // Department rows intentionally retain per-owner counts. The org headline is
+  // task-grained so it reconciles exactly with the unique-task drill-down.
+  totals.pendingLate = pendingLateTasks.length;
+
   // Org-wide freshness stamp: the most recent action timestamp.
   const lastActionAt = members.reduce<string | null>((max, m) => {
     if (!m.departmentId || !visibleDeptIds.has(m.departmentId)) return max;
@@ -496,7 +791,13 @@ async function _getTeamPulseOverview(orgId: string): Promise<TeamPulseOverview> 
     return max;
   }, null);
 
-  return { generatedAt: new Date().toISOString(), lastActionAt, rows, totals };
+  return {
+    generatedAt: new Date().toISOString(),
+    lastActionAt,
+    overloadProjectsThreshold,
+    rows,
+    totals,
+  };
 }
 
 export const getTeamPulseOverview = cache(_getTeamPulseOverview);

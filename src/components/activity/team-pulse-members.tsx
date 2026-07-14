@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { riyadhDateOf, riyadhTodayIso, riyadhDaysAgoIso } from "@/lib/tz";
 import { CompareTrendModal } from "@/components/activity/compare-trend-modal";
 import { ActionBreakdownButton } from "@/components/activity/action-breakdown-sheet";
+import { TeamPulsePendingCell } from "@/components/activity/team-pulse-pending-cell";
 import type { TeamMemberRow, ActivityStatus, LoadFlag } from "@/lib/data/team-pulse";
 
 const NA = "—";
@@ -57,23 +58,6 @@ function CompletedSplit({ today, week }: { today: number; week: number }) {
         <span className="text-[9px] font-normal text-muted-foreground"> اليوم</span>
       </span>
       <span className="text-[10px] text-muted-foreground">{week} الأسبوع</span>
-    </div>
-  );
-}
-
-// مُعلقة — tasks whose current stage the person OWNS: how many have breached
-// their STAGE SLA (sat in the current stage longer than that stage's allowance,
-// red) out of the total on their desk. "Late" = per-stage SLA, NOT the ordinary
-// task-deadline overdue; only the 5 SLA-configured stages can be late.
-function PendingCell({ late, owned }: { late: number; owned: number }) {
-  if (owned === 0) return <span className="text-muted-foreground">—</span>;
-  return (
-    <div className="flex flex-col items-center leading-tight tabular-nums">
-      <span className={cn("font-semibold", late > 0 ? "text-cc-red" : "text-muted-foreground")}>
-        {late}
-        <span className="text-[9px] font-normal text-muted-foreground"> متأخرة</span>
-      </span>
-      <span className="text-[10px] text-muted-foreground">{owned} على مكتبه</span>
     </div>
   );
 }
@@ -222,7 +206,12 @@ export function TeamPulseMembers({
                       </td>
                       <td className="px-3 py-2.5 tabular-nums text-center">{m.openWip}</td>
                       <td className="px-3 py-2.5 text-center">
-                        <PendingCell late={m.pendingLate} owned={m.ownedOpen} />
+                        <TeamPulsePendingCell
+                          employeeId={m.employeeId}
+                          fullName={m.fullName}
+                          late={m.pendingLate}
+                          owned={m.ownedOpen}
+                        />
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-2">
