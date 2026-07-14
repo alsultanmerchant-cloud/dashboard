@@ -362,12 +362,13 @@ async function _getExecutiveIndicatorsForWindow(
   // Load once, reuse for the snapshot/interval KPIs. `since` = the earliest
   // period start we evaluate, so we keep every task that could be open in-window.
   const since = startOfDayMs(previous.from);
-  const [facts, excluded, excludedProjectIds, completedRows, ccEntries] = await Promise.all([
+  const [facts, excluded, excludedProjectIds, completedRows, ccEntries, liveClientChanges] = await Promise.all([
     loadOpenOrRecent(orgId, new Date(since).toISOString()),
     excludedClientIds(orgId),
     excludedProjectIdsByTag(orgId),
     loadCompleted(orgId, previous.from, range.to),
     loadClientChanges(orgId, previous.from, range.to),
+    countLiveClientChanges(orgId),
   ]);
 
   // KPI 1 — Projects At Risk (≥1 overdue open task) and the High-Risk tier
@@ -443,11 +444,15 @@ async function _getExecutiveIndicatorsForWindow(
     validation: { ok: true, missing: [] },
   };
 
-  // KPI 5 — Client Changes Comparison (org-wide distinct tasks entering the stage)
+  // KPI 5 — Client Changes. Following the same live-main-value + period-trend
+  // convention as the Overdue KPI (and the card's own tooltip: the big value is
+  // the instantaneous operational state, the trend compares the selected period
+  // to the previous one). Main value = tasks sitting in client_changes right now;
+  // trend = distinct tasks that entered the stage this period vs the prior one.
   const ccSel = distinctTasks(ccEntries, range.from, range.to);
   const ccPrev = distinctTasks(ccEntries, previous.from, previous.to);
   const clientChanges: ClientChangesKpi = {
-    mainValue: ccSel,
+    mainValue: liveClientChanges,
     trend: trendOf(ccSel, ccPrev),
     periods,
     validation: { ok: true, missing: [] },
@@ -571,6 +576,20 @@ async function loadClientChanges(orgId: string, fromIso: string, toIso: string):
   }
   return out;
 }
+// Live count of tasks sitting in the client_changes stage right now. Archived
+// (wound-down / lost-client) tasks are excluded, matching getTopRevisedTasks'
+// activeNow so the two dashboard cards agree.
+async function countLiveClientChanges(orgId: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", orgId)
+    .eq("stage", "client_changes")
+    .is("archived_at", null);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 function distinctTasks(entries: CcEntry[], from: string, to: string): number {
   const set = new Set<string>();
   for (const e of entries) if (e.enteredDate >= from && e.enteredDate <= to) set.add(e.taskId);

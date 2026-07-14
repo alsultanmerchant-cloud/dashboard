@@ -3056,7 +3056,7 @@
       },
       "clientChanges": {
         "label": "Client Changes",
-        "sub": "Tasks that entered the Client Changes stage"
+        "sub": "Tasks currently in the Client Changes stage"
       },
       "review": {
         "label": "In review",
