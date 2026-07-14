@@ -1758,7 +1758,9 @@ async function _getTopRevisedTasks(
         .select("id, service_id")
         .eq("organization_id", orgId)
         .eq("stage", "client_changes")
-        .is("archived_at", null)
+        // Count ALL tasks currently in the stage, archived included — this card
+        // mirrors the Odoo "Task Stage History" view (Active in true+false), so
+        // wound-down / lost-client tasks still sitting in client_changes count.
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
 
@@ -1777,14 +1779,12 @@ async function _getTopRevisedTasks(
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabaseAdmin
         .from("task_stage_history")
-        .select("task_id, entered_at, exited_at, task:tasks!inner(archived_at)")
+        .select("task_id, entered_at, exited_at")
         .eq("organization_id", orgId)
         .eq("to_stage", "client_changes")
-        // Match the live count's scope: exclude archived (wound-down / lost-
-        // client) tasks. Otherwise the period count is inflated and its trend
-        // can invert (a lost-client batch in the prior window made client-
-        // changes look like they were falling when they were rising).
-        .is("task.archived_at", null)
+        // ALL tasks, archived included — the entered / existed counts come
+        // straight from the Task Stage History (Last Stage In = entered_at,
+        // Last Stage Out = exited_at), mirroring the Odoo view's Active true+false.
         // Fetch every client_changes occupancy that OVERLAPS the combined
         // [priorStart, endExclusive) window — i.e. entered before the window
         // ended AND had not yet left when the window began. This captures tasks
