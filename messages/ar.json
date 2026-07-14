@@ -3250,7 +3250,9 @@
       "totalEvents": "إجمالي التعديلات",
       "affectedTasks": "مهام متأثرة",
       "avgRevisions": "متوسط/مهمة",
-      "threePlus": "مهام ٣+ مراجعات"
+      "threePlus": "مهام ٣+ مراجعات",
+      "enteredThisPeriod": "دخلت هذه الفترة",
+      "existedThisPeriod": "ضمن المرحلة هذه الفترة"
     },
     "scores": {
       "title": "الحالة التشغيلية",

@@ -43,7 +43,7 @@ function getServiceTone(slug: string) {
 export async function TopRevisedTasksSection({ rows: m, windowLabel }: { rows: ClientEditsMetrics; windowLabel?: string }) {
   const t = await getTranslations("Executive.topRevised");
 
-  const weekDelta = m.enteredThisWeek - m.enteredLastWeek;
+  const weekDelta = m.existedThisPeriod - m.existedLastPeriod;
   const TrendIcon = weekDelta > 0 ? TrendingUp : weekDelta < 0 ? TrendingDown : Minus;
   const trendTone = weekDelta > 0 ? "text-cc-red" : weekDelta < 0 ? "text-cc-green" : "text-muted-foreground";
   const trendSign = weekDelta > 0 ? "+" : "";
@@ -87,14 +87,17 @@ export async function TopRevisedTasksSection({ rows: m, windowLabel }: { rows: C
 
             <div className="relative mt-5 grid grid-cols-2 gap-2">
               <div className="rounded-xl border border-border/60 bg-background/55 px-3 py-2">
-                <p className="text-[10px] font-medium text-muted-foreground">{t("thisWeek")}</p>
-                <p className="mt-0.5 text-lg font-bold tabular-nums">{m.enteredThisWeek}</p>
+                <p className="text-[10px] font-medium text-muted-foreground">{t("enteredThisPeriod")}</p>
+                <p className="mt-0.5 text-lg font-bold tabular-nums">{m.enteredThisPeriod}</p>
               </div>
               <div className="rounded-xl border border-border/60 bg-background/55 px-3 py-2">
-                <p className="text-[10px] font-medium text-muted-foreground">{t("weeklyChange")}</p>
-                <div className={cn("mt-0.5 flex items-center gap-1 text-lg font-bold tabular-nums", trendTone)}>
-                  <TrendIcon className="size-4" />
-                  <span>{trendSign}{weekDelta}</span>
+                <p className="text-[10px] font-medium text-muted-foreground">{t("existedThisPeriod")}</p>
+                <div className="mt-0.5 flex items-baseline gap-1.5">
+                  <span className="text-lg font-bold tabular-nums">{m.existedThisPeriod}</span>
+                  <span className={cn("flex items-center gap-0.5 text-[11px] font-semibold tabular-nums", trendTone)}>
+                    <TrendIcon className="size-3" />
+                    {trendSign}{weekDelta}
+                  </span>
                 </div>
               </div>
             </div>

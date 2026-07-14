@@ -1716,13 +1716,16 @@ export const getStageFlowMatrix = cache(_getStageFlowMatrix);
 // ---- Client-edits indicator ----------------------------------------------
 
 export interface ClientEditsMetrics {
-  // Tasks currently sitting at client_changes right now.
+  // Tasks currently sitting at client_changes right now (point-in-time).
   activeNow: number;
+  // Distinct tasks that ENTERED client_changes during the selected window.
+  enteredThisPeriod: number;
   // Distinct tasks that were IN client_changes at any point during the selected
   // window — entered during it OR carried over from before (still there).
-  enteredThisWeek: number;
-  // Distinct tasks that were IN client_changes at any point during the prior window.
-  enteredLastWeek: number;
+  existedThisPeriod: number;
+  // Same "existed" (occupancy) count for the immediately-preceding window — used
+  // for the period-over-period trend.
+  existedLastPeriod: number;
   // Per-service breakdown of tasks currently at client_changes.
   byService: Array<{ name: string; slug: string; count: number }>;
 }
@@ -1816,32 +1819,39 @@ async function _getTopRevisedTasks(
 
   const activeNow = live.length;
 
-  // Period cards are occupancy counters: distinct tasks that were IN
-  // client_changes at any point during the window — whether they entered inside
-  // it OR carried over from before and were still there. A stage occupancy is
-  // the interval [entered_at, exited_at) (open-ended while still in the stage);
-  // it counts toward a window when that interval overlaps the window.
-  const thisPeriodTaskIds = new Set<string>();
-  const lastPeriodTaskIds = new Set<string>();
+  // The period card breaks into three counters:
+  //   • entered   — tasks that newly ENTERED client_changes during the window.
+  //   • existed   — tasks that were IN client_changes at any point during the
+  //                 window (entered during it OR carried over and still there).
+  //   • activeNow — tasks sitting in client_changes right now (computed above).
+  // A stage occupancy is the interval [entered_at, exited_at) (open-ended while
+  // still in the stage); "existed" counts it when the interval overlaps the
+  // window, "entered" counts it only when entered_at falls inside the window.
+  const enteredThisIds = new Set<string>();
+  const existedThisIds = new Set<string>();
+  const existedLastIds = new Set<string>();
   for (const r of hist) {
-    // this window [rangeStart, endExclusive): entered before it ends (always
-    // true given the fetch) AND had not left before it began.
+    // existed — this window [rangeStart, endExclusive): entered before it ends
+    // (always true given the fetch) AND had not left before it began.
     if (r.exited_at === null || r.exited_at > rangeStart) {
-      thisPeriodTaskIds.add(r.task_id);
+      existedThisIds.add(r.task_id);
+      // entered — occupancy that began inside this window.
+      if (r.entered_at >= rangeStart) enteredThisIds.add(r.task_id);
     }
-    // prior window [priorStart, rangeStart): entered before it ends AND had not
-    // left before it began.
+    // existed — prior window [priorStart, rangeStart): entered before it ends AND
+    // had not left before it began.
     if (r.entered_at < rangeStart && (r.exited_at === null || r.exited_at > priorStart)) {
-      lastPeriodTaskIds.add(r.task_id);
+      existedLastIds.add(r.task_id);
     }
   }
   // Safety net: any task sitting in client_changes right now was, by definition,
-  // present during the current window — include it even if its history row is
-  // missing (data-quality gaps in imported stage history).
-  for (const t of live) thisPeriodTaskIds.add(t.id);
+  // present during the current window — include it in "existed" even if its
+  // history row is missing (data-quality gaps in imported stage history).
+  for (const t of live) existedThisIds.add(t.id);
 
-  const enteredThisWeek = thisPeriodTaskIds.size;
-  const enteredLastWeek = lastPeriodTaskIds.size;
+  const enteredThisPeriod = enteredThisIds.size;
+  const existedThisPeriod = existedThisIds.size;
+  const existedLastPeriod = existedLastIds.size;
 
   // Count active tasks per service.
   const svcCount = new Map<string, number>();
@@ -1877,7 +1887,7 @@ async function _getTopRevisedTasks(
 
   const byService = Array.from(byServiceMerged.values()).sort((a, b) => b.count - a.count);
 
-  return { activeNow, enteredThisWeek, enteredLastWeek, byService };
+  return { activeNow, enteredThisPeriod, existedThisPeriod, existedLastPeriod, byService };
 }
 
 export const getTopRevisedTasks = cache(_getTopRevisedTasks);

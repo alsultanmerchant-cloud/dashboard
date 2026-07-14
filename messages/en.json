@@ -3250,7 +3250,9 @@
       "totalEvents": "Total revisions",
       "affectedTasks": "Affected tasks",
       "avgRevisions": "Avg per task",
-      "threePlus": "3+ revisions"
+      "threePlus": "3+ revisions",
+      "enteredThisPeriod": "Entered this period",
+      "existedThisPeriod": "In stage this period"
     },
     "scores": {
       "title": "Operational Health",
