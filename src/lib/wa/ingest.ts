@@ -265,6 +265,21 @@ export interface IngestResult {
 
 const MAX_WA_MEDIA_BYTES = 15 * 1024 * 1024;
 
+// Migration 0241 adds the media columns. Keep ingestion available during a
+// deployment/schema drift incident: one missing-column response disables media
+// metadata for this server process, then the same messages are retried using
+// the pre-0241 shape. Text/chat ingestion must never be taken down by optional
+// media support.
+let waMediaColumnsAvailable: boolean | null = null;
+
+function isMissingWaMediaColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === "PGRST204" &&
+    /media_(?:storage_path|mime_type|filename|size_bytes)/i.test(error.message ?? "")
+  );
+}
+
 function safePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "file";
 }
@@ -491,9 +506,8 @@ export async function ingestWaMessages(
     mediaByMessageId.set(m.waMessageId, await persistWaMedia(orgId, m));
   }
 
-  const rows = messages.map((m) => {
+  const baseRows = messages.map((m) => {
     const link = links.get(m.chatId);
-    const media = mediaByMessageId.get(m.waMessageId);
     return {
       organization_id: orgId,
       chat_id: m.chatId,
@@ -508,6 +522,12 @@ export async function ingestWaMessages(
       message_type: m.messageType,
       is_from_me: m.isFromMe,
       sent_at: m.sentAt,
+    };
+  });
+  const rowsWithMedia = messages.map((m, index) => {
+    const media = mediaByMessageId.get(m.waMessageId);
+    return {
+      ...baseRows[index],
       media_storage_path: media?.media_storage_path ?? null,
       media_mime_type: media?.media_mime_type ?? m.media?.mimeType ?? null,
       media_filename: media?.media_filename ?? m.media?.filename ?? null,
@@ -515,16 +535,28 @@ export async function ingestWaMessages(
     };
   });
 
-  const { data, error } = await supabaseAdmin
-    .from("wa_messages")
-    .upsert(rows as never, {
-      onConflict: "organization_id,chat_id,wa_message_id",
-      ignoreDuplicates: true,
-    })
-    .select("id");
-  if (error) throw error;
+  const upsertRows = (rows: typeof baseRows) =>
+    supabaseAdmin
+      .from("wa_messages")
+      .upsert(rows as never, {
+        onConflict: "organization_id,chat_id,wa_message_id",
+        ignoreDuplicates: true,
+      })
+      .select("id");
 
-  const ingested = data?.length ?? 0;
+  let result = await upsertRows(
+    waMediaColumnsAvailable === false ? baseRows : (rowsWithMedia as typeof baseRows),
+  );
+  if (isMissingWaMediaColumnError(result.error)) {
+    waMediaColumnsAvailable = false;
+    console.warn("[wa] migration 0241 missing; ingesting without optional media metadata");
+    result = await upsertRows(baseRows);
+  } else if (!result.error && waMediaColumnsAvailable === null) {
+    waMediaColumnsAvailable = true;
+  }
+  if (result.error) throw result.error;
+
+  const ingested = result.data?.length ?? 0;
   // Refresh each touched link's stored message_count from the source of truth.
   for (const chatId of byChat.keys()) {
     const { count } = await supabaseAdmin
