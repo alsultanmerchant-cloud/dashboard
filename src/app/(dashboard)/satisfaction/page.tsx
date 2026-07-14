@@ -112,6 +112,7 @@ export default async function SatisfactionPage({
         </div>
       )}
       <SatisfactionWorkspace
+        canManageClients={session.permissions.has("clients.manage")}
         options={options}
         searchKeywords={searchKeywords}
         rows={boardRows}

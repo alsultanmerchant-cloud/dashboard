@@ -299,6 +299,13 @@ export const SatisfactionSchema = z.object({
         issue: z.string(), // Arabic, one line
         // What the team should do next about it.
         action: z.string(), // Arabic, one line
+        // Structured live-resolution hints. Optional keeps every historical
+        // JSON snapshot readable; new analyses populate them for reliable
+        // automatic status checks without another Gemini call.
+        taskCodes: z.array(z.string()).max(12).optional(),
+        resolutionKind: z
+          .enum(["task_completion", "no_overdue_tasks", "brief_attached", "manual_confirmation"])
+          .optional(),
       }),
     )
     .max(6),

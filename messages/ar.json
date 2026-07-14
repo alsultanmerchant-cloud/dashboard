@@ -3591,6 +3591,32 @@
       "criticalTitle": "آخر التطورات",
       "latestFirst": "الأحدث أولاً",
       "recommendationsTitle": "Recommendations",
+      "recommendationStatus": {
+        "liveHint": "التوصية لقطة من التحليل، أما حالتها فتُراجع تلقائيًا من بيانات النظام دون إعادة تحليل.",
+        "snapshotAt": "وقت التحليل: {date}",
+        "checkedAt": "آخر تحقق: {date}",
+        "noActive": "لا توجد توصيات نشطة يمكن للنظام إثبات استمرارها الآن.",
+        "resolvedGroup": "تم حلها ({n})",
+        "confirmResolved": "تأكيد أنها حُلّت",
+        "clearConfirmation": "إلغاء تأكيد الحل",
+        "state": {
+          "open": "مفتوحة الآن",
+          "resolved": "تم الحل تلقائيًا",
+          "manually_resolved": "تم تأكيد الحل",
+          "needs_confirmation": "بحاجة إلى تأكيد"
+        },
+        "reason": {
+          "linkedTasksOpen": "تحقق النظام من المهام المرتبطة: ما زال {n} منها مفتوحًا.",
+          "linkedTasksResolved": "تحقق النظام من اكتمال {n} من المهام المرتبطة.",
+          "linkedTasksUnverifiable": "تعذر التحقق من جميع أكواد المهام المرتبطة؛ يلزم تأكيد بشري.",
+          "overdueTasksOpen": "البيانات المباشرة تعرض {n} من المهام المتأخرة حاليًا.",
+          "overdueTasksResolved": "لا توجد مهام متأخرة نشطة لهذا العميل في البيانات المباشرة.",
+          "briefMissing": "لم يعثر النظام على بريف مرتبط حتى الآن.",
+          "briefAttached": "تم العثور على بريف مرتبط بعد وقت التحليل.",
+          "manualConfirmed": "أكد أحد أعضاء الفريق أن المشكلة حُلّت؛ تم حفظ التأكيد في سجل النشاط.",
+          "unverifiable": "هذه ملاحظة مستخرجة من المحادثة ولا توجد إشارة نظامية كافية لإغلاقها تلقائيًا."
+        }
+      },
       "timelineTitle": "Client Timeline",
       "noCriticalEvents": "لا توجد أحداث حرجة تستدعي تدخلًا إداريًا الآن.",
       "noRecommendations": "لا توجد توصيات عاجلة في هذا التحليل.",
@@ -3964,7 +3990,7 @@
       "reanalyzedWithoutNew": "أُعيد التحليل دون رسائل واتساب جديدة",
       "resultBody": "هذه النتيجة أُنشئت الآن، لكن أحدث رسالة مستخدمة تعود إلى {date}. لا تعتبرها تأكيدًا على أن تواصل العميل الحالي بخير.",
       "analysisRunAt": "وقت تشغيل التحليل",
-      "lastMessageAt": "آخر رسالة مستخدمة",
+      "lastMessageAt": "آخر رسالة مستلمة",
       "unknownDate": "غير معروف"
     },
     "archive": "أرشفة",

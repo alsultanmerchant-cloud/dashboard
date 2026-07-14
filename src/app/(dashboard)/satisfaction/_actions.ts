@@ -48,6 +48,89 @@ export type UploadState = {
 export type BriefLinkState = { ok?: true; error?: string; projectId?: string };
 export type BriefFileState = { ok?: true; error?: string; projectId?: string; filename?: string };
 
+const RecommendationStatusSchema = z.object({
+  clientId: z.string().uuid(),
+  analysisId: z.string().uuid(),
+  recommendationIndex: z.number().int().min(0).max(5),
+  issue: z.string().trim().min(1).max(2_000),
+  state: z.enum(["resolved", "cleared"]),
+});
+
+export type RecommendationStatusState = { ok?: true; error?: string };
+
+export async function setRecommendationStatusAction(input: {
+  clientId: string;
+  analysisId: string;
+  recommendationIndex: number;
+  issue: string;
+  state: "resolved" | "cleared";
+}): Promise<RecommendationStatusState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = RecommendationStatusSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  const { clientId, analysisId, recommendationIndex, issue, state } = parsed.data;
+
+  // Verify the immutable snapshot and exact row text so a stale browser cannot
+  // confirm a different recommendation after navigation/history changes.
+  const { data: analysis, error: analysisError } = await supabaseAdmin
+    .from("client_satisfaction_analyses")
+    .select("id, recommendations")
+    .eq("organization_id", session.orgId)
+    .eq("client_id", clientId)
+    .eq("id", analysisId)
+    .maybeSingle();
+  if (analysisError) return { error: analysisError.message };
+  const recommendations = Array.isArray(analysis?.recommendations)
+    ? analysis.recommendations
+    : [];
+  const stored = recommendations[recommendationIndex];
+  if (
+    !stored ||
+    Array.isArray(stored) ||
+    typeof stored !== "object" ||
+    stored.issue !== issue
+  ) {
+    return { error: "التوصية تغيّرت أو لم تعد موجودة؛ حدّث الصفحة وحاول مجددًا" };
+  }
+
+  const { error } = await supabaseAdmin.from("ai_events").insert({
+    organization_id: session.orgId,
+    actor_user_id: session.userId,
+    event_type: "SATISFACTION_RECOMMENDATION_STATUS_CHANGED",
+    entity_type: "satisfaction_analysis",
+    entity_id: analysisId,
+    importance: "normal",
+    payload: {
+      clientId,
+      recommendationIndex,
+      issue,
+      state,
+    },
+  });
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action:
+      state === "resolved"
+        ? "satisfaction.recommendation_confirmed_resolved"
+        : "satisfaction.recommendation_confirmation_cleared",
+    entityType: "satisfaction_analysis",
+    entityId: analysisId,
+    metadata: { clientId, recommendationIndex, issue },
+  });
+
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}
+
 // Keep Arabic letters, latin alphanumerics, dot, dash, underscore; replace the
 // rest with `_` so the storage object key stays safe across S3-compatible
 // backends. Mirrors the helper used by the task comment composer.

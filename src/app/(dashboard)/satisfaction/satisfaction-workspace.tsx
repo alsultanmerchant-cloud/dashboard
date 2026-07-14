@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useTransition } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { useTranslations } from "next-intl";
 import { SatisfactionSchema } from "@/lib/satisfaction-schema";
@@ -51,6 +51,7 @@ import {
   uploadClientBriefFileAction,
   deleteClientBriefAction,
   setClientArchivedAction,
+  setRecommendationStatusAction,
 } from "./_actions";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
@@ -67,8 +68,13 @@ import type {
   ClientSatisfactionDetail,
   SatisfactionRow,
 } from "@/lib/data/satisfaction";
+import type {
+  RecommendationLiveStatus,
+  RecommendationResolutionReason,
+} from "@/lib/satisfaction-recommendation-status";
 
 interface Props {
+  canManageClients: boolean;
   options: { value: string; label: string; keywords?: string | null }[];
   // clientId → space-joined project / group / contract names, so the overview
   // search matches a client by ANY identifier, not just its display name.
@@ -126,6 +132,7 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
 }
 
 export function SatisfactionWorkspace({
+  canManageClients,
   options,
   searchKeywords,
   rows,
@@ -370,8 +377,8 @@ export function SatisfactionWorkspace({
                 <span>{t("freshness.analysisRunAt")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}</span>
                 <span className="mx-1.5">·</span>
                 <span>
-                  {t("freshness.lastMessageAt")}: {detail.analysis.sourceLatestMessageAt
-                    ? detail.analysis.sourceLatestMessageAt.slice(0, 16).replace("T", " ")
+                  {t("freshness.lastMessageAt")}: {detail.latestMessageAt
+                    ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
                     : t("freshness.unknownDate")}
                 </span>
               </div>
@@ -413,6 +420,8 @@ export function SatisfactionWorkspace({
           {detail.analysis && (
             <AnalysisView
               analysis={detail.analysis}
+              recommendationStatuses={detail.recommendationStatuses}
+              canManageClients={canManageClients}
               history={detail.history}
               execution={execution}
               media={media}
@@ -1139,14 +1148,41 @@ function buildClientTimelineEvents(
 function buildFallbackRecommendations(
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>,
   execution: ClientExecutionSnapshot | null,
+  recommendationStatuses: RecommendationLiveStatus[],
 ) {
-  const recs = [...analysis.recommendations];
+  const statusByIndex = new Map(
+    recommendationStatuses.map((status) => [status.recommendationIndex, status]),
+  );
+  const checkedAt = recommendationStatuses[0]?.checkedAt ?? analysis.createdAt;
+  const recs = analysis.recommendations.map((recommendation, recommendationIndex) => ({
+    ...recommendation,
+    liveStatus:
+      statusByIndex.get(recommendationIndex) ??
+      ({
+        recommendationIndex,
+        state: "needs_confirmation",
+        reason: "unverifiable",
+        checkedAt,
+        openTaskCount: null,
+        liveOverdueCount: null,
+        matchedTasks: [],
+      } satisfies RecommendationLiveStatus),
+  }));
   if (execution && execution.overdueCount > 0 && recs.length < 6) {
     const stage = execution.byStage[0]?.stage;
     recs.push({
       priority: execution.overdueCount >= 4 ? ("high" as const) : ("medium" as const),
       issue: `يوجد ${execution.overdueCount} مهام متأخرة${stage ? `، أكثرها في مرحلة ${stage}` : ""}.`,
       action: "تحديد مالك لكل مهمة متأخرة وإرسال موعد تسليم واضح للعميل خلال 48 ساعة.",
+      liveStatus: {
+        recommendationIndex: recs.length,
+        state: "open" as const,
+        reason: "overdue_tasks_open" as const,
+        checkedAt,
+        openTaskCount: execution.overdueCount,
+        liveOverdueCount: execution.overdueCount,
+        matchedTasks: [],
+      },
     });
   }
   if (analysis.risks.length > 0 && recs.length < 6) {
@@ -1154,6 +1190,15 @@ function buildFallbackRecommendations(
       priority: "medium" as const,
       issue: analysis.risks[0],
       action: "تحويل الخطر إلى قرار متابعة: من المسؤول، ما الإجراء، وما موعد الإغلاق.",
+      liveStatus: {
+        recommendationIndex: recs.length,
+        state: "needs_confirmation" as const,
+        reason: "unverifiable" as const,
+        checkedAt,
+        openTaskCount: null,
+        liveOverdueCount: null,
+        matchedTasks: [],
+      },
     });
   }
   return recs.slice(0, 6);
@@ -1161,6 +1206,8 @@ function buildFallbackRecommendations(
 
 function AnalysisView({
   analysis,
+  recommendationStatuses,
+  canManageClients,
   history,
   execution,
   media,
@@ -1171,6 +1218,8 @@ function AnalysisView({
   sentimentLabel,
 }: {
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
+  recommendationStatuses: RecommendationLiveStatus[];
+  canManageClients: boolean;
   history: AnalysisHistoryItem[];
   execution: ClientExecutionSnapshot | null;
   media: ClientMediaExchange | null;
@@ -1195,8 +1244,8 @@ function AnalysisView({
     [clientEvents],
   );
   const recommendations = useMemo(
-    () => buildFallbackRecommendations(analysis, execution),
-    [analysis, execution],
+    () => buildFallbackRecommendations(analysis, execution, recommendationStatuses),
+    [analysis, execution, recommendationStatuses],
   );
   // Deep-link scroll: cross-page links (e.g. the accountability cases feed) land
   // on `/satisfaction?client=X#accountability`. The target section only exists
@@ -1433,7 +1482,14 @@ function AnalysisView({
       {activeTab === "critical" ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
           <CriticalEventsPanel events={criticalEvents} t={t} />
-          <RecommendationsPanel recommendations={recommendations} t={t} />
+          <RecommendationsPanel
+            recommendations={recommendations}
+            analysisCreatedAt={analysis.createdAt}
+            analysisId={analysis.id}
+            clientId={clientId}
+            canManageClients={canManageClients}
+            t={t}
+          />
         </div>
       ) : (
         <ClientTimelinePanel
@@ -1695,41 +1751,93 @@ function CriticalEventsPanel({
 
 function RecommendationsPanel({
   recommendations,
+  analysisCreatedAt,
+  analysisId,
+  clientId,
+  canManageClients,
   t,
 }: {
-  recommendations: NonNullable<ClientSatisfactionDetail["analysis"]>["recommendations"];
+  recommendations: Array<
+    NonNullable<ClientSatisfactionDetail["analysis"]>["recommendations"][number] & {
+      liveStatus: RecommendationLiveStatus;
+    }
+  >;
+  analysisCreatedAt: string;
+  analysisId: string;
+  clientId: string;
+  canManageClients: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const sorted = [...recommendations].sort(
+    (a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority],
+  );
+  const active = sorted.filter((recommendation) => recommendation.liveStatus.state !== "resolved");
+  const resolved = sorted.filter((recommendation) => recommendation.liveStatus.state === "resolved");
+  const checkedAt = recommendations[0]?.liveStatus.checkedAt ?? analysisCreatedAt;
+
   return (
     <Card className="border-cyan/30">
       <CardContent className="p-4">
-        <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-          <Lightbulb className="size-4 text-cyan" /> {t("executive.recommendationsTitle")}
-        </p>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold">
+              <Lightbulb className="size-4 text-cyan" /> {t("executive.recommendationsTitle")}
+            </p>
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              {t("executive.recommendationStatus.liveHint")}
+            </p>
+          </div>
+          <div className="text-end text-[10px] leading-5 text-muted-foreground">
+            <p>{t("executive.recommendationStatus.snapshotAt", { date: analysisCreatedAt.slice(0, 10) })}</p>
+            <p>{t("executive.recommendationStatus.checkedAt", { date: checkedAt.slice(0, 10) })}</p>
+          </div>
+        </div>
         {recommendations.length > 0 ? (
-          <ul className="space-y-3">
-            {[...recommendations]
-              .sort((a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority])
-              .map((rec, i) => (
-                <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
-                  <div className="mb-1.5 flex items-start gap-2">
-                    <span
-                      className={cn(
-                        "mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
-                        REC_PRIORITY_TONE[rec.priority],
-                      )}
-                    >
-                      {t(`recPriority.${rec.priority}`)}
-                    </span>
-                    <span className="text-[13px] font-medium leading-snug">{rec.issue}</span>
-                  </div>
-                  <p className="flex items-start gap-1.5 text-[13px] text-cyan">
-                    <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
-                    {rec.action}
-                  </p>
-                </li>
-              ))}
-          </ul>
+          <div className="space-y-3">
+            {active.length > 0 ? (
+              <ul className="space-y-3">
+                {active.map((recommendation) => (
+                  <RecommendationItem
+                    key={`${recommendation.liveStatus.recommendationIndex}-${recommendation.issue}`}
+                    recommendation={recommendation}
+                    analysisId={analysisId}
+                    clientId={clientId}
+                    canManageClients={canManageClients}
+                    t={t}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-cc-green/30 bg-green-dim px-3 py-2.5 text-[13px] text-cc-green">
+                <CheckCircle2 className="size-4 shrink-0" />
+                {t("executive.recommendationStatus.noActive")}
+              </div>
+            )}
+
+            {resolved.length > 0 && (
+              <details className="group rounded-lg border border-cc-green/25 bg-green-dim/40">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-[12px] font-semibold text-cc-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-green/40">
+                  <span className="inline-flex items-center gap-2">
+                    <CheckCircle2 className="size-4" />
+                    {t("executive.recommendationStatus.resolvedGroup", { n: resolved.length })}
+                  </span>
+                  <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <ul className="space-y-2 border-t border-cc-green/20 p-2">
+                  {resolved.map((recommendation) => (
+                    <RecommendationItem
+                      key={`${recommendation.liveStatus.recommendationIndex}-${recommendation.issue}`}
+                      recommendation={recommendation}
+                      analysisId={analysisId}
+                      clientId={clientId}
+                      canManageClients={canManageClients}
+                      t={t}
+                    />
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
         ) : (
           <p className="rounded-lg border border-border bg-soft-1 px-3 py-6 text-center text-sm text-muted-foreground">
             {t("executive.noRecommendations")}
@@ -1737,6 +1845,173 @@ function RecommendationsPanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function recommendationReasonText(
+  reason: RecommendationResolutionReason,
+  status: RecommendationLiveStatus,
+  t: ReturnType<typeof useTranslations>,
+) {
+  switch (reason) {
+    case "linked_tasks_open":
+      return t("executive.recommendationStatus.reason.linkedTasksOpen", {
+        n: status.openTaskCount ?? 0,
+      });
+    case "linked_tasks_resolved":
+      return t("executive.recommendationStatus.reason.linkedTasksResolved", {
+        n: status.matchedTasks.length,
+      });
+    case "linked_tasks_unverifiable":
+      return t("executive.recommendationStatus.reason.linkedTasksUnverifiable");
+    case "overdue_tasks_open":
+      return t("executive.recommendationStatus.reason.overdueTasksOpen", {
+        n: status.liveOverdueCount ?? 0,
+      });
+    case "overdue_tasks_resolved":
+      return t("executive.recommendationStatus.reason.overdueTasksResolved");
+    case "brief_missing":
+      return t("executive.recommendationStatus.reason.briefMissing");
+    case "brief_attached":
+      return t("executive.recommendationStatus.reason.briefAttached");
+    case "manual_confirmed":
+      return t("executive.recommendationStatus.reason.manualConfirmed");
+    default:
+      return t("executive.recommendationStatus.reason.unverifiable");
+  }
+}
+
+function RecommendationItem({
+  recommendation,
+  analysisId,
+  clientId,
+  canManageClients,
+  t,
+}: {
+  recommendation: NonNullable<
+    ClientSatisfactionDetail["analysis"]
+  >["recommendations"][number] & { liveStatus: RecommendationLiveStatus };
+  analysisId: string;
+  clientId: string;
+  canManageClients: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const status = recommendation.liveStatus;
+  const resolved = status.state === "resolved";
+  const statusTone =
+    status.state === "resolved"
+      ? "border-cc-green/35 bg-green-dim text-cc-green"
+      : status.state === "open"
+        ? "border-amber/35 bg-amber-dim text-amber"
+        : "border-border bg-soft-2 text-muted-foreground";
+  const StatusIcon =
+    status.state === "resolved"
+      ? CheckCircle2
+      : status.state === "open"
+        ? AlertTriangle
+        : HelpCircle;
+  const canConfirm = canManageClients && status.state === "needs_confirmation";
+  const canClearConfirmation = canManageClients && status.reason === "manual_confirmed";
+
+  const updateManualStatus = (state: "resolved" | "cleared") => {
+    setStatusError(null);
+    startTransition(async () => {
+      const result = await setRecommendationStatusAction({
+        clientId,
+        analysisId,
+        recommendationIndex: status.recommendationIndex,
+        issue: recommendation.issue,
+        state,
+      });
+      if (result.error) {
+        setStatusError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  return (
+    <li
+      className={cn(
+        "rounded-lg border p-3",
+        resolved ? "border-cc-green/25 bg-card/70" : "border-border bg-soft-1",
+      )}
+    >
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span
+          className={cn(
+            "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase",
+            REC_PRIORITY_TONE[recommendation.priority],
+          )}
+        >
+          {t(`recPriority.${recommendation.priority}`)}
+        </span>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+            statusTone,
+          )}
+        >
+          <StatusIcon className="size-3" />
+          {status.reason === "manual_confirmed"
+            ? t("executive.recommendationStatus.state.manually_resolved")
+            : t(`executive.recommendationStatus.state.${status.state}`)}
+        </span>
+      </div>
+      <p className={cn("text-[13px] font-medium leading-snug", resolved && "text-foreground/75")}>
+        {recommendation.issue}
+      </p>
+      <p className={cn("mt-1.5 flex items-start gap-1.5 text-[13px]", resolved ? "text-muted-foreground" : "text-cyan")}>
+        <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
+        {recommendation.action}
+      </p>
+      <div className="mt-2 border-t border-border/70 pt-2">
+        <p className="text-[11px] leading-5 text-muted-foreground">
+          {recommendationReasonText(status.reason, status, t)}
+        </p>
+        {status.matchedTasks.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {status.matchedTasks.map((task) => (
+              <Link
+                key={task.id}
+                href={`/tasks/${task.id}`}
+                className="rounded border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-foreground/75 transition-colors hover:border-cyan/40 hover:text-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40"
+              >
+                {task.taskCode}
+              </Link>
+            ))}
+          </div>
+        )}
+        {(canConfirm || canClearConfirmation) && (
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isPending}
+              onClick={() => updateManualStatus(canConfirm ? "resolved" : "cleared")}
+              className="h-7 gap-1.5 px-2 text-[11px]"
+            >
+              {isPending ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : canConfirm ? (
+                <CheckCircle2 className="size-3" />
+              ) : (
+                <ArchiveRestore className="size-3" />
+              )}
+              {canConfirm
+                ? t("executive.recommendationStatus.confirmResolved")
+                : t("executive.recommendationStatus.clearConfirmation")}
+            </Button>
+          </div>
+        )}
+        {statusError && <p className="mt-1.5 text-[11px] text-cc-red">{statusError}</p>}
+      </div>
+    </li>
   );
 }
 

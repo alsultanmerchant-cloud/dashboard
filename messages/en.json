@@ -3591,6 +3591,32 @@
       "criticalTitle": "Latest developments",
       "latestFirst": "Newest first",
       "recommendationsTitle": "Recommendations",
+      "recommendationStatus": {
+        "liveHint": "The recommendation is an analysis snapshot; its status is checked automatically against live system data without re-analysis.",
+        "snapshotAt": "Analyzed: {date}",
+        "checkedAt": "Last checked: {date}",
+        "noActive": "No active recommendations can currently be confirmed by system data.",
+        "resolvedGroup": "Resolved ({n})",
+        "confirmResolved": "Confirm resolved",
+        "clearConfirmation": "Undo confirmation",
+        "state": {
+          "open": "Open now",
+          "resolved": "Automatically resolved",
+          "manually_resolved": "Resolution confirmed",
+          "needs_confirmation": "Needs confirmation"
+        },
+        "reason": {
+          "linkedTasksOpen": "The system checked the linked tasks: {n} remain open.",
+          "linkedTasksResolved": "The system confirmed that {n} linked tasks are complete.",
+          "linkedTasksUnverifiable": "Not all linked task codes could be verified; human confirmation is required.",
+          "overdueTasksOpen": "Live data currently shows {n} overdue tasks.",
+          "overdueTasksResolved": "Live data shows no active overdue tasks for this client.",
+          "briefMissing": "No linked brief has been found yet.",
+          "briefAttached": "A linked brief was found after the analysis snapshot.",
+          "manualConfirmed": "A team member confirmed that the issue was resolved; the confirmation was saved to the activity log.",
+          "unverifiable": "This finding came from conversation evidence and has no reliable system signal for automatic closure."
+        }
+      },
       "timelineTitle": "Client Timeline",
       "noCriticalEvents": "No management-level critical events right now.",
       "noRecommendations": "No urgent recommendations in this analysis.",
@@ -3964,7 +3990,7 @@
       "reanalyzedWithoutNew": "Re-analyzed without new WhatsApp messages",
       "resultBody": "This result was generated now, but its newest message is from {date}. Do not treat it as confirmation that current client communication is healthy.",
       "analysisRunAt": "Analysis run",
-      "lastMessageAt": "Latest message used",
+      "lastMessageAt": "Latest message received",
       "unknownDate": "Unknown"
     },
     "archive": "Archive",

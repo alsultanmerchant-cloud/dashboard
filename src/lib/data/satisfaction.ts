@@ -8,6 +8,13 @@ import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowle
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { isClientRelationshipActive } from "@/lib/data/satisfaction-rules";
 import { getClientMergeMap, resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
+import {
+  classifyRecommendationLiveStatus,
+  extractRecommendationTaskCodes,
+  isOverdueTaskRecommendation,
+  type RecommendationLiveStatus,
+  type RecommendationTaskState,
+} from "@/lib/satisfaction-recommendation-status";
 
 // Re-export identity helpers so existing importers of these from this module
 // (and its many consumers) keep resolving without churn.
@@ -308,6 +315,9 @@ export interface ClientSatisfactionDetail {
   latestMessageAt: string | null; // newest linked live/imported WhatsApp message
   hasNewMessagesSinceAnalysis: boolean | null;
   analysis: AnalysisInfo | null; // the shown analysis (selected, else current week)
+  // Live, deterministic checks layered over the immutable AI snapshot. Existing
+  // analyses work immediately; no Gemini re-run is required.
+  recommendationStatuses: RecommendationLiveStatus[];
   history: AnalysisHistoryItem[]; // all stored snapshots, newest first
   activeProjects: Array<{ id: string; name: string }>;
   brief: ClientBriefRef | null; // the attached brief doc (reachable link/file), if any
@@ -411,6 +421,114 @@ async function hydrateStuckTaskIds(orgId: string, stuckTasks: StuckTask[]): Prom
   for (const t of stuckTasks) {
     if (!t.taskId && t.taskCode) t.taskId = idByCode.get(t.taskCode) ?? null;
   }
+}
+
+async function getRecommendationLiveStatuses(
+  orgId: string,
+  clientId: string,
+  analysis: AnalysisInfo | null,
+  hasBrief: boolean,
+): Promise<RecommendationLiveStatus[]> {
+  if (!analysis?.recommendations.length) return [];
+
+  const needsTaskData = analysis.recommendations.some(
+    (recommendation) =>
+      extractRecommendationTaskCodes(recommendation).length > 0 ||
+      isOverdueTaskRecommendation(recommendation),
+  );
+  const [projectIds, manualEventsRes] = await Promise.all([
+    needsTaskData ? resolveClientProjectIds(orgId, clientId) : Promise.resolve([]),
+    supabaseAdmin
+      .from("ai_events")
+      .select("payload, created_at")
+      .eq("organization_id", orgId)
+      .eq("event_type", "SATISFACTION_RECOMMENDATION_STATUS_CHANGED")
+      .eq("entity_type", "satisfaction_analysis")
+      .eq("entity_id", analysis.id)
+      .order("created_at", { ascending: true }),
+  ]);
+  let liveOverdueCount: number | null = null;
+  const tasksByCode = new Map<string, RecommendationTaskState>();
+
+  if (projectIds.length > 0) {
+    const { data } = await supabaseAdmin
+      .from("tasks")
+      .select("id, task_code, stage, is_overdue, archived_at")
+      .eq("organization_id", orgId)
+      .in("project_id", projectIds);
+
+    if (data) {
+      liveOverdueCount = 0;
+      for (const row of data as Array<{
+        id: string;
+        task_code: string | null;
+        stage: string | null;
+        is_overdue: boolean | null;
+        archived_at: string | null;
+      }>) {
+        const archived = Boolean(row.archived_at);
+        const stage = row.stage ?? "new";
+        if (!archived && stage !== "done" && row.is_overdue) liveOverdueCount += 1;
+        if (row.task_code) {
+          tasksByCode.set(row.task_code.toUpperCase(), {
+            id: row.id,
+            taskCode: row.task_code,
+            stage,
+            archived,
+          });
+        }
+      }
+    }
+  }
+
+  const checkedAt = new Date().toISOString();
+  const statuses = analysis.recommendations.map((recommendation, recommendationIndex) =>
+    classifyRecommendationLiveStatus({
+      recommendation,
+      recommendationIndex,
+      tasksByCode,
+      liveOverdueCount,
+      hasBrief,
+      checkedAt,
+    }),
+  );
+
+  // A conversation-only finding has no safe machine signal. Team confirmation
+  // is stored as an append-only ai_event overlay so the original AI snapshot
+  // remains immutable and the action is auditable/reversible.
+  const latestManualByIndex = new Map<
+    number,
+    { state: "resolved" | "cleared"; issue: string; createdAt: string }
+  >();
+  for (const event of manualEventsRes.data ?? []) {
+    const payload = event.payload;
+    if (!payload || Array.isArray(payload) || typeof payload !== "object") continue;
+    const index = payload.recommendationIndex;
+    const state = payload.state;
+    const issue = payload.issue;
+    if (
+      typeof index !== "number" ||
+      (state !== "resolved" && state !== "cleared") ||
+      typeof issue !== "string"
+    ) {
+      continue;
+    }
+    latestManualByIndex.set(index, { state, issue, createdAt: event.created_at });
+  }
+
+  return statuses.map((status) => {
+    const manual = latestManualByIndex.get(status.recommendationIndex);
+    const recommendation = analysis.recommendations[status.recommendationIndex];
+    if (!manual || manual.state !== "resolved" || manual.issue !== recommendation?.issue) {
+      return status;
+    }
+    return {
+      ...status,
+      state: "resolved" as const,
+      reason: "manual_confirmed" as const,
+      checkedAt: manual.createdAt,
+    };
+  });
 }
 
 async function _getClientSatisfactionDetail(
@@ -541,9 +659,12 @@ async function _getClientSatisfactionDetail(
   // deep-links straight to /tasks/[id]. Every accountability taskCode is
   // guaranteed to be a stuckTasks code (analyze-time roster validation), so
   // resolving stuckTasks covers the panel.
-  if (analysis?.teamContext?.stuckTasks?.length) {
-    await hydrateStuckTaskIds(orgId, analysis.teamContext.stuckTasks);
-  }
+  const [, recommendationStatuses] = await Promise.all([
+    analysis?.teamContext?.stuckTasks?.length
+      ? hydrateStuckTaskIds(orgId, analysis.teamContext.stuckTasks)
+      : Promise.resolve(),
+    getRecommendationLiveStatuses(orgId, clientId, analysis, Boolean(brief)),
+  ]);
 
   const history: AnalysisHistoryItem[] = (
     (historyRes.data ?? []) as Array<Record<string, unknown>>
@@ -567,6 +688,7 @@ async function _getClientSatisfactionDetail(
     latestMessageAt,
     hasNewMessagesSinceAnalysis,
     analysis,
+    recommendationStatuses,
     history,
     activeProjects: ((projectsRes.data ?? []) as Array<{ id: string; name: string }>).map((p) => ({
       id: p.id,
