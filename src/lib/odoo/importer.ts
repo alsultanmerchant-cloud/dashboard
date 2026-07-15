@@ -2624,6 +2624,9 @@ export async function syncOneTask(
   }
   try {
     await syncStageHistory(odoo, organizationSlug, { onlyOdooTaskIds: [odooTaskId] });
+    // Copy the real Odoo stage_in_date back onto tasks.stage_entered_at so the
+    // stage-dwell badge matches Rwasem instead of the sync-time stamp (0250).
+    await supabaseAdmin.rpc("reconcile_stage_entered_at", { p_task_ids: [taskUuid] });
   } catch (e) {
     console.warn(`syncOneTask stage-history: ${(e as Error).message}`);
   }

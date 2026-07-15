@@ -54,7 +54,7 @@ export interface QualityScore {
 export interface DisciplineScore {
   score: number;
   delta: number | null;
-  activeMembers: number | null; // null = no per-user attribution in source
+  activeMembers: number | null; // distinct actors in window (task_comments attribution); null only if RPC errors
   totalMembers: number;
   actions7d: number;
   staleTasks: number; // open & no stage movement > 7 days
@@ -68,7 +68,7 @@ export interface ProductivityScore {
   completed30d: number;
   contributors: number;
   tasksPerMember: number;
-  utilizationPct: number | null; // null = no allocated-hours data
+  utilizationPct: number | null; // engaged-capacity %: contributors / active roster (hours absent, load stands in)
   overloaded: number; // by open-task count vs team mean
   underutilized: number;
 }
@@ -153,6 +153,86 @@ async function loadSnapshots(orgId: string): Promise<{
   return { current, previous };
 }
 
+// ---- Agent load (paginated) ----------------------------------------------
+// task_assignees for open work exceeds the 1000-row PostgREST cap org-wide
+// (~1.4k agent rows), so a single select silently truncates and undercounts
+// contributors / overload / balance. Page through the full set instead.
+type AgentLoadRow = {
+  employee_id: string;
+  task:
+    | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
+    | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
+    | null;
+};
+
+// ---- SLA compliance (business-minutes, all SLA-configured stages) --------
+// The «الالتزام بالـ SLA» tile used to read only v_review_backlog (the two
+// review stages) and reported a misleading 0% — that view flags every review
+// item as breached. The real, team-activity/accountability method compares
+// public.business_minutes_between(stage_entered_at, now()) against the EFFECTIVE
+// per-stage SLA (task override → template stage_sla_overrides snapshot →
+// organization sla_rules) across ALL open tasks in an SLA-configured stage.
+// Compliance = within-SLA / eligible. Read-only, one round-trip.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function loadSlaCompliance(
+  orgId: string,
+): Promise<{ eligible: number; breached: number; pct: number | null }> {
+  if (!UUID_RE.test(orgId)) return { eligible: 0, breached: 0, pct: null };
+  const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
+    p_sql: `
+      with eff as (
+        select
+          coalesce(
+            t.sla_override_minutes,
+            nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
+            s.max_minutes
+          ) sla_minutes,
+          public.business_minutes_between(t.stage_entered_at, now()) elapsed
+        from public.tasks t
+        left join public.sla_rules s
+          on s.organization_id = t.organization_id
+         and s.stage_key = t.stage::text
+        where t.organization_id = '${orgId}'
+          and t.archived_at is null
+          and t.stage <> 'done'
+      )
+      select
+        count(*) filter (where sla_minutes is not null) eligible,
+        count(*) filter (where sla_minutes is not null and elapsed > sla_minutes) breached
+      from eff
+    `.trim(),
+  });
+  if (error) {
+    console.error("[executive-scores.loadSlaCompliance]", error.message);
+    return { eligible: 0, breached: 0, pct: null };
+  }
+  const row = (Array.isArray(data) ? data[0] : null) as
+    | { eligible: number | string; breached: number | string }
+    | null;
+  const eligible = Number(row?.eligible ?? 0);
+  const breached = Number(row?.breached ?? 0);
+  const pct = eligible > 0 ? round(((eligible - breached) / eligible) * 100) : null;
+  return { eligible, breached, pct };
+}
+
+async function loadAgentRows(orgId: string): Promise<AgentLoadRow[]> {
+  const page = 1000;
+  const rows: AgentLoadRow[] = [];
+  for (let offset = 0; ; offset += page) {
+    const { data, error } = await supabaseAdmin
+      .from("task_assignees")
+      .select("employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at)")
+      .eq("organization_id", orgId)
+      .eq("role_type", "agent")
+      .range(offset, offset + page - 1);
+    if (error || !data || data.length === 0) break;
+    rows.push(...(data as unknown as AgentLoadRow[]));
+    if (data.length < page) break;
+  }
+  return rows;
+}
+
 // =========================================================================
 // Main fetcher
 // =========================================================================
@@ -174,17 +254,16 @@ async function _getExecutiveScores(
   const [
     snaps,
     openTasksRes,
-    agentLoadRes,
+    agentLoadRows,
     reworkRes,
     rejectedRes,
     decidedRes,
     moves7Res,
     comments7Res,
     timesheets7Res,
-    contributorsRes,
+    activeMembersRes,
     membersRes,
-    backlogRes,
-    slaRes,
+    slaComplianceRes,
     escalationsRes,
     satAgg,
     doneInRangeRes,
@@ -197,12 +276,9 @@ async function _getExecutiveScores(
       .eq("organization_id", orgId)
       .is("archived_at", null)
       .neq("stage", "done"),
-    // Agent load on open tasks — drives capacity/balance.
-    supabaseAdmin
-      .from("task_assignees")
-      .select("employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at)")
-      .eq("organization_id", orgId)
-      .eq("role_type", "agent"),
+    // Agent load on open tasks — drives capacity/balance. Paginated: the full
+    // agent-assignee set exceeds the 1000-row cap, so a plain select truncates.
+    loadAgentRows(orgId),
     // Rework: client_changes transitions within the selected window. Exclude
     // archived (wound-down / lost-client) tasks so the rework score is scoped
     // like the live counts and isn't skewed by a lost-client batch.
@@ -244,29 +320,26 @@ async function _getExecutiveScores(
       .eq("organization_id", orgId)
       .gte("created_at", rangeStart)
       .lt("created_at", rangeEnd),
-    // Distinct active contributors within the window (who moved a task).
-    supabaseAdmin
-      .from("task_stage_history")
-      .select("moved_by")
-      .eq("organization_id", orgId)
-      .gte("entered_at", rangeStart)
-      .lt("entered_at", rangeEnd)
-      .not("moved_by", "is", null),
+    // Distinct active members within the window: employees who took ANY
+    // attributed action (comment OR imported stage-change). Attribution lives in
+    // task_comments.actor_employee_id — task_stage_history.moved_by is never
+    // populated by the Odoo importer. Counted server-side (RPC) so a >1000-row
+    // window doesn't truncate the distinct set.
+    supabaseAdmin.rpc("dashboard_active_member_count", {
+      p_org: orgId,
+      p_from: rangeStart,
+      p_to: rangeEnd,
+    }),
     // Active team headcount.
     supabaseAdmin
       .from("employee_profiles")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
       .eq("employment_status", "active"),
-    // SLA: review-stage backlog times.
-    supabaseAdmin
-      .from("v_review_backlog")
-      .select("stage, business_minutes_in_stage")
-      .eq("organization_id", orgId),
-    supabaseAdmin
-      .from("sla_rules")
-      .select("stage_key, max_minutes")
-      .eq("organization_id", orgId),
+    // SLA compliance across all SLA-configured stages (business-minutes vs the
+    // effective per-stage SLA) — the same method Team Activity / Accountability
+    // use. Replaces the review-only v_review_backlog basis that reported 0%.
+    loadSlaCompliance(orgId),
     // Unacknowledged escalations.
     supabaseAdmin
       .from("escalations")
@@ -373,16 +446,9 @@ async function _getExecutiveScores(
     onTimeSampleInRange > 0 ? Math.round((onTimeHitsInRange / onTimeSampleInRange) * 100) : null;
 
   // ---- Capacity / load (by open-task count; hours are unavailable) -------
-  type LoadRow = {
-    employee_id: string;
-    task:
-      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
-      | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
-      | null;
-  };
   const countByEmp = new Map<string, number>();
   let allocatedMinutesTotal = 0;
-  for (const raw of (agentLoadRes.data ?? []) as unknown as LoadRow[]) {
+  for (const raw of agentLoadRows) {
     const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
     if (!t || t.archived_at || t.stage === "done") continue;
     countByEmp.set(raw.employee_id, (countByEmp.get(raw.employee_id) ?? 0) + 1);
@@ -394,41 +460,37 @@ async function _getExecutiveScores(
   // Overloaded / under-utilized relative to the team mean open-task load.
   const overloaded = counts.filter((c) => meanLoad > 0 && c > meanLoad * 1.75).length;
   const underutilized = counts.filter((c) => meanLoad > 0 && c < meanLoad * 0.4).length;
-  // Hours-based utilization only when allocation data exists.
+  // Capacity utilization. Allocated hours / timesheets are 100% empty in the
+  // Odoo-synced dataset (and won't be filled), so hours-based utilization has no
+  // source. Team feedback: derive it from real task-load instead — the share of
+  // the active roster actually carrying open delivery work («الطاقة المشغولة»:
+  // engaged vs idle capacity, the same load signal behind the حمل-زائد / مساحة
+  // tiles). Falls back to the true hours formula automatically if allocation
+  // data ever lands.
+  const activeRoster = membersRes.count ?? 0;
   const utilizationPct: number | null =
     allocatedMinutesTotal > 0 && contributors > 0
       ? round((allocatedMinutesTotal / (contributors * 40 * 60)) * 100)
-      : null;
+      : activeRoster > 0 && contributors > 0
+        ? clamp(round((contributors / activeRoster) * 100))
+        : null;
   const tasksPerMember = contributors > 0 ? Math.round((meanLoad) * 10) / 10 : 0;
 
   // ---- Discipline / activity --------------------------------------------
   const actions7d =
     (moves7Res.count ?? 0) + (comments7Res.count ?? 0) + (timesheets7Res.count ?? 0);
-  // Active members: union of anyone attributed to a recent action. With the
-  // current dataset all attribution columns are null → activeMembers is null
-  // (N/A) rather than a misleading 0.
-  const attributed = new Set(
-    ((contributorsRes.data ?? []) as Array<{ moved_by: string | null }>)
-      .map((r) => r.moved_by)
-      .filter((v): v is string => !!v),
-  );
-  const activeMembers: number | null = attributed.size > 0 ? attributed.size : null;
+  // Active members: distinct employees who took an attributed action in the
+  // window (comment OR imported stage-change), counted server-side via
+  // dashboard_active_member_count — task_comments.actor_employee_id is the real
+  // attribution source (moved_by is never populated by the Odoo importer).
+  const activeMembers: number | null =
+    typeof activeMembersRes.data === "number" ? activeMembersRes.data : null;
   const totalMembers = membersRes.count ?? 0;
 
-  // SLA compliance: share of review-stage items still within their limit.
-  const slaMax = new Map<string, number>();
-  for (const r of (slaRes.data ?? []) as Array<{ stage_key: string; max_minutes: number }>) {
-    slaMax.set(r.stage_key, r.max_minutes);
-  }
-  let slaTotal = 0;
-  let slaOk = 0;
-  for (const r of (backlogRes.data ?? []) as Array<{ stage: string; business_minutes_in_stage: number }>) {
-    const limit = slaMax.get(r.stage);
-    if (limit === undefined) continue;
-    slaTotal += 1;
-    if (r.business_minutes_in_stage <= limit) slaOk += 1;
-  }
-  const slaCompliancePct = slaTotal > 0 ? round((slaOk / slaTotal) * 100) : null;
+  // SLA compliance: share of open tasks within their effective per-stage SLA,
+  // across ALL SLA-configured stages (business-minutes basis — same method as
+  // Team Activity / Accountability). Computed in loadSlaCompliance().
+  const slaCompliancePct = slaComplianceRes.pct;
 
   // ---- Quality figures --------------------------------------------------
   const reworkCount = reworkRes.count ?? 0;

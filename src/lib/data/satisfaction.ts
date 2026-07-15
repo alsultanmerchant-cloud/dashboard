@@ -8,6 +8,7 @@ import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowle
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { isClientRelationshipActive } from "@/lib/data/satisfaction-rules";
 import { getClientMergeMap, resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
+import { riyadhTodayIso } from "@/lib/tz";
 import {
   classifyRecommendationLiveStatus,
   extractRecommendationTaskCodes,
@@ -453,22 +454,26 @@ async function getRecommendationLiveStatuses(
   if (projectIds.length > 0) {
     const { data } = await supabaseAdmin
       .from("tasks")
-      .select("id, task_code, stage, is_overdue, archived_at")
+      .select("id, task_code, stage, planned_date, archived_at")
       .eq("organization_id", orgId)
       .in("project_id", projectIds);
 
     if (data) {
       liveOverdueCount = 0;
+      // Overdue = OPEN (stage != done, incl. `new`) past its Riyadh deadline —
+      // matches the execution/team snapshots. See [[project_rwasem_overdue_definition]].
+      const todayIso = riyadhTodayIso();
       for (const row of data as Array<{
         id: string;
         task_code: string | null;
         stage: string | null;
-        is_overdue: boolean | null;
+        planned_date: string | null;
         archived_at: string | null;
       }>) {
         const archived = Boolean(row.archived_at);
         const stage = row.stage ?? "new";
-        if (!archived && stage !== "done" && row.is_overdue) liveOverdueCount += 1;
+        if (!archived && stage !== "done" && !!row.planned_date && row.planned_date < todayIso)
+          liveOverdueCount += 1;
         if (row.task_code) {
           tasksByCode.set(row.task_code.toUpperCase(), {
             id: row.id,
@@ -575,13 +580,21 @@ async function _getClientSatisfactionDetail(
     // though they can be (and have been) analyzed.
     clientHasResolvedMessages(orgId, clientId),
     getClientLatestLiveMessageAt(orgId, clientId),
-    supabaseAdmin
-      .from("projects")
-      .select("id, name")
-      .eq("organization_id", orgId)
-      .eq("client_id", clientId)
-      .neq("status", "archived")
-      .order("created_at", { ascending: false }),
+    // Non-archived projects across the client's FULL identity (owned + WA-group
+    // -linked + merged twins) — not just directly-owned rows. A split client
+    // whose project lives on a twin row otherwise shows zero active projects,
+    // which disables the brief-attach button even though a brief *can* be
+    // attached (resolveBriefProject uses this same identity set).
+    (async () => {
+      const ids = await resolveClientProjectIds(orgId, clientId);
+      if (ids.length === 0) return { data: [] as Array<{ id: string; name: string }>, error: null };
+      return supabaseAdmin
+        .from("projects")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .in("id", ids)
+        .order("created_at", { ascending: false });
+    })(),
     getClientBriefRef(orgId, clientId),
     getClientDisplayNameMap(orgId),
   ]);
@@ -1375,7 +1388,7 @@ async function _getClientExecutionSnapshot(
   const { data, error } = await supabaseAdmin
     .from("tasks")
     .select(
-      "id, task_code, title, stage, delay_days, due_date, planned_date, stage_entered_at, is_overdue, archived_at",
+      "id, task_code, title, stage, delay_days, due_date, planned_date, stage_entered_at, archived_at",
     )
     .eq("organization_id", orgId)
     .in("project_id", projectIds);
@@ -1390,7 +1403,6 @@ async function _getClientExecutionSnapshot(
     due_date: string | null;
     planned_date: string | null;
     stage_entered_at: string | null;
-    is_overdue: boolean | null;
     archived_at: string | null;
   };
   const rows = data as unknown as Row[];
@@ -1421,12 +1433,20 @@ async function _getClientExecutionSnapshot(
     done: (r.stage ?? "") === "done",
   });
 
-  // Odoo-archived tasks keep is_overdue=true forever (the flag is never cleared
-  // on archive), so ~88% of "overdue" rows are archived work whose cycle ended.
-  // Current/weekly view = LIVE overdue only. Full-period view additionally brings
-  // the WORST archived delays (overdue ≥ ARCHIVED_BIG_DELAY_DAYS, top few) as
-  // historical problems. See [[project_satisfaction_execution_scope_fix]].
-  const overdueRows = rows.filter((r) => r.is_overdue);
+  // Overdue = OPEN task (any stage but `done`, INCLUDING `new`) past its Riyadh
+  // deadline. The stored is_overdue flag excludes `new` (migration 0219), so a
+  // late not-yet-started task never counted as overdue; count it here so those
+  // slips surface in satisfaction. See [[project_rwasem_overdue_definition]].
+  const todayIso = riyadhTodayIso();
+  const isOverdueRow = (r: Row) =>
+    (r.stage ?? "") !== "done" && !!r.planned_date && r.planned_date < todayIso;
+  // Odoo-archived tasks keep past deadlines forever, so ~88% of "overdue" rows are
+  // archived work whose cycle ended. Weekly view = LIVE overdue only (NO archived
+  // fallback — a wound-down client yields an empty weekly roster by design). The
+  // full-period view (includeArchived) brings the WORST archived delays (overdue ≥
+  // ARCHIVED_BIG_DELAY_DAYS, top few) as historical problems.
+  // See [[project_satisfaction_execution_scope_fix]].
+  const overdueRows = rows.filter(isOverdueRow);
   const liveTasks = overdueRows.filter((r) => !r.archived_at).map(toTask);
   const worstArchived = overdueRows
     .filter((r) => r.archived_at)
@@ -1434,15 +1454,15 @@ async function _getClientExecutionSnapshot(
     .filter((t) => (t.overdueDays ?? 0) >= ARCHIVED_BIG_DELAY_DAYS)
     .sort((a, b) => (b.overdueDays ?? 0) - (a.overdueDays ?? 0))
     .slice(0, ARCHIVED_TASK_CAP);
-  // A wound-down (lost/closed) client has EVERY task archived, so the live-only
-  // weekly view returns nothing and the AI is told "no tasks" — going blind on
-  // exactly the client whose delivery history matters most. When there are no
-  // live overdue tasks, fall back to the worst archived delays even in the weekly
-  // view (flagged historical), so the analysis still sees the real delivery
-  // record instead of a false "no delays". Active clients keep live tasks, so
-  // this fallback never adds stale noise for them.
-  // See [[project_satisfaction_execution_scope_fix]].
-  const archivedBigDelay = includeArchived || liveTasks.length === 0 ? worstArchived : [];
+  // A wound-down (lost/closed) client has its WHOLE Odoo project archived, so no
+  // live open task remains — the weekly view would go blind on exactly the client
+  // whose delivery record matters. Only in that case does weekly fall back to the
+  // worst archived delays (flagged historical). An ACTIVE client — even one fully
+  // on-time with zero live overdue — still has live open work, so it never pulls
+  // archived tasks in (the bug the strict weekly filter was meant to kill).
+  // Gate on live-open work, NOT live-overdue (an on-time active client has none).
+  const hasLiveOpen = rows.some((r) => !r.archived_at && (r.stage ?? "") !== "done");
+  const archivedBigDelay = includeArchived || !hasLiveOpen ? worstArchived : [];
   const tasks = [...liveTasks, ...archivedBigDelay];
 
   // Part 2 — actual delivery state, NOT gated on overdue. In-flight tasks (being

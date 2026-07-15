@@ -12,6 +12,7 @@ import { syncTaskFollowers } from "@/lib/odoo/syncs/task-followers";
 import { syncProjectMembers } from "@/lib/odoo/syncs/project-members";
 import { syncAttachments } from "@/lib/odoo/syncs/attachments";
 import { syncTaskAssigneeManagers } from "@/lib/odoo/syncs/task-assignee-managers";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 // Odoo sync entry-point. Triggered by Supabase pg_cron via pg_net.http_post.
 // Auth: shared secret in the X-Cron-Secret header (CRON_SECRET env var).
@@ -153,7 +154,16 @@ async function handle(request: NextRequest) {
 
   // Supplementary steps — each isolated so a partial failure is acceptable.
   const stageHistoryStep = shouldRun("stage-history")
-    ? await runStep(() => syncStageHistory(odoo, orgSlug))
+    ? await runStep(async () => {
+        const res = await syncStageHistory(odoo, orgSlug);
+        // Realign tasks.stage_entered_at with the freshly-synced Odoo
+        // stage_in_date so stage-dwell matches Rwasem, not the sync time (0250).
+        const { data: reconciled } = await supabaseAdmin.rpc(
+          "reconcile_stage_entered_at",
+          { p_task_ids: undefined },
+        );
+        return { ...res, stageEnteredAtReconciled: reconciled ?? 0 };
+      })
     : null;
   const assigneeManagersStep = shouldRun("assignee-managers")
     ? await runStep(() => syncTaskAssigneeManagers(orgSlug))

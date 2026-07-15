@@ -8418,6 +8418,10 @@ export type Database = {
         Returns: string
       }
       agent_run_readonly_sql: { Args: { p_sql: string }; Returns: Json }
+      dashboard_active_member_count: {
+        Args: { p_org: string; p_from: string; p_to: string }
+        Returns: number
+      }
       approve_task: {
         Args: { p_notes?: string; p_task_id: string }
         Returns: {
@@ -8509,6 +8513,10 @@ export type Database = {
         Returns: number
       }
       compute_employee_activity_all: { Args: never; Returns: number }
+      effective_task_owner_position: {
+        Args: { p_owners: Json; p_stage: string; p_task_id: string }
+        Returns: string
+      }
       compute_monthly_closing: { Args: { p_month: string }; Returns: number }
       compute_monthly_dashboard: {
         Args: { p_month: string; p_org: string }

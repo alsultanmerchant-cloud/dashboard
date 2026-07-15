@@ -462,6 +462,60 @@
         "system": "System",
         "tasks": "Tasks"
       }
+    },
+    "ceoAnalysis": {
+      "titleCeo": "CEO analysis",
+      "titleOperational": "Operational analysis",
+      "descriptionCeo": "Accountability signals and contract revenue movement for the current month.",
+      "descriptionOperational": "Accountability signals and operational ownership for the current month.",
+      "accountabilityLink": "Accountability",
+      "contractsLink": "Contracts",
+      "currencySuffix": "SR",
+      "na": "N/A",
+      "accountabilityCard": {
+        "unavailableTitle": "Accountability",
+        "title": "Accountability",
+        "description": "Operational ownership, SLA discipline, and AI-linked risk signals.",
+        "open": "Open",
+        "medianScore": "Median score",
+        "highRisk": "High risk",
+        "overdueTasks": "Overdue tasks",
+        "aiRisk": "AI risk",
+        "lowestScorecards": "Lowest current scorecards",
+        "lowConfidenceCount": "{count} low confidence",
+        "noRows": "No measured accountability rows yet.",
+        "rowSummary": "{role} · {samples} samples · {overdue} overdue",
+        "roleAccountManager": "Account manager",
+        "roleTeamManager": "Team manager",
+        "roleAgent": "Agent"
+      },
+      "contractsCard": {
+        "unavailableTitle": "Contracts analysis",
+        "title": "Contracts analysis",
+        "description": "Revenue target, renewal pool, installments, and account-manager movement.",
+        "open": "Open",
+        "expectedIncome": "Expected income",
+        "actualIncome": "Actual income",
+        "achievement": "Achievement",
+        "dueOverdueInstallments": "Due + overdue installments",
+        "accSalesSub": "Acc {acc} · Sales {sales}",
+        "expectedIncomeTip": "Sheet 'Total Expected income' — Account expected (I27) + Sales expected (G36).",
+        "actualIncomeTip": "Sheet 'Total Actual income' — Account income (I30) + Sales income (I38).",
+        "achievementTip": "Combined company achievement: total Actual income ÷ total Expected income (Account + Sales together).",
+        "departmentAchievement": "Department achievement",
+        "account": "Account",
+        "sales": "Sales",
+        "movNew": "New",
+        "movRenewed": "Renewed",
+        "movLost": "Lost",
+        "cntOnTarget": "On target",
+        "cntOverdue": "Overdue",
+        "cntHold": "Hold",
+        "topAccountManagers": "Top account managers",
+        "tracked": "{count} tracked",
+        "noAmTargets": "No AM targets calculated yet.",
+        "unassigned": "Unassigned"
+      }
     }
   },
   "Login": {
@@ -3272,8 +3326,8 @@
         "stability": "Overall company-health score (0–100). A weighted blend of Delivery 30%, Quality 25%, Discipline 20%, Productivity 15% (Delivery feeds the composite even though its card now lives in the sections above) plus a 10% risk adjustment (−5 per un-acknowledged escalation, −0.3 per critical overdue task, −6 per at-risk client). Grade: A ≥85, B ≥70, C ≥55, D ≥40, F <40. It's a formula, not a guess.",
         "delivery": "On-time delivery % (50%) + share of tasks not overdue (30%) + a penalty for average delay (10%) + a penalty for blocked tasks (10%). Computed from the last 30 days. Any signal with no data drops out and the rest is reweighted.",
         "quality": "Lower rework (30%) + lower rejection rate (15%) + a revision-count penalty (10%) + AI-read client satisfaction from WhatsApp chats (30%). The satisfaction part is a Gemini read; if there are no chats it drops out. (Brief adherence was removed — the AI rarely has the real brief document, so it's unreliable.)",
-        "discipline": "Active-member coverage (30%) + task freshness — share of open tasks touched in the last 7 days (30%) + weekly action volume per person (20%, baseline ~5/person/week) + SLA compliance on review-stage dwell (20%).",
-        "productivity": "Workload balance (40%) — penalizes both overloaded (>1.75× team average) and underused (<0.4×) members — + 30-day throughput per person (30%, baseline ~12/person/month) + capacity utilization vs an 85% target (30%, when hours are allocated)."
+        "discipline": "Active-member coverage (30%) + task freshness — share of open tasks touched in the last 7 days (30%) + weekly action volume per person (20%, baseline ~5/person/week) + per-stage SLA compliance (20%, business-hours basis across all SLA-configured stages — the same method as Team Activity / Accountability).",
+        "productivity": "Workload balance (40%) — penalizes both overloaded (>1.75× team average) and underused (<0.4×) members — + 30-day throughput per person (30%, baseline ~12/person/month) + capacity utilization vs an 85% target (30%). Utilization = share of the active roster carrying open delivery work (allocated hours are absent in the source, so load stands in for them)."
       },
       "delivery": {
         "name": "Delivery Commitment",
@@ -3307,6 +3361,7 @@
         "completed": "Completed (30d)",
         "perMember": "Tasks per member",
         "utilization": "Capacity utilization",
+        "utilizationHint": "Share of the active roster carrying open delivery work (allocated hours are absent in the source, so task load stands in).",
         "overloaded": "Overloaded members",
         "underutilized": "Underutilized members"
       },

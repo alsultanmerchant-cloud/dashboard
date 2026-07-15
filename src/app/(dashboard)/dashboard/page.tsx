@@ -343,11 +343,11 @@ async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFin
     <section className="mb-8">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">{canFinance ? "CEO analysis" : "Operational analysis"}</h2>
+          <h2 className="text-base font-semibold">
+            {canFinance ? t("ceoAnalysis.titleCeo") : t("ceoAnalysis.titleOperational")}
+          </h2>
           <p className="text-xs text-muted-foreground">
-            {canFinance
-              ? "Accountability signals and contract revenue movement for the current month."
-              : "Accountability signals and operational ownership for the current month."}
+            {canFinance ? t("ceoAnalysis.descriptionCeo") : t("ceoAnalysis.descriptionOperational")}
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -355,7 +355,7 @@ async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFin
             href="/accountability"
             className="inline-flex items-center gap-1 rounded-lg border border-soft bg-card px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
           >
-            Accountability
+            {t("ceoAnalysis.accountabilityLink")}
             <ArrowUpRight className="size-3" />
           </Link>
           {canFinance && (
@@ -363,7 +363,7 @@ async function CeoAnalysisSection({ orgId, canFinance }: { orgId: string; canFin
               href="/contracts?view=dashboard"
               className="inline-flex items-center gap-1 rounded-lg border border-soft bg-card px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
             >
-              Contracts
+              {t("ceoAnalysis.contractsLink")}
               <ArrowUpRight className="size-3" />
             </Link>
           )}
@@ -495,7 +495,7 @@ type DashT = Awaited<ReturnType<typeof getTranslations<"Dashboard">>>;
 
 function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySummary; t: DashT }) {
   if (!summary.ok) {
-    return <AnalysisUnavailable title="Accountability" message={summary.message} />;
+    return <AnalysisUnavailable title={t("ceoAnalysis.accountabilityCard.unavailableTitle")} message={summary.message} />;
   }
 
   return (
@@ -504,38 +504,38 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Scale className="size-4 text-status-info" />
-            Accountability
+            {t("ceoAnalysis.accountabilityCard.title")}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Operational ownership, SLA discipline, and AI-linked risk signals.
+            {t("ceoAnalysis.accountabilityCard.description")}
           </p>
         </div>
         <Link href="/accountability" className="text-xs text-cyan hover:underline">
-          Open
+          {t("ceoAnalysis.accountabilityCard.open")}
         </Link>
       </div>
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <AnalysisStat label="Median score" value={fmtMaybePct(summary.medianScore)} tone="info" tip={t("metricTooltips.dashboard_medianScore")} />
-        <AnalysisStat label="High risk" value={summary.highRiskCount} tone="danger" tip={t("metricTooltips.dashboard_highRisk")} />
-        <AnalysisStat label="Overdue tasks" value={summary.overdueTasks} tone="warning" tip={t("metricTooltips.dashboard_overdueTasks")} />
-        <AnalysisStat label="AI risk" value={summary.aiRiskSignals} tone="warning" tip={t("metricTooltips.dashboard_aiRisk")} />
+        <AnalysisStat label={t("ceoAnalysis.accountabilityCard.medianScore")} value={fmtMaybePct(summary.medianScore, t)} tone="info" tip={t("metricTooltips.dashboard_medianScore")} />
+        <AnalysisStat label={t("ceoAnalysis.accountabilityCard.highRisk")} value={summary.highRiskCount} tone="danger" tip={t("metricTooltips.dashboard_highRisk")} />
+        <AnalysisStat label={t("ceoAnalysis.accountabilityCard.overdueTasks")} value={summary.overdueTasks} tone="warning" tip={t("metricTooltips.dashboard_overdueTasks")} />
+        <AnalysisStat label={t("ceoAnalysis.accountabilityCard.aiRisk")} value={summary.aiRiskSignals} tone="warning" tip={t("metricTooltips.dashboard_aiRisk")} />
       </div>
 
       <div className="mt-4 rounded-xl border border-soft bg-soft-1/35">
         <div className="flex items-center justify-between border-b border-soft px-3 py-2">
           <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-            Lowest current scorecards
+            {t("ceoAnalysis.accountabilityCard.lowestScorecards")}
             <MetricInfo text={t("metricTooltips.dashboard_lowestScorecards")} />
           </span>
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            {summary.lowConfidenceCount} low confidence
+            {t("ceoAnalysis.accountabilityCard.lowConfidenceCount", { count: summary.lowConfidenceCount })}
             <MetricInfo text={t("metricTooltips.dashboard_lowConfidence")} />
           </span>
         </div>
         {summary.worstRows.length === 0 ? (
           <p className="px-3 py-5 text-center text-xs text-muted-foreground">
-            No measured accountability rows yet.
+            {t("ceoAnalysis.accountabilityCard.noRows")}
           </p>
         ) : (
           <div className="divide-y divide-soft/70">
@@ -548,7 +548,11 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{row.fullName}</span>
                   <span className="text-[11px] text-muted-foreground">
-                    {roleLabel(row.role)} · {row.sampleSize} samples · {row.overdueOwned} overdue
+                    {t("ceoAnalysis.accountabilityCard.rowSummary", {
+                      role: roleLabel(row.role, t),
+                      samples: row.sampleSize,
+                      overdue: row.overdueOwned,
+                    })}
                   </span>
                 </span>
                 <span
@@ -557,7 +561,7 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
                     scoreTone(row.score, row.confidence),
                   )}
                 >
-                  {fmtMaybePct(row.score)}
+                  {fmtMaybePct(row.score, t)}
                 </span>
               </Link>
             ))}
@@ -570,7 +574,7 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
 
 function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t: DashT }) {
   if (!analysis.ok) {
-    return <AnalysisUnavailable title="Contracts analysis" message={analysis.message} />;
+    return <AnalysisUnavailable title={t("ceoAnalysis.contractsCard.unavailableTitle")} message={analysis.message} />;
   }
 
   const { dashboard: d, amTargets } = analysis;
@@ -596,14 +600,14 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <BadgeDollarSign className="size-4 text-status-success" />
-            Contracts analysis
+            {t("ceoAnalysis.contractsCard.title")}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Revenue target, renewal pool, installments, and account-manager movement.
+            {t("ceoAnalysis.contractsCard.description")}
           </p>
         </div>
         <Link href="/contracts?view=dashboard" className="text-xs text-cyan hover:underline">
-          Open
+          {t("ceoAnalysis.contractsCard.open")}
         </Link>
       </div>
 
@@ -612,29 +616,30 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
           the installments due+overdue. */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <AnalysisStat
-          label="Expected income"
-          value={fmtSR(expectedIncome)}
-          sub={`Acc ${fmtSR(d.acc_expected)} · Sales ${fmtSR(d.sales_expected)}`}
+          label={t("ceoAnalysis.contractsCard.expectedIncome")}
+          value={fmtSR(expectedIncome, t)}
+          sub={t("ceoAnalysis.contractsCard.accSalesSub", { acc: fmtSR(d.acc_expected, t), sales: fmtSR(d.sales_expected, t) })}
           tone="info"
-          tip="Sheet 'Total Expected income' — Account expected (I27) + Sales expected (G36)."
+          tip={t("ceoAnalysis.contractsCard.expectedIncomeTip")}
         />
         <AnalysisStat
-          label="Actual income"
-          value={fmtSR(actualIncome)}
-          sub={`Acc ${fmtSR(d.acc_actual)} · Sales ${fmtSR(d.sales_total_income)}`}
+          label={t("ceoAnalysis.contractsCard.actualIncome")}
+          value={fmtSR(actualIncome, t)}
+          sub={t("ceoAnalysis.contractsCard.accSalesSub", { acc: fmtSR(d.acc_actual, t), sales: fmtSR(d.sales_total_income, t) })}
           tone="success"
-          tip="Sheet 'Total Actual income' — Account income (I30) + Sales income (I38)."
+          tip={t("ceoAnalysis.contractsCard.actualIncomeTip")}
         />
         <DeptAchievementStat
-          label="Achievement"
+          label={t("ceoAnalysis.contractsCard.achievement")}
           pct={incomeAchievementPct}
           actual={actualIncome}
           expected={expectedIncome}
-          tip="Combined company achievement: total Actual income ÷ total Expected income (Account + Sales together)."
+          tip={t("ceoAnalysis.contractsCard.achievementTip")}
+          t={t}
         />
         <AnalysisStat
-          label="Due + overdue installments"
-          value={fmtSR(totalDue)}
+          label={t("ceoAnalysis.contractsCard.dueOverdueInstallments")}
+          value={fmtSR(totalDue, t)}
           tone="warning"
           tip={t("metricTooltips.dashboard_dueInstallments")}
         />
@@ -644,36 +649,36 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
         <div className="rounded-xl border border-soft bg-soft-1/35 p-3">
           <div className="mb-3 flex items-center justify-between text-xs">
             <span className="inline-flex items-center gap-1.5 font-medium">
-              Department achievement
+              {t("ceoAnalysis.contractsCard.departmentAchievement")}
               <MetricInfo text={t("metricTooltips.dashboard_monthlyAchievementBar")} />
             </span>
             <span className="tabular-nums text-muted-foreground">{analysis.month}</span>
           </div>
           <div className="space-y-2.5">
-            <DeptBar label="Account" pct={d.acc_achievement_pct} />
-            <DeptBar label="Sales" pct={d.sales_achievement_pct} />
+            <DeptBar label={t("ceoAnalysis.contractsCard.account")} pct={d.acc_achievement_pct} />
+            <DeptBar label={t("ceoAnalysis.contractsCard.sales")} pct={d.sales_achievement_pct} />
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-            <MiniCount label="New" value={d.mov_new} tip={t("metricTooltips.dashboard_movNew")} />
-            <MiniCount label="Renewed" value={d.mov_renewed} tip={t("metricTooltips.dashboard_movRenewed")} />
-            <MiniCount label="Lost" value={d.mov_lost} tip={t("metricTooltips.dashboard_movLost")} />
-            <MiniCount label="On target" value={d.cnt_on_target} tip={t("metricTooltips.dashboard_cntOnTarget")} />
-            <MiniCount label="Overdue" value={d.cnt_overdue} tip={t("metricTooltips.dashboard_cntOverdue")} />
-            <MiniCount label="Hold" value={d.cnt_roster_hold} tip={t("metricTooltips.dashboard_cntHold")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.movNew")} value={d.mov_new} tip={t("metricTooltips.dashboard_movNew")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.movRenewed")} value={d.mov_renewed} tip={t("metricTooltips.dashboard_movRenewed")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.movLost")} value={d.mov_lost} tip={t("metricTooltips.dashboard_movLost")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.cntOnTarget")} value={d.cnt_on_target} tip={t("metricTooltips.dashboard_cntOnTarget")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.cntOverdue")} value={d.cnt_overdue} tip={t("metricTooltips.dashboard_cntOverdue")} />
+            <MiniCount label={t("ceoAnalysis.contractsCard.cntHold")} value={d.cnt_roster_hold} tip={t("metricTooltips.dashboard_cntHold")} />
           </div>
         </div>
 
         <div className="rounded-xl border border-soft bg-soft-1/35">
           <div className="flex items-center justify-between border-b border-soft px-3 py-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-              Top account managers
+              {t("ceoAnalysis.contractsCard.topAccountManagers")}
               <MetricInfo text={t("metricTooltips.dashboard_topAccountManagers")} />
             </span>
-            <span className="text-[11px] text-muted-foreground">{amTargets.length} tracked</span>
+            <span className="text-[11px] text-muted-foreground">{t("ceoAnalysis.contractsCard.tracked", { count: amTargets.length })}</span>
           </div>
           {topAm.length === 0 ? (
             <p className="px-3 py-5 text-center text-xs text-muted-foreground">
-              No AM targets calculated yet.
+              {t("ceoAnalysis.contractsCard.noAmTargets")}
             </p>
           ) : (
             <div className="divide-y divide-soft/70">
@@ -681,10 +686,10 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
                 <div key={am.account_manager_id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
                   <span className="min-w-0">
                     <span className="block truncate font-medium">
-                      {am.account_manager_name ?? "Unassigned"}
+                      {am.account_manager_name ?? t("ceoAnalysis.contractsCard.unassigned")}
                     </span>
                     <span className="text-[11px] text-muted-foreground">
-                      {fmtSR(am.achieved_total)} / {fmtSR(am.expected_total)}
+                      {fmtSR(am.achieved_total, t)} / {fmtSR(am.expected_total, t)}
                     </span>
                   </span>
                   <Explained text={t("metricTooltips.dashboard_amAchievementPct")} className="self-center rounded-md border border-cc-green/25 bg-green-dim px-2 py-1 font-semibold tabular-nums text-status-success">
@@ -751,12 +756,14 @@ function DeptAchievementStat({
   actual,
   expected,
   tip,
+  t,
 }: {
   label: string;
   pct: number;
   actual: number;
   expected: number;
   tip?: React.ReactNode;
+  t: DashT;
 }) {
   const tone = achievementTone(pct);
   const toneCls = {
@@ -772,7 +779,7 @@ function DeptAchievementStat({
       </div>
       <div className="mt-1 text-lg font-semibold tabular-nums">{Math.round(pct)}%</div>
       <div className="mt-0.5 truncate text-[11px] text-muted-foreground tabular-nums">
-        {fmtSR(actual)} / {fmtSR(expected)}
+        {fmtSR(actual, t)} / {fmtSR(expected, t)}
       </div>
     </div>
   );
@@ -811,12 +818,12 @@ function MiniCount({ label, value, tip }: { label: string; value: number; tip?: 
   );
 }
 
-function fmtSR(value: number): string {
-  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)} SR`;
+function fmtSR(value: number, t: DashT): string {
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)} ${t("ceoAnalysis.currencySuffix")}`;
 }
 
-function fmtMaybePct(value: number | null): string {
-  return value === null ? "N/A" : `${Math.round(value)}%`;
+function fmtMaybePct(value: number | null, t: DashT): string {
+  return value === null ? t("ceoAnalysis.na") : `${Math.round(value)}%`;
 }
 
 function achievementTone(value: number): "success" | "warning" | "danger" {
@@ -834,8 +841,8 @@ function scoreTone(score: number | null, confidence: "high" | "low"): string {
   return "border-cc-red/25 bg-red-dim text-status-danger";
 }
 
-function roleLabel(role: string): string {
-  if (role === "account_manager") return "Account manager";
-  if (role === "team_manager") return "Team manager";
-  return "Agent";
+function roleLabel(role: string, t: DashT): string {
+  if (role === "account_manager") return t("ceoAnalysis.accountabilityCard.roleAccountManager");
+  if (role === "team_manager") return t("ceoAnalysis.accountabilityCard.roleTeamManager");
+  return t("ceoAnalysis.accountabilityCard.roleAgent");
 }

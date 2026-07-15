@@ -122,35 +122,33 @@ async function _getClientTeamActivitySnapshot(
     };
   }
   const proj = `select unnest(array[${projectIds.map((id) => `'${id}'`).join(",")}]::uuid[]) as id`;
-  // Odoo-archived tasks keep is_overdue=true forever (the flag is never cleared
-  // on archive), so ~88% of "overdue" rows are actually archived work whose cycle
-  // ended. The current/weekly view must show ONLY live tasks; a full-period run
-  // additionally surfaces archived tasks (flagged historical) as past problems.
-  // See [[project_satisfaction_execution_scope_fix]].
+  // Odoo-archived tasks keep past deadlines forever, so ~88% of "overdue" rows are
+  // actually archived work whose cycle ended. The current/weekly view shows ONLY
+  // live tasks; a full-period run (includeArchived) additionally surfaces archived
+  // tasks (flagged historical) as past problems.
   //
-  // EXCEPT a wound-down (lost/closed) client, whose project was archived wholesale
-  // in Odoo: it has ZERO live tasks, so the strict weekly filter leaves an empty
-  // roster and the analysis' accountability rows get dropped (roster guardrail) —
-  // going blind on exactly the client whose delivery record matters. Probe first:
-  // if there are no live tasks but archived ones exist, treat the weekly run as a
-  // full record so the roster (and accountability) still resolve. Active clients
-  // have live tasks, so this never loosens the filter for them.
-  // Mirror the execution snapshot's fallback condition EXACTLY (liveTasks empty):
-  // no live overdue tasks but archived overdue ones exist ⇒ wound-down client, so
-  // surface its archived work instead of an empty roster. Unstarted `new` tasks do
-  // NOT count as live work — a lost client often keeps a few never-started rows.
+  // EXCEPTION — a wound-down (lost/closed) client has its WHOLE Odoo project
+  // archived, so it has ZERO live open tasks: the strict weekly filter leaves an
+  // empty roster and the accountability rows get dropped (roster guardrail), going
+  // blind on exactly the client whose delivery record matters. Probe for live OPEN
+  // work (not live *overdue* — an on-time active client has none, and gating on
+  // overdue is what wrongly pulled archived tasks into active clients' weekly
+  // views). Only a client with no live open task at all falls back to its archived
+  // record. See [[project_satisfaction_execution_scope_fix]].
   let effectiveIncludeArchived = includeArchived;
   if (!includeArchived) {
-    const [probe] = await runSql<{ live_overdue: number; archived_overdue: number }>(`
+    const [probe] = await runSql<{ live_open: number }>(`
 with cli_projects as (${proj})
-select
-  count(*) filter (where t.is_overdue and t.archived_at is null) as live_overdue,
-  count(*) filter (where t.is_overdue and t.archived_at is not null) as archived_overdue
+select count(*) filter (where t.archived_at is null and t.stage <> 'done') as live_open
 from tasks t join cli_projects cp on cp.id = t.project_id`);
-    if (Number(probe?.live_overdue ?? 0) === 0 && Number(probe?.archived_overdue ?? 0) > 0)
-      effectiveIncludeArchived = true;
+    if (Number(probe?.live_open ?? 0) === 0) effectiveIncludeArchived = true;
   }
   const notArchived = effectiveIncludeArchived ? "" : "and t.archived_at is null";
+  // Overdue = OPEN task (any stage but `done`, INCLUDING `new`) past its Riyadh
+  // deadline. The stored is_overdue flag excludes `new` (migration 0219), so a
+  // late not-yet-started task never surfaced as overdue here; count it as overdue
+  // for satisfaction so those slips show. See [[project_rwasem_overdue_definition]].
+  const overdue = "(t.stage <> 'done' and t.planned_date < (now() at time zone 'Asia/Riyadh')::date)";
 
   // Query A — the stuck work behind complaints (overdue tasks, fully resolved).
   const stuckRows = await runSql<{
@@ -204,7 +202,7 @@ select t.id, t.task_code, t.title, t.stage::text as stage, s.name as service,
 from tasks t
 join cli_projects cp on cp.id = t.project_id
 left join services s on s.id = t.service_id
-where t.is_overdue = true ${notArchived}
+where ${overdue} ${notArchived}
 order by (t.archived_at is not null) asc, t.stage_entered_at asc
 limit ${MAX_STUCK}`);
 
@@ -213,7 +211,7 @@ limit ${MAX_STUCK}`);
 with cli_projects as (${proj})
 select coalesce(s.name, 'أخرى') as service,
   count(*) as total_open,
-  count(*) filter (where t.is_overdue) as overdue
+  count(*) filter (where ${overdue}) as overdue
 from tasks t
 join cli_projects cp on cp.id = t.project_id
 left join services s on s.id = t.service_id
@@ -244,7 +242,7 @@ order by overdue desc, total_open desc`);
     last_action_at: string | null;
   }>(`
 with cli_projects as (${proj}),
-cli_tasks as (select t.id, t.is_overdue, t.stage::text as stage from tasks t join cli_projects cp on cp.id = t.project_id where true ${notArchived})
+cli_tasks as (select t.id, ${overdue} as is_overdue, t.stage::text as stage from tasks t join cli_projects cp on cp.id = t.project_id where true ${notArchived})
 select e.id as employee_id, e.full_name as name, pos.role as position_role, pos.name as position_name, d.name as department,
   count(distinct ct.id) filter (where ct.stage <> 'done' and ta.role_type = 'agent') as open_tasks,
   count(distinct ct.id) filter (where ct.is_overdue and ta.role_type = 'agent') as overdue_tasks,

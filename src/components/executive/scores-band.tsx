@@ -460,6 +460,7 @@ export async function ExecutiveScoresBand({
                       productivity.utilizationPct >= 60 && productivity.utilizationPct <= 100
                         ? "good"
                         : "warn",
+                    hint: t("productivity.utilizationHint"),
                   },
               {
                 label: t("productivity.overloaded"),

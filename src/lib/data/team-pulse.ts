@@ -269,6 +269,34 @@ async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
   return (data ?? []) as T[];
 }
 
+// Keep request-time drill-downs correct even during a migration/deploy rollout:
+// prefer the configured owner, but execution falls back to the assigned active
+// Specialist when the configured Agent does not exist on the task. The cache
+// refresh uses the equivalent effective_task_owner_position SQL function.
+const EFFECTIVE_CURRENT_OWNER_PREDICATE = `(
+  pos.role = coalesce(
+    public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text),
+    case when t.stage = 'new'
+         then coalesce(t.stage_owner_positions ->> 'new', 'specialist')
+    end
+  )
+  or (
+    t.stage in ('in_progress', 'client_changes')
+    and public.accountable_position_for_stage(
+          t.stage_owner_positions, t.stage::text) = 'agent'
+    and pos.role = 'specialist'
+    and not exists (
+      select 1
+        from task_assignees owner_ta
+        join employee_profiles owner_e on owner_e.id = owner_ta.employee_id
+        join positions owner_pos on owner_pos.id = owner_e.position_id
+       where owner_ta.task_id = t.id
+         and owner_e.employment_status = 'active'
+         and owner_pos.role = 'agent'
+    )
+  )
+)`;
+
 interface PendingLateTaskSqlRow {
   task_id: string;
   task_code: string | null;
@@ -354,11 +382,7 @@ async function queryPendingLateTasks(
        ${leadershipPredicate}
        and t.archived_at is null
        and t.stage <> 'done'
-       and pos.role = coalesce(
-             public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text),
-             case when t.stage = 'new'
-                  then coalesce(t.stage_owner_positions ->> 'new', 'specialist')
-             end)
+       and ${EFFECTIVE_CURRENT_OWNER_PREDICATE}
        and public.business_minutes_between(t.stage_entered_at, now())
              > coalesce(t.sla_override_minutes,
                         nullif(t.stage_sla_overrides ->> t.stage::text, '')::numeric,
@@ -412,8 +436,9 @@ interface OwnedDeskTaskSqlRow {
 }
 
 // Every open task whose CURRENT stage is owned by this employee's position.
-// This mirrors team_activity_cache.owned_open exactly, including New tasks
-// (which fall back to the template's New owner / specialist and may have no SLA).
+// This mirrors team_activity_cache.owned_open exactly, including New tasks and
+// execution tasks whose configured Agent is absent and assigned Specialist is
+// therefore the effective owner.
 async function _getEmployeeOwnedDeskTasks(
   orgId: string,
   employeeId: string,
@@ -449,11 +474,7 @@ async function _getEmployeeOwnedDeskTasks(
        and coalesce(d.show_in_team_pulse, true)
        and t.archived_at is null
        and t.stage <> 'done'
-       and pos.role = coalesce(
-             public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text),
-             case when t.stage = 'new'
-                  then coalesce(t.stage_owner_positions ->> 'new', 'specialist')
-             end)
+       and ${EFFECTIVE_CURRENT_OWNER_PREDICATE}
      order by is_late desc, t.stage_entered_at asc nulls last
   `);
 
