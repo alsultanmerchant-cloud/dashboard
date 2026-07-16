@@ -1,4 +1,5 @@
 import "server-only";
+import { z } from "zod";
 import { generateObject } from "ai";
 import type { ModelMessage, UserContent } from "ai";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -95,6 +96,9 @@ export interface SatisfactionInput {
   // Frozen into the analysis and used to validate the model's `accountability`
   // output — any name/task-code not present here is dropped on persist.
   team: ClientTeamActivitySnapshot;
+  // The client-group transcript alone — reused by the examples repair pass to
+  // re-extract the per-request quotes the main call sometimes drops.
+  clientTranscript: string;
   makePrompt: (budget: number) => string;
   makeMessages: (budget: number) => ModelMessage[];
 }
@@ -434,6 +438,7 @@ ${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${t
     contract,
     activity,
     team,
+    clientTranscript: clientBlock,
     makePrompt,
     makeMessages,
   };
@@ -636,5 +641,98 @@ export async function analyzeClientSatisfaction(
   }
   if (!result) throw lastErr instanceof Error ? lastErr : new Error("analysis failed");
 
+  // On heavy analyses the model reliably fills the request/approval COUNTS but
+  // sometimes drops the per-type example quotes (arrays default to []), which
+  // makes the /satisfaction chips non-clickable — no drill-down. Backfill the
+  // missing examples with a small, focused second pass so the drill-downs
+  // always work when a count is non-zero.
+  await repairMissingExamples(input, result);
+
   return persistSatisfaction(orgId, clientId, actorUserId, result, input);
+}
+
+const RepairExampleSchema = z.object({
+  text: z.string(),
+  date: z.string().nullable().catch(null),
+});
+const RepairSchema = z.object({
+  requestExamples: z.object({
+    new: z.array(RepairExampleSchema).max(12).default([]),
+    edit: z.array(RepairExampleSchema).max(12).default([]),
+    complaint: z.array(RepairExampleSchema).max(12).default([]),
+    inquiry: z.array(RepairExampleSchema).max(12).default([]),
+    approval: z.array(RepairExampleSchema).max(12).default([]),
+  }),
+  approvalExamples: z.object({
+    approved: z.array(RepairExampleSchema).max(12).default([]),
+    rejected: z.array(RepairExampleSchema).max(12).default([]),
+    changesRequested: z.array(RepairExampleSchema).max(12).default([]),
+    noResponse: z.array(RepairExampleSchema).max(12).default([]),
+  }),
+});
+
+const REQ_KEYS = ["new", "edit", "complaint", "inquiry", "approval"] as const;
+const APPR_KEYS = ["approved", "rejected", "changesRequested", "noResponse"] as const;
+
+// Re-extract the actual quotes behind each non-zero request/approval count when
+// an analysis has counts but empty example arrays. Mutates the passed signals in
+// place, filling ONLY the missing types (never overwriting quotes already
+// present). A focused single-purpose prompt is far more reliable than the full
+// analysis at this narrow task. Failures are swallowed — the counts still
+// render. Shared by the live pipeline and the repair backfill script.
+export async function fillMissingSignalExamples(
+  cg: SatisfactionResult["clientGroupSignals"],
+  clientTranscript: string,
+): Promise<boolean> {
+  const missingReq = REQ_KEYS.filter(
+    (k) => (cg.requests?.[k] ?? 0) > 0 && (cg.requestExamples?.[k]?.length ?? 0) === 0,
+  );
+  const missingAppr = APPR_KEYS.filter(
+    (k) => (cg.approvals?.[k] ?? 0) > 0 && (cg.approvalExamples?.[k]?.length ?? 0) === 0,
+  );
+  if (missingReq.length === 0 && missingAppr.length === 0) return false;
+  if (!clientTranscript || clientTranscript.length < 5) return false;
+
+  const prompt = `أنت تستخرج اقتباسات حقيقية من محادثة واتساب لمجموعة عميل بوكالة تسويق (Sky Light). المطلوب فقط: لكل نوع أدناه، أدرج الرسائل الفعلية التي تمثّله من كلام العميل [عميل/طرف خارجي] — اقتباس حقيقي أو تلخيص أمين مع التاريخ إن وُجد. لا تخترع رسائل، ولا تُدرج ردود [موظف الشركة] كطلبات عميل. اجعل عدد العناصر مطابقًا قدر الإمكان للأعداد المذكورة (حتى ١٢ لكل نوع).
+
+الأعداد المطلوبة تغطيتها بالأمثلة:
+- طلبات: ${missingReq.map((k) => `${k}=${cg.requests[k]}`).join("، ") || "لا شيء"}
+- اعتمادات: ${missingAppr.map((k) => `${k}=${cg.approvals[k]}`).join("، ") || "لا شيء"}
+الأنواع غير المذكورة أعلاه اتركها فارغة.
+
+=== محادثة مجموعة العميل ===
+${trim(clientTranscript, 30_000)}`;
+
+  try {
+    const { object } = await generateObject({
+      model: aiModel("flagship"),
+      maxRetries: 1,
+      schema: RepairSchema,
+      prompt,
+    });
+    let filled = false;
+    for (const k of missingReq) {
+      if (object.requestExamples[k]?.length) {
+        cg.requestExamples[k] = object.requestExamples[k];
+        filled = true;
+      }
+    }
+    for (const k of missingAppr) {
+      if (object.approvalExamples[k]?.length) {
+        cg.approvalExamples[k] = object.approvalExamples[k];
+        filled = true;
+      }
+    }
+    return filled;
+  } catch {
+    /* leave counts without examples — chips still render, just not clickable */
+    return false;
+  }
+}
+
+async function repairMissingExamples(
+  input: SatisfactionInput,
+  result: SatisfactionResult,
+): Promise<void> {
+  await fillMissingSignalExamples(result.clientGroupSignals, input.clientTranscript);
 }

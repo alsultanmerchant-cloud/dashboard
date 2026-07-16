@@ -93,4 +93,29 @@ describe("recommendation live reconciliation", () => {
   test("does not guess when a text-only relationship issue has no live proof", () => {
     expect(classify("العميل غير راضٍ عن جودة المحتوى").state).toBe("needs_confirmation");
   });
+
+  test("respects resolutionKind=manual_confirmation over incidental linked-task completion", () => {
+    // A debt finding the model flagged as manual_confirmation, with a DONE weekly-
+    // report task attached as context — must NOT auto-resolve on that task.
+    const result = classifyRecommendationLiveStatus({
+      recommendation: {
+        priority: "high" as const,
+        issue: "توقف حملات سناب شات بسبب المديونية",
+        action: "متابعة العميل لسداد المديونية",
+        taskCodes: ["PRJ-01794-321"],
+        resolutionKind: "manual_confirmation" as const,
+      },
+      recommendationIndex: 0,
+      tasksByCode: new Map([
+        ["PRJ-01794-321", { id: "t1", taskCode: "PRJ-01794-321", stage: "done", archived: false }],
+      ]),
+      liveOverdueCount: 0,
+      hasBrief: false,
+      checkedAt,
+    });
+    expect(result.state).toBe("needs_confirmation");
+    expect(result.reason).toBe("unverifiable");
+    // task chip still surfaced for context
+    expect(result.matchedTasks.map((t) => t.taskCode)).toEqual(["PRJ-01794-321"]);
+  });
 });

@@ -10,7 +10,10 @@ import { TopbarCalendarPopover } from "./topbar-calendar-popover";
 import { Button } from "@/components/ui/button";
 import { useTopbarControls } from "@/components/layout/topbar-context";
 import { PAGE_TITLE_KEYS } from "@/lib/nav";
-import { CommandPaletteTrigger, QuickCreateTrigger } from "@/components/command-palette";
+import {
+  CommandPaletteTrigger,
+  QuickCreateTrigger,
+} from "@/components/command-palette";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { intlLocale } from "@/lib/utils-format";
 
@@ -20,7 +23,9 @@ const SmartSearchBar = dynamic(
       default: mod.SmartSearchBar,
     })),
   {
-    loading: () => <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />,
+    loading: () => (
+      <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />
+    ),
   },
 );
 
@@ -30,7 +35,9 @@ const ProjectsSearchBar = dynamic(
       default: mod.ProjectsSearchBar,
     })),
   {
-    loading: () => <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />,
+    loading: () => (
+      <div className="h-10 rounded-xl border border-white/70 bg-white/95 dark:border-white/30 dark:bg-white/8" />
+    ),
   },
 );
 
@@ -65,8 +72,11 @@ export function Topbar({
     controls: { onRefresh, isRefreshing, lastUpdatedAt },
     pageMeta,
   } = useTopbarControls();
-  const title = pageMeta?.title ?? (meta ? tTitles(meta.titleKey) : tGroups("dashboard"));
-  const subtitle = pageMeta?.subtitle ?? (meta?.subtitleKey ? tTitles(meta.subtitleKey) : tApp("title"));
+  const title =
+    pageMeta?.title ?? (meta ? tTitles(meta.titleKey) : tGroups("dashboard"));
+  const subtitle =
+    pageMeta?.subtitle ??
+    (meta?.subtitleKey ? tTitles(meta.subtitleKey) : tApp("title"));
   const showRefresh = pathname === "/dashboard" && !!onRefresh;
   const showTaskSearch = pathname === "/tasks";
   const showProjectSearch = pathname === "/projects";
@@ -85,7 +95,11 @@ export function Topbar({
     "inline-flex items-center gap-1.5 rounded-xl border border-white/70 bg-white/95 px-3.5 py-2 text-xs font-semibold text-primary transition-colors hover:border-white hover:bg-white dark:border-white/45 dark:bg-white/8 dark:text-white dark:hover:border-white/60 dark:hover:bg-white/14";
 
   return (
-    <div className="sticky top-0 z-40 px-3 sm:px-6 pt-3">
+    <div
+      className={`sticky top-0 px-3 pt-3 sm:px-6 ${
+        notificationPanel ? "z-[60]" : "z-40"
+      }`}
+    >
       <div className="rwasem-topbar dark:glass-surface flex items-center justify-between gap-3 rounded-[20px] px-3 py-3 shadow-[var(--surface-elev)] sm:rounded-[26px] sm:px-5 dark:shadow-none rtl:flex-row-reverse">
         <div className="flex min-w-0 flex-1 items-center gap-3 rtl:flex-row-reverse">
           <Button
@@ -102,8 +116,12 @@ export function Topbar({
           <AppSwitcher className="hidden lg:inline-flex" />
 
           <div className="min-w-0 rtl:text-right">
-            <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">{title}</h2>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">{subtitle}</p>
+            <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">
+              {title}
+            </h2>
+            <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">
+              {subtitle}
+            </p>
           </div>
         </div>
 
@@ -122,7 +140,9 @@ export function Topbar({
                 disabled={Boolean(isRefreshing)}
                 className="gap-1.5"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
+                />
                 {tTopbar("refresh")}
               </Button>
             </div>
@@ -170,7 +190,12 @@ export function Topbar({
           </Link>
 
           <div className="relative shrink-0" data-bell-root>
-            <Button variant="ghost" size="icon" className={`relative sm:rounded-2xl ${iconChip}`} onClick={onBellClick}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`relative sm:rounded-2xl ${iconChip}`}
+              onClick={onBellClick}
+            >
               <Bell className="w-4 h-4 text-status-warning dark:text-amber" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -start-0.5 w-5 h-5 bg-cc-red rounded-full text-[9px] text-white flex items-center justify-center font-bold">

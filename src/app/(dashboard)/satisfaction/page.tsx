@@ -2,12 +2,14 @@ import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { requirePagePermission } from "@/lib/auth-server";
-import { listContractClientOptions, getClientSearchKeywords } from "@/lib/data/clients";
+import {
+  listContractClientOptions,
+  getClientSearchKeywords,
+} from "@/lib/data/clients";
 import {
   getSatisfactionRows,
   getClientSatisfactionDetail,
   getClientExecutionSnapshot,
-  getClientMediaExchange,
 } from "@/lib/data/satisfaction";
 import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { listNonConnectedWaAccounts } from "@/lib/data/wa-accounts";
@@ -28,7 +30,15 @@ export default async function SatisfactionPage({
   // at-risk-only view. See [[project_ceo_insights_panel]].
   const initialRisk = sp.risk === "1";
 
-  const [clients, keywords, rows, detail, execution, media, financeMap, nonConnectedAccounts] = await Promise.all([
+  const [
+    clients,
+    keywords,
+    rows,
+    detail,
+    execution,
+    financeMap,
+    nonConnectedAccounts,
+  ] = await Promise.all([
     // Picker lists CONTRACT clients only — the agency's actual client book,
     // named from the contract sheet. No-contract Odoo/lead rows (tests,
     // placeholders, un-signed leads) are excluded. See [[project_clients_centralization]].
@@ -36,10 +46,15 @@ export default async function SatisfactionPage({
     getClientSearchKeywords(session.orgId),
     getSatisfactionRows(session.orgId),
     selectedId
-      ? getClientSatisfactionDetail(session.orgId, selectedId, selectedAnalysisId)
+      ? getClientSatisfactionDetail(
+          session.orgId,
+          selectedId,
+          selectedAnalysisId,
+        )
       : Promise.resolve(null),
-    selectedId ? getClientExecutionSnapshot(session.orgId, selectedId) : Promise.resolve(null),
-    selectedId ? getClientMediaExchange(session.orgId, selectedId) : Promise.resolve(null),
+    selectedId
+      ? getClientExecutionSnapshot(session.orgId, selectedId)
+      : Promise.resolve(null),
     getClientFinanceMap(session.orgId),
     listNonConnectedWaAccounts(session.orgId),
   ]);
@@ -70,11 +85,6 @@ export default async function SatisfactionPage({
   const contractClientIds = new Set(clients.map((c) => c.id as string));
   const boardRows = rows.filter((r) => contractClientIds.has(r.clientId));
 
-  // Same keyword blob, but as a plain record so the overview board/table search
-  // can match a client by ANY identifier (project / group / contract), not just
-  // its display name — mirroring the top picker. See [[project_clients_centralization]].
-  const searchKeywords: Record<string, string> = Object.fromEntries(keywords);
-
   return (
     <div>
       <PageHeader title={t("title")} description={t("subtitle")} />
@@ -88,10 +98,14 @@ export default async function SatisfactionPage({
               <AlertTriangle className="size-4" />
             </span>
             <div>
-              <p className="font-semibold text-cc-red">{t("connectionBanner.title")}</p>
+              <p className="font-semibold text-cc-red">
+                {t("connectionBanner.title")}
+              </p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                 {t("connectionBanner.body", {
-                  names: nonConnectedAccounts.map((account) => account.displayName).join("، "),
+                  names: nonConnectedAccounts
+                    .map((account) => account.displayName)
+                    .join("، "),
                 })}
               </p>
             </div>
@@ -114,12 +128,10 @@ export default async function SatisfactionPage({
       <SatisfactionWorkspace
         canManageClients={session.permissions.has("clients.manage")}
         options={options}
-        searchKeywords={searchKeywords}
         rows={boardRows}
         detail={detail}
         financeMap={financeMap}
         execution={execution}
-        media={media}
         selectedId={selectedId}
         selectedAnalysisId={selectedAnalysisId}
         initialRisk={initialRisk}

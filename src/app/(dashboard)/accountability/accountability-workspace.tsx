@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
@@ -10,11 +9,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
-  Eye,
   Gauge,
   Hourglass,
   Info,
-  Loader2,
   MousePointerClick,
   Quote,
   RefreshCw,
@@ -37,7 +34,12 @@ import { cn } from "@/lib/utils";
 import { TASK_OWNER_ROLE_KEYS, TASK_OWNER_ROLE_LABELS } from "@/lib/labels";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import { Explained, MetricInfo } from "@/components/metric-info";
+import { EmployeeEvidence } from "./employee-evidence";
+import { ReviewerRigorSection as SharedReviewerRigorSection } from "./reviewer-rigor-section";
+import { AccountabilityRangePicker } from "./accountability-range-picker";
+import { AccountabilityPeriodTrend } from "./accountability-period-trend";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
+import type { DashboardRange } from "@/lib/dashboard-range";
 import type {
   AccountabilityEvidence,
   AccountabilityOverview,
@@ -50,7 +52,7 @@ const NA = "—";
 // Filter bucket key for employees with no position set on /organization/employees.
 const NONE_KEY = "__none__";
 
-type SortKey = "onTime" | "overdue" | "score" | "name";
+type SortKey = "onTime" | "overdue" | "trend" | "name";
 
 type CoachIssueKind = "deadline" | "sla" | "rework" | "review" | "pending_review";
 
@@ -74,6 +76,7 @@ interface Props {
   evidence: AccountabilityEvidence | null;
   selectedId: string | null;
   financeMap: ClientFinanceMap;
+  reviewerRange: DashboardRange;
 }
 
 // Low-confidence rows render neutral (never red): a tiny sample must not look
@@ -203,7 +206,7 @@ function buildCoachingIssues(
           severity: r.fastReviewShare >= 50 ? "warning" : "watch",
           title: "مراجعاته سريعة بشكل مقلق",
           why: "هذا خطأ عندما تتحول المراجعة إلى تمرير شكلي. دور المراجعة هو منع الخطأ قبل وصوله للمرحلة التالية، لا مجرد تحريك البطاقة.",
-          evidence: `${r.fastReviewShare}% من ${r.reviewsCompleted} مراجعة أُغلقت في أقل من 10 دقائق عمل.`,
+          evidence: `${r.fastReviewCount} من ${r.reviewsCompleted} تاسك مراجَع أُغلق في أقل من 10 دقائق عمل.`,
           nextAction: "يستخدم قائمة فحص قصيرة قبل الاعتماد: المطلوب من البريف، جودة المخرَج، المرفقات، وتعليق واضح إذا أعادها للتعديل.",
           source: "صرامة المراجعة + سجل المراحل",
           sort: 650 + r.fastReviewShare,
@@ -232,9 +235,8 @@ function buildCoachingIssues(
   return issues.sort((a, b) => b.sort - a.sort);
 }
 
-export function AccountabilityWorkspace({ overview, evidence, selectedId, financeMap }: Props) {
+export function AccountabilityWorkspace({ overview, evidence, selectedId, financeMap, reviewerRange }: Props) {
   const t = useTranslations("AccountabilityPage");
-  const tStages = useTranslations("TasksBoard.stages");
   const searchParams = useSearchParams();
   const [refreshing, startRefresh] = useTransition();
 
@@ -307,14 +309,6 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const onSortChange = (key: SortKey) => {
     setSortKey(key);
     mirrorUrl({ sort: key });
-  };
-
-  const stageLabel = (s: string) => {
-    try {
-      return tStages(s);
-    } catch {
-      return s;
-    }
   };
 
   const fmtMinutes = (min: number | null): string => {
@@ -391,8 +385,10 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
       }
       const d = rank(a) - rank(b);
       if (d !== 0) return d;
-      if (sortKey === "score") return (a.score ?? 999) - (b.score ?? 999);
-      return (a.onTimeRate ?? 999) - (b.onTimeRate ?? 999);
+      if (sortKey === "trend") {
+        return (a.periodTrend.difference ?? 999) - (b.periodTrend.difference ?? 999);
+      }
+      return (a.periodTrend.currentRate ?? 999) - (b.periodTrend.currentRate ?? 999);
     });
   }, [overview.rows, query, roleFilter, sortKey]);
 
@@ -452,7 +448,7 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
   const sortOptions: { key: SortKey; label: string }[] = [
     { key: "onTime", label: "الالتزام" },
     { key: "overdue", label: "الأكثر تأخّرًا" },
-    { key: "score", label: "الأدنى درجة" },
+    { key: "trend", label: "الأكثر تراجعًا" },
     { key: "name", label: "الاسم" },
   ];
 
@@ -471,6 +467,8 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
           {refreshing ? "جارٍ التحديث…" : "تحديث البيانات"}
         </button>
       </div>
+
+      <AccountabilityRangePicker range={reviewerRange} />
 
       {/* Head stats */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -542,7 +540,6 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
             reviewerRows={selectedRow ? reviewerByEmployee.get(selectedRow.employeeId) ?? [] : []}
             evidence={selId ? evidenceCache[selId] ?? null : null}
             loading={loadingId === selId}
-            stageLabel={stageLabel}
             fmtMinutes={fmtMinutes}
             t={t}
           />
@@ -550,11 +547,11 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
       )}
 
       {/* Secondary: cross-team reviewer audit (collapsed by default) */}
-      <ReviewerRigorSection
+      <SharedReviewerRigorSection
         reviewers={overview.reviewers}
+        range={reviewerRange}
         onSelect={select}
-        fmtMinutes={fmtMinutes}
-        t={t}
+        showRangePicker={false}
       />
 
       {/* Tier-B: AI-linked signals — always quoted, always labeled, never scored */}
@@ -651,7 +648,7 @@ function MasterList({
 
         <ul className="divide-y divide-border/60">
           {rows.map((r) => {
-            const low = r.confidence === "low";
+            const low = r.periodTrend.currentSampleSize < 5;
             const issues = coachingByEmployee.get(r.employeeId) ?? [];
             const severity = issues.reduce<CoachIssue["severity"] | null>(
               (acc, i) => (acc ? strongerSeverity(acc, i.severity) : i.severity),
@@ -706,19 +703,12 @@ function MasterList({
                       )}
                       dir="ltr"
                     >
-                      {r.onTimeRate === null ? NA : `${r.onTimeRate}%`}
+                      {r.periodTrend.currentRate === null ? NA : `${r.periodTrend.currentRate}%`}
                     </div>
                     <div className="text-[10px] text-muted-foreground">{t("col.onTime")}</div>
                   </div>
-                  {/* Composite score badge */}
-                  <span
-                    className={cn(
-                      "inline-flex min-w-11 shrink-0 justify-center rounded-md border px-1.5 py-1 text-xs font-bold tabular-nums",
-                      scoreBadgeTone(r.score, low),
-                    )}
-                    dir="ltr"
-                  >
-                    {r.score === null ? NA : `${r.score}%`}
+                  <span className="inline-flex min-w-20 shrink-0 justify-center rounded-[var(--radius-sm)] border border-border bg-soft-1 px-1.5 py-1">
+                    <AccountabilityPeriodTrend trend={r.periodTrend} />
                   </span>
                 </button>
               </li>
@@ -737,7 +727,6 @@ function DetailPane({
   reviewerRows,
   evidence,
   loading,
-  stageLabel,
   fmtMinutes,
   t,
 }: {
@@ -746,7 +735,6 @@ function DetailPane({
   reviewerRows: { stage: "manager" | "specialist"; row: ReviewerRigorRow }[];
   evidence: AccountabilityEvidence | null;
   loading: boolean;
-  stageLabel: (s: string) => string;
   fmtMinutes: (min: number | null) => string;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -897,7 +885,7 @@ function DetailPane({
             <div className="mt-2 space-y-2">
               {reviewerRows.map(({ stage, row: rev }) => {
                 const revLow = rev.confidence === "low";
-                const rubberStamp = !revLow && rev.fastReviewShare !== null && rev.fastReviewShare >= 30;
+                const rubberStamp = !revLow && rev.fastReviewCount > 0;
                 return (
                   <div key={`${stage}-${rev.employeeId}`} className="rounded-lg border border-border bg-card p-3">
                     <p className="text-[11px] font-semibold text-foreground/90">
@@ -924,7 +912,7 @@ function DetailPane({
                           )}
                           dir="ltr"
                         >
-                          {rev.fastReviewShare === null ? NA : `${rev.fastReviewShare}%`}
+                          {rev.fastReviewCount}
                         </p>
                         <p className="text-[10px] text-muted-foreground">{t("reviewers.col.fastShare")}</p>
                       </div>
@@ -946,279 +934,10 @@ function DetailPane({
           </section>
         )}
 
-        {/* Evidence — the tasks behind the numbers */}
-        <section>
-          <p className="inline-flex items-center gap-1.5 text-xs font-semibold">
-            <Eye className="size-4 text-cyan" />
-            الأدلة
-            <MetricInfo
-              text={t("metricTooltips.accountability_evidenceDwell")}
-              label={t("col.avgDwell")}
-            />
-          </p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{t("evidence.hint")}</p>
-
-          {loading ? (
-            <div className="mt-2 flex items-center justify-center gap-2 rounded-lg bg-soft-1/60 px-3 py-6 text-xs text-muted-foreground">
-              <Loader2 className="size-4 animate-spin text-cyan" />
-              جارٍ تحميل الأدلة…
-            </div>
-          ) : !evidence || evidence.items.length === 0 ? (
-            <p className="mt-2 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
-              {t("evidence.empty")}
-            </p>
-          ) : (
-            <ul className="mt-2 space-y-1.5">
-              {evidence.items.map((item) => (
-                <li key={`${item.taskId}-${item.stage}-${item.enteredAt}`}>
-                  <Link
-                    href={`/tasks/${item.taskId}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] transition-colors hover:border-cyan/30 hover:bg-soft-1"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {item.taskCode && (
-                        <span
-                          dir="ltr"
-                          className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground/70"
-                        >
-                          {item.taskCode}
-                        </span>
-                      )}
-                      <span className="max-w-[16rem] truncate">{item.title}</span>
-                      {item.clientName && (
-                        <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
-                          {item.clientName}
-                        </span>
-                      )}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2 text-[11px]">
-                      <span className="rounded bg-soft-2 px-1.5 py-0.5 text-muted-foreground">
-                        {stageLabel(item.stage)}
-                      </span>
-                      <span className="tabular-nums text-muted-foreground">
-                        {fmtMinutes(item.dwellBusinessMinutes)}
-                      </span>
-                      {item.exitedAt === null && (
-                        <span className="rounded bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
-                          {t("evidence.inStageNow")}
-                        </span>
-                      )}
-                      {item.isOverdue && (
-                        <span className="rounded bg-red-dim px-1.5 py-0.5 text-[10px] font-medium text-cc-red">
-                          {item.delayDays !== null
-                            ? t("evidence.delayDays", { n: item.delayDays })
-                            : t("evidence.overdue")}
-                        </span>
-                      )}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        {/* Evidence — shared with the employee file in the Team lens. */}
+        <EmployeeEvidence evidence={evidence} loading={loading} />
       </CardContent>
     </Card>
-  );
-}
-
-// ---- Reviewer rigor (cross-team audit, collapsed by default) ---------------
-function ReviewerRigorSection({
-  reviewers,
-  onSelect,
-  fmtMinutes,
-  t,
-}: {
-  reviewers: { managerReview: ReviewerRigorRow[]; specialistReview: ReviewerRigorRow[] };
-  onSelect: (id: string) => void;
-  fmtMinutes: (min: number | null) => string;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const [open, setOpen] = useState(false);
-  const total = reviewers.managerReview.length + reviewers.specialistReview.length;
-
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex w-full items-center gap-2 text-start"
-        >
-          <Scale className="size-4 text-cyan" />
-          <span className="text-sm font-semibold">{t("reviewers.title")}</span>
-          <span className="rounded-full border border-border bg-soft-1 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {total}
-          </span>
-          <ChevronDown className={cn("ms-auto size-4 transition-transform", open && "rotate-180")} />
-        </button>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("reviewers.hint")}</p>
-
-        {open && (
-          <div className="mt-4 space-y-6">
-            <ReviewerStageBlock
-              title={t("reviewers.managerReviewTitle")}
-              subtitle={t("reviewers.managerReviewSubtitle")}
-              rows={reviewers.managerReview}
-              onSelect={onSelect}
-              fmtMinutes={fmtMinutes}
-              t={t}
-            />
-            <ReviewerStageBlock
-              title={t("reviewers.specialistReviewTitle")}
-              subtitle={t("reviewers.specialistReviewSubtitle")}
-              rows={reviewers.specialistReview}
-              onSelect={onSelect}
-              fmtMinutes={fmtMinutes}
-              t={t}
-            />
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ReviewerStageBlock({
-  title,
-  subtitle,
-  rows,
-  onSelect,
-  fmtMinutes,
-  t,
-}: {
-  title: string;
-  subtitle: string;
-  rows: ReviewerRigorRow[];
-  onSelect: (id: string) => void;
-  fmtMinutes: (min: number | null) => string;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-foreground/90">{title}</p>
-      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{subtitle}</p>
-      {rows.some((r) => r.attribution === "stage_history_assignment") && (
-        <p className="mt-2 rounded-md border border-amber/20 bg-amber/5 px-2.5 py-1.5 text-[11px] leading-snug text-muted-foreground">
-          {t("reviewers.attributedNote")}
-        </p>
-      )}
-
-      {rows.length === 0 ? (
-        <p className="mt-3 rounded-lg bg-soft-1/60 px-3 py-4 text-center text-xs text-muted-foreground">
-          {t("reviewers.empty")}
-        </p>
-      ) : (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="p-2 text-start font-medium">{t("reviewers.col.reviewer")}</th>
-                <th className="p-2 text-center font-medium">
-                  <span className="inline-flex items-center gap-1">
-                    {t("reviewers.col.reviews")}
-                    <MetricInfo text={t("metricTooltips.accountability_reviewerReviews")} label={t("reviewers.col.reviews")} />
-                  </span>
-                </th>
-                <th className="p-2 text-center font-medium">
-                  <span className="inline-flex items-center gap-1">
-                    {t("reviewers.col.medianTime")}
-                    <MetricInfo text={t("metricTooltips.accountability_reviewerMedianTime")} label={t("reviewers.col.medianTime")} />
-                  </span>
-                </th>
-                <th className="p-2 text-center font-medium">
-                  <span className="inline-flex items-center gap-1">
-                    {t("reviewers.col.fastShare")}
-                    <MetricInfo text={t("metricTooltips.accountability_reviewerFastShare")} label={t("reviewers.col.fastShare")} />
-                  </span>
-                </th>
-                <th className="p-2 text-center font-medium">
-                  <span className="inline-flex items-center gap-1">
-                    {t("reviewers.col.rework")}
-                    <MetricInfo text={t("metricTooltips.accountability_reviewerRework")} label={t("reviewers.col.rework")} />
-                  </span>
-                </th>
-                <th className="p-2 text-center font-medium">
-                  <span className="inline-flex items-center gap-1">
-                    {t("reviewers.col.pending")}
-                    <MetricInfo text={t("metricTooltips.accountability_reviewerPending")} label={t("reviewers.col.pending")} />
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const low = r.confidence === "low";
-                const rubberStamp = !low && r.fastReviewShare !== null && r.fastReviewShare >= 30;
-                return (
-                  <tr
-                    key={r.employeeId}
-                    onClick={() => onSelect(r.employeeId)}
-                    className="cursor-pointer border-b border-border/50 transition-colors hover:bg-soft-1"
-                    title={t("evidenceRule")}
-                  >
-                    <td className="p-2">
-                      <span className="font-medium hover:text-cyan">{r.fullName}</span>
-                      {low && (
-                        <span
-                          className="ms-1.5 rounded border border-border bg-soft-1 px-1 py-0.5 text-[10px] text-muted-foreground"
-                          title={t("lowSampleHint")}
-                        >
-                          {t("lowSample", { n: r.sampleSize })}
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-2 text-center tabular-nums">{r.reviewsCompleted}</td>
-                    <td className="p-2 text-center tabular-nums text-muted-foreground">
-                      {fmtMinutes(r.medianReviewBusinessMinutes)}
-                    </td>
-                    <td className="p-2 text-center">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 tabular-nums",
-                          rubberStamp ? "font-semibold text-amber" : "text-muted-foreground",
-                        )}
-                      >
-                        {rubberStamp && <Timer className="size-3" />}
-                        <span dir="ltr">{r.fastReviewShare === null ? NA : `${r.fastReviewShare}%`}</span>
-                      </span>
-                      {rubberStamp && <div className="text-[10px] text-amber">{t("reviewers.rubberStamp")}</div>}
-                    </td>
-                    <td className="p-2 text-center">
-                      <span
-                        className={cn(
-                          "tabular-nums",
-                          !low && r.reworkAfterPassRate !== null && r.reworkAfterPassRate >= 30
-                            ? "font-semibold text-amber"
-                            : "text-muted-foreground",
-                        )}
-                        dir="ltr"
-                      >
-                        {r.reworkAfterPassRate === null ? NA : `${r.reworkAfterPassRate}%`}
-                      </span>
-                      {r.passCount > 0 && (
-                        <div className="text-[10px] tabular-nums text-muted-foreground">
-                          {t("reviewers.reworkDetail", { k: r.reworkCount, n: r.passCount })}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-2 text-center">
-                      <span className="tabular-nums">{r.pendingReviews}</span>
-                      {r.oldestPendingBusinessMinutes !== null && r.pendingReviews > 0 && (
-                        <div className="text-[10px] tabular-nums text-muted-foreground">
-                          {t("reviewers.oldestPending", { v: fmtMinutes(r.oldestPendingBusinessMinutes) })}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
   );
 }
 

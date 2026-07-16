@@ -78,6 +78,26 @@ export function classifyRecommendationLiveStatus({
   hasBrief: boolean;
   checkedAt: string;
 }): RecommendationLiveStatus {
+  // The model's own resolution declaration wins. When it says a finding needs a
+  // human to confirm, any task codes it carries are CONTEXT/evidence — never a
+  // resolution trigger. Otherwise a coarse periodic task ("client month", a
+  // weekly report) rolling over to Done silently closes an unrelated finding
+  // (e.g. a still-unpaid debt). We still resolve the task chips for display.
+  if (recommendation.resolutionKind === "manual_confirmation") {
+    const matchedTasks = extractRecommendationTaskCodes(recommendation)
+      .map((code) => tasksByCode.get(code))
+      .filter((task): task is RecommendationTaskState => Boolean(task));
+    return {
+      recommendationIndex,
+      state: "needs_confirmation",
+      reason: "unverifiable",
+      checkedAt,
+      openTaskCount: null,
+      liveOverdueCount,
+      matchedTasks,
+    };
+  }
+
   const taskCodes = extractRecommendationTaskCodes(recommendation);
   if (taskCodes.length > 0) {
     const matchedTasks = taskCodes

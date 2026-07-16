@@ -55,3 +55,4 @@ next-env.d.ts
 # stray media
 *.ogg
 supabase/.temp/
+wa-lid-map.json

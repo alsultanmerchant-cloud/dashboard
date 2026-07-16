@@ -80,7 +80,7 @@ export async function setRecommendationStatusAction(input: {
   // confirm a different recommendation after navigation/history changes.
   const { data: analysis, error: analysisError } = await supabaseAdmin
     .from("client_satisfaction_analyses")
-    .select("id, recommendations")
+    .select("id, recommendations, risks")
     .eq("organization_id", session.orgId)
     .eq("client_id", clientId)
     .eq("id", analysisId)
@@ -89,13 +89,23 @@ export async function setRecommendationStatusAction(input: {
   const recommendations = Array.isArray(analysis?.recommendations)
     ? analysis.recommendations
     : [];
-  const stored = recommendations[recommendationIndex];
-  if (
-    !stored ||
-    Array.isArray(stored) ||
-    typeof stored !== "object" ||
-    stored.issue !== issue
-  ) {
+  const risks = Array.isArray(analysis?.risks) ? analysis.risks : [];
+  // Confirm by exact issue TEXT, not array index. The UI (buildFallbackRecommendations)
+  // appends derived cards — an overdue-tasks card and a first-risk card — at indices
+  // PAST the end of the stored recommendations array. An index check rejected those
+  // derived cards outright, so their "confirm resolved" button could never succeed
+  // (and reload/re-analyze never helped, since they are never in the stored array).
+  // A card is confirmable when its issue matches a stored recommendation OR a stored risk.
+  const knownIssues = new Set<string>();
+  for (const rec of recommendations) {
+    if (rec && !Array.isArray(rec) && typeof rec === "object" && typeof rec.issue === "string") {
+      knownIssues.add(rec.issue);
+    }
+  }
+  for (const risk of risks) {
+    if (typeof risk === "string") knownIssues.add(risk);
+  }
+  if (!knownIssues.has(issue)) {
     return { error: "التوصية تغيّرت أو لم تعد موجودة؛ حدّث الصفحة وحاول مجددًا" };
   }
 

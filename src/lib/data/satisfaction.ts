@@ -2,12 +2,24 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
-import type { ClientTeamActivitySnapshot, StuckTask } from "@/lib/data/satisfaction-team";
-import { getClientBriefRef, type ClientBriefRef } from "@/lib/satisfaction-brief";
-import { getKnowledgeStamp, isStaleAgainstKnowledge } from "@/lib/data/ai-knowledge";
+import type {
+  ClientTeamActivitySnapshot,
+  StuckTask,
+} from "@/lib/data/satisfaction-team";
+import {
+  getClientBriefRef,
+  type ClientBriefRef,
+} from "@/lib/satisfaction-brief";
+import {
+  getKnowledgeStamp,
+  isStaleAgainstKnowledge,
+} from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { isClientRelationshipActive } from "@/lib/data/satisfaction-rules";
-import { getClientMergeMap, resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
+import {
+  getClientMergeMap,
+  resolveClientProjectIds,
+} from "@/lib/data/satisfaction-identity";
 import { riyadhTodayIso } from "@/lib/tz";
 import {
   classifyRecommendationLiveStatus,
@@ -95,49 +107,65 @@ export interface SatisfactionRow {
 
 // ---- Hub overview: every client that has an import or analysis -----------
 async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
-  const knowledgeStamp = await getKnowledgeStamp(orgId);
-  const displayNames = await getClientDisplayNameMap(orgId);
-  const [importsRes, analysesRes, clientsRes, projectsRes, linksRes, holdLostRes, contractsRes] =
-    await Promise.all([
-      supabaseAdmin
-        .from("client_chat_imports")
-        .select("client_id, group_kind")
-        .eq("organization_id", orgId),
-      supabaseAdmin
-        .from("client_satisfaction_analyses")
-        .select("client_id, satisfaction_score, brief_adherence_score, sentiment, created_at")
-        .eq("organization_id", orgId)
-        .eq("is_current", true),
-      supabaseAdmin
-        .from("clients")
-        .select("id, name, status, merged_into_client_id")
-        .eq("organization_id", orgId),
-      supabaseAdmin
-        .from("projects")
-        .select("id, client_id, status")
-        .eq("organization_id", orgId),
-      supabaseAdmin
-        .from("wa_group_links")
-        .select("client_id, message_count, projects:wa_group_projects(project_id)")
-        .eq("organization_id", orgId)
-        .not("client_id", "is", null),
-      // Projects carrying a HOLD / LOST tag (Odoo project tags). These flag a
-      // paused/churned relationship the operator hasn't archived in Rawasm yet,
-      // so satisfaction must treat such a project as NOT live (team feedback).
-      supabaseAdmin
-        .from("project_tag_assignments")
-        .select("project_id, tag:project_tags!inner(name)")
-        .eq("organization_id", orgId)
-        .in("tag.name", ["HOLD", "LOST"]),
-      // Contract statuses per client — the fallback signal for clients that live
-      // only on the contracts sheet (no Rawasm project). A no-project client whose
-      // contracts are ALL closed/lost is a churned relationship, not an active one.
-      supabaseAdmin
-        .from("contracts")
-        .select("client_id, status")
-        .eq("organization_id", orgId)
-        .not("client_id", "is", null),
-    ]);
+  // These reads are independent. Starting the identity/knowledge helpers with
+  // the board queries removes an avoidable round-trip from direct callers while
+  // React.cache still coalesces them with the picker/detail callers on the page.
+  const [
+    knowledgeStamp,
+    displayNames,
+    importsRes,
+    analysesRes,
+    clientsRes,
+    projectsRes,
+    linksRes,
+    holdLostRes,
+    contractsRes,
+  ] = await Promise.all([
+    getKnowledgeStamp(orgId),
+    getClientDisplayNameMap(orgId),
+    supabaseAdmin
+      .from("client_chat_imports")
+      .select("client_id, group_kind")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("client_satisfaction_analyses")
+      .select(
+        "client_id, satisfaction_score, brief_adherence_score, sentiment, created_at",
+      )
+      .eq("organization_id", orgId)
+      .eq("is_current", true),
+    supabaseAdmin
+      .from("clients")
+      .select("id, name, status, merged_into_client_id")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("projects")
+      .select("id, client_id, status")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("wa_group_links")
+      .select(
+        "client_id, message_count, projects:wa_group_projects(project_id)",
+      )
+      .eq("organization_id", orgId)
+      .not("client_id", "is", null),
+    // Projects carrying a HOLD / LOST tag (Odoo project tags). These flag a
+    // paused/churned relationship the operator hasn't archived in Rawasm yet,
+    // so satisfaction must treat such a project as NOT live (team feedback).
+    supabaseAdmin
+      .from("project_tag_assignments")
+      .select("project_id, tag:project_tags!inner(name)")
+      .eq("organization_id", orgId)
+      .in("tag.name", ["HOLD", "LOST"]),
+    // Contract statuses per client — the fallback signal for clients that live
+    // only on the contracts sheet (no Rawasm project). A no-project client whose
+    // contracts are ALL closed/lost is a churned relationship, not an active one.
+    supabaseAdmin
+      .from("contracts")
+      .select("client_id, status")
+      .eq("organization_id", orgId)
+      .not("client_id", "is", null),
+  ]);
   if (importsRes.error) throw importsRes.error;
   if (analysesRes.error) throw analysesRes.error;
   if (clientsRes.error) throw clientsRes.error;
@@ -175,7 +203,10 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   // Contract statuses folded onto the canonical client (contracts usually sit on
   // the merged sheet twin, not the project/chat-bearing canonical row).
   const contractStatusesByClient = new Map<string, Set<string>>();
-  for (const r of (contractsRes.data ?? []) as Array<{ client_id: string | null; status: string | null }>) {
+  for (const r of (contractsRes.data ?? []) as Array<{
+    client_id: string | null;
+    status: string | null;
+  }>) {
     if (!r.client_id) continue;
     const key = canonClient(r.client_id);
     const set = contractStatusesByClient.get(key) ?? new Set<string>();
@@ -198,7 +229,11 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
   // (or a still-live/renewable) contract stays active.
   const projectStatusById = new Map<string, string | null>();
   const ownedProjectIds = new Map<string, string[]>();
-  for (const p of (projectsRes.data ?? []) as Array<{ id: string; client_id: string | null; status: string | null }>) {
+  for (const p of (projectsRes.data ?? []) as Array<{
+    id: string;
+    client_id: string | null;
+    status: string | null;
+  }>) {
     projectStatusById.set(p.id, p.status);
     if (!p.client_id) continue;
     const arr = ownedProjectIds.get(p.client_id) ?? [];
@@ -234,14 +269,20 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
         status: projectStatusById.get(pid) ?? null,
         holdLost: holdLostProjectIds.has(pid),
       })),
-      contractStatuses: [...(contractStatusesByClient.get(canonClient(clientId)) ?? [])],
+      contractStatuses: [
+        ...(contractStatusesByClient.get(canonClient(clientId)) ?? []),
+      ],
     });
   };
 
   // A client has live coverage if any of its mapped groups carry ingested messages.
   const clientsWithMessages = new Set<string>();
-  for (const l of (linksRes.data ?? []) as Array<{ client_id: string | null; message_count: number | null }>) {
-    if (l.client_id && (l.message_count ?? 0) > 0) clientsWithMessages.add(l.client_id);
+  for (const l of (linksRes.data ?? []) as Array<{
+    client_id: string | null;
+    message_count: number | null;
+  }>) {
+    if (l.client_id && (l.message_count ?? 0) > 0)
+      clientsWithMessages.add(l.client_id);
   }
 
   const rowByClient = new Map<string, SatisfactionRow>();
@@ -270,7 +311,10 @@ async function _getSatisfactionRows(orgId: string): Promise<SatisfactionRow[]> {
     return r;
   };
 
-  for (const i of (importsRes.data ?? []) as Array<{ client_id: string; group_kind: GroupKind }>) {
+  for (const i of (importsRes.data ?? []) as Array<{
+    client_id: string;
+    group_kind: GroupKind;
+  }>) {
     const r = ensure(i.client_id);
     if (i.group_kind === "client") r.hasClient = true;
     else r.hasTechnical = true;
@@ -319,6 +363,14 @@ export interface ClientSatisfactionDetail {
   // Live, deterministic checks layered over the immutable AI snapshot. Existing
   // analyses work immediately; no Gemini re-run is required.
   recommendationStatuses: RecommendationLiveStatus[];
+  // Issue texts a team member has manually confirmed as resolved. Covers the
+  // UI's derived cards (overdue / first-risk) whose index isn't in the stored
+  // recommendations array, so their resolved state can't ride on the index-keyed
+  // recommendationStatuses above.
+  manualResolvedIssues: string[];
+  // Live task-based state per accountability row (index-aligned with
+  // analysis.accountability) — resolved rows render as closed problems.
+  accountabilityStates: AccountabilityLiveState[];
   history: AnalysisHistoryItem[]; // all stored snapshots, newest first
   activeProjects: Array<{ id: string; name: string }>;
   brief: ClientBriefRef | null; // the attached brief doc (reachable link/file), if any
@@ -339,8 +391,19 @@ const EMPTY_BIG_PICTURE: SatisfactionResult["bigPicture"] = {
 const EMPTY_CLIENT_SIGNALS: SatisfactionResult["clientGroupSignals"] = {
   requests: { new: 0, edit: 0, complaint: 0, inquiry: 0, approval: 0 },
   approvals: { approved: 0, rejected: 0, changesRequested: 0, noResponse: 0 },
-  requestExamples: { new: [], edit: [], complaint: [], inquiry: [], approval: [] },
-  approvalExamples: { approved: [], rejected: [], changesRequested: [], noResponse: [] },
+  requestExamples: {
+    new: [],
+    edit: [],
+    complaint: [],
+    inquiry: [],
+    approval: [],
+  },
+  approvalExamples: {
+    approved: [],
+    rejected: [],
+    changesRequested: [],
+    noResponse: [],
+  },
   responseSpeed: "unknown",
 };
 const EMPTY_TECH_SIGNALS: SatisfactionResult["technicalGroupSignals"] = {
@@ -351,30 +414,39 @@ const EMPTY_TECH_SIGNALS: SatisfactionResult["technicalGroupSignals"] = {
 
 function toAnalysisInfo(a: Record<string, unknown>): AnalysisInfo {
   const storedBigPicture =
-    (a.big_picture as (SatisfactionResult["bigPicture"] & {
-      _sourceLatestMessageAt?: string | null;
-      _hadNewMessages?: boolean | null;
-    }) | null) ?? EMPTY_BIG_PICTURE;
+    (a.big_picture as
+      | (SatisfactionResult["bigPicture"] & {
+          _sourceLatestMessageAt?: string | null;
+          _hadNewMessages?: boolean | null;
+        })
+      | null) ?? EMPTY_BIG_PICTURE;
   return {
     id: a.id as string,
     satisfactionScore: (a.satisfaction_score as number) ?? 0,
     briefAdherenceScore: (a.brief_adherence_score as number | null) ?? null,
-    briefAdherence: (a.brief_adherence as SatisfactionResult["briefAdherence"]) ?? null,
+    briefAdherence:
+      (a.brief_adherence as SatisfactionResult["briefAdherence"]) ?? null,
     sentiment: (a.sentiment as SatisfactionResult["sentiment"]) ?? "neutral",
     summary: (a.summary as string) ?? "",
     bigPicture: storedBigPicture,
     indicators: (a.indicators as SatisfactionResult["indicators"]) ?? [],
     clientGroupSignals:
-      (a.client_group_signals as SatisfactionResult["clientGroupSignals"]) ?? EMPTY_CLIENT_SIGNALS,
+      (a.client_group_signals as SatisfactionResult["clientGroupSignals"]) ??
+      EMPTY_CLIENT_SIGNALS,
     technicalGroupSignals:
-      (a.technical_group_signals as SatisfactionResult["technicalGroupSignals"]) ?? EMPTY_TECH_SIGNALS,
+      (a.technical_group_signals as SatisfactionResult["technicalGroupSignals"]) ??
+      EMPTY_TECH_SIGNALS,
     causes: (a.causes as SatisfactionResult["causes"]) ?? [],
-    accountability: (a.accountability as SatisfactionResult["accountability"]) ?? [],
+    accountability:
+      (a.accountability as SatisfactionResult["accountability"]) ?? [],
     highlights: (a.highlights as SatisfactionResult["highlights"]) ?? [],
-    sentimentTimeline: (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
+    sentimentTimeline:
+      (a.sentiment_timeline as SatisfactionResult["sentimentTimeline"]) ?? [],
     risks: (a.risks as string[]) ?? [],
-    recommendations: (a.recommendations as SatisfactionResult["recommendations"]) ?? [],
-    contractContext: (a.contract_context as ClientContractContext | null) ?? null,
+    recommendations:
+      (a.recommendations as SatisfactionResult["recommendations"]) ?? [],
+    contractContext:
+      (a.contract_context as ClientContractContext | null) ?? null,
     teamContext: (a.team_context as ClientTeamActivitySnapshot | null) ?? null,
     model: (a.model as string | null) ?? null,
     createdAt: a.created_at as string,
@@ -404,9 +476,16 @@ export const getAnalysisById = cache(_getAnalysisById);
 // Fill in taskId on a frozen roster's stuck tasks by resolving their task_code
 // against the live tasks table. Mutates in place. Only queries codes still
 // missing an id, so re-running on already-hydrated snapshots is a no-op.
-async function hydrateStuckTaskIds(orgId: string, stuckTasks: StuckTask[]): Promise<void> {
+async function hydrateStuckTaskIds(
+  orgId: string,
+  stuckTasks: StuckTask[],
+): Promise<void> {
   const codes = [
-    ...new Set(stuckTasks.filter((t) => !t.taskId && t.taskCode).map((t) => t.taskCode as string)),
+    ...new Set(
+      stuckTasks
+        .filter((t) => !t.taskId && t.taskCode)
+        .map((t) => t.taskCode as string),
+    ),
   ];
   if (codes.length === 0) return;
   const { data } = await supabaseAdmin
@@ -424,21 +503,79 @@ async function hydrateStuckTaskIds(orgId: string, stuckTasks: StuckTask[]): Prom
   }
 }
 
+// Live, deterministic state of one accountability ("extracted problem") row —
+// same task-based reconciliation as recommendations: a complaint whose evidence
+// tasks are ALL done is no longer an open problem, without any AI re-run.
+export interface AccountabilityLiveState {
+  index: number;
+  state: "open" | "resolved" | "unknown";
+  reason:
+    | "linked_tasks_open"
+    | "linked_tasks_resolved"
+    | "manual_confirmed"
+    | "unverifiable";
+  openTaskCount: number | null;
+  matchedTasks: RecommendationTaskState[];
+}
+
+// Both the execution snapshot and the live recommendation reconciliation need
+// the same client task set on a selected satisfaction page. Keep one per-request
+// snapshot so the route does not issue two unbounded task reads for one client.
+type ClientExecutionTaskRow = {
+  id: string;
+  task_code: string | null;
+  title: string | null;
+  stage: string | null;
+  delay_days: number | null;
+  due_date: string | null;
+  planned_date: string | null;
+  stage_entered_at: string | null;
+  archived_at: string | null;
+};
+
+async function _getClientExecutionTaskRows(
+  orgId: string,
+  clientId: string,
+): Promise<ClientExecutionTaskRow[]> {
+  const projectIds = await resolveClientProjectIds(orgId, clientId);
+  if (projectIds.length === 0) return [];
+  const { data, error } = await supabaseAdmin
+    .from("tasks")
+    .select(
+      "id, task_code, title, stage, delay_days, due_date, planned_date, stage_entered_at, archived_at",
+    )
+    .eq("organization_id", orgId)
+    .in("project_id", projectIds);
+  if (error) throw error;
+  return (data ?? []) as unknown as ClientExecutionTaskRow[];
+}
+const getClientExecutionTaskRows = cache(_getClientExecutionTaskRows);
+
 async function getRecommendationLiveStatuses(
   orgId: string,
   clientId: string,
   analysis: AnalysisInfo | null,
   hasBrief: boolean,
-): Promise<RecommendationLiveStatus[]> {
-  if (!analysis?.recommendations.length) return [];
+): Promise<{
+  statuses: RecommendationLiveStatus[];
+  manualResolvedIssues: string[];
+  accountabilityStates: AccountabilityLiveState[];
+}> {
+  if (!analysis?.recommendations.length && !analysis?.accountability?.length) {
+    return { statuses: [], manualResolvedIssues: [], accountabilityStates: [] };
+  }
 
-  const needsTaskData = analysis.recommendations.some(
-    (recommendation) =>
-      extractRecommendationTaskCodes(recommendation).length > 0 ||
-      isOverdueTaskRecommendation(recommendation),
-  );
-  const [projectIds, manualEventsRes] = await Promise.all([
-    needsTaskData ? resolveClientProjectIds(orgId, clientId) : Promise.resolve([]),
+  const accountabilityRows = analysis.accountability ?? [];
+  const needsTaskData =
+    analysis.recommendations.some(
+      (recommendation) =>
+        extractRecommendationTaskCodes(recommendation).length > 0 ||
+        isOverdueTaskRecommendation(recommendation),
+    ) || accountabilityRows.some((row) => (row.taskCodes ?? []).length > 0);
+  const [taskRows, manualEventsRes] = await Promise.all([
+    needsTaskData
+      ? getClientExecutionTaskRows(orgId, clientId)
+      : Promise.resolve([]),
     supabaseAdmin
       .from("ai_events")
       .select("payload, created_at")
@@ -451,82 +588,76 @@ async function getRecommendationLiveStatuses(
   let liveOverdueCount: number | null = null;
   const tasksByCode = new Map<string, RecommendationTaskState>();
 
-  if (projectIds.length > 0) {
-    const { data } = await supabaseAdmin
-      .from("tasks")
-      .select("id, task_code, stage, planned_date, archived_at")
-      .eq("organization_id", orgId)
-      .in("project_id", projectIds);
-
-    if (data) {
-      liveOverdueCount = 0;
-      // Overdue = OPEN (stage != done, incl. `new`) past its Riyadh deadline —
-      // matches the execution/team snapshots. See [[project_rwasem_overdue_definition]].
-      const todayIso = riyadhTodayIso();
-      for (const row of data as Array<{
-        id: string;
-        task_code: string | null;
-        stage: string | null;
-        planned_date: string | null;
-        archived_at: string | null;
-      }>) {
-        const archived = Boolean(row.archived_at);
-        const stage = row.stage ?? "new";
-        if (!archived && stage !== "done" && !!row.planned_date && row.planned_date < todayIso)
-          liveOverdueCount += 1;
-        if (row.task_code) {
-          tasksByCode.set(row.task_code.toUpperCase(), {
-            id: row.id,
-            taskCode: row.task_code,
-            stage,
-            archived,
-          });
-        }
+  if (needsTaskData) {
+    liveOverdueCount = 0;
+    // Overdue = OPEN (stage != done, incl. `new`) past its Riyadh deadline —
+    // matches the execution/team snapshots. See [[project_rwasem_overdue_definition]].
+    const todayIso = riyadhTodayIso();
+    for (const row of taskRows) {
+      const archived = Boolean(row.archived_at);
+      const stage = row.stage ?? "new";
+      if (
+        !archived &&
+        stage !== "done" &&
+        !!row.planned_date &&
+        row.planned_date < todayIso
+      )
+        liveOverdueCount += 1;
+      if (row.task_code) {
+        tasksByCode.set(row.task_code.toUpperCase(), {
+          id: row.id,
+          taskCode: row.task_code,
+          stage,
+          archived,
+        });
       }
     }
   }
 
   const checkedAt = new Date().toISOString();
-  const statuses = analysis.recommendations.map((recommendation, recommendationIndex) =>
-    classifyRecommendationLiveStatus({
-      recommendation,
-      recommendationIndex,
-      tasksByCode,
-      liveOverdueCount,
-      hasBrief,
-      checkedAt,
-    }),
+  const statuses = analysis.recommendations.map(
+    (recommendation, recommendationIndex) =>
+      classifyRecommendationLiveStatus({
+        recommendation,
+        recommendationIndex,
+        tasksByCode,
+        liveOverdueCount,
+        hasBrief,
+        checkedAt,
+      }),
   );
 
   // A conversation-only finding has no safe machine signal. Team confirmation
   // is stored as an append-only ai_event overlay so the original AI snapshot
-  // remains immutable and the action is auditable/reversible.
-  const latestManualByIndex = new Map<
-    number,
-    { state: "resolved" | "cleared"; issue: string; createdAt: string }
+  // remains immutable and the action is auditable/reversible. Keyed by the exact
+  // issue TEXT, not array index: the UI shows derived cards (overdue / first-risk)
+  // whose index sits past the end of the stored recommendations array, so
+  // index-based matching could never resolve them. Events arrive oldest-first,
+  // so the last write per issue is the latest state.
+  const latestManualByIssue = new Map<
+    string,
+    { state: "resolved" | "cleared"; createdAt: string }
   >();
   for (const event of manualEventsRes.data ?? []) {
     const payload = event.payload;
-    if (!payload || Array.isArray(payload) || typeof payload !== "object") continue;
-    const index = payload.recommendationIndex;
+    if (!payload || Array.isArray(payload) || typeof payload !== "object")
+      continue;
     const state = payload.state;
     const issue = payload.issue;
     if (
-      typeof index !== "number" ||
       (state !== "resolved" && state !== "cleared") ||
       typeof issue !== "string"
-    ) {
+    )
       continue;
-    }
-    latestManualByIndex.set(index, { state, issue, createdAt: event.created_at });
+    latestManualByIssue.set(issue, { state, createdAt: event.created_at });
   }
 
-  return statuses.map((status) => {
-    const manual = latestManualByIndex.get(status.recommendationIndex);
+  const overlaid = statuses.map((status) => {
     const recommendation = analysis.recommendations[status.recommendationIndex];
-    if (!manual || manual.state !== "resolved" || manual.issue !== recommendation?.issue) {
-      return status;
-    }
+    const manual = recommendation
+      ? latestManualByIssue.get(recommendation.issue)
+      : undefined;
+    if (!manual || manual.state !== "resolved") return status;
     return {
       ...status,
       state: "resolved" as const,
@@ -534,6 +665,64 @@ async function getRecommendationLiveStatuses(
       checkedAt: manual.createdAt,
     };
   });
+
+  // Resolved issues that don't map to a stored recommendation (the UI's derived
+  // risk/overdue cards) — surfaced so the client can mark those cards resolved.
+  const manualResolvedIssues = [...latestManualByIssue.entries()]
+    .filter(([, manual]) => manual.state === "resolved")
+    .map(([issue]) => issue);
+
+  // Accountability taskCodes are the tasks that EVIDENCE the finding (per the
+  // schema), NOT its remediation. So a conversation complaint (e.g. an unpaid
+  // debt) must never auto-close just because an evidencing task rolled over to
+  // Done — a coarse "client month" / weekly-report task completing says nothing
+  // about whether the debt was paid. Task state only tells us the row is still
+  // actively behind (open); closure needs a human confirm or the AI-refresh pass
+  // finding real resolution evidence in the messages.
+  const accountabilityStates: AccountabilityLiveState[] =
+    accountabilityRows.map((row, index) => {
+      const manual = latestManualByIssue.get(row.complaint);
+      if (manual?.state === "resolved") {
+        return {
+          index,
+          state: "resolved",
+          reason: "manual_confirmed",
+          openTaskCount: null,
+          matchedTasks: [],
+        };
+      }
+      const codes = [
+        ...new Set(
+          (row.taskCodes ?? [])
+            .map((c) => c.trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      ];
+      const matchedTasks = codes
+        .map((code) => tasksByCode.get(code))
+        .filter((task): task is RecommendationTaskState => Boolean(task));
+      const openTaskCount = matchedTasks.filter(
+        (task) => task.stage !== "done" && !task.archived,
+      ).length;
+      if (openTaskCount > 0) {
+        return {
+          index,
+          state: "open",
+          reason: "linked_tasks_open",
+          openTaskCount,
+          matchedTasks,
+        };
+      }
+      return {
+        index,
+        state: "unknown",
+        reason: "unverifiable",
+        openTaskCount: null,
+        matchedTasks,
+      };
+    });
+
+  return { statuses: overlaid, manualResolvedIssues, accountabilityStates };
 }
 
 async function _getClientSatisfactionDetail(
@@ -541,7 +730,21 @@ async function _getClientSatisfactionDetail(
   clientId: string,
   selectedAnalysisId?: string | null,
 ): Promise<ClientSatisfactionDetail | null> {
-  const [clientRes, importsRes, analysisRes, historyRes, hasMessages, latestLiveMessageAt, projectsRes, brief, displayNames] = await Promise.all([
+  const selectedAnalysisPromise = selectedAnalysisId
+    ? getAnalysisById(orgId, selectedAnalysisId)
+    : Promise.resolve(null);
+  const [
+    clientRes,
+    importsRes,
+    analysisRes,
+    historyRes,
+    hasMessages,
+    latestLiveMessageAt,
+    projectsRes,
+    brief,
+    displayNames,
+    selectedAnalysis,
+  ] = await Promise.all([
     supabaseAdmin
       .from("clients")
       .select("id, name")
@@ -587,7 +790,8 @@ async function _getClientSatisfactionDetail(
     // attached (resolveBriefProject uses this same identity set).
     (async () => {
       const ids = await resolveClientProjectIds(orgId, clientId);
-      if (ids.length === 0) return { data: [] as Array<{ id: string; name: string }>, error: null };
+      if (ids.length === 0)
+        return { data: [] as Array<{ id: string; name: string }>, error: null };
       return supabaseAdmin
         .from("projects")
         .select("id, name")
@@ -597,6 +801,7 @@ async function _getClientSatisfactionDetail(
     })(),
     getClientBriefRef(orgId, clientId),
     getClientDisplayNameMap(orgId),
+    selectedAnalysisPromise,
   ]);
   if (clientRes.error) throw clientRes.error;
   if (projectsRes.error) throw projectsRes.error;
@@ -627,26 +832,32 @@ async function _getClientSatisfactionDetail(
   // Shown analysis: an explicitly selected past snapshot, else the current
   // week. A selected id is fetched separately (it may not be the current row).
   let analysis: AnalysisInfo | null = current ? toAnalysisInfo(current) : null;
-  if (selectedAnalysisId && selectedAnalysisId !== analysis?.id) {
-    const picked = await getAnalysisById(orgId, selectedAnalysisId);
-    if (picked) analysis = picked;
+  if (
+    selectedAnalysisId &&
+    selectedAnalysisId !== analysis?.id &&
+    selectedAnalysis
+  ) {
+    analysis = selectedAnalysis;
   }
 
-  const latestMessageAt = [
-    latestLiveMessageAt,
-    clientImp?.lastMessageAt ?? null,
-    techImp?.lastMessageAt ?? null,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1) ?? null;
+  const latestMessageAt =
+    [
+      latestLiveMessageAt,
+      clientImp?.lastMessageAt ?? null,
+      techImp?.lastMessageAt ?? null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
   // Backfill the truth for legacy snapshots that predate the persisted
   // watermark: when this is demonstrably a re-analysis (an older snapshot
   // exists) and even today's newest available message predates the run, it ran
   // without new chat evidence. This makes already-saved misleading results show
   // the warning immediately, not only after their next re-analysis.
   const hasEarlierAnalysis = analysis
-    ? ((historyRes.data ?? []) as Array<{ id: string; created_at: string }>).some(
+    ? (
+        (historyRes.data ?? []) as Array<{ id: string; created_at: string }>
+      ).some(
         (row) => row.id !== analysis.id && row.created_at < analysis.createdAt,
       )
     : false;
@@ -660,9 +871,14 @@ async function _getClientSatisfactionDetail(
     analysis.hadNewMessages = false;
     analysis.sourceLatestMessageAt = latestMessageAt;
   }
-  const freshnessBaseline = analysis?.sourceLatestMessageAt ?? analysis?.createdAt ?? null;
+  const freshnessBaseline =
+    analysis?.sourceLatestMessageAt ?? analysis?.createdAt ?? null;
   const hasNewMessagesSinceAnalysis = analysis
-    ? Boolean(latestMessageAt && freshnessBaseline && latestMessageAt > freshnessBaseline)
+    ? Boolean(
+        latestMessageAt &&
+        freshnessBaseline &&
+        latestMessageAt > freshnessBaseline,
+      )
     : null;
 
   // Resolve task_code → task id for the shown analysis's roster. The frozen
@@ -672,12 +888,42 @@ async function _getClientSatisfactionDetail(
   // deep-links straight to /tasks/[id]. Every accountability taskCode is
   // guaranteed to be a stuckTasks code (analyze-time roster validation), so
   // resolving stuckTasks covers the panel.
-  const [, recommendationStatuses] = await Promise.all([
+  const [, recommendationStatusResult] = await Promise.all([
     analysis?.teamContext?.stuckTasks?.length
       ? hydrateStuckTaskIds(orgId, analysis.teamContext.stuckTasks)
       : Promise.resolve(),
     getRecommendationLiveStatuses(orgId, clientId, analysis, Boolean(brief)),
   ]);
+  const {
+    statuses: recommendationStatuses,
+    manualResolvedIssues,
+    accountabilityStates,
+  } = recommendationStatusResult;
+
+  // Older analyses froze the "ثغرات مكتشفة" gap strings leading with the bare
+  // task_code (مهمة PRJ-…). Rewrite them at view time to lead with the task
+  // NAME (code kept in parens) using the frozen stuckTasks. New analyses already
+  // store this format, so the prefix match is a no-op for them.
+  if (
+    analysis?.teamContext?.gaps?.length &&
+    analysis.teamContext.stuckTasks?.length
+  ) {
+    const titleByCode = new Map<string, string>();
+    for (const st of analysis.teamContext.stuckTasks) {
+      if (st.taskCode && st.title && st.title !== "—")
+        titleByCode.set(st.taskCode, st.title);
+    }
+    if (titleByCode.size > 0) {
+      analysis.teamContext.gaps = analysis.teamContext.gaps.map((g) => {
+        for (const [code, title] of titleByCode) {
+          const bare = `مهمة ${code} `;
+          if (g.startsWith(bare))
+            return `مهمة «${title}» (${code}) ${g.slice(bare.length)}`;
+        }
+        return g;
+      });
+    }
+  }
 
   const history: AnalysisHistoryItem[] = (
     (historyRes.data ?? []) as Array<Record<string, unknown>>
@@ -702,8 +948,12 @@ async function _getClientSatisfactionDetail(
     hasNewMessagesSinceAnalysis,
     analysis,
     recommendationStatuses,
+    manualResolvedIssues,
+    accountabilityStates,
     history,
-    activeProjects: ((projectsRes.data ?? []) as Array<{ id: string; name: string }>).map((p) => ({
+    activeProjects: (
+      (projectsRes.data ?? []) as Array<{ id: string; name: string }>
+    ).map((p) => ({
       id: p.id,
       name: p.name,
     })),
@@ -744,7 +994,9 @@ function normalizedPersonName(value: string | null | undefined): string {
 // Employee phones may be entered as +966 5…, 00966…, or 05…. WhatsApp's
 // phone JIDs use 966…@c.us. Canonicalise Saudi mobiles to their final 9 digits;
 // never treat an opaque @lid identifier as a phone because it is not one.
-export function normalizedWhatsAppPhone(value: string | null | undefined): string | null {
+export function normalizedWhatsAppPhone(
+  value: string | null | undefined,
+): string | null {
   if (!value || /@lid$/i.test(value.trim())) return null;
   let digits = value.replace(/@.*$/, "").replace(/\D/g, "");
   if (digits.startsWith("00")) digits = digits.slice(2);
@@ -753,7 +1005,9 @@ export function normalizedWhatsAppPhone(value: string | null | undefined): strin
   return digits.length >= 7 ? digits : null;
 }
 
-async function getEmployeeSenderDirectory(orgId: string): Promise<EmployeeSenderDirectory> {
+async function getEmployeeSenderDirectory(
+  orgId: string,
+): Promise<EmployeeSenderDirectory> {
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("full_name, phone, employment_status")
@@ -895,14 +1149,23 @@ async function resolveClientGroupChats(
           .select("wa_group_links(chat_id, group_kind)")
           .eq("organization_id", orgId)
           .in("project_id", projectIds)
-      : Promise.resolve({ data: [] as Array<{ wa_group_links: { chat_id: string; group_kind: GroupKind | null } | null }> }),
+      : Promise.resolve({
+          data: [] as Array<{
+            wa_group_links: {
+              chat_id: string;
+              group_kind: GroupKind | null;
+            } | null;
+          }>,
+        }),
     projectIds.length
       ? supabaseAdmin
           .from("wa_group_links")
           .select("chat_id, group_kind")
           .eq("organization_id", orgId)
           .in("project_id", projectIds)
-      : Promise.resolve({ data: [] as Array<{ chat_id: string; group_kind: GroupKind | null }> }),
+      : Promise.resolve({
+          data: [] as Array<{ chat_id: string; group_kind: GroupKind | null }>,
+        }),
   ]);
 
   const out = new Map<string, GroupKind | null>();
@@ -913,13 +1176,19 @@ async function resolveClientGroupChats(
     if (!out.has(chatId)) out.set(chatId, kind ?? null);
     else if (out.get(chatId) == null && kind != null) out.set(chatId, kind);
   };
-  for (const r of (directRes.data ?? []) as Array<{ chat_id: string; group_kind: GroupKind | null }>)
+  for (const r of (directRes.data ?? []) as Array<{
+    chat_id: string;
+    group_kind: GroupKind | null;
+  }>)
     add(r.chat_id, r.group_kind);
   for (const r of (m2mRes.data ?? []) as Array<{
     wa_group_links: { chat_id: string; group_kind: GroupKind | null } | null;
   }>)
     add(r.wa_group_links?.chat_id, r.wa_group_links?.group_kind ?? null);
-  for (const r of (legacyRes.data ?? []) as Array<{ chat_id: string; group_kind: GroupKind | null }>)
+  for (const r of (legacyRes.data ?? []) as Array<{
+    chat_id: string;
+    group_kind: GroupKind | null;
+  }>)
     add(r.chat_id, r.group_kind);
   return out;
 }
@@ -931,8 +1200,13 @@ async function resolveClientGroupChats(
 // analyze buttons for clients that actually have (and were) analyzed. Keeping
 // this consistent with buildClientTranscripts is what makes the button state
 // match reality. See [[project_satisfaction_transcript_resolution]].
-async function _clientHasResolvedMessages(orgId: string, clientId: string): Promise<boolean> {
-  const chatIds = Array.from((await resolveClientGroupChats(orgId, clientId)).keys());
+async function _clientHasResolvedMessages(
+  orgId: string,
+  clientId: string,
+): Promise<boolean> {
+  const chatIds = Array.from(
+    (await resolveClientGroupChats(orgId, clientId)).keys(),
+  );
   if (chatIds.length === 0) return false;
   const { count } = await supabaseAdmin
     .from("wa_messages")
@@ -947,7 +1221,9 @@ async function _getClientLatestLiveMessageAt(
   orgId: string,
   clientId: string,
 ): Promise<string | null> {
-  const chatIds = Array.from((await resolveClientGroupChats(orgId, clientId)).keys());
+  const chatIds = Array.from(
+    (await resolveClientGroupChats(orgId, clientId)).keys(),
+  );
   if (chatIds.length === 0) return null;
   const { data } = await supabaseAdmin
     .from("wa_messages")
@@ -960,21 +1236,26 @@ async function _getClientLatestLiveMessageAt(
     .maybeSingle();
   return (data?.sent_at as string | null | undefined) ?? null;
 }
-export const getClientLatestLiveMessageAt = cache(_getClientLatestLiveMessageAt);
+export const getClientLatestLiveMessageAt = cache(
+  _getClientLatestLiveMessageAt,
+);
 
 async function _buildClientTranscripts(
   orgId: string,
   clientId: string,
-  opts?: { sinceDays?: number },
+  opts?: { sinceDays?: number; sinceIso?: string },
 ): Promise<MergedTranscripts> {
   // Windowed (current-status) analysis: only the last `sinceDays` of LIVE
   // messages. The one-time .txt import is a historical seed (one undated blob)
   // so it is excluded from a recent window — it would drag old complaints into
   // the "current" reading, which is exactly what the team asked us to stop.
+  // `sinceIso` is an exact cutoff (e.g. "messages since the analysis ran") used
+  // by the status-refresh pass; it wins over sinceDays.
   const since =
-    opts?.sinceDays != null
+    opts?.sinceIso ??
+    (opts?.sinceDays != null
       ? new Date(Date.now() - opts.sinceDays * 86_400_000).toISOString()
-      : null;
+      : null);
 
   // The client's groups resolved from the live link graph (chat_id → kind).
   const chatKinds = await resolveClientGroupChats(orgId, clientId);
@@ -985,7 +1266,9 @@ async function _buildClientTranscripts(
   let waQuery = chatIds.length
     ? supabaseAdmin
         .from("wa_messages")
-        .select("chat_id, group_kind, sender, sender_id, body, sent_at, message_type, is_from_me")
+        .select(
+          "chat_id, group_kind, sender, sender_id, body, sent_at, message_type, is_from_me",
+        )
         .eq("organization_id", orgId)
         .in("chat_id", chatIds)
         .order("sent_at", { ascending: true })
@@ -995,7 +1278,9 @@ async function _buildClientTranscripts(
 
   const [importsRes, waRes, employeeDirectory] = await Promise.all([
     since
-      ? Promise.resolve({ data: [] as Array<{ group_kind: GroupKind; transcript: string }> })
+      ? Promise.resolve({
+          data: [] as Array<{ group_kind: GroupKind; transcript: string }>,
+        })
       : supabaseAdmin
           .from("client_chat_imports")
           .select("group_kind, transcript, last_message_at, created_at")
@@ -1007,15 +1292,22 @@ async function _buildClientTranscripts(
   ]);
 
   // Latest one-time import per kind (historical seed; empty for windowed runs).
-  const rawImportByKind: Record<GroupKind, string> = { client: "", technical: "" };
+  const rawImportByKind: Record<GroupKind, string> = {
+    client: "",
+    technical: "",
+  };
   let latestMessageAt: string | null = null;
   for (const r of (importsRes.data ?? []) as Array<{
     group_kind: GroupKind;
     transcript: string;
     last_message_at?: string | null;
   }>) {
-    if (!rawImportByKind[r.group_kind]) rawImportByKind[r.group_kind] = r.transcript ?? "";
-    if (r.last_message_at && (!latestMessageAt || r.last_message_at > latestMessageAt))
+    if (!rawImportByKind[r.group_kind])
+      rawImportByKind[r.group_kind] = r.transcript ?? "";
+    if (
+      r.last_message_at &&
+      (!latestMessageAt || r.last_message_at > latestMessageAt)
+    )
       latestMessageAt = r.last_message_at;
   }
 
@@ -1029,7 +1321,10 @@ async function _buildClientTranscripts(
   let externalMessages = 0;
   const importByKind: Record<GroupKind, string> = { client: "", technical: "" };
   for (const kind of ["client", "technical"] as const) {
-    const annotated = annotateImportedTranscript(rawImportByKind[kind], employeeDirectory);
+    const annotated = annotateImportedTranscript(
+      rawImportByKind[kind],
+      employeeDirectory,
+    );
     importByKind[kind] = annotated.text;
     identifiedEmployeeMessages += annotated.employees;
     externalMessages += annotated.external;
@@ -1044,7 +1339,8 @@ async function _buildClientTranscripts(
     message_type: string | null;
     is_from_me: boolean;
   }>) {
-    if (r.sent_at && (!latestMessageAt || r.sent_at > latestMessageAt)) latestMessageAt = r.sent_at;
+    if (r.sent_at && (!latestMessageAt || r.sent_at > latestMessageAt))
+      latestMessageAt = r.sent_at;
     const kind: GroupKind =
       (r.chat_id ? chatKinds.get(r.chat_id) : null) ?? r.group_kind ?? "client";
     // Media-aware: keep image/video captions, document filenames, and shared
@@ -1060,12 +1356,16 @@ async function _buildClientTranscripts(
       null;
     if (identity || r.is_from_me) identifiedEmployeeMessages += 1;
     else externalMessages += 1;
-    liveByKind[kind].push(renderWaLine(r.sent_at, r.sender, text, identity, r.is_from_me));
+    liveByKind[kind].push(
+      renderWaLine(r.sent_at, r.sender, text, identity, r.is_from_me),
+    );
     counts[kind] += 1;
   }
 
   const merge = (kind: GroupKind) =>
-    [importByKind[kind], liveByKind[kind].join("\n")].filter(Boolean).join("\n");
+    [importByKind[kind], liveByKind[kind].join("\n")]
+      .filter(Boolean)
+      .join("\n");
 
   return {
     client: merge("client"),
@@ -1189,7 +1489,8 @@ async function _getClientMediaExchange(
       out.voiceNotes += 1;
     } else if (type === "document") {
       out.documentCount += 1;
-      if (text && out.documents.length < MEDIA_PER_CATEGORY) out.documents.push(item);
+      if (text && out.documents.length < MEDIA_PER_CATEGORY)
+        out.documents.push(item);
     } else if (type === "image" || type === "sticker") {
       out.imageCount += 1;
       if (!text) out.silentImages += 1;
@@ -1200,7 +1501,10 @@ async function _getClientMediaExchange(
     } else if (type === "vcard" || type === "location") {
       out.otherCount += 1;
       if (text && out.others.length < MEDIA_PER_CATEGORY)
-        out.others.push({ ...item, text: `${type === "vcard" ? "جهة اتصال" : "موقع"}: ${text}` });
+        out.others.push({
+          ...item,
+          text: `${type === "vcard" ? "جهة اتصال" : "موقع"}: ${text}`,
+        });
     }
   }
   out.totalSharedItems = out.totalMedia + out.linkCount;
@@ -1227,7 +1531,10 @@ const AI_MEDIA_MAX_ITEMS = 16;
 const AI_MEDIA_MAX_ITEM_BYTES = 8 * 1024 * 1024;
 const AI_MEDIA_MAX_TOTAL_BYTES = 35 * 1024 * 1024;
 
-function aiReadableMime(mime: string | null, messageType: string | null): string | null {
+function aiReadableMime(
+  mime: string | null,
+  messageType: string | null,
+): string | null {
   const m = (mime ?? "").toLowerCase();
   const t = (messageType ?? "").toLowerCase();
   if (m.startsWith("image/")) return m;
@@ -1294,7 +1601,8 @@ async function _getClientStoredMediaAttachments(
       .download(r.media_storage_path);
     if (error || !blob) continue;
     const bytes = Buffer.from(await blob.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > AI_MEDIA_MAX_ITEM_BYTES) continue;
+    if (bytes.byteLength === 0 || bytes.byteLength > AI_MEDIA_MAX_ITEM_BYTES)
+      continue;
     if (totalBytes + bytes.byteLength > AI_MEDIA_MAX_TOTAL_BYTES) break;
 
     totalBytes += bytes.byteLength;
@@ -1325,7 +1633,9 @@ async function _getClientStoredMediaAttachments(
 
   return out.reverse();
 }
-export const getClientStoredMediaAttachments = cache(_getClientStoredMediaAttachments);
+export const getClientStoredMediaAttachments = cache(
+  _getClientStoredMediaAttachments,
+);
 
 // ---- Client execution snapshot (ties satisfaction to real delivery work) -
 // Surfaces the client's actually-delayed tasks next to the AI analysis, so a
@@ -1382,44 +1692,28 @@ async function _getClientExecutionSnapshot(
   includeArchived = false,
 ): Promise<ClientExecutionSnapshot | null> {
   // ALL of the client's projects (owned + WA-linked + twins), not just owned —
-  // otherwise a split client's tasks are silently missed.
-  const projectIds = await resolveClientProjectIds(orgId, clientId);
-  if (projectIds.length === 0) return null;
-  const { data, error } = await supabaseAdmin
-    .from("tasks")
-    .select(
-      "id, task_code, title, stage, delay_days, due_date, planned_date, stage_entered_at, archived_at",
-    )
-    .eq("organization_id", orgId)
-    .in("project_id", projectIds);
-  if (error || !data) return null;
-
-  type Row = {
-    id: string;
-    task_code: string | null;
-    title: string | null;
-    stage: string | null;
-    delay_days: number | null;
-    due_date: string | null;
-    planned_date: string | null;
-    stage_entered_at: string | null;
-    archived_at: string | null;
-  };
-  const rows = data as unknown as Row[];
+  // otherwise a split client's tasks are silently missed. This is shared with
+  // recommendation status reconciliation when both load on the selected page.
+  const rows = await getClientExecutionTaskRows(orgId, clientId);
+  if (rows.length === 0) return null;
 
   const now = Date.now();
   const daysSince = (iso: string | null): number | null =>
-    iso ? Math.max(0, Math.floor((now - new Date(iso).getTime()) / 86_400_000)) : null;
+    iso
+      ? Math.max(0, Math.floor((now - new Date(iso).getTime()) / 86_400_000))
+      : null;
   // Overdue magnitude in calendar days: working-days delay_days when present,
   // else (archived_at | today) − planned_date. Used to rank archived tasks.
-  const overdueDaysOf = (r: Row): number | null => {
+  const overdueDaysOf = (r: ClientExecutionTaskRow): number | null => {
     if (r.delay_days != null) return r.delay_days;
     if (!r.planned_date) return null;
     const ref = r.archived_at ? new Date(r.archived_at).getTime() : now;
-    const d = Math.floor((ref - new Date(r.planned_date).getTime()) / 86_400_000);
+    const d = Math.floor(
+      (ref - new Date(r.planned_date).getTime()) / 86_400_000,
+    );
     return d > 0 ? d : null;
   };
-  const toTask = (r: Row): ExecutionTask => ({
+  const toTask = (r: ClientExecutionTaskRow): ExecutionTask => ({
     id: r.id,
     taskCode: r.task_code,
     title: (r.title ?? "").trim() || "—",
@@ -1438,7 +1732,7 @@ async function _getClientExecutionSnapshot(
   // late not-yet-started task never counted as overdue; count it here so those
   // slips surface in satisfaction. See [[project_rwasem_overdue_definition]].
   const todayIso = riyadhTodayIso();
-  const isOverdueRow = (r: Row) =>
+  const isOverdueRow = (r: ClientExecutionTaskRow) =>
     (r.stage ?? "") !== "done" && !!r.planned_date && r.planned_date < todayIso;
   // Odoo-archived tasks keep past deadlines forever, so ~88% of "overdue" rows are
   // archived work whose cycle ended. Weekly view = LIVE overdue only (NO archived
@@ -1461,7 +1755,9 @@ async function _getClientExecutionSnapshot(
   // on-time with zero live overdue — still has live open work, so it never pulls
   // archived tasks in (the bug the strict weekly filter was meant to kill).
   // Gate on live-open work, NOT live-overdue (an on-time active client has none).
-  const hasLiveOpen = rows.some((r) => !r.archived_at && (r.stage ?? "") !== "done");
+  const hasLiveOpen = rows.some(
+    (r) => !r.archived_at && (r.stage ?? "") !== "done",
+  );
   const archivedBigDelay = includeArchived || !hasLiveOpen ? worstArchived : [];
   const tasks = [...liveTasks, ...archivedBigDelay];
 
@@ -1507,12 +1803,14 @@ async function _getClientExecutionSnapshot(
   // Odoo-archived, i.e. the whole engagement was closed. Completed (done) tasks
   // may be non-archived without changing this — it's the LIVE work that's gone.
   const inFlightRows = rows.filter((r) => IN_FLIGHT.has(r.stage ?? ""));
-  const allArchived = inFlightRows.length > 0 && inFlightRows.every((r) => !!r.archived_at);
+  const allArchived =
+    inFlightRows.length > 0 && inFlightRows.every((r) => !!r.archived_at);
 
   if (tasks.length === 0 && keyTasks.length === 0) return null;
 
   const stageCounts = new Map<string, number>();
-  for (const t of tasks) stageCounts.set(t.stage, (stageCounts.get(t.stage) ?? 0) + 1);
+  for (const t of tasks)
+    stageCounts.set(t.stage, (stageCounts.get(t.stage) ?? 0) + 1);
   const byStage = Array.from(stageCounts.entries())
     .map(([stage, count]) => ({ stage, count }))
     .sort((a, b) => b.count - a.count);
@@ -1520,14 +1818,21 @@ async function _getClientExecutionSnapshot(
   // Bottleneck = each stuck stage as a share of all overdue tasks. Keep the
   // stages that account for the bulk of the delay (top 3, or any ≥ 25%).
   const bottlenecks = byStage
-    .map((s) => ({ stage: s.stage, count: s.count, pct: Math.round((s.count / tasks.length) * 100) }))
+    .map((s) => ({
+      stage: s.stage,
+      count: s.count,
+      pct: Math.round((s.count / tasks.length) * 100),
+    }))
     .filter((s, i) => i < 3 || s.pct >= 25);
 
   // Live tasks first, then archived/historical; within each, worst-delay first.
   const topTasks = [...tasks]
     .sort((a, b) => {
       if (a.archived !== b.archived) return a.archived ? 1 : -1;
-      return (b.overdueDays ?? b.daysStuck ?? -1) - (a.overdueDays ?? a.daysStuck ?? -1);
+      return (
+        (b.overdueDays ?? b.daysStuck ?? -1) -
+        (a.overdueDays ?? a.daysStuck ?? -1)
+      );
     })
     .slice(0, 8);
   const maxDaysStuck = liveTasks.length
@@ -1565,7 +1870,10 @@ export const getClientExecutionSnapshot = cache(_getClientExecutionSnapshot);
 // rows merged INTO it (sheet twins), and — if it is itself a merged sheet row —
 // its canonical parent plus that parent's other children (siblings). Contracts /
 // activity logs are gathered across this whole set.
-async function _getClientContractIdentity(orgId: string, clientId: string): Promise<string[]> {
+async function _getClientContractIdentity(
+  orgId: string,
+  clientId: string,
+): Promise<string[]> {
   const merge = await getClientMergeMap(orgId);
   const canonical = merge.get(clientId) ?? clientId; // walk up one hop to the parent
   const ids = new Set<string>([clientId, canonical]);
@@ -1642,7 +1950,9 @@ async function _getClientContractContext(
   const ids = await getClientContractIdentity(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contracts")
-    .select("contract_code, target, status, total_value, paid_value, payment_status, start_date, end_date")
+    .select(
+      "contract_code, target, status, total_value, paid_value, payment_status, start_date, end_date",
+    )
     .eq("organization_id", orgId)
     .in("client_id", ids)
     .order("start_date", { ascending: false });
@@ -1673,7 +1983,9 @@ async function _getClientContractContext(
   // The live portfolio = currently-running contracts (active/hold). If none are
   // live (all closed/lost), keep the most-recent single row so a churned client
   // still carries commercial context for the model.
-  const live = rows.filter((r) => r.status === "active" || r.status === "hold").map(toLine);
+  const live = rows
+    .filter((r) => r.status === "active" || r.status === "hold")
+    .map(toLine);
   const contracts = live.length ? live : [toLine(rows[0])];
 
   // `contracts` is ordered newest-first (start_date desc), so contracts[0] is the
@@ -1681,7 +1993,10 @@ async function _getClientContractContext(
   // before. Numeric fields aggregate the whole live portfolio.
   const primary = contracts[0];
   const starts = contracts.map((c) => c.startDate).sort();
-  const ends = contracts.map((c) => c.endDate).filter((e): e is string => !!e).sort();
+  const ends = contracts
+    .map((c) => c.endDate)
+    .filter((e): e is string => !!e)
+    .sort();
 
   return {
     target: primary.target,
@@ -1706,7 +2021,9 @@ async function _getClientContractActivity(
   const ids = await getClientContractIdentity(orgId, clientId);
   const { data, error } = await supabaseAdmin
     .from("contract_sheet_logs")
-    .select("log_type, log_time, notes, account_manager, contract:contracts!inner(client_id)")
+    .select(
+      "log_type, log_time, notes, account_manager, contract:contracts!inner(client_id)",
+    )
     .eq("organization_id", orgId)
     .in("contract.client_id", ids)
     .order("log_time", { ascending: false, nullsFirst: false })
@@ -1738,7 +2055,10 @@ export interface SatisfactionAggregate {
 
 // A client is "at risk" when AI satisfaction is low or the sentiment is bad.
 const AT_RISK_SCORE = 55;
-export function isClientAtRisk(score: number | null, sentiment: string | null): boolean {
+export function isClientAtRisk(
+  score: number | null,
+  sentiment: string | null,
+): boolean {
   if (sentiment === "negative") return true;
   if (score !== null && score < AT_RISK_SCORE) return true;
   return false;
@@ -1792,7 +2112,9 @@ async function _getActiveProjectClientIds(orgId: string): Promise<Set<string>> {
 }
 export const getActiveProjectClientIds = cache(_getActiveProjectClientIds);
 
-async function _getOrgSatisfactionAggregate(orgId: string): Promise<SatisfactionAggregate> {
+async function _getOrgSatisfactionAggregate(
+  orgId: string,
+): Promise<SatisfactionAggregate> {
   const [{ data, error }, activeIds] = await Promise.all([
     supabaseAdmin
       .from("client_satisfaction_analyses")
@@ -1802,20 +2124,31 @@ async function _getOrgSatisfactionAggregate(orgId: string): Promise<Satisfaction
     getActiveProjectClientIds(orgId),
   ]);
   if (error || !data || data.length === 0) {
-    return { avgSatisfaction: null, avgBriefAdherence: null, analyzedClients: 0, atRiskClients: 0 };
+    return {
+      avgSatisfaction: null,
+      avgBriefAdherence: null,
+      analyzedClients: 0,
+      atRiskClients: 0,
+    };
   }
 
   // Keep only analyses for ACTIVE clients (live project) — already-lost clients
   // skew the average down and inflate the at-risk count with names that can't
   // churn. Matches the /satisfaction page + CEO brief churn definition.
-  const rows = (data as Array<{
-    client_id: string | null;
-    satisfaction_score: number | null;
-    brief_adherence_score: number | null;
-    sentiment: string | null;
-  }>).filter((r) => r.client_id != null && activeIds.has(r.client_id));
-  const sat = rows.map((r) => r.satisfaction_score).filter((v): v is number => v !== null);
-  const brief = rows.map((r) => r.brief_adherence_score).filter((v): v is number => v !== null);
+  const rows = (
+    data as Array<{
+      client_id: string | null;
+      satisfaction_score: number | null;
+      brief_adherence_score: number | null;
+      sentiment: string | null;
+    }>
+  ).filter((r) => r.client_id != null && activeIds.has(r.client_id));
+  const sat = rows
+    .map((r) => r.satisfaction_score)
+    .filter((v): v is number => v !== null);
+  const brief = rows
+    .map((r) => r.brief_adherence_score)
+    .filter((v): v is number => v !== null);
   const avg = (xs: number[]) =>
     xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
 
@@ -1823,7 +2156,9 @@ async function _getOrgSatisfactionAggregate(orgId: string): Promise<Satisfaction
     avgSatisfaction: avg(sat),
     avgBriefAdherence: avg(brief),
     analyzedClients: rows.length,
-    atRiskClients: rows.filter((r) => isClientAtRisk(r.satisfaction_score, r.sentiment)).length,
+    atRiskClients: rows.filter((r) =>
+      isClientAtRisk(r.satisfaction_score, r.sentiment),
+    ).length,
   };
 }
 export const getOrgSatisfactionAggregate = cache(_getOrgSatisfactionAggregate);
@@ -1865,7 +2200,10 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
     .from("wa_group_projects")
     .select("group_link_id, project_id")
     .eq("organization_id", orgId);
-  for (const row of (gp ?? []) as Array<{ group_link_id: string; project_id: string }>) {
+  for (const row of (gp ?? []) as Array<{
+    group_link_id: string;
+    project_id: string;
+  }>) {
     const arr = projectsByLink.get(row.group_link_id) ?? [];
     arr.push(row.project_id);
     projectsByLink.set(row.group_link_id, arr);
@@ -1873,8 +2211,13 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
 
   // How many distinct connected numbers fed each group (provenance from 0200).
   const coverage = new Map<string, number>();
-  const { data: cov } = await supabaseAdmin.rpc("get_wa_group_coverage", { p_org: orgId });
-  for (const row of (cov ?? []) as Array<{ chat_id: string; account_count: number }>) {
+  const { data: cov } = await supabaseAdmin.rpc("get_wa_group_coverage", {
+    p_org: orgId,
+  });
+  for (const row of (cov ?? []) as Array<{
+    chat_id: string;
+    account_count: number;
+  }>) {
     coverage.set(row.chat_id, row.account_count);
   }
 
@@ -1902,7 +2245,8 @@ async function _getWaGroupLinks(orgId: string): Promise<WaGroupLink[]> {
       chatId: r.chat_id,
       chatName: r.chat_name,
       clientId: r.client_id,
-      clientName: (r.client_id ? displayNames.get(r.client_id) : null) ?? c?.name ?? null,
+      clientName:
+        (r.client_id ? displayNames.get(r.client_id) : null) ?? c?.name ?? null,
       projectIds: projectsByLink.get(r.id) ?? [],
       groupKind: r.group_kind,
       isActive: r.is_active,
@@ -1945,7 +2289,9 @@ export interface WaLinkSuggestion {
   suggestedAt: string | null;
 }
 
-async function _getWaLinkSuggestions(orgId: string): Promise<WaLinkSuggestion[]> {
+async function _getWaLinkSuggestions(
+  orgId: string,
+): Promise<WaLinkSuggestion[]> {
   const { data, error } = await supabaseAdmin
     .from("wa_group_links")
     .select(
@@ -1985,7 +2331,8 @@ async function _getWaLinkSuggestions(orgId: string): Promise<WaLinkSuggestion[]>
       chatId: r.chat_id,
       chatName: r.chat_name,
       suggestedClientId: r.suggested_client_id,
-      suggestedClientName: displayNames.get(r.suggested_client_id) ?? c?.name ?? null,
+      suggestedClientName:
+        displayNames.get(r.suggested_client_id) ?? c?.name ?? null,
       suggestedProjectId: r.suggested_project_id,
       suggestedProjectName: p?.name ?? null,
       suggestedProjectCode: p?.project_code ?? null,
@@ -2015,7 +2362,9 @@ export interface ProjectCoverageGap {
   hasTechnicalGroup: boolean;
 }
 
-async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageGap[]> {
+async function _getProjectGroupCoverage(
+  orgId: string,
+): Promise<ProjectCoverageGap[]> {
   const [projectsRes, linksRes, gpRes] = await Promise.all([
     supabaseAdmin
       .from("projects")
@@ -2051,7 +2400,10 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
 
   // group_link_id → set of explicitly linked project ids (0203).
   const projSetByLink = new Map<string, Set<string>>();
-  for (const r of (gpRes.data ?? []) as Array<{ group_link_id: string; project_id: string }>) {
+  for (const r of (gpRes.data ?? []) as Array<{
+    group_link_id: string;
+    project_id: string;
+  }>) {
     const s = projSetByLink.get(r.group_link_id) ?? new Set<string>();
     s.add(r.project_id);
     projSetByLink.set(r.group_link_id, s);
@@ -2062,7 +2414,10 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
   const activeByClient = new Map<string, number>();
   for (const p of projects) {
     if (p.status === "active" && p.client_id)
-      activeByClient.set(p.client_id, (activeByClient.get(p.client_id) ?? 0) + 1);
+      activeByClient.set(
+        p.client_id,
+        (activeByClient.get(p.client_id) ?? 0) + 1,
+      );
   }
 
   const gaps: ProjectCoverageGap[] = [];
@@ -2074,7 +2429,10 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
       const projSet = projSetByLink.get(l.id);
       const belongs =
         (!!projSet && projSet.has(p.id)) ||
-        (!projSet && singleActive && !!l.client_id && l.client_id === p.client_id);
+        (!projSet &&
+          singleActive &&
+          !!l.client_id &&
+          l.client_id === p.client_id);
       if (!belongs) continue;
       if (l.group_kind === "client") hasClient = true;
       else if (l.group_kind === "technical") hasTech = true;
@@ -2086,7 +2444,8 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
       projectName: p.name,
       projectCode: p.project_code,
       clientId: p.client_id,
-      clientName: (p.client_id ? displayNames.get(p.client_id) : null) ?? c?.name ?? null,
+      clientName:
+        (p.client_id ? displayNames.get(p.client_id) : null) ?? c?.name ?? null,
       hasClientGroup: hasClient,
       hasTechnicalGroup: hasTech,
     });
@@ -2094,7 +2453,8 @@ async function _getProjectGroupCoverage(orgId: string): Promise<ProjectCoverageG
   // Worst first: missing both, then missing one.
   gaps.sort(
     (a, b) =>
-      Number(a.hasClientGroup) + Number(a.hasTechnicalGroup) -
+      Number(a.hasClientGroup) +
+      Number(a.hasTechnicalGroup) -
       (Number(b.hasClientGroup) + Number(b.hasTechnicalGroup)),
   );
   return gaps;
@@ -2114,7 +2474,9 @@ async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
   const [{ data, error }, activeIds, displayNames] = await Promise.all([
     supabaseAdmin
       .from("client_satisfaction_analyses")
-      .select("client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)")
+      .select(
+        "client_id, satisfaction_score, sentiment, risks, client:clients!inner(name)",
+      )
       .eq("organization_id", orgId)
       .eq("is_current", true),
     getActiveProjectClientIds(orgId),
@@ -2143,6 +2505,8 @@ async function _getAtRiskClients(orgId: string): Promise<AtRiskClient[]> {
         topRisk: r.risks && r.risks.length > 0 ? r.risks[0] : null,
       };
     })
-    .sort((a, b) => (a.satisfactionScore ?? 100) - (b.satisfactionScore ?? 100));
+    .sort(
+      (a, b) => (a.satisfactionScore ?? 100) - (b.satisfactionScore ?? 100),
+    );
 }
 export const getAtRiskClients = cache(_getAtRiskClients);

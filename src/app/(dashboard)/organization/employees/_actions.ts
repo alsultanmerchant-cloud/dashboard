@@ -158,6 +158,117 @@ export async function inviteEmployeeAction(
 
 type ActionResult = { ok: true } | { error: string };
 
+// Canonicalise a phone the way the satisfaction tagger does (final 9 Saudi
+// digits) so the clash check compares equal across +966 / 05 / 9665 forms.
+function canonicalPhone(value: string | null | undefined): string | null {
+  if (!value) return null;
+  let digits = value.replace(/@.*$/, "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (/^05\d{8}$/.test(digits)) return digits.slice(1);
+  if (/^9665\d{8}$/.test(digits)) return digits.slice(3);
+  return digits.length >= 7 ? digits : null;
+}
+
+// Link (or clear) an employee's WhatsApp number from the employees-page linker.
+// Storing the number in employee_profiles.phone is what lets the satisfaction
+// transcript tagger match this person's resolved @c.us sender to a staff row,
+// so their group messages stop being read as client voice. Pass phoneJid = null
+// to unlink. Gated on employees.manage; audit-logged.
+const LinkWhatsAppSchema = z.object({
+  employee_id: z.string().uuid(),
+  phone_jid: z.string().trim().max(40).nullable(),
+});
+
+export async function linkEmployeeWhatsAppAction(input: {
+  employeeId: string;
+  phoneJid: string | null;
+}): Promise<ActionResult> {
+  let session;
+  try {
+    session = await requirePermission("employees.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const parsed = LinkWhatsAppSchema.safeParse({
+    employee_id: input.employeeId,
+    phone_jid: input.phoneJid,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  }
+
+  const { data: emp } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, full_name, phone")
+    .eq("organization_id", session.orgId)
+    .eq("id", parsed.data.employee_id)
+    .maybeSingle();
+  if (!emp) return { error: "الموظف غير موجود" };
+
+  // Unlink: clear the phone.
+  if (!parsed.data.phone_jid) {
+    const { error } = await supabaseAdmin
+      .from("employee_profiles")
+      .update({ phone: null })
+      .eq("id", emp.id);
+    if (error) return { error: error.message };
+    await logAudit({
+      organizationId: session.orgId,
+      actorUserId: session.userId,
+      action: "employee.whatsapp_unlink",
+      entityType: "employee",
+      entityId: emp.id,
+      metadata: { full_name: emp.full_name, from: emp.phone },
+    });
+    revalidatePath("/organization/employees");
+    return { ok: true };
+  }
+
+  const digits = parsed.data.phone_jid.replace(/@.*$/, "").replace(/\D/g, "");
+  if (digits.length < 7) return { error: "رقم واتساب غير صالح" };
+  const canonical = canonicalPhone(digits);
+
+  // Guard: don't attach the same WhatsApp number to two different people — that
+  // would make the satisfaction tagger attribute one person's messages to both.
+  if (canonical) {
+    const { data: others } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("id, full_name, phone")
+      .eq("organization_id", session.orgId)
+      .neq("id", emp.id)
+      .not("phone", "is", null);
+    const clash = (others ?? []).find(
+      (o) => canonicalPhone((o as { phone: string }).phone) === canonical,
+    );
+    if (clash) {
+      return {
+        error: `هذا الرقم مرتبط بالفعل بـ«${(clash as { full_name: string }).full_name}». أزل الربط عنه أولًا.`,
+      };
+    }
+  }
+
+  const stored = `+${digits}`;
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({ phone: stored })
+    .eq("id", emp.id);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "employee.whatsapp_link",
+    entityType: "employee",
+    entityId: emp.id,
+    metadata: { full_name: emp.full_name, from: emp.phone, to: stored },
+  });
+
+  revalidatePath("/organization/employees");
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}
+
 const UpdateSchema = z.object({
   id: z.string().uuid(),
   full_name: z.string().trim().min(2, "الاسم قصير جدًا").max(160),

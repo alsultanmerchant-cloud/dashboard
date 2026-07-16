@@ -316,8 +316,14 @@ limit ${MAX_PEOPLE}`);
   for (const t of stuckTasks) {
     if ((t.daysStuck ?? 0) >= 14 && t.moves30d === 0) {
       const who = t.stageOwner || t.executor;
+      // Prefer the task NAME (falls back to code only when the title is the
+      // "—" empty sentinel); keep the code in parentheses for traceability.
+      const hasTitle = t.title && t.title !== "—";
+      const taskLabel = hasTitle
+        ? `«${t.title}»${t.taskCode ? ` (${t.taskCode})` : ""}`
+        : (t.taskCode ?? "غير معنونة");
       gaps.push(
-        `مهمة ${t.taskCode ?? t.title} عالقة ${t.daysStuck} يوم في «${t.stage}» بدون أي حركة خلال ٣٠ يوم${who ? ` — المسؤول: ${who}` : ""}.`,
+        `مهمة ${taskLabel} عالقة ${t.daysStuck} يوم في «${t.stage}» بدون أي حركة خلال ٣٠ يوم${who ? ` — المسؤول: ${who}` : ""}.`,
       );
     }
   }

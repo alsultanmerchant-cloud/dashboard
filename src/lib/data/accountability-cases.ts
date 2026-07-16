@@ -2,8 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
-  getAccountabilityOverview,
-  type AccountabilityOverview,
+  getAccountabilityCaseOverview,
+  type AccountabilityCaseOverview,
 } from "@/lib/data/accountability";
 
 // =========================================================================
@@ -156,11 +156,7 @@ interface LedgerRow {
   actions: number;
   active_days: number;
   last_at: string | null;
-}
-interface DailyRow {
-  actor_employee_id: string;
-  d: string; // YYYY-MM-DD
-  n: number;
+  daily: { d: string; n: number }[];
 }
 interface StuckRow {
   employee_id: string;
@@ -246,15 +242,15 @@ function daysBetween(fromIso: string | null, nowMs: number): number | null {
 
 async function _getAccountabilityCases(
   orgId: string,
-  overview?: AccountabilityOverview,
+  overview?: AccountabilityCaseOverview,
 ): Promise<AccountabilityCasesResult> {
   const org = assertUuid(orgId, "organization id");
 
   // The scorecard/reviewer overview is the execution backbone (already cached).
   // The four extra reads are per-stream evidence; each degrades to empty so a
   // single timeout can't take the page down.
-  const [ov, emps, ledger, daily, stuck, contracts, analyses] = await Promise.all([
-    overview ? Promise.resolve(overview) : getAccountabilityOverview(orgId),
+  const [ov, emps, ledger, stuck, contracts, analyses] = await Promise.all([
+    overview ? Promise.resolve(overview) : getAccountabilityCaseOverview(orgId),
     runSql<EmpRow>(empSql(org)).catch((e) => {
       console.error("[cases] empSql failed:", e);
       return [] as EmpRow[];
@@ -262,10 +258,6 @@ async function _getAccountabilityCases(
     runSql<LedgerRow>(ledgerSql(org)).catch((e) => {
       console.error("[cases] ledgerSql failed:", e);
       return [] as LedgerRow[];
-    }),
-    runSql<DailyRow>(dailySql(org)).catch((e) => {
-      console.error("[cases] dailySql failed:", e);
-      return [] as DailyRow[];
     }),
     runSql<StuckRow>(stuckSql(org)).catch((e) => {
       console.error("[cases] stuckSql failed:", e);
@@ -290,13 +282,13 @@ async function _getAccountabilityCases(
     axis14.push(d.toISOString().slice(0, 10));
   }
   const dailyByEmp = new Map<string, Map<string, number>>();
-  for (const r of daily) {
+  for (const r of ledger) {
     let m = dailyByEmp.get(r.actor_employee_id);
     if (!m) {
       m = new Map();
       dailyByEmp.set(r.actor_employee_id, m);
     }
-    m.set(r.d, r.n);
+    for (const day of r.daily) m.set(day.d, day.n);
   }
   // Team medians (peer comparison) across all measured employees.
   const peerMedianOpen = median(ov.rows.map((r) => r.openTasks)) ?? 0;
@@ -480,7 +472,7 @@ async function _getAccountabilityCases(
         b.proof.push({
           stream: "execution",
           kind: "slow_review",
-          text: `${rv.fastReviewShare}% من ${rv.reviewsCompleted} مراجعة أُغلقت في أقل من ١٠ دقائق عمل — مؤشر مراجعة شكلية.`,
+          text: `${rv.fastReviewCount} من ${rv.reviewsCompleted} تاسك مراجَع أُغلق في أقل من ١٠ دقائق عمل — مؤشر مراجعة شكلية.`,
           quote: null,
           href: `/accountability`,
           taskCode: null,
@@ -715,25 +707,34 @@ select e.id, e.full_name, e.job_title as position_label, d.name as department
 
 function ledgerSql(org: string): string {
   return `
-select actor_employee_id,
-       count(*)::int as actions,
-       count(distinct created_at::date)::int as active_days,
-       max(created_at) as last_at
-  from task_comments
- where organization_id = '${org}'
-   and actor_employee_id is not null
-   and created_at > now() - interval '30 days'
- group by 1`;
-}
-
-function dailySql(org: string): string {
-  return `
-select actor_employee_id, created_at::date::text as d, count(*)::int as n
-  from task_comments
- where organization_id = '${org}'
-   and actor_employee_id is not null
-   and created_at > now() - interval '14 days'
- group by 1, 2`;
+with recent as (
+  select actor_employee_id, created_at
+    from task_comments
+   where organization_id = '${org}'
+     and actor_employee_id is not null
+     and created_at > now() - interval '30 days'
+), ledger as (
+  select actor_employee_id,
+         count(*)::int as actions,
+         count(distinct created_at::date)::int as active_days,
+         max(created_at) as last_at
+    from recent
+   group by 1
+), daily as (
+  select actor_employee_id,
+         jsonb_agg(jsonb_build_object('d', d, 'n', n) order by d) as days
+    from (
+      select actor_employee_id, created_at::date::text as d, count(*)::int as n
+        from recent
+       where created_at > now() - interval '14 days'
+       group by 1, 2
+    ) grouped
+   group by 1
+)
+select l.actor_employee_id, l.actions, l.active_days, l.last_at,
+       coalesce(d.days, '[]'::jsonb) as daily
+  from ledger l
+  left join daily d using (actor_employee_id)`;
 }
 
 function stuckSql(org: string): string {
@@ -751,12 +752,8 @@ with attrib as (
 select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as stage,
        (t.stage not in ('done','new') and t.planned_date < current_date) as overdue,
        (current_date - h.entered_at::date) as days_in_stage,
-       (select max(tc.created_at)::date from task_comments tc
-          where tc.task_id = t.id and tc.actor_employee_id = a.employee_id) as last_action,
-       (select count(*) from task_comments tc
-          where tc.task_id = t.id
-            and tc.actor_employee_id = a.employee_id
-            and tc.created_at >= h.entered_at)::int as owner_actions_in_stage
+       max(tc.created_at)::date as last_action,
+       count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage
   from attrib a
   join tasks t on t.id = a.task_id and t.archived_at is null
   join lateral (
@@ -764,13 +761,15 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
      where h2.task_id = t.id and h2.exited_at is null
      order by h2.entered_at desc limit 1
   ) h on true
-  join employee_profiles ep on ep.id = a.employee_id
+  left join task_comments tc
+    on tc.task_id = t.id and tc.actor_employee_id = a.employee_id
  where a.position_role = public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text)
    and t.stage not in ('done','new')
    and (
      (t.planned_date < current_date)
      or (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS}
-   )`;
+   )
+ group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at`;
 }
 
 function contractsSql(org: string): string {

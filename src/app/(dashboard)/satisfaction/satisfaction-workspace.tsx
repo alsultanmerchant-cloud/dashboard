@@ -45,6 +45,7 @@ import {
   Users,
   ChevronDown,
   Scale,
+  RefreshCw,
 } from "lucide-react";
 import {
   attachClientBriefLinkAction,
@@ -56,18 +57,27 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import { MetricInfo, Explained } from "@/components/metric-info";
-import type { ClientFinanceBadge, ClientFinanceMap } from "@/lib/data/client-finance";
+import type {
+  ClientFinanceBadge,
+  ClientFinanceMap,
+} from "@/lib/data/client-finance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type {
+  AccountabilityLiveState,
   AnalysisHistoryItem,
   ClientExecutionSnapshot,
   ClientMediaExchange,
   ClientSatisfactionDetail,
   SatisfactionRow,
 } from "@/lib/data/satisfaction";
+import type { RefreshSummary } from "@/lib/satisfaction-refresh";
 import type {
   RecommendationLiveStatus,
   RecommendationResolutionReason,
@@ -76,13 +86,9 @@ import type {
 interface Props {
   canManageClients: boolean;
   options: { value: string; label: string; keywords?: string | null }[];
-  // clientId → space-joined project / group / contract names, so the overview
-  // search matches a client by ANY identifier, not just its display name.
-  searchKeywords: Record<string, string>;
   rows: SatisfactionRow[];
   detail: ClientSatisfactionDetail | null;
   execution: ClientExecutionSnapshot | null;
-  media: ClientMediaExchange | null;
   selectedId: string | null;
   selectedAnalysisId: string | null;
   financeMap: ClientFinanceMap;
@@ -92,7 +98,8 @@ interface Props {
 }
 
 function scoreTone(score: number | null) {
-  if (score === null) return { text: "text-muted-foreground", ring: "text-muted-foreground/40" };
+  if (score === null)
+    return { text: "text-muted-foreground", ring: "text-muted-foreground/40" };
   if (score >= 70) return { text: "text-cc-green", ring: "text-cc-green" };
   if (score >= 50) return { text: "text-amber", ring: "text-amber" };
   return { text: "text-cc-red", ring: "text-cc-red" };
@@ -105,8 +112,20 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
   const tone = scoreTone(score);
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`} className={cn("-rotate-90", tone.ring)} width={size} height={size}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth="6" className="stroke-border" />
+      <svg
+        viewBox={`0 0 ${size} ${size}`}
+        className={cn("-rotate-90", tone.ring)}
+        width={size}
+        height={size}
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          strokeWidth="6"
+          className="stroke-border"
+        />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -134,11 +153,9 @@ function Ring({ score, size = 72 }: { score: number | null; size?: number }) {
 export function SatisfactionWorkspace({
   canManageClients,
   options,
-  searchKeywords,
   rows,
   detail,
   execution,
-  media,
   selectedId,
   selectedAnalysisId,
   financeMap,
@@ -150,6 +167,10 @@ export function SatisfactionWorkspace({
   const [analyzing, setAnalyzing] = useState<"week" | "all" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSummary, setRefreshSummary] = useState<RefreshSummary | null>(
+    null,
+  );
 
   const selRow = useMemo(
     () => rows.find((r) => r.clientId === selectedId) ?? null,
@@ -252,8 +273,44 @@ export function SatisfactionWorkspace({
     satStream.submit({ clientId: selectedId, windowKind: "week" });
   };
 
-  const sentimentLabel = (s: string | null) =>
-    s ? t(`sentiment.${s}`) : "—";
+  // "تحديث" — status refresh, not a re-analysis: the server sends the still-open
+  // findings of the SHOWN analysis + the messages that arrived since it ran +
+  // the live task table to the model, which closes whatever now has resolution
+  // evidence. Closures land in the same overlay the manual confirm button
+  // writes, so the page reflects them after router.refresh().
+  const refreshStatuses = async () => {
+    if (!selectedId || !detail?.analysis) return;
+    setError(null);
+    setRefreshSummary(null);
+    setRefreshing(true);
+    try {
+      const res = await fetch("/api/satisfaction/refresh-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: selectedId,
+          analysisId: detail.analysis.id,
+        }),
+      });
+      const raw = await res.text();
+      let data: { error?: string; summary?: RefreshSummary } = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        /* non-JSON body (timeout / gateway error) */
+      }
+      if (!res.ok)
+        throw new Error(data.error ?? `تعذر التحديث (${res.status})`);
+      setRefreshSummary(data.summary ?? null);
+      if (data.summary?.resolved.length) router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const sentimentLabel = (s: string | null) => (s ? t(`sentiment.${s}`) : "—");
 
   return (
     <div className="space-y-6">
@@ -294,13 +351,14 @@ export function SatisfactionWorkspace({
       {!selectedId ? (
         <SatisfactionOverview
           rows={rows}
-          searchKeywords={searchKeywords}
+          options={options}
           financeMap={financeMap}
           onSelect={select}
           onAnalyze={async (id) => {
             await analyzeClient(id);
             router.refresh();
           }}
+          canManageClients={canManageClients}
           initialRisk={initialRisk}
           t={t}
         />
@@ -320,7 +378,9 @@ export function SatisfactionWorkspace({
             <div className="flex items-start gap-2 rounded-xl border border-amber/35 bg-amber/10 px-4 py-3 text-sm text-amber">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <div>
-                <p className="font-semibold">{t("freshness.noNewBeforeTitle")}</p>
+                <p className="font-semibold">
+                  {t("freshness.noNewBeforeTitle")}
+                </p>
                 <p className="mt-0.5 text-xs leading-6 text-foreground/70">
                   {t("freshness.noNewBeforeBody", {
                     date: detail.latestMessageAt
@@ -337,7 +397,9 @@ export function SatisfactionWorkspace({
           <div className="flex flex-wrap items-center gap-3">
             {(() => {
               const hasTranscript =
-                !!detail.imports.client || !!detail.imports.technical || detail.hasMessages;
+                !!detail.imports.client ||
+                !!detail.imports.technical ||
+                detail.hasMessages;
               const busy = analyzing !== null || satStream.isLoading;
               return (
                 <>
@@ -366,18 +428,39 @@ export function SatisfactionWorkspace({
                     )}
                     {t("analyzeAll")}
                   </Button>
+                  {detail.analysis && (
+                    <Button
+                      variant="outline"
+                      onClick={refreshStatuses}
+                      disabled={busy || refreshing}
+                      title={t("refresh.hint")}
+                    >
+                      {refreshing ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-4" />
+                      )}
+                      {t("refresh.button")}
+                    </Button>
+                  )}
                   {!hasTranscript && (
-                    <span className="text-xs text-muted-foreground">{t("uploadFirst")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("uploadFirst")}
+                    </span>
                   )}
                 </>
               );
             })()}
             {detail.analysis && (
               <div className="text-xs leading-5 text-muted-foreground">
-                <span>{t("freshness.analysisRunAt")}: {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}</span>
+                <span>
+                  {t("freshness.analysisRunAt")}:{" "}
+                  {detail.analysis.createdAt.slice(0, 16).replace("T", " ")}
+                </span>
                 <span className="mx-1.5">·</span>
                 <span>
-                  {t("freshness.lastMessageAt")}: {detail.latestMessageAt
+                  {t("freshness.lastMessageAt")}:{" "}
+                  {detail.latestMessageAt
                     ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
                     : t("freshness.unknownDate")}
                 </span>
@@ -389,7 +472,9 @@ export function SatisfactionWorkspace({
               onClick={toggleArchive}
               disabled={archiving}
               className="ms-auto text-muted-foreground hover:text-foreground"
-              title={selRow?.manuallyArchived ? t("restoreHint") : t("archiveHint")}
+              title={
+                selRow?.manuallyArchived ? t("restoreHint") : t("archiveHint")
+              }
             >
               {archiving ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -401,6 +486,51 @@ export function SatisfactionWorkspace({
               {selRow?.manuallyArchived ? t("restore") : t("archive")}
             </Button>
           </div>
+
+          {/* Status-refresh outcome — what the model closed and on what evidence */}
+          {refreshSummary && (
+            <div
+              className={cn(
+                "rounded-xl border px-4 py-3 text-sm",
+                refreshSummary.resolved.length > 0
+                  ? "border-cc-green/35 bg-green-dim/40"
+                  : "border-border bg-soft-1",
+              )}
+            >
+              <p className="flex items-center gap-2 text-xs font-semibold">
+                <RefreshCw className="size-3.5 text-cyan" />
+                {refreshSummary.checked === 0
+                  ? t("refresh.nothingToCheck")
+                  : refreshSummary.resolved.length > 0
+                    ? t("refresh.resolvedCount", {
+                        n: refreshSummary.resolved.length,
+                      })
+                    : t("refresh.noneResolved", { n: refreshSummary.checked })}
+                {!refreshSummary.hadNewMessages &&
+                  refreshSummary.checked > 0 && (
+                    <span className="font-normal text-muted-foreground">
+                      · {t("refresh.noNewMessages")}
+                    </span>
+                  )}
+              </p>
+              {refreshSummary.resolved.length > 0 && (
+                <ul className="mt-2 space-y-1.5">
+                  {refreshSummary.resolved.map((entry, i) => (
+                    <li key={i} className="text-[12px] leading-5">
+                      <span className="font-medium text-cc-green">
+                        ✓ {entry.issue}
+                      </span>
+                      {entry.evidence && (
+                        <span className="block text-[11px] text-muted-foreground">
+                          {entry.evidence}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {/* Live streaming preview while re-analyzing — the summary streams in;
               the full analysis below reloads once it finishes. */}
@@ -421,10 +551,11 @@ export function SatisfactionWorkspace({
             <AnalysisView
               analysis={detail.analysis}
               recommendationStatuses={detail.recommendationStatuses}
+              manualResolvedIssues={detail.manualResolvedIssues}
+              accountabilityStates={detail.accountabilityStates}
               canManageClients={canManageClients}
               history={detail.history}
               execution={execution}
-              media={media}
               clientId={selectedId}
               activeProjects={detail.activeProjects}
               brief={detail.brief}
@@ -434,7 +565,9 @@ export function SatisfactionWorkspace({
           )}
 
           {/* Real delivery work — delayed tasks tied to this client */}
-          {execution && <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />}
+          {execution && (
+            <ExecutionPanel snapshot={execution} t={t} tStages={tStages} />
+          )}
         </div>
       ) : null}
     </div>
@@ -452,8 +585,18 @@ const BUCKETS: {
 }[] = [
   { key: "atRisk", accent: "text-cc-red", bar: "bg-cc-red", dot: "bg-cc-red" },
   { key: "watch", accent: "text-amber", bar: "bg-amber", dot: "bg-amber" },
-  { key: "healthy", accent: "text-cc-green", bar: "bg-cc-green", dot: "bg-cc-green" },
-  { key: "pending", accent: "text-muted-foreground", bar: "bg-border", dot: "bg-muted-foreground/40" },
+  {
+    key: "healthy",
+    accent: "text-cc-green",
+    bar: "bg-cc-green",
+    dot: "bg-cc-green",
+  },
+  {
+    key: "pending",
+    accent: "text-muted-foreground",
+    bar: "bg-border",
+    dot: "bg-muted-foreground/40",
+  },
 ];
 
 function bucketOf(r: SatisfactionRow): BucketKey {
@@ -465,23 +608,37 @@ function bucketOf(r: SatisfactionRow): BucketKey {
 
 function SatisfactionOverview({
   rows,
-  searchKeywords,
+  options,
   financeMap,
   onSelect,
   onAnalyze,
+  canManageClients,
   initialRisk = false,
   t,
 }: {
   rows: SatisfactionRow[];
-  searchKeywords: Record<string, string>;
+  options: Props["options"];
   financeMap: ClientFinanceMap;
   onSelect: (id: string) => void;
   onAnalyze: (id: string) => Promise<void>;
+  canManageClients: boolean;
   initialRisk?: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const router = useRouter();
   const [view, setView] = useState<"board" | "table">("board");
   const [query, setQuery] = useState("");
+  // Bulk "تحديث الكل": run the status-refresh pass for every analyzed client in
+  // the current scope, a few at a time. Each client is one bounded model call
+  // through the same /refresh-status route, so failures are per-client and the
+  // rest of the sweep continues.
+  const [bulk, setBulk] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+    closed: number;
+    failed: number;
+  } | null>(null);
   // Active clients (≥1 non-archived project) vs lost/archived relationships.
   // Always defaults to "active" — including the dashboard deep-link. The
   // "عملاء معرضون للفقد" pill counts ACTIVE at-risk clients only (an already-lost
@@ -491,6 +648,18 @@ function SatisfactionOverview({
   // At-risk-only filter — toggled on when deep-linked from the dashboard
   // "عملاء معرضون للفقد" stat. Matches isClientAtRisk: negative sentiment OR score < 55.
   const [riskOnly, setRiskOnly] = useState(initialRisk);
+  // The picker already carries the searchable aliases. Reuse that one
+  // representation for the board instead of serializing every keyword twice.
+  const searchKeywords = useMemo(
+    () =>
+      new Map(
+        options.map((option) => [
+          option.value,
+          option.keywords?.toLowerCase() ?? "",
+        ]),
+      ),
+    [options],
+  );
 
   const counts = useMemo(
     () => ({
@@ -504,7 +673,8 @@ function SatisfactionOverview({
       risk: rows.filter(
         (r) =>
           bucketOf(r) === "atRisk" &&
-          (relation === "all" || r.hasActiveProject === (relation === "active")),
+          (relation === "all" ||
+            r.hasActiveProject === (relation === "active")),
       ).length,
     }),
     [rows, relation],
@@ -519,12 +689,58 @@ function SatisfactionOverview({
       if (q) {
         // Match the client name OR any linked identifier (project / group /
         // contract names + codes), mirroring the top picker.
-        const kw = searchKeywords[r.clientId]?.toLowerCase() ?? "";
-        if (!r.clientName.toLowerCase().includes(q) && !kw.includes(q)) return false;
+        const kw = searchKeywords.get(r.clientId) ?? "";
+        if (!r.clientName.toLowerCase().includes(q) && !kw.includes(q))
+          return false;
       }
       return true;
     });
   }, [rows, query, relation, riskOnly, searchKeywords]);
+
+  // Only clients that HAVE an analysis can be refreshed (the pass reconciles an
+  // existing snapshot; it never creates one). Scoped to the visible filter so
+  // "update all" means "update everything I'm looking at".
+  const refreshableIds = useMemo(
+    () => filtered.filter((r) => r.analyzedAt).map((r) => r.clientId),
+    [filtered],
+  );
+
+  const refreshAll = async () => {
+    if (bulk?.running || refreshableIds.length === 0) return;
+    const ids = [...refreshableIds];
+    const total = ids.length;
+    setBulk({ running: true, done: 0, total, closed: 0, failed: 0 });
+    // 3 concurrent workers — enough to finish a 50-client board in a few
+    // minutes without hammering the AI gateway.
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < ids.length) {
+        const clientId = ids[cursor++];
+        try {
+          const res = await fetch("/api/satisfaction/refresh-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientId }),
+          });
+          const data = (await res.json().catch(() => ({}))) as {
+            summary?: { resolved?: unknown[] };
+          };
+          if (!res.ok) throw new Error("failed");
+          const closedHere = data.summary?.resolved?.length ?? 0;
+          setBulk((b) =>
+            b ? { ...b, done: b.done + 1, closed: b.closed + closedHere } : b,
+          );
+        } catch {
+          setBulk((b) =>
+            b ? { ...b, done: b.done + 1, failed: b.failed + 1 } : b,
+          );
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
+    setBulk((b) => (b ? { ...b, running: false } : b));
+    router.refresh();
+  };
 
   if (rows.length === 0) {
     return (
@@ -593,6 +809,28 @@ function SatisfactionOverview({
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {canManageClients && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshAll}
+              disabled={bulk?.running || refreshableIds.length === 0}
+              title={t("refresh.bulkHint")}
+              className="h-9"
+            >
+              {bulk?.running ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              {bulk?.running
+                ? t("refresh.bulkProgress", {
+                    done: bulk.done,
+                    total: bulk.total,
+                  })
+                : t("refresh.bulkButton", { n: refreshableIds.length })}
+            </Button>
+          )}
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             {t("clientsCount", { n: filtered.length })}
             <MetricInfo
@@ -606,7 +844,9 @@ function SatisfactionOverview({
               onClick={() => setView("board")}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                view === "board" ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+                view === "board"
+                  ? "bg-soft-2 text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               <LayoutGrid className="size-3.5" />
@@ -617,7 +857,9 @@ function SatisfactionOverview({
               onClick={() => setView("table")}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                view === "table" ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+                view === "table"
+                  ? "bg-soft-2 text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               <TableProperties className="size-3.5" />
@@ -627,10 +869,47 @@ function SatisfactionOverview({
         </div>
       </div>
 
+      {/* Bulk-refresh outcome — kept visible after the sweep so the operator
+          sees how many findings were closed across the whole board. */}
+      {bulk && !bulk.running && (
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs",
+            bulk.closed > 0
+              ? "border-cc-green/35 bg-green-dim/40"
+              : "border-border bg-soft-1",
+          )}
+        >
+          <RefreshCw className="size-3.5 shrink-0 text-cyan" />
+          <span className="font-semibold">
+            {t("refresh.bulkDone", {
+              closed: bulk.closed,
+              clients: bulk.done - bulk.failed,
+            })}
+          </span>
+          {bulk.failed > 0 && (
+            <span className="text-muted-foreground">
+              · {t("refresh.bulkFailed", { n: bulk.failed })}
+            </span>
+          )}
+        </div>
+      )}
+
       {view === "board" ? (
-        <SatisfactionBoard rows={filtered} financeMap={financeMap} onSelect={onSelect} onAnalyze={onAnalyze} t={t} />
+        <SatisfactionBoard
+          rows={filtered}
+          financeMap={financeMap}
+          onSelect={onSelect}
+          onAnalyze={onAnalyze}
+          t={t}
+        />
       ) : (
-        <OverviewTable rows={filtered} financeMap={financeMap} onSelect={onSelect} t={t} />
+        <OverviewTable
+          rows={filtered}
+          financeMap={financeMap}
+          onSelect={onSelect}
+          t={t}
+        />
       )}
     </div>
   );
@@ -674,7 +953,9 @@ function SatisfactionBoard({
             <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
               <div className="flex items-center gap-2">
                 <span className={cn("size-2 rounded-full", b.dot)} />
-                <span className="text-sm font-semibold">{t(`board.${b.key}`)}</span>
+                <span className="text-sm font-semibold">
+                  {t(`board.${b.key}`)}
+                </span>
                 <span className="rounded-full bg-soft-2 px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
                   {items.length}
                 </span>
@@ -774,8 +1055,15 @@ function BoardCard({
           )}
         </p>
         <ClientFinanceBadges badge={finance} className="mt-0.5" />
-        <p className={cn("text-[11px] font-medium", err ? "text-cc-red" : accent)}>
-          {row.sentiment ? t(`sentiment.${row.sentiment}`) : t("board.noGroups")}
+        <p
+          className={cn(
+            "text-[11px] font-medium",
+            err ? "text-cc-red" : accent,
+          )}
+        >
+          {row.sentiment
+            ? t(`sentiment.${row.sentiment}`)
+            : t("board.noGroups")}
         </p>
         <div className="mt-1 flex items-center gap-1.5">
           <Dot on={row.hasClient} label={t("clientGroup")} />
@@ -803,7 +1091,11 @@ function BoardCard({
           title={row.stale ? t("board.staleHint") : t("board.analyze")}
           className="inline-flex shrink-0 items-center gap-1 rounded-md border border-cyan/30 bg-soft-2 px-2 py-1 text-[11px] font-medium text-cyan transition-colors hover:bg-cyan/10 disabled:opacity-60"
         >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="size-3.5" />
+          )}
           {row.stale ? t("board.reanalyze") : t("board.analyze")}
         </button>
       ) : (
@@ -832,12 +1124,19 @@ function OverviewTable({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="p-3 text-start font-medium">{t("col.client")}</th>
-                <th className="p-3 text-center font-medium">{t("col.groups")}</th>
+                <th className="p-3 text-start font-medium">
+                  {t("col.client")}
+                </th>
+                <th className="p-3 text-center font-medium">
+                  {t("col.groups")}
+                </th>
                 <th className="p-3 text-center font-medium">
                   <span className="inline-flex items-center justify-center gap-1">
                     {t("col.satisfaction")}
-                    <MetricInfo text={t("help.satisfaction")} label={t("col.satisfaction")} />
+                    <MetricInfo
+                      text={t("help.satisfaction")}
+                      label={t("col.satisfaction")}
+                    />
                   </span>
                 </th>
                 <th className="p-3 text-center font-medium">
@@ -849,10 +1148,15 @@ function OverviewTable({
                 <th className="p-3 text-center font-medium">
                   <span className="inline-flex items-center justify-center gap-1">
                     {t("col.sentiment")}
-                    <MetricInfo text={t("help.sentiment")} label={t("col.sentiment")} />
+                    <MetricInfo
+                      text={t("help.sentiment")}
+                      label={t("col.sentiment")}
+                    />
                   </span>
                 </th>
-                <th className="p-3 text-center font-medium">{t("col.analyzed")}</th>
+                <th className="p-3 text-center font-medium">
+                  {t("col.analyzed")}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -873,7 +1177,10 @@ function OverviewTable({
                           </span>
                         )}
                       </span>
-                      <ClientFinanceBadges badge={financeMap[r.clientId]} className="ms-1.5" />
+                      <ClientFinanceBadges
+                        badge={financeMap[r.clientId]}
+                        className="ms-1.5"
+                      />
                     </td>
                     <td className="p-3 text-center">
                       <span className="inline-flex gap-1">
@@ -881,7 +1188,12 @@ function OverviewTable({
                         <Dot on={r.hasTechnical} label={t("technicalGroup")} />
                       </span>
                     </td>
-                    <td className={cn("p-3 text-center font-semibold tabular-nums", tone.text)}>
+                    <td
+                      className={cn(
+                        "p-3 text-center font-semibold tabular-nums",
+                        tone.text,
+                      )}
+                    >
                       {r.satisfactionScore ?? "—"}
                     </td>
                     <td className="p-3 text-center text-xs tabular-nums text-muted-foreground">
@@ -890,7 +1202,7 @@ function OverviewTable({
                           {t("briefMissingShort")}
                         </span>
                       ) : (
-                        r.briefAdherenceScore ?? "—"
+                        (r.briefAdherenceScore ?? "—")
                       )}
                     </td>
                     <td className="p-3 text-center text-xs text-muted-foreground">
@@ -941,7 +1253,8 @@ function ExecutionPanel({
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <AlertTriangle className="size-4 text-amber" /> {t("execution.title")}
+            <AlertTriangle className="size-4 text-amber" />{" "}
+            {t("execution.title")}
           </p>
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
             <Explained text={t("metricTooltips.satisfaction_execOverdueCount")}>
@@ -958,7 +1271,9 @@ function ExecutionPanel({
             )}
           </div>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("execution.hint")}</p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          {t("execution.hint")}
+        </p>
 
         {/* by-stage distribution — shows whether delays cluster in one phase */}
         {snapshot.byStage.length > 0 && (
@@ -968,9 +1283,15 @@ function ExecutionPanel({
                 key={s.stage}
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-soft-1 px-2 py-1 text-[11px]"
               >
-                <span className="text-muted-foreground">{stageLabel(s.stage)}</span>
-                <Explained text={t("metricTooltips.satisfaction_execStageCount")}>
-                  <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">{s.count}</span>
+                <span className="text-muted-foreground">
+                  {stageLabel(s.stage)}
+                </span>
+                <Explained
+                  text={t("metricTooltips.satisfaction_execStageCount")}
+                >
+                  <span className="rounded-full bg-soft-2 px-1.5 font-medium tabular-nums">
+                    {s.count}
+                  </span>
                 </Explained>
               </span>
             ))}
@@ -998,7 +1319,9 @@ function ExecutionPanel({
                     {stageLabel(task.stage)}
                   </span>
                   {task.daysStuck !== null && (
-                    <Explained text={t("metricTooltips.satisfaction_execDaysStuck")}>
+                    <Explained
+                      text={t("metricTooltips.satisfaction_execDaysStuck")}
+                    >
                       <span className="tabular-nums text-amber">
                         {t("execution.daysStuck", { n: task.daysStuck })}
                       </span>
@@ -1015,7 +1338,11 @@ function ExecutionPanel({
 }
 
 // ---- Analysis view -------------------------------------------------------
-const REC_PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+const REC_PRIORITY_RANK: Record<string, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
 const REC_PRIORITY_TONE: Record<string, string> = {
   high: "bg-red-dim text-cc-red",
   medium: "bg-soft-2 text-amber",
@@ -1024,7 +1351,8 @@ const REC_PRIORITY_TONE: Record<string, string> = {
 
 type ExecutiveTab = "critical" | "timeline";
 type TimelineRange = "7" | "30" | "90" | "all";
-type EventFilter = "all" | "complaint" | "approval" | "delay" | "internal" | "decision";
+type EventFilter =
+  "all" | "complaint" | "approval" | "delay" | "internal" | "decision";
 type ClientTimelineEvent = {
   id: string;
   title: string;
@@ -1052,12 +1380,21 @@ function formatEventDate(date: string | null) {
   }).format(d);
 }
 
-function highlightCategory(type: string, text: string, audience: string): ClientTimelineEvent["category"] {
+function highlightCategory(
+  type: string,
+  text: string,
+  audience: string,
+): ClientTimelineEvent["category"] {
   const body = text.toLowerCase();
   if (audience === "team") return "internal";
   if (type === "complaint" || type === "escalation") return "complaint";
-  if (type === "milestone" || /اعتماد|اعتمد|وافق|موافقة|approved|approval/.test(body)) return "approval";
-  if (/تأخير|متأخر|اتأخر|تأخر|delay|late|deadline|موعد/.test(body)) return "delay";
+  if (
+    type === "milestone" ||
+    /اعتماد|اعتمد|وافق|موافقة|approved|approval/.test(body)
+  )
+    return "approval";
+  if (/تأخير|متأخر|اتأخر|تأخر|delay|late|deadline|موعد/.test(body))
+    return "delay";
   if (/قرار|تقرر|قرر|decided|decision/.test(body)) return "decision";
   return "decision";
 }
@@ -1093,13 +1430,16 @@ function buildClientTimelineEvents(
       source: h.audience === "team" ? "technical" : "client",
       category,
       critical,
-      severity: h.type === "escalation" ? "critical" : critical ? "high" : "medium",
+      severity:
+        h.type === "escalation" ? "critical" : critical ? "high" : "medium",
     });
   });
 
   if (execution && execution.overdueCount > 0) {
     const newestTaskDate =
-      execution.topTasks.map(taskEventDate).sort((a, b) => parseTime(b) - parseTime(a))[0] ?? null;
+      execution.topTasks
+        .map(taskEventDate)
+        .sort((a, b) => parseTime(b) - parseTime(a))[0] ?? null;
     events.push({
       id: "system-overdue-summary",
       title: `يوجد ${execution.overdueCount} مهام متأخرة في المشروع`,
@@ -1107,7 +1447,12 @@ function buildClientTimelineEvents(
       source: "system",
       category: "delay",
       critical: true,
-      severity: execution.overdueCount >= 8 ? "critical" : execution.overdueCount >= 4 ? "high" : "medium",
+      severity:
+        execution.overdueCount >= 8
+          ? "critical"
+          : execution.overdueCount >= 4
+            ? "high"
+            : "medium",
     });
 
     execution.topTasks.slice(0, 6).forEach((task, index) => {
@@ -1118,29 +1463,36 @@ function buildClientTimelineEvents(
         source: "system",
         category: "delay",
         critical: (task.delayDays ?? 0) >= 3 || (task.daysStuck ?? 0) >= 7,
-        severity: (task.delayDays ?? 0) >= 5 || (task.daysStuck ?? 0) >= 14 ? "high" : "medium",
+        severity:
+          (task.delayDays ?? 0) >= 5 || (task.daysStuck ?? 0) >= 14
+            ? "high"
+            : "medium",
       });
     });
   }
 
   // Contract activity-log events — holds/edits/close/renew as dated timeline
   // entries. Lost/Hold are critical; Renew reads as a positive (approval) beat.
-  (analysis.contractContext?.recentActivity ?? []).slice(0, 6).forEach((ev, index) => {
-    const isLost = /Lost/i.test(ev.logType);
-    const isRenew = /Renew/i.test(ev.logType);
-    const isHold = /HOLD/i.test(ev.logType) && !/LIFTED/i.test(ev.logType);
-    const critical = isLost || isHold;
-    const note = ev.notes ? ev.notes.replace(/\s+/g, " ").trim().slice(0, 120) : "";
-    events.push({
-      id: `contract-${index}`,
-      title: `${contractEventLabel(ev.logType)}${note ? ` — ${note}` : ""}`,
-      date: ev.logTime ?? analysis.createdAt,
-      source: "system",
-      category: isRenew ? "approval" : critical ? "complaint" : "decision",
-      critical,
-      severity: isLost ? "critical" : isHold ? "high" : "medium",
+  (analysis.contractContext?.recentActivity ?? [])
+    .slice(0, 6)
+    .forEach((ev, index) => {
+      const isLost = /Lost/i.test(ev.logType);
+      const isRenew = /Renew/i.test(ev.logType);
+      const isHold = /HOLD/i.test(ev.logType) && !/LIFTED/i.test(ev.logType);
+      const critical = isLost || isHold;
+      const note = ev.notes
+        ? ev.notes.replace(/\s+/g, " ").trim().slice(0, 120)
+        : "";
+      events.push({
+        id: `contract-${index}`,
+        title: `${contractEventLabel(ev.logType)}${note ? ` — ${note}` : ""}`,
+        date: ev.logTime ?? analysis.createdAt,
+        source: "system",
+        category: isRenew ? "approval" : critical ? "complaint" : "decision",
+        critical,
+        severity: isLost ? "critical" : isHold ? "high" : "medium",
+      });
     });
-  });
 
   return events.sort((a, b) => parseTime(b.date) - parseTime(a.date));
 }
@@ -1149,31 +1501,40 @@ function buildFallbackRecommendations(
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>,
   execution: ClientExecutionSnapshot | null,
   recommendationStatuses: RecommendationLiveStatus[],
+  manualResolvedIssues: string[],
 ) {
   const statusByIndex = new Map(
-    recommendationStatuses.map((status) => [status.recommendationIndex, status]),
+    recommendationStatuses.map((status) => [
+      status.recommendationIndex,
+      status,
+    ]),
   );
+  const resolvedIssues = new Set(manualResolvedIssues);
   const checkedAt = recommendationStatuses[0]?.checkedAt ?? analysis.createdAt;
-  const recs = analysis.recommendations.map((recommendation, recommendationIndex) => ({
-    ...recommendation,
-    liveStatus:
-      statusByIndex.get(recommendationIndex) ??
-      ({
-        recommendationIndex,
-        state: "needs_confirmation",
-        reason: "unverifiable",
-        checkedAt,
-        openTaskCount: null,
-        liveOverdueCount: null,
-        matchedTasks: [],
-      } satisfies RecommendationLiveStatus),
-  }));
+  const recs = analysis.recommendations.map(
+    (recommendation, recommendationIndex) => ({
+      ...recommendation,
+      liveStatus:
+        statusByIndex.get(recommendationIndex) ??
+        ({
+          recommendationIndex,
+          state: "needs_confirmation",
+          reason: "unverifiable",
+          checkedAt,
+          openTaskCount: null,
+          liveOverdueCount: null,
+          matchedTasks: [],
+        } satisfies RecommendationLiveStatus),
+    }),
+  );
   if (execution && execution.overdueCount > 0 && recs.length < 6) {
     const stage = execution.byStage[0]?.stage;
     recs.push({
-      priority: execution.overdueCount >= 4 ? ("high" as const) : ("medium" as const),
+      priority:
+        execution.overdueCount >= 4 ? ("high" as const) : ("medium" as const),
       issue: `يوجد ${execution.overdueCount} مهام متأخرة${stage ? `، أكثرها في مرحلة ${stage}` : ""}.`,
-      action: "تحديد مالك لكل مهمة متأخرة وإرسال موعد تسليم واضح للعميل خلال 48 ساعة.",
+      action:
+        "تحديد مالك لكل مهمة متأخرة وإرسال موعد تسليم واضح للعميل خلال 48 ساعة.",
       liveStatus: {
         recommendationIndex: recs.length,
         state: "open" as const,
@@ -1186,14 +1547,21 @@ function buildFallbackRecommendations(
     });
   }
   if (analysis.risks.length > 0 && recs.length < 6) {
+    const riskIssue = analysis.risks[0];
+    const riskResolved = resolvedIssues.has(riskIssue);
     recs.push({
       priority: "medium" as const,
-      issue: analysis.risks[0],
-      action: "تحويل الخطر إلى قرار متابعة: من المسؤول، ما الإجراء، وما موعد الإغلاق.",
+      issue: riskIssue,
+      action:
+        "تحويل الخطر إلى قرار متابعة: من المسؤول، ما الإجراء، وما موعد الإغلاق.",
       liveStatus: {
         recommendationIndex: recs.length,
-        state: "needs_confirmation" as const,
-        reason: "unverifiable" as const,
+        state: riskResolved
+          ? ("resolved" as const)
+          : ("needs_confirmation" as const),
+        reason: riskResolved
+          ? ("manual_confirmed" as const)
+          : ("unverifiable" as const),
         checkedAt,
         openTaskCount: null,
         liveOverdueCount: null,
@@ -1207,10 +1575,11 @@ function buildFallbackRecommendations(
 function AnalysisView({
   analysis,
   recommendationStatuses,
+  manualResolvedIssues,
+  accountabilityStates,
   canManageClients,
   history,
   execution,
-  media,
   clientId,
   activeProjects,
   brief,
@@ -1219,10 +1588,11 @@ function AnalysisView({
 }: {
   analysis: NonNullable<ClientSatisfactionDetail["analysis"]>;
   recommendationStatuses: RecommendationLiveStatus[];
+  manualResolvedIssues: string[];
+  accountabilityStates: AccountabilityLiveState[];
   canManageClients: boolean;
   history: AnalysisHistoryItem[];
   execution: ClientExecutionSnapshot | null;
-  media: ClientMediaExchange | null;
   clientId: string;
   activeProjects: ClientSatisfactionDetail["activeProjects"];
   brief: ClientSatisfactionDetail["brief"];
@@ -1244,8 +1614,14 @@ function AnalysisView({
     [clientEvents],
   );
   const recommendations = useMemo(
-    () => buildFallbackRecommendations(analysis, execution, recommendationStatuses),
-    [analysis, execution, recommendationStatuses],
+    () =>
+      buildFallbackRecommendations(
+        analysis,
+        execution,
+        recommendationStatuses,
+        manualResolvedIssues,
+      ),
+    [analysis, execution, recommendationStatuses, manualResolvedIssues],
   );
   // Deep-link scroll: cross-page links (e.g. the accountability cases feed) land
   // on `/satisfaction?client=X#accountability`. The target section only exists
@@ -1289,11 +1665,15 @@ function AnalysisView({
         <div className="flex items-start gap-2 rounded-lg border border-amber/35 bg-amber/10 px-3 py-2 text-[13px] text-amber">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <div>
-            <p className="font-semibold">{t("freshness.reanalyzedWithoutNew")}</p>
+            <p className="font-semibold">
+              {t("freshness.reanalyzedWithoutNew")}
+            </p>
             <p className="mt-0.5 text-xs leading-5 text-foreground/70">
               {t("freshness.resultBody", {
                 date: analysis.sourceLatestMessageAt
-                  ? analysis.sourceLatestMessageAt.slice(0, 16).replace("T", " ")
+                  ? analysis.sourceLatestMessageAt
+                      .slice(0, 16)
+                      .replace("T", " ")
                   : t("freshness.unknownDate"),
               })}
             </p>
@@ -1310,7 +1690,8 @@ function AnalysisView({
             href={`/satisfaction?client=${clientId}`}
             className="inline-flex items-center gap-1 font-medium text-cyan hover:underline"
           >
-            {t("history.backToCurrent")} <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
+            {t("history.backToCurrent")}{" "}
+            <ArrowRight className="size-3.5 ltr:rotate-0 rtl:rotate-180" />
           </Link>
         </div>
       )}
@@ -1334,92 +1715,102 @@ function AnalysisView({
               <span
                 className={cn(
                   "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                  analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                  analysis.satisfactionScore < 55 ||
+                    analysis.sentiment === "negative"
                     ? "border-cc-red/30 bg-red-dim text-cc-red"
-                    : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
+                    : analysis.satisfactionScore < 70 ||
+                        (execution?.overdueCount ?? 0) > 0
                       ? "border-amber/30 bg-amber/10 text-amber"
                       : "border-cc-green/30 bg-green-dim text-cc-green",
                 )}
               >
-                {analysis.satisfactionScore < 55 || analysis.sentiment === "negative"
+                {analysis.satisfactionScore < 55 ||
+                analysis.sentiment === "negative"
                   ? t("executive.riskHigh")
-                  : analysis.satisfactionScore < 70 || (execution?.overdueCount ?? 0) > 0
+                  : analysis.satisfactionScore < 70 ||
+                      (execution?.overdueCount ?? 0) > 0
                     ? t("executive.riskMedium")
                     : t("executive.riskLow")}
               </span>
             </Explained>
           </div>
           <div className="flex flex-wrap items-stretch gap-x-6 gap-y-4 border-t border-border pt-4">
-          {/* درجة الرضا — score + the one-line "why this score" directly beneath it */}
-          <div className="min-w-[16rem] flex-1 space-y-2.5">
-            <div className="flex items-center gap-3">
-              <Ring score={analysis.satisfactionScore} size={84} />
-              <div>
-                <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {t("satisfactionScore")}
-                  <MetricInfo
-                    text={t("metricTooltips.satisfaction_score")}
-                    label={t("satisfactionScore")}
-                  />
-                </p>
-                <p className={cn("text-sm font-semibold", tone.text)}>
-                  {sentimentLabel(analysis.sentiment)}
-                </p>
-                <p className="mt-1 inline-flex items-center gap-1 rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  <CalendarRange className="size-3" />
-                  {t(`window.${analysis.windowKind}`)}
-                  {range(analysis) && <span className="tabular-nums">· {range(analysis)}</span>}
-                </p>
-              </div>
-            </div>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {analysis.risks[0] ?? t("executive.noMajorRisk")}
-            </p>
-          </div>
-          {/* الالتزام بالبريف — score + its own one-line reason directly beneath it */}
-          <div className="min-w-[16rem] flex-1 space-y-2.5 sm:border-s sm:border-border sm:ps-6">
-            <div className="flex items-center gap-3">
-              {briefMissing ? (
-                <span className="flex size-16 shrink-0 items-center justify-center rounded-full border border-dashed border-amber/50 bg-amber/10 text-amber">
-                  <FileQuestion className="size-6" />
-                </span>
-              ) : (
-                <Ring score={analysis.briefAdherenceScore} size={64} />
-              )}
-              <div>
-                <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {t("briefAdherence")}
-                  <MetricInfo
-                    text={t("metricTooltips.satisfaction_briefAdherence")}
-                    label={t("briefAdherence")}
-                  />
-                </p>
-                {brief ? (
-                  <BriefManager
-                    brief={brief}
-                    clientId={clientId}
-                    activeProjects={activeProjects}
-                    t={t}
-                  />
-                ) : briefMissing ? (
-                  <p className="mt-1 text-[11px] font-medium text-amber">
-                    {t("briefMissingShort")}
+            {/* درجة الرضا — score + the one-line "why this score" directly beneath it */}
+            <div className="min-w-[16rem] flex-1 space-y-2.5">
+              <div className="flex items-center gap-3">
+                <Ring score={analysis.satisfactionScore} size={84} />
+                <div>
+                  <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {t("satisfactionScore")}
+                    <MetricInfo
+                      text={t("metricTooltips.satisfaction_score")}
+                      label={t("satisfactionScore")}
+                    />
                   </p>
-                ) : null}
+                  <p className={cn("text-sm font-semibold", tone.text)}>
+                    {sentimentLabel(analysis.sentiment)}
+                  </p>
+                  <p className="mt-1 inline-flex items-center gap-1 rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <CalendarRange className="size-3" />
+                    {t(`window.${analysis.windowKind}`)}
+                    {range(analysis) && (
+                      <span className="tabular-nums">· {range(analysis)}</span>
+                    )}
+                  </p>
+                </div>
               </div>
-            </div>
-            {!briefMissing && analysis.briefAdherence?.reason && (
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {analysis.briefAdherence.reason}
+                {analysis.risks[0] ?? t("executive.noMajorRisk")}
               </p>
-            )}
-          </div>
+            </div>
+            {/* الالتزام بالبريف — score + its own one-line reason directly beneath it */}
+            <div className="min-w-[16rem] flex-1 space-y-2.5 sm:border-s sm:border-border sm:ps-6">
+              <div className="flex items-center gap-3">
+                {briefMissing ? (
+                  <span className="flex size-16 shrink-0 items-center justify-center rounded-full border border-dashed border-amber/50 bg-amber/10 text-amber">
+                    <FileQuestion className="size-6" />
+                  </span>
+                ) : (
+                  <Ring score={analysis.briefAdherenceScore} size={64} />
+                )}
+                <div>
+                  <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {t("briefAdherence")}
+                    <MetricInfo
+                      text={t("metricTooltips.satisfaction_briefAdherence")}
+                      label={t("briefAdherence")}
+                    />
+                  </p>
+                  {brief ? (
+                    <BriefManager
+                      brief={brief}
+                      clientId={clientId}
+                      activeProjects={activeProjects}
+                      t={t}
+                    />
+                  ) : briefMissing ? (
+                    <p className="mt-1 text-[11px] font-medium text-amber">
+                      {t("briefMissingShort")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              {!briefMissing && analysis.briefAdherence?.reason && (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {analysis.briefAdherence.reason}
+                </p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {briefMissing && !brief && (
-        <MissingBriefPanel clientId={clientId} activeProjects={activeProjects} t={t} />
+        <MissingBriefPanel
+          clientId={clientId}
+          activeProjects={activeProjects}
+          t={t}
+        />
       )}
 
       {/* لماذا هذه الدرجة — per-requirement brief-adherence breakdown */}
@@ -1432,7 +1823,11 @@ function AnalysisView({
       )}
 
       {/* الصورة الكبرى — each source rolled up into one account-health verdict */}
-      <BigPicturePanel bigPicture={analysis.bigPicture} contract={analysis.contractContext} t={t} />
+      <BigPicturePanel
+        bigPicture={analysis.bigPicture}
+        contract={analysis.contractContext}
+        t={t}
+      />
 
       {/* المؤشرات — the risk/operational taxonomy */}
       <IndicatorsPanel indicators={analysis.indicators} t={t} />
@@ -1447,6 +1842,7 @@ function AnalysisView({
       <AccountabilityPanel
         accountability={analysis.accountability}
         teamContext={analysis.teamContext}
+        liveStates={accountabilityStates}
         t={t}
       />
 
@@ -1504,9 +1900,14 @@ function AnalysisView({
       )}
 
       {/* الوسائط والملفات المتبادلة — evidence of what was shared in the chats */}
-      <MediaExchangePanel media={media} t={t} />
+      <MediaExchangePanel clientId={clientId} t={t} />
 
-      <HistoryList history={history} clientId={clientId} shownId={analysis.id} t={t} />
+      <HistoryList
+        history={history}
+        clientId={clientId}
+        shownId={analysis.id}
+        t={t}
+      />
     </div>
   );
 }
@@ -1515,20 +1916,105 @@ function AnalysisView({
 // Evidence surfaced from the chats. We never stored the media BINARY (no
 // pixels/bytes), so the panel stays intentionally aggregate-only.
 function MediaExchangePanel({
-  media,
+  clientId,
   t,
 }: {
-  media: ClientMediaExchange | null;
+  clientId: string;
   t: ReturnType<typeof useTranslations>;
 }) {
-  if (!media || media.totalSharedItems === 0) return null;
+  const [media, setMedia] = useState<ClientMediaExchange | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const loadMedia = async () => {
+    if (loading || media) return;
+    setLoading(true);
+    setError(false);
+    try {
+      const response = await fetch(
+        `/api/satisfaction/media?client=${encodeURIComponent(clientId)}`,
+        {
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) throw new Error("media request failed");
+      const body = (await response.json()) as {
+        media?: ClientMediaExchange | null;
+      };
+      setMedia(body.media ?? null);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!media) {
+    return (
+      <Card className="border-border">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div>
+            <p className="inline-flex items-center gap-2 text-sm font-semibold">
+              <FileUp className="size-4 text-muted-foreground" />{" "}
+              {t("media.title")}
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+              {t("media.hintStored")}
+            </p>
+            {error && (
+              <p className="mt-2 text-xs text-cc-red">{t("media.loadError")}</p>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMedia}
+            disabled={loading}
+          >
+            {loading && <Loader2 className="size-3.5 animate-spin" />}
+            {loading ? t("media.loading") : t("media.load")}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (media.totalSharedItems === 0) {
+    return (
+      <Card className="border-border">
+        <CardContent className="p-4">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <FileUp className="size-4 text-muted-foreground" />{" "}
+            {t("media.title")}
+          </p>
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            {t("media.empty")}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   const categories = [
-    { icon: FileText, label: t("media.documents"), n: media.documentCount ?? media.documents.length },
-    { icon: FileQuestion, label: t("media.images"), n: media.imageCount ?? media.images.length + media.silentImages },
-    { icon: TrendingUp, label: t("media.videos"), n: media.videoCount ?? media.videos.length },
+    {
+      icon: FileText,
+      label: t("media.documents"),
+      n: media.documentCount ?? media.documents.length,
+    },
+    {
+      icon: FileQuestion,
+      label: t("media.images"),
+      n: media.imageCount ?? media.images.length + media.silentImages,
+    },
+    {
+      icon: TrendingUp,
+      label: t("media.videos"),
+      n: media.videoCount ?? media.videos.length,
+    },
     { icon: MessagesSquare, label: t("media.voiceNotes"), n: media.voiceNotes },
     { icon: Link2, label: t("media.links"), n: media.linkCount },
-    { icon: Link2, label: t("media.others"), n: media.otherCount ?? media.others.length },
+    {
+      icon: Link2,
+      label: t("media.others"),
+      n: media.otherCount ?? media.others.length,
+    },
   ].filter((category) => category.n > 0);
 
   return (
@@ -1536,13 +2022,18 @@ function MediaExchangePanel({
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <FileUp className="size-4 text-muted-foreground" /> {t("media.title")}
+            <FileUp className="size-4 text-muted-foreground" />{" "}
+            {t("media.title")}
           </p>
           <span className="text-[11px] text-muted-foreground">
-            {media.isPartial ? t("media.countAtLeast", { n: media.totalSharedItems }) : t("media.count", { n: media.totalSharedItems })}
+            {media.isPartial
+              ? t("media.countAtLeast", { n: media.totalSharedItems })
+              : t("media.count", { n: media.totalSharedItems })}
           </span>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{t("media.hintStored")}</p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          {t("media.hintStored")}
+        </p>
         <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
           {categories.map((category) => (
             <li
@@ -1613,7 +2104,12 @@ function HistoryList({
                   )}
                 >
                   <span className="flex items-center gap-2">
-                    <span className={cn("text-base font-bold tabular-nums", tone.text)}>
+                    <span
+                      className={cn(
+                        "text-base font-bold tabular-nums",
+                        tone.text,
+                      )}
+                    >
                       {h.satisfactionScore ?? "—"}
                     </span>
                     <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -1626,7 +2122,9 @@ function HistoryList({
                     )}
                   </span>
                   <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>{h.sentiment ? t(`sentiment.${h.sentiment}`) : "—"}</span>
+                    <span>
+                      {h.sentiment ? t(`sentiment.${h.sentiment}`) : "—"}
+                    </span>
                     <span className="tabular-nums text-muted-foreground/70">
                       {h.createdAt.slice(0, 10)}
                     </span>
@@ -1642,7 +2140,9 @@ function HistoryList({
             onClick={() => setExpanded((v) => !v)}
             className="mt-2.5 w-full rounded-lg border border-border bg-card py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:border-cyan/30 hover:text-foreground"
           >
-            {expanded ? t("history.showLess") : t("history.showMore", { count: hidden })}
+            {expanded
+              ? t("history.showLess")
+              : t("history.showMore", { count: hidden })}
           </button>
         )}
       </CardContent>
@@ -1664,7 +2164,12 @@ function EventSourceBadge({
         ? "border-amber/25 bg-amber/10 text-amber"
         : "border-border bg-soft-2 text-muted-foreground";
   return (
-    <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", tone)}>
+    <span
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        tone,
+      )}
+    >
       {t(`executive.source.${source}`)}
     </span>
   );
@@ -1685,7 +2190,12 @@ function EventCategoryBadge({
     decision: "bg-cyan/10 text-cyan",
   };
   return (
-    <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", tone[category])}>
+    <span
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[9px] font-semibold",
+        tone[category],
+      )}
+    >
       {t(`executive.category.${category}`)}
     </span>
   );
@@ -1729,9 +2239,12 @@ function CriticalEventsPanel({
       <CardContent className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <AlertTriangle className="size-4 text-amber" /> {t("executive.criticalTitle")}
+            <AlertTriangle className="size-4 text-amber" />{" "}
+            {t("executive.criticalTitle")}
           </p>
-          <span className="text-[11px] text-muted-foreground">{t("executive.latestFirst")}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t("executive.latestFirst")}
+          </span>
         </div>
         {events.length > 0 ? (
           <ul className="space-y-2">
@@ -1758,7 +2271,9 @@ function RecommendationsPanel({
   t,
 }: {
   recommendations: Array<
-    NonNullable<ClientSatisfactionDetail["analysis"]>["recommendations"][number] & {
+    NonNullable<
+      ClientSatisfactionDetail["analysis"]
+    >["recommendations"][number] & {
       liveStatus: RecommendationLiveStatus;
     }
   >;
@@ -1771,9 +2286,14 @@ function RecommendationsPanel({
   const sorted = [...recommendations].sort(
     (a, b) => REC_PRIORITY_RANK[a.priority] - REC_PRIORITY_RANK[b.priority],
   );
-  const active = sorted.filter((recommendation) => recommendation.liveStatus.state !== "resolved");
-  const resolved = sorted.filter((recommendation) => recommendation.liveStatus.state === "resolved");
-  const checkedAt = recommendations[0]?.liveStatus.checkedAt ?? analysisCreatedAt;
+  const active = sorted.filter(
+    (recommendation) => recommendation.liveStatus.state !== "resolved",
+  );
+  const resolved = sorted.filter(
+    (recommendation) => recommendation.liveStatus.state === "resolved",
+  );
+  const checkedAt =
+    recommendations[0]?.liveStatus.checkedAt ?? analysisCreatedAt;
 
   return (
     <Card className="border-cyan/30">
@@ -1781,15 +2301,24 @@ function RecommendationsPanel({
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <p className="inline-flex items-center gap-2 text-sm font-semibold">
-              <Lightbulb className="size-4 text-cyan" /> {t("executive.recommendationsTitle")}
+              <Lightbulb className="size-4 text-cyan" />{" "}
+              {t("executive.recommendationsTitle")}
             </p>
             <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
               {t("executive.recommendationStatus.liveHint")}
             </p>
           </div>
           <div className="text-end text-[10px] leading-5 text-muted-foreground">
-            <p>{t("executive.recommendationStatus.snapshotAt", { date: analysisCreatedAt.slice(0, 10) })}</p>
-            <p>{t("executive.recommendationStatus.checkedAt", { date: checkedAt.slice(0, 10) })}</p>
+            <p>
+              {t("executive.recommendationStatus.snapshotAt", {
+                date: analysisCreatedAt.slice(0, 10),
+              })}
+            </p>
+            <p>
+              {t("executive.recommendationStatus.checkedAt", {
+                date: checkedAt.slice(0, 10),
+              })}
+            </p>
           </div>
         </div>
         {recommendations.length > 0 ? (
@@ -1819,7 +2348,9 @@ function RecommendationsPanel({
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-[12px] font-semibold text-cc-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cc-green/40">
                   <span className="inline-flex items-center gap-2">
                     <CheckCircle2 className="size-4" />
-                    {t("executive.recommendationStatus.resolvedGroup", { n: resolved.length })}
+                    {t("executive.recommendationStatus.resolvedGroup", {
+                      n: resolved.length,
+                    })}
                   </span>
                   <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
                 </summary>
@@ -1914,7 +2445,8 @@ function RecommendationItem({
         ? AlertTriangle
         : HelpCircle;
   const canConfirm = canManageClients && status.state === "needs_confirmation";
-  const canClearConfirmation = canManageClients && status.reason === "manual_confirmed";
+  const canClearConfirmation =
+    canManageClients && status.reason === "manual_confirmed";
 
   const updateManualStatus = (state: "resolved" | "cleared") => {
     setStatusError(null);
@@ -1962,10 +2494,20 @@ function RecommendationItem({
             : t(`executive.recommendationStatus.state.${status.state}`)}
         </span>
       </div>
-      <p className={cn("text-[13px] font-medium leading-snug", resolved && "text-foreground/75")}>
+      <p
+        className={cn(
+          "text-[13px] font-medium leading-snug",
+          resolved && "text-foreground/75",
+        )}
+      >
         {recommendation.issue}
       </p>
-      <p className={cn("mt-1.5 flex items-start gap-1.5 text-[13px]", resolved ? "text-muted-foreground" : "text-cyan")}>
+      <p
+        className={cn(
+          "mt-1.5 flex items-start gap-1.5 text-[13px]",
+          resolved ? "text-muted-foreground" : "text-cyan",
+        )}
+      >
         <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
         {recommendation.action}
       </p>
@@ -1993,7 +2535,9 @@ function RecommendationItem({
               variant="outline"
               size="sm"
               disabled={isPending}
-              onClick={() => updateManualStatus(canConfirm ? "resolved" : "cleared")}
+              onClick={() =>
+                updateManualStatus(canConfirm ? "resolved" : "cleared")
+              }
               className="h-7 gap-1.5 px-2 text-[11px]"
             >
               {isPending ? (
@@ -2009,7 +2553,9 @@ function RecommendationItem({
             </Button>
           </div>
         )}
-        {statusError && <p className="mt-1.5 text-[11px] text-cc-red">{statusError}</p>}
+        {statusError && (
+          <p className="mt-1.5 text-[11px] text-cc-red">{statusError}</p>
+        )}
       </div>
     </li>
   );
@@ -2068,7 +2614,8 @@ function BigPicturePanel({
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                    CONTRACT_TARGET_TONE[contract.target] ?? "border-border bg-soft-2 text-muted-foreground",
+                    CONTRACT_TARGET_TONE[contract.target] ??
+                      "border-border bg-soft-2 text-muted-foreground",
                   )}
                 >
                   <FileSignature className="size-3" />
@@ -2080,7 +2627,8 @@ function BigPicturePanel({
               <span
                 className={cn(
                   "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                  ACCOUNT_HEALTH_TONE[bigPicture.accountHealth] ?? ACCOUNT_HEALTH_TONE.watch,
+                  ACCOUNT_HEALTH_TONE[bigPicture.accountHealth] ??
+                    ACCOUNT_HEALTH_TONE.watch,
                 )}
               >
                 {t(`accountHealth.${bigPicture.accountHealth}`)}
@@ -2089,11 +2637,16 @@ function BigPicturePanel({
           </div>
         </div>
         {bigPicture.headline && (
-          <p className="text-sm leading-relaxed text-muted-foreground">{bigPicture.headline}</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {bigPicture.headline}
+          </p>
         )}
         <div className="grid grid-cols-3 gap-3 border-t border-border pt-4">
           {dims.map((d) => (
-            <div key={d.key} className="flex flex-col items-center gap-1.5 text-center">
+            <div
+              key={d.key}
+              className="flex flex-col items-center gap-1.5 text-center"
+            >
               <Ring score={d.score} size={64} />
               <p className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
                 {t(`bigPicture.${d.key}`)}
@@ -2142,11 +2695,15 @@ function IndicatorGroup({
               {t(`indicator.${ind.code}`)}
             </span>
             {ind.date && (
-              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{ind.date}</span>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                {ind.date}
+              </span>
             )}
           </div>
           {ind.evidence && (
-            <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{ind.evidence}</p>
+            <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+              {ind.evidence}
+            </p>
           )}
         </li>
       ))}
@@ -2187,17 +2744,22 @@ function IndicatorsPanel({
               {red.length > 0 ? (
                 <IndicatorGroup items={red} severity="red" t={t} />
               ) : (
-                <p className="text-[12px] text-muted-foreground">{t("indicators.noneRisk")}</p>
+                <p className="text-[12px] text-muted-foreground">
+                  {t("indicators.noneRisk")}
+                </p>
               )}
             </div>
             <div>
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber">
-                {t("indicators.operational")} {yellow.length > 0 && `(${yellow.length})`}
+                {t("indicators.operational")}{" "}
+                {yellow.length > 0 && `(${yellow.length})`}
               </p>
               {yellow.length > 0 ? (
                 <IndicatorGroup items={yellow} severity="yellow" t={t} />
               ) : (
-                <p className="text-[12px] text-muted-foreground">{t("indicators.noneOperational")}</p>
+                <p className="text-[12px] text-muted-foreground">
+                  {t("indicators.noneOperational")}
+                </p>
               )}
             </div>
           </div>
@@ -2275,12 +2837,18 @@ function ClientSignalsPanel({
   t: ReturnType<typeof useTranslations>;
 }) {
   const reqKeys = ["new", "edit", "complaint", "inquiry", "approval"] as const;
-  const apprKeys = ["approved", "rejected", "changesRequested", "noResponse"] as const;
+  const apprKeys = [
+    "approved",
+    "rejected",
+    "changesRequested",
+    "noResponse",
+  ] as const;
   return (
     <Card className="border-cyan/20">
       <CardContent className="space-y-3 p-4">
         <p className="inline-flex items-center gap-2 text-sm font-semibold">
-          <MessagesSquare className="size-4 text-cyan" /> {t("signals.clientTitle")}
+          <MessagesSquare className="size-4 text-cyan" />{" "}
+          {t("signals.clientTitle")}
         </p>
         <div>
           <p className="mb-1.5 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2364,7 +2932,10 @@ function TechnicalSignalsPanel({
                 </p>
                 <ul className="space-y-1">
                   {signals.blockers.map((b, i) => (
-                    <li key={i} className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+                    <li
+                      key={i}
+                      className="flex items-start gap-1.5 text-[12px] text-muted-foreground"
+                    >
                       <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber" />
                       {b}
                     </li>
@@ -2379,7 +2950,10 @@ function TechnicalSignalsPanel({
                 </p>
                 <ul className="space-y-1">
                   {signals.delayCauses.map((d, i) => (
-                    <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
+                    <li
+                      key={i}
+                      className="flex items-center justify-between gap-2 text-[12px]"
+                    >
                       <span className="text-muted-foreground">{d.cause}</span>
                       <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
                         {t(`owner.${d.attributedTo}`)}
@@ -2418,10 +2992,26 @@ function TechnicalSignalsPanel({
 // each documented brief requirement and whether it was delivered. Renders only
 // when the analysis carried a brief (briefAdherence non-null).
 const BRIEF_STATUS_META = {
-  delivered: { icon: CheckCircle2, cls: "text-cc-green", badge: "border-cc-green/25 bg-cc-green/[0.07] text-cc-green" },
-  partial: { icon: MinusCircle, cls: "text-amber", badge: "border-amber/30 bg-amber/10 text-amber" },
-  not_delivered: { icon: XCircle, cls: "text-cc-red", badge: "border-cc-red/25 bg-red-dim/40 text-cc-red" },
-  no_evidence: { icon: HelpCircle, cls: "text-muted-foreground", badge: "border-border bg-soft-2 text-muted-foreground" },
+  delivered: {
+    icon: CheckCircle2,
+    cls: "text-cc-green",
+    badge: "border-cc-green/25 bg-cc-green/[0.07] text-cc-green",
+  },
+  partial: {
+    icon: MinusCircle,
+    cls: "text-amber",
+    badge: "border-amber/30 bg-amber/10 text-amber",
+  },
+  not_delivered: {
+    icon: XCircle,
+    cls: "text-cc-red",
+    badge: "border-cc-red/25 bg-red-dim/40 text-cc-red",
+  },
+  no_evidence: {
+    icon: HelpCircle,
+    cls: "text-muted-foreground",
+    badge: "border-border bg-soft-2 text-muted-foreground",
+  },
 } as const;
 
 function BriefAdherencePanel({
@@ -2435,7 +3025,12 @@ function BriefAdherencePanel({
 }) {
   const items = breakdown.items ?? [];
   // Order: problems first (not_delivered, partial), then delivered, then no_evidence.
-  const rank = { not_delivered: 0, partial: 1, delivered: 2, no_evidence: 3 } as const;
+  const rank = {
+    not_delivered: 0,
+    partial: 1,
+    delivered: 2,
+    no_evidence: 3,
+  } as const;
   const sorted = [...items].sort((a, b) => rank[a.status] - rank[b.status]);
   const counts = items.reduce(
     (m, it) => ((m[it.status] = (m[it.status] ?? 0) + 1), m),
@@ -2446,7 +3041,8 @@ function BriefAdherencePanel({
       <CardContent className="p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <ClipboardList className="size-4 text-muted-foreground" /> {t("briefBreakdown.title")}
+            <ClipboardList className="size-4 text-muted-foreground" />{" "}
+            {t("briefBreakdown.title")}
             {score !== null && (
               <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
                 {score}%
@@ -2454,7 +3050,9 @@ function BriefAdherencePanel({
             )}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {(["delivered", "partial", "not_delivered", "no_evidence"] as const).map((s) =>
+            {(
+              ["delivered", "partial", "not_delivered", "no_evidence"] as const
+            ).map((s) =>
               counts[s] ? (
                 <span
                   key={s}
@@ -2476,17 +3074,29 @@ function BriefAdherencePanel({
               const meta = BRIEF_STATUS_META[it.status];
               const Icon = meta.icon;
               return (
-                <li key={i} className="flex items-start gap-2.5 rounded-lg border border-border bg-soft-1 p-3">
+                <li
+                  key={i}
+                  className="flex items-start gap-2.5 rounded-lg border border-border bg-soft-1 p-3"
+                >
                   <Icon className={cn("mt-0.5 size-4 shrink-0", meta.cls)} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-[13px] font-medium leading-snug">{it.requirement}</span>
-                      <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium", meta.badge)}>
+                      <span className="text-[13px] font-medium leading-snug">
+                        {it.requirement}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium",
+                          meta.badge,
+                        )}
+                      >
                         {t(`briefBreakdown.status.${it.status}`)}
                       </span>
                     </div>
                     {it.note && (
-                      <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{it.note}</p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                        {it.note}
+                      </p>
                     )}
                   </div>
                 </li>
@@ -2494,7 +3104,9 @@ function BriefAdherencePanel({
             })}
           </ul>
         ) : (
-          <p className="text-[12px] text-muted-foreground">{t("briefBreakdown.empty")}</p>
+          <p className="text-[12px] text-muted-foreground">
+            {t("briefBreakdown.empty")}
+          </p>
         )}
       </CardContent>
     </Card>
@@ -2513,13 +3125,19 @@ function CausesPanel({
     <Card className="border-border">
       <CardContent className="p-4">
         <p className="mb-3 inline-flex items-center gap-2 text-sm font-semibold">
-          <GitBranch className="size-4 text-muted-foreground" /> {t("causes.title")}
+          <GitBranch className="size-4 text-muted-foreground" />{" "}
+          {t("causes.title")}
         </p>
         <ul className="space-y-2">
           {causes.map((c, i) => (
-            <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
+            <li
+              key={i}
+              className="rounded-lg border border-border bg-soft-1 p-3"
+            >
               <div className="mb-1 flex items-start justify-between gap-2">
-                <span className="text-[13px] font-medium leading-snug">{c.problem}</span>
+                <span className="text-[13px] font-medium leading-snug">
+                  {c.problem}
+                </span>
                 <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
                   {t(`owner.${c.owner}`)}
                 </span>
@@ -2551,12 +3169,15 @@ const BASIS_TONE: Record<string, string> = {
 function AccountabilityPanel({
   accountability,
   teamContext,
+  liveStates,
   t,
 }: {
   accountability: Analysis["accountability"];
   teamContext: Analysis["teamContext"];
+  liveStates: AccountabilityLiveState[];
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [showResolved, setShowResolved] = useState(false);
   if (!accountability || accountability.length === 0) return null;
   // name → employeeId, so person chips can deep-link to the accountability page.
   const idByName = new Map<string, string>();
@@ -2570,8 +3191,153 @@ function AccountabilityPanel({
   // the chip can deep-link to the real task instead of a code-search that misses.
   const taskByCode = new Map<string, { title: string; id: string | null }>();
   for (const st of teamContext?.stuckTasks ?? []) {
-    if (st.taskCode) taskByCode.set(st.taskCode, { title: st.title, id: st.taskId ?? null });
+    if (st.taskCode)
+      taskByCode.set(st.taskCode, { title: st.title, id: st.taskId ?? null });
   }
+  // Live reconciliation: a complaint whose evidence tasks are all done (or that
+  // was confirmed resolved) is a CLOSED problem — it sinks into a قسم منفصل
+  // instead of shouting forever from the frozen snapshot.
+  const stateByIndex = new Map(liveStates.map((s) => [s.index, s]));
+  const openRows = accountability
+    .map((row, i) => ({ row, i, live: stateByIndex.get(i) }))
+    .filter(({ live }) => live?.state !== "resolved");
+  const resolvedRows = accountability
+    .map((row, i) => ({ row, i, live: stateByIndex.get(i) }))
+    .filter(({ live }) => live?.state === "resolved");
+  const renderRow = ({
+    row,
+    i,
+    live,
+  }: {
+    row: Analysis["accountability"][number];
+    i: number;
+    live: AccountabilityLiveState | undefined;
+  }) => {
+    const resolved = live?.state === "resolved";
+    return (
+      <li
+        key={i}
+        className={cn(
+          "rounded-lg border p-3",
+          resolved
+            ? "border-cc-green/25 bg-card/70 opacity-80"
+            : "border-border bg-soft-1",
+        )}
+      >
+        {/* complaint → finding */}
+        <div className="flex items-start justify-between gap-2">
+          <span
+            className={cn(
+              "text-[13px] font-medium leading-snug",
+              resolved && "text-foreground/70",
+            )}
+          >
+            “{row.complaint}”
+          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {resolved && (
+              <span className="inline-flex items-center gap-1 rounded border border-cc-green/35 bg-green-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-green">
+                <CheckCircle2 className="size-3" />
+                {live?.reason === "manual_confirmed"
+                  ? t("accountability.resolvedConfirmed")
+                  : t("accountability.resolvedByTasks")}
+              </span>
+            )}
+            {row.service && (
+              <span className="rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {row.service}
+              </span>
+            )}
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                row.confidence === "high"
+                  ? "bg-emerald-400/10 text-emerald-300"
+                  : row.confidence === "low"
+                    ? "bg-soft-2 text-muted-foreground"
+                    : "bg-amber/10 text-amber",
+              )}
+            >
+              {t(`accountability.confidence.${row.confidence}`)}
+            </span>
+          </div>
+        </div>
+        <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-foreground/90">
+          <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0 text-cc-red" />
+          {row.finding}
+        </p>
+
+        {/* responsible people */}
+        {row.responsible.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {t("accountability.responsible")}:
+            </span>
+            {row.responsible.map((p, j) => {
+              const empId = idByName.get(p.name.replace(/\s+/g, " ").trim());
+              const chip = (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                    BASIS_TONE[p.basis] ??
+                      "border-border bg-soft-2 text-foreground",
+                  )}
+                >
+                  <Users className="size-3" />
+                  {p.name}
+                  <span className="opacity-70">
+                    · {t(`accountability.basis.${p.basis}`)}
+                  </span>
+                </span>
+              );
+              return empId ? (
+                <Link key={j} href={`/accountability?employee=${empId}`}>
+                  {chip}
+                </Link>
+              ) : (
+                <span key={j}>{chip}</span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* evidencing tasks */}
+        {row.taskCodes.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {t("accountability.tasks")}:
+            </span>
+            {row.taskCodes.map((code) => {
+              const task = taskByCode.get(code);
+              // Deep-link to the task detail when we know its id; otherwise
+              // fall back to the tasks search (RPC now matches task_code).
+              const href = task?.id
+                ? `/tasks/${task.id}`
+                : `/tasks?q=${encodeURIComponent(code)}`;
+              return (
+                <Link
+                  key={code}
+                  href={href}
+                  title={code}
+                  className="inline-flex max-w-[16rem] items-center gap-1 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ClipboardList className="size-3 shrink-0" />
+                  <span className="truncate">{task?.title ?? code}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        {/* evidence line */}
+        {row.evidence && (
+          <p className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-snug text-muted-foreground">
+            {row.evidence}
+          </p>
+        )}
+      </li>
+    );
+  };
   return (
     <Card id="accountability" className="scroll-mt-24 border-cc-red/25">
       <CardContent className="p-4">
@@ -2581,103 +3347,32 @@ function AccountabilityPanel({
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
           {t("accountability.hint")}
         </p>
-        <ul className="mt-3 space-y-3">
-          {accountability.map((row, i) => (
-            <li key={i} className="rounded-lg border border-border bg-soft-1 p-3">
-              {/* complaint → finding */}
-              <div className="flex items-start justify-between gap-2">
-                <span className="text-[13px] font-medium leading-snug">“{row.complaint}”</span>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {row.service && (
-                    <span className="rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {row.service}
-                    </span>
-                  )}
-                  <span
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-[10px] font-medium",
-                      row.confidence === "high"
-                        ? "bg-emerald-400/10 text-emerald-300"
-                        : row.confidence === "low"
-                          ? "bg-soft-2 text-muted-foreground"
-                          : "bg-amber/10 text-amber",
-                    )}
-                  >
-                    {t(`accountability.confidence.${row.confidence}`)}
-                  </span>
-                </div>
-              </div>
-              <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-foreground/90">
-                <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0 text-cc-red" />
-                {row.finding}
-              </p>
-
-              {/* responsible people */}
-              {row.responsible.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {t("accountability.responsible")}:
-                  </span>
-                  {row.responsible.map((p, j) => {
-                    const empId = idByName.get(p.name.replace(/\s+/g, " ").trim());
-                    const chip = (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                          BASIS_TONE[p.basis] ?? "border-border bg-soft-2 text-foreground",
-                        )}
-                      >
-                        <Users className="size-3" />
-                        {p.name}
-                        <span className="opacity-70">· {t(`accountability.basis.${p.basis}`)}</span>
-                      </span>
-                    );
-                    return empId ? (
-                      <Link key={j} href={`/accountability?employee=${empId}`}>
-                        {chip}
-                      </Link>
-                    ) : (
-                      <span key={j}>{chip}</span>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* evidencing tasks */}
-              {row.taskCodes.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {t("accountability.tasks")}:
-                  </span>
-                  {row.taskCodes.map((code) => {
-                    const task = taskByCode.get(code);
-                    // Deep-link to the task detail when we know its id; otherwise
-                    // fall back to the tasks search (RPC now matches task_code).
-                    const href = task?.id ? `/tasks/${task.id}` : `/tasks?q=${encodeURIComponent(code)}`;
-                    return (
-                      <Link
-                        key={code}
-                        href={href}
-                        title={code}
-                        className="inline-flex max-w-[16rem] items-center gap-1 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-                      >
-                        <ClipboardList className="size-3 shrink-0" />
-                        <span className="truncate">{task?.title ?? code}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* evidence line */}
-              {row.evidence && (
-                <p className="mt-2 border-t border-border/60 pt-2 text-[11px] leading-snug text-muted-foreground">
-                  {row.evidence}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
+        <ul className="mt-3 space-y-3">{openRows.map(renderRow)}</ul>
+        {resolvedRows.length > 0 && (
+          <div
+            className={cn(
+              openRows.length > 0 && "mt-3 border-t border-border/60 pt-3",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setShowResolved((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-cc-green"
+            >
+              <CheckCircle2 className="size-3.5" />
+              {t("accountability.resolvedGroup", { n: resolvedRows.length })}
+              <ChevronDown
+                className={cn(
+                  "size-3.5 transition-transform",
+                  showResolved && "rotate-180",
+                )}
+              />
+            </button>
+            {showResolved && (
+              <ul className="mt-2 space-y-3">{resolvedRows.map(renderRow)}</ul>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -2694,8 +3389,10 @@ function TeamRosterPanel({
   t: ReturnType<typeof useTranslations>;
 }) {
   const [open, setOpen] = useState(false);
-  if (!teamContext || !teamContext.hasData || teamContext.people.length === 0) return null;
-  const fmtDate = (iso: string | null) => (iso ? iso.slice(0, 10) : t("team.noActivity"));
+  if (!teamContext || !teamContext.hasData || teamContext.people.length === 0)
+    return null;
+  const fmtDate = (iso: string | null) =>
+    iso ? iso.slice(0, 10) : t("team.noActivity");
   return (
     <Card className="border-border">
       <CardContent className="p-4">
@@ -2714,7 +3411,10 @@ function TeamRosterPanel({
               </span>
             )}
             <ChevronDown
-              className={cn("size-4 transition-transform", open && "rotate-180")}
+              className={cn(
+                "size-4 transition-transform",
+                open && "rotate-180",
+              )}
             />
           </span>
         </button>
@@ -2748,17 +3448,32 @@ function TeamRosterPanel({
               <table className="w-full text-[12px]">
                 <thead>
                   <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
-                    <th className="py-1.5 pe-2 text-start font-medium">{t("team.person")}</th>
-                    <th className="px-2 text-start font-medium">{t("team.role")}</th>
-                    <th className="px-2 text-center font-medium">{t("team.open")}</th>
-                    <th className="px-2 text-center font-medium">{t("team.overdue")}</th>
-                    <th className="px-2 text-center font-medium">{t("team.actions30d")}</th>
-                    <th className="ps-2 text-start font-medium">{t("team.lastAction")}</th>
+                    <th className="py-1.5 pe-2 text-start font-medium">
+                      {t("team.person")}
+                    </th>
+                    <th className="px-2 text-start font-medium">
+                      {t("team.role")}
+                    </th>
+                    <th className="px-2 text-center font-medium">
+                      {t("team.open")}
+                    </th>
+                    <th className="px-2 text-center font-medium">
+                      {t("team.overdue")}
+                    </th>
+                    <th className="px-2 text-center font-medium">
+                      {t("team.actions30d")}
+                    </th>
+                    <th className="ps-2 text-start font-medium">
+                      {t("team.lastAction")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {teamContext.people.map((p) => (
-                    <tr key={p.employeeId} className="border-b border-border/50 last:border-0">
+                    <tr
+                      key={p.employeeId}
+                      className="border-b border-border/50 last:border-0"
+                    >
                       <td className="py-1.5 pe-2">
                         <Link
                           href={`/accountability?employee=${p.employeeId}`}
@@ -2767,8 +3482,12 @@ function TeamRosterPanel({
                           {p.name}
                         </Link>
                       </td>
-                      <td className="px-2 text-muted-foreground">{p.positionLabel}</td>
-                      <td className="px-2 text-center tabular-nums">{p.openTasks}</td>
+                      <td className="px-2 text-muted-foreground">
+                        {p.positionLabel}
+                      </td>
+                      <td className="px-2 text-center tabular-nums">
+                        {p.openTasks}
+                      </td>
                       <td
                         className={cn(
                           "px-2 text-center tabular-nums",
@@ -2780,7 +3499,9 @@ function TeamRosterPanel({
                       <td
                         className={cn(
                           "px-2 text-center tabular-nums",
-                          p.actions30d === 0 && p.overdueTasks > 0 && "font-medium text-cc-red",
+                          p.actions30d === 0 &&
+                            p.overdueTasks > 0 &&
+                            "font-medium text-cc-red",
                         )}
                       >
                         {p.actions30d}
@@ -2802,7 +3523,10 @@ function TeamRosterPanel({
                 </p>
                 <ul className="space-y-1">
                   {teamContext.gaps.map((g, i) => (
-                    <li key={i} className="flex items-start gap-1.5 text-[11px] text-foreground/90">
+                    <li
+                      key={i}
+                      className="flex items-start gap-1.5 text-[11px] text-foreground/90"
+                    >
                       <AlertTriangle className="mt-0.5 size-3 shrink-0 text-cc-red" />
                       {g}
                     </li>
@@ -2831,7 +3555,9 @@ function ClientTimelinePanel({
   filter: EventFilter;
   onRangeChange: (range: TimelineRange) => void;
   onFilterChange: (filter: EventFilter) => void;
-  sentimentTimeline: NonNullable<ClientSatisfactionDetail["analysis"]>["sentimentTimeline"];
+  sentimentTimeline: NonNullable<
+    ClientSatisfactionDetail["analysis"]
+  >["sentimentTimeline"];
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
@@ -2839,7 +3565,8 @@ function ClientTimelinePanel({
       <CardContent className="space-y-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="inline-flex items-center gap-2 text-sm font-semibold">
-            <History className="size-4 text-cyan" /> {t("executive.timelineTitle")}
+            <History className="size-4 text-cyan" />{" "}
+            {t("executive.timelineTitle")}
           </p>
           <div className="flex flex-wrap gap-2">
             <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
@@ -2850,7 +3577,9 @@ function ClientTimelinePanel({
                   onClick={() => onRangeChange(value)}
                   className={cn(
                     "rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors",
-                    range === value ? "bg-soft-2 text-foreground" : "text-muted-foreground hover:text-foreground",
+                    range === value
+                      ? "bg-soft-2 text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {t(`executive.range.${value}`)}
@@ -2861,7 +3590,16 @@ function ClientTimelinePanel({
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          {(["all", "complaint", "approval", "delay", "internal", "decision"] as const).map((value) => (
+          {(
+            [
+              "all",
+              "complaint",
+              "approval",
+              "delay",
+              "internal",
+              "decision",
+            ] as const
+          ).map((value) => (
             <button
               key={value}
               type="button"
@@ -2891,7 +3629,10 @@ function ClientTimelinePanel({
               {sentimentTimeline.map((pt, i) => {
                 const ptTone = scoreTone(pt.score);
                 return (
-                  <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                  <div
+                    key={i}
+                    className="flex flex-1 flex-col items-center gap-1"
+                  >
                     <div
                       className={cn("w-full rounded-t", ptTone.text)}
                       style={{
@@ -2901,7 +3642,9 @@ function ClientTimelinePanel({
                       }}
                       title={`${pt.period}: ${pt.score}`}
                     />
-                    <span className="text-[9px] text-muted-foreground">{pt.period.slice(5)}</span>
+                    <span className="text-[9px] text-muted-foreground">
+                      {pt.period.slice(5)}
+                    </span>
                   </div>
                 );
               })}
@@ -3020,11 +3763,25 @@ function BriefManager({
       {confirming && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-cc-red/30 bg-cc-red/5 px-2 py-1.5 text-[11px]">
           <span className="text-cc-red">{t("deleteBriefConfirm")}</span>
-          <Button size="sm" variant="destructive" onClick={remove} disabled={busy}>
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={remove}
+            disabled={busy}
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="size-3.5" />
+            )}
             {t("deleteBrief")}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+          >
             {t("cancel")}
           </Button>
         </div>
@@ -3034,8 +3791,14 @@ function BriefManager({
 
       {editing && (
         <div className="rounded-lg border border-border bg-soft-1 p-3">
-          <p className="mb-2 text-[11px] font-medium text-muted-foreground">{t("replaceBriefHint")}</p>
-          <BriefAttachForms clientId={clientId} activeProjects={activeProjects} t={t} />
+          <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+            {t("replaceBriefHint")}
+          </p>
+          <BriefAttachForms
+            clientId={clientId}
+            activeProjects={activeProjects}
+            t={t}
+          />
         </div>
       )}
     </div>
@@ -3073,7 +3836,11 @@ function MissingBriefPanel({
             </Link>
           )}
         </div>
-        <BriefAttachForms clientId={clientId} activeProjects={activeProjects} t={t} />
+        <BriefAttachForms
+          clientId={clientId}
+          activeProjects={activeProjects}
+          t={t}
+        />
       </CardContent>
     </Card>
   );
@@ -3108,7 +3875,11 @@ function BriefAttachForms({
     setError(null);
     setBusy("link");
     try {
-      const res = await attachClientBriefLinkAction({ clientId, projectId: projectId || undefined, url });
+      const res = await attachClientBriefLinkAction({
+        clientId,
+        projectId: projectId || undefined,
+        url,
+      });
       if (res.error) setError(res.error);
       else {
         setUrl("");
@@ -3163,91 +3934,120 @@ function BriefAttachForms({
 
   return (
     <div className="space-y-3">
-        {saved ? (
-          // Success prompt — explicit "re-analyze now" vs "later" (no auto run).
-          <div className="rounded-lg border border-cc-green/30 bg-green-dim/40 p-3">
-            <p className="inline-flex items-center gap-2 text-sm font-medium text-cc-green">
-              <CheckCircle2 className="size-4" /> {saved}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{t("briefSavedPrompt")}</p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              <Button size="sm" onClick={reanalyze} disabled={reanalyzing}>
-                {reanalyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                {t("reanalyzeNow")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setSaved(null);
-                  router.refresh();
-                }}
-                disabled={reanalyzing}
-              >
-                {t("later")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Project picker (shared by both inputs) */}
-            <select
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              disabled={activeProjects.length <= 1}
-              className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors focus:border-cyan/50 md:max-w-xs"
-            >
-              {noProject ? (
-                <option value="">{t("noActiveProject")}</option>
+      {saved ? (
+        // Success prompt — explicit "re-analyze now" vs "later" (no auto run).
+        <div className="rounded-lg border border-cc-green/30 bg-green-dim/40 p-3">
+          <p className="inline-flex items-center gap-2 text-sm font-medium text-cc-green">
+            <CheckCircle2 className="size-4" /> {saved}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("briefSavedPrompt")}
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <Button size="sm" onClick={reanalyze} disabled={reanalyzing}>
+              {reanalyzing ? (
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                activeProjects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))
+                <Sparkles className="size-4" />
               )}
-            </select>
+              {t("reanalyzeNow")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSaved(null);
+                router.refresh();
+              }}
+              disabled={reanalyzing}
+            >
+              {t("later")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Project picker (shared by both inputs) */}
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            disabled={activeProjects.length <= 1}
+            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm outline-none transition-colors focus:border-cyan/50 md:max-w-xs"
+          >
+            {noProject ? (
+              <option value="">{t("noActiveProject")}</option>
+            ) : (
+              activeProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))
+            )}
+          </select>
 
-            {/* Option A — paste a Google Doc / Sheet link */}
-            <form onSubmit={saveLink} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                dir="ltr"
-                placeholder={t("briefLinkPlaceholder")}
-                className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-cyan/50"
-              />
-              <Button type="submit" disabled={busy !== null || noProject || !url.trim()}>
-                {busy === "link" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                {t("saveBriefLink")}
-              </Button>
-            </form>
+          {/* Option A — paste a Google Doc / Sheet link */}
+          <form
+            onSubmit={saveLink}
+            className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              dir="ltr"
+              placeholder={t("briefLinkPlaceholder")}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-cyan/50"
+            />
+            <Button
+              type="submit"
+              disabled={busy !== null || noProject || !url.trim()}
+            >
+              {busy === "link" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Upload className="size-4" />
+              )}
+              {t("saveBriefLink")}
+            </Button>
+          </form>
 
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground/60">
-              <span className="h-px flex-1 bg-border" />
-              {t("or")}
-              <span className="h-px flex-1 bg-border" />
-            </div>
+          <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground/60">
+            <span className="h-px flex-1 bg-border" />
+            {t("or")}
+            <span className="h-px flex-1 bg-border" />
+          </div>
 
-            {/* Option B — upload a local file (txt / csv / xlsx) */}
-            <form onSubmit={uploadFile} className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".txt,.md,.csv,.tsv,.xlsx,.xls,text/plain,text/csv"
-                onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
-                className="h-9 rounded-md border border-border bg-background px-2 py-1 text-sm text-muted-foreground outline-none transition-colors file:me-2 file:rounded file:border-0 file:bg-soft-2 file:px-2 file:py-1 file:text-xs file:text-foreground focus:border-cyan/50"
-              />
-              <Button type="submit" variant="outline" disabled={busy !== null || noProject || !fileName}>
-                {busy === "file" ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}
-                {t("uploadBriefFile")}
-              </Button>
-            </form>
-            <p className="text-[11px] text-muted-foreground/70">{t("briefFileHint")}</p>
-          </>
-        )}
+          {/* Option B — upload a local file (txt / csv / xlsx) */}
+          <form
+            onSubmit={uploadFile}
+            className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]"
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,.md,.csv,.tsv,.xlsx,.xls,text/plain,text/csv"
+              onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+              className="h-9 rounded-md border border-border bg-background px-2 py-1 text-sm text-muted-foreground outline-none transition-colors file:me-2 file:rounded file:border-0 file:bg-soft-2 file:px-2 file:py-1 file:text-xs file:text-foreground focus:border-cyan/50"
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={busy !== null || noProject || !fileName}
+            >
+              {busy === "file" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <FileUp className="size-4" />
+              )}
+              {t("uploadBriefFile")}
+            </Button>
+          </form>
+          <p className="text-[11px] text-muted-foreground/70">
+            {t("briefFileHint")}
+          </p>
+        </>
+      )}
 
-        {error && <p className="text-xs text-cc-red">{error}</p>}
+      {error && <p className="text-xs text-cc-red">{error}</p>}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Building2,
   ChevronLeft,
@@ -28,6 +28,13 @@ import {
   type CaseStatus,
   type PersistedCaseMeta,
 } from "@/lib/accountability/case-status";
+import { getAccountabilityEvidenceAction } from "./_actions";
+import { EmployeeEvidence } from "./employee-evidence";
+import { ReviewerRigorSection } from "./reviewer-rigor-section";
+import { AccountabilityRangePicker } from "./accountability-range-picker";
+import { AccountabilityPeriodTrend } from "./accountability-period-trend";
+import type { AccountabilityEvidence, AccountabilityOverview } from "@/lib/data/accountability";
+import type { DashboardRange } from "@/lib/dashboard-range";
 import type {
   AccountabilityRoster,
   DepartmentSummary,
@@ -39,6 +46,7 @@ import type {
 } from "@/lib/data/accountability-cases";
 
 const PAGE_SIZE = 12;
+type TeamSortKey = "onTime" | "overdue" | "trend" | "name";
 
 const STATUS_TONE: Record<CaseStatus, string> = {
   open: "border-border bg-soft-1 text-muted-foreground",
@@ -52,13 +60,18 @@ export function TeamWorkspace({
   roster,
   cases,
   caseMeta,
+  reviewers,
+  reviewerRange,
 }: {
   roster: AccountabilityRoster;
   cases: AccountabilityCase[];
   caseMeta: Record<string, PersistedCaseMeta>;
+  reviewers: AccountabilityOverview["reviewers"];
+  reviewerRange: DashboardRange;
 }) {
   const [dept, setDept] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<TeamSortKey>("onTime");
   const [page, setPage] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -70,13 +83,21 @@ export function TeamWorkspace({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return roster.employees.filter((e) => {
+    const matches = roster.employees.filter((e) => {
       if (dept && e.department !== dept) return false;
       if (q && !e.name.toLowerCase().includes(q) && !(e.role ?? "").toLowerCase().includes(q))
         return false;
       return true;
     });
-  }, [roster.employees, dept, query]);
+    return [...matches].sort((a, b) => {
+      if (sortKey === "name") return a.name.localeCompare(b.name, "ar");
+      if (sortKey === "overdue") return b.overdueOwned - a.overdueOwned;
+      if (sortKey === "trend") {
+        return (a.periodTrend.difference ?? 999) - (b.periodTrend.difference ?? 999);
+      }
+      return (a.periodTrend.currentRate ?? 999) - (b.periodTrend.currentRate ?? 999);
+    });
+  }, [roster.employees, dept, query, sortKey]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clamped = Math.min(page, pageCount - 1);
@@ -92,6 +113,8 @@ export function TeamWorkspace({
 
   return (
     <div className="space-y-4">
+      <AccountabilityRangePicker range={reviewerRange} />
+
       {/* Summary */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <SummaryCard icon={Building2} tone="text-foreground" value={totals.depts} label="أقسام" />
@@ -150,6 +173,34 @@ export function TeamWorkspace({
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">الترتيب</span>
+        {([
+          ["onTime", "الالتزام"],
+          ["overdue", "الأكثر تأخّرًا"],
+          ["trend", "الأكثر تراجعًا"],
+          ["name", "الاسم"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              setSortKey(key);
+              setPage(0);
+            }}
+            aria-pressed={sortKey === key}
+            className={cn(
+              "rounded-[var(--radius-sm)] border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              sortKey === key
+                ? "border-cyan/40 bg-cyan-dim text-cyan"
+                : "border-border bg-card text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Employees table */}
       {filtered.length === 0 ? (
         <EmptyState
@@ -160,7 +211,7 @@ export function TeamWorkspace({
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[810px] text-sm">
               <thead>
                 <tr className="border-b border-border text-[11px] text-muted-foreground">
                   <th className="px-3 py-2 text-start font-medium">الموظف</th>
@@ -168,6 +219,7 @@ export function TeamWorkspace({
                   <th className="px-3 py-2 text-center font-medium">مفتوحة</th>
                   <th className="px-3 py-2 text-center font-medium">متأخرة</th>
                   <th className="px-3 py-2 text-center font-medium">الالتزام</th>
+                  <th className="px-3 py-2 text-center font-medium">مقارنة بالفترة السابقة</th>
                   <th className="px-3 py-2 text-center font-medium">الحالة</th>
                   <th className="px-3 py-2 text-center font-medium">الوضع</th>
                 </tr>
@@ -215,8 +267,16 @@ export function TeamWorkspace({
         </Card>
       )}
 
+      <ReviewerRigorSection
+        reviewers={reviewers}
+        range={reviewerRange}
+        onSelect={setOpenId}
+        showRangePicker={false}
+      />
+
       {openEmp && (
         <EmployeeModal
+          key={openEmp.id}
           e={openEmp}
           kase={caseByEmp.get(openEmp.id) ?? null}
           meta={caseMeta[openEmp.id] ?? null}
@@ -343,7 +403,10 @@ function EmployeeRow({
         {e.overdueOwned}
       </td>
       <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground" dir="ltr">
-        {e.onTimeRate === null ? "—" : `${e.onTimeRate}%`}
+        {e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`}
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        <AccountabilityPeriodTrend trend={e.periodTrend} showRates />
       </td>
       <td className="px-3 py-2.5 text-center">
         <SeverityPill severity={e.severity} />
@@ -374,6 +437,34 @@ function EmployeeModal({
   onClose: () => void;
 }) {
   const [showAdvice, setShowAdvice] = useState(false);
+  const [evidence, setEvidence] = useState<AccountabilityEvidence | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(true);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [evidenceAttempt, setEvidenceAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    getAccountabilityEvidenceAction(e.id)
+      .then((res) => {
+        if (!active) return;
+        if (res.ok) {
+          setEvidence(res.evidence);
+        } else {
+          setEvidence(null);
+          setEvidenceError(res.error);
+        }
+        setEvidenceLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setEvidence(null);
+        setEvidenceError("failed");
+        setEvidenceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [e.id, evidenceAttempt]);
 
   return (
     <div
@@ -418,8 +509,11 @@ function EmployeeModal({
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-4">
             <Metric label="مفتوحة" value={e.openTasks} />
             <Metric label="متأخرة" value={e.overdueOwned} tone={e.overdueOwned > 0 ? "text-cc-red" : undefined} />
-            <Metric label="الالتزام" value={e.onTimeRate === null ? "—" : `${e.onTimeRate}%`} />
-            <Metric label="الدرجة" value={e.score === null ? "—" : e.score} />
+            <Metric label="الالتزام في الفترة" value={e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`} />
+            <div className="bg-card px-2 py-2.5">
+              <AccountabilityPeriodTrend trend={e.periodTrend} prominent />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">مقارنة بالفترة السابقة</p>
+            </div>
           </div>
 
           {kase ? (
@@ -478,6 +572,18 @@ function EmployeeModal({
               </p>
             </div>
           )}
+
+          {/* Stage-level proof behind this employee's accountability metrics. */}
+          <EmployeeEvidence
+            evidence={evidence}
+            loading={evidenceLoading}
+            error={evidenceError}
+            onRetry={() => {
+              setEvidenceLoading(true);
+              setEvidenceError(null);
+              setEvidenceAttempt((attempt) => attempt + 1);
+            }}
+          />
 
           {/* Deep link to the full stage-level evidence */}
           <Link

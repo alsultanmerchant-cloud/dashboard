@@ -23,6 +23,8 @@ import {
   Copy,
   RefreshCw,
   Check,
+  MessageCircle,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -48,7 +50,18 @@ import {
   hardDeleteEmployeeAction,
   createAccountForEmployeeAction,
   resetEmployeePasswordAction,
+  linkEmployeeWhatsAppAction,
 } from "./_actions";
+
+// A WhatsApp identity resolved from client groups (phone + display name +
+// activity). The team links one to an employee to fill employee_profiles.phone.
+export type WaIdentityOption = {
+  phoneJid: string;
+  phone: string; // canonical last-9 for matching
+  displayName: string | null;
+  messageCount: number;
+  groupCount: number;
+};
 
 export type EmployeeRow = {
   id: string;
@@ -68,6 +81,12 @@ export type EmployeeRow = {
   team_leader_name: string | null;
   department_head_name: string | null;
   external_source: string | null;
+  whatsapp: {
+    phoneJid: string;
+    displayName: string | null;
+    messageCount: number;
+    groupCount: number;
+  } | null;
 };
 
 export type DeptOption = {
@@ -81,11 +100,13 @@ export function EmployeesAdmin({
   departments,
   positions: positionsProp,
   canManage,
+  waIdentities,
 }: {
   rows: EmployeeRow[];
   departments: DeptOption[];
   positions: PositionOption[];
   canManage: boolean;
+  waIdentities: WaIdentityOption[];
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -98,6 +119,18 @@ export function EmployeesAdmin({
   const [hardDeleting, setHardDeleting] = useState<EmployeeRow | null>(null);
   const [creatingAccount, setCreatingAccount] = useState<EmployeeRow | null>(null);
   const [resettingPassword, setResettingPassword] = useState<EmployeeRow | null>(null);
+  const [linkingWa, setLinkingWa] = useState<EmployeeRow | null>(null);
+
+  // Phones already linked to an employee — hidden from other rows' pickers so
+  // the same number can't be double-assigned.
+  const linkedPhones = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) {
+      const d = (r.phone ?? "").replace(/@.*$/, "").replace(/\D/g, "");
+      if (d) s.add(d.length >= 9 ? d.slice(-9) : d);
+    }
+    return s;
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -206,6 +239,7 @@ export function EmployeesAdmin({
                 <th className="px-3 py-2 text-start font-medium">المدير</th>
                 <th className="px-3 py-2 text-start font-medium">قائد الفريق</th>
                 <th className="px-3 py-2 text-start font-medium">رئيس القسم</th>
+                <th className="px-3 py-2 text-start font-medium">واتساب</th>
                 <th className="px-3 py-2 text-start font-medium">الحالة</th>
                 {canManage && <th className="px-3 py-2 text-start font-medium" />}
               </tr>
@@ -245,6 +279,13 @@ export function EmployeesAdmin({
                     <td className="px-3 py-2 text-xs">{r.manager_name ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">{r.team_leader_name ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">{r.department_head_name ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <WhatsAppCell
+                        row={r}
+                        canManage={canManage}
+                        onLink={() => setLinkingWa(r)}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-xs">
                       {terminated ? (
                         <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
@@ -384,7 +425,230 @@ export function EmployeesAdmin({
           }}
         />
       )}
+
+      {linkingWa && (
+        <LinkWhatsAppDialog
+          employee={linkingWa}
+          identities={waIdentities}
+          linkedPhones={linkedPhones}
+          onClose={() => setLinkingWa(null)}
+          onDone={() => {
+            setLinkingWa(null);
+            router.refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// Table cell: shows the linked WhatsApp identity (name + activity) or a "link"
+// affordance. The linkage is what feeds the satisfaction tagger, so surfacing
+// it inline lets the team see coverage at a glance.
+function WhatsAppCell({
+  row,
+  canManage,
+  onLink,
+}: {
+  row: EmployeeRow;
+  canManage: boolean;
+  onLink: () => void;
+}) {
+  if (row.whatsapp) {
+    return (
+      <button
+        type="button"
+        onClick={canManage ? onLink : undefined}
+        disabled={!canManage}
+        title={canManage ? "تغيير أو إزالة الربط" : undefined}
+        className={cn(
+          "inline-flex max-w-[180px] items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[11px] text-emerald-300",
+          canManage && "hover:border-emerald-400/70",
+        )}
+      >
+        <MessageCircle className="size-3 shrink-0" />
+        <span className="truncate">{row.whatsapp.displayName ?? "مرتبط"}</span>
+        <span className="shrink-0 text-emerald-300/60">
+          · {row.whatsapp.groupCount} مج
+        </span>
+      </button>
+    );
+  }
+  if (!canManage) return <span className="text-muted-foreground">—</span>;
+  return (
+    <button
+      type="button"
+      onClick={onLink}
+      className="inline-flex items-center gap-1 rounded-full border border-soft bg-card px-2 py-0.5 text-[11px] text-muted-foreground hover:border-cyan/50 hover:text-cyan"
+    >
+      <Link2 className="size-3" />
+      ربط واتساب
+    </button>
+  );
+}
+
+// Picker: search + ranked list of resolved WhatsApp identities. Ranking blends
+// name similarity to the employee with group breadth (staff span many client
+// groups; clients typically one), so the right person surfaces first. Already-
+// linked numbers are hidden unless they belong to THIS employee.
+function LinkWhatsAppDialog({
+  employee,
+  identities,
+  linkedPhones,
+  onClose,
+  onDone,
+}: {
+  employee: EmployeeRow;
+  identities: WaIdentityOption[];
+  linkedPhones: Set<string>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [pending, start] = useTransition();
+
+  const currentPhone = employee.whatsapp?.phoneJid ?? null;
+  const currentCanon = currentPhone
+    ? (() => {
+        const d = currentPhone.replace(/@.*$/, "").replace(/\D/g, "");
+        return d.length >= 9 ? d.slice(-9) : d;
+      })()
+    : null;
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z؀-ۿ0-9 ]/g, " ");
+  const empTokens = useMemo(
+    () => new Set(norm(employee.full_name).split(/\s+/).filter((w) => w.length > 1)),
+    [employee.full_name],
+  );
+
+  const ranked = useMemo(() => {
+    const q = norm(search).trim();
+    return identities
+      // Hide numbers already linked to a DIFFERENT employee.
+      .filter((i) => !linkedPhones.has(i.phone) || i.phone === currentCanon)
+      .filter((i) => {
+        if (!q) return true;
+        return (
+          (i.displayName ?? "").toLowerCase().includes(q) ||
+          i.phoneJid.includes(q.replace(/\D/g, ""))
+        );
+      })
+      .map((i) => {
+        const nameTokens = norm(i.displayName ?? "").split(/\s+/).filter(Boolean);
+        const overlap = nameTokens.filter((t) => empTokens.has(t)).length;
+        return { i, score: overlap * 1000 + i.groupCount };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 40)
+      .map((x) => x.i);
+  }, [identities, search, empTokens, linkedPhones, currentCanon]);
+
+  function link(phoneJid: string | null) {
+    start(async () => {
+      const res = await linkEmployeeWhatsAppAction({
+        employeeId: employee.id,
+        phoneJid,
+      });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(phoneJid ? "تم ربط رقم واتساب" : "تمت إزالة الربط");
+      onDone();
+    });
+  }
+
+  return (
+    <Modal onClose={onClose} title={`ربط واتساب: ${employee.full_name}`}>
+      <div className="space-y-3 p-4">
+        <div className="rounded-lg border border-soft bg-soft-1/40 p-3 text-[11px] text-muted-foreground">
+          اختر هوية واتساب التي تخص هذا الموظف. الربط يملأ رقم هاتفه ويجعل تحليل
+          رضا العملاء ينسب رسائله للفريق بدلًا من قراءتها كصوت العميل. الأرقام
+          التي تظهر في مجموعات أكثر غالبًا موظفون.
+        </div>
+
+        {employee.whatsapp && (
+          <div className="flex items-center justify-between rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2">
+            <div className="min-w-0 text-xs text-emerald-200">
+              <span className="font-medium">
+                {employee.whatsapp.displayName ?? "مرتبط حاليًا"}
+              </span>
+              <span dir="ltr" className="ms-2 text-emerald-200/70">
+                {employee.whatsapp.phoneJid.replace(/@.*$/, "")}
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => link(null)}
+              disabled={pending}
+              className="text-cc-red hover:text-cc-red"
+            >
+              إزالة الربط
+            </Button>
+          </div>
+        )}
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="ابحث بالاسم أو الرقم..."
+            className="ps-8"
+            autoFocus
+          />
+        </div>
+
+        <div className="max-h-72 space-y-1 overflow-y-auto">
+          {ranked.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              لا توجد هويات واتساب مطابقة.
+            </p>
+          ) : (
+            ranked.map((i) => {
+              const isCurrent = i.phone === currentCanon;
+              return (
+                <button
+                  key={i.phoneJid}
+                  type="button"
+                  onClick={() => !isCurrent && link(i.phoneJid)}
+                  disabled={pending || isCurrent}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-lg border border-soft bg-card px-3 py-2 text-start transition-colors",
+                    isCurrent
+                      ? "opacity-60"
+                      : "hover:border-cyan/50 hover:bg-cyan-dim/30",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium">
+                      {i.displayName ?? "بدون اسم"}
+                      {isCurrent && (
+                        <span className="ms-1.5 text-[10px] text-emerald-300">
+                          (الحالي)
+                        </span>
+                      )}
+                    </p>
+                    <p dir="ltr" className="truncate text-[10px] text-muted-foreground">
+                      {i.phoneJid.replace(/@.*$/, "")}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {i.groupCount} مجموعة · {i.messageCount} رسالة
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-soft px-4 py-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+          إغلاق
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

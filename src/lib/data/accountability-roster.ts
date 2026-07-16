@@ -1,7 +1,11 @@
 import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getAccountabilityOverview } from "@/lib/data/accountability";
+import {
+  getAccountabilityPeriodTrends,
+  getAccountabilityScorecard,
+  type AccountabilityPeriodTrend,
+} from "@/lib/data/accountability";
 import {
   getAccountabilityCases,
   type CaseSeverity,
@@ -12,8 +16,8 @@ import {
 // employees, non-leadership) grouped by department, each row tagged with its
 // live case severity if any. Feeds the /accountability team view: a department
 // grid + a searchable, paginated employee table whose rows open a full modal.
-// Reuses getAccountabilityOverview + getAccountabilityCases (both React-cached,
-// so this adds only one lightweight department lookup).
+// Reuses the compact cached scorecard plus the live case feed. The full
+// overview's coverage and AI-signal queries belong only to the scorecard lens.
 // =========================================================================
 
 export interface RosterEmployee {
@@ -26,6 +30,7 @@ export interface RosterEmployee {
   onTimeRate: number | null;
   score: number | null;
   reworkReturns30d: number;
+  periodTrend: AccountabilityPeriodTrend;
   severity: CaseSeverity | null; // null = no live case
   hasCase: boolean;
 }
@@ -62,9 +67,14 @@ select e.id, coalesce(d.name, '${UNASSIGNED}') as dept
   return map;
 }
 
-async function _getAccountabilityRoster(orgId: string): Promise<AccountabilityRoster> {
-  const [overview, cases, depts] = await Promise.all([
-    getAccountabilityOverview(orgId),
+async function _getAccountabilityRoster(
+  orgId: string,
+  from?: string,
+  to?: string,
+): Promise<AccountabilityRoster> {
+  const [scorecard, trends, cases, depts] = await Promise.all([
+    getAccountabilityScorecard(orgId),
+    getAccountabilityPeriodTrends(orgId, from, to),
     getAccountabilityCases(orgId),
     fetchDeptMap(orgId),
   ]);
@@ -72,7 +82,7 @@ async function _getAccountabilityRoster(orgId: string): Promise<AccountabilityRo
   const sevByEmp = new Map<string, CaseSeverity>();
   for (const c of cases.cases) if (c.employeeId) sevByEmp.set(c.employeeId, c.severity);
 
-  const employees: RosterEmployee[] = overview.rows.map((r) => ({
+  const employees: RosterEmployee[] = scorecard.map((r) => ({
     id: r.employeeId,
     name: r.fullName,
     role: r.positionLabel ?? r.jobTitle ?? null,
@@ -82,6 +92,7 @@ async function _getAccountabilityRoster(orgId: string): Promise<AccountabilityRo
     onTimeRate: r.onTimeRate,
     score: r.score,
     reworkReturns30d: r.reworkReturns30d,
+    periodTrend: trends[r.employeeId] ?? r.periodTrend,
     severity: sevByEmp.get(r.employeeId) ?? null,
     hasCase: sevByEmp.has(r.employeeId),
   }));

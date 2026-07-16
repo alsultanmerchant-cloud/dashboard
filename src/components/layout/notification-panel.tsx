@@ -83,7 +83,7 @@ export function NotificationPanel({
   return (
     <div
       ref={panelRef}
-      className="fixed z-50 top-16 start-3 end-3 max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200 sm:absolute sm:top-[calc(100%+12px)] sm:start-auto sm:end-0 sm:w-96 sm:max-w-[calc(100vw-1.5rem)]"
+      className="fixed z-50 top-16 start-3 end-3 max-h-[70vh] bg-card border border-border rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-in slide-in-from-top-2 fade-in-0 duration-200 sm:absolute sm:top-[calc(100%+12px)] sm:start-auto sm:end-0 sm:w-96 sm:max-w-[calc(100vw-1.5rem)] sm:rtl:start-0 sm:rtl:end-auto"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -106,7 +106,12 @@ export function NotificationPanel({
             <CheckCheck className="w-3.5 h-3.5" />
             {t("markAllRead")}
           </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label={tCommon("close")}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={onClose}
+            aria-label={tCommon("close")}
+          >
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -130,12 +135,18 @@ export function NotificationPanel({
               <div className="flex items-start gap-3">
                 <span className="text-base mt-0.5 shrink-0">{n.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-xs leading-relaxed ${n.isRead ? "text-muted-foreground" : "text-foreground"}`}>
+                  <p
+                    className={`text-xs leading-relaxed ${n.isRead ? "text-muted-foreground" : "text-foreground"}`}
+                  >
                     {n.title ?? n.message}
                   </p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">{timeAgo(n.timestamp)}</p>
+                  <p className="text-[10px] text-muted-foreground/70 mt-1">
+                    {timeAgo(n.timestamp)}
+                  </p>
                 </div>
-                {!n.isRead && <span className="w-2 h-2 rounded-full bg-cyan shrink-0 mt-1.5" />}
+                {!n.isRead && (
+                  <span className="w-2 h-2 rounded-full bg-cyan shrink-0 mt-1.5" />
+                )}
               </div>
             </button>
           ))

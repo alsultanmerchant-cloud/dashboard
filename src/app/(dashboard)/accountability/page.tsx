@@ -2,8 +2,10 @@ import { getTranslations } from "next-intl/server";
 import { requirePagePermission } from "@/lib/auth-server";
 import {
   getAccountabilityOverview,
+  getAccountabilityReviewers,
   getEmployeeAccountabilityEvidence,
 } from "@/lib/data/accountability";
+import { resolveRange } from "@/lib/dashboard-range";
 import { getAccountabilityCases } from "@/lib/data/accountability-cases";
 import { getAccountabilityRoster } from "@/lib/data/accountability-roster";
 import { syncAndGetCaseMeta } from "@/lib/data/accountability-cases-store";
@@ -19,11 +21,20 @@ import { AccountabilityShell } from "./accountability-shell";
 export default async function AccountabilityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ emp?: string; employee?: string; view?: string }>;
+  searchParams: Promise<{
+    emp?: string;
+    employee?: string;
+    view?: string;
+    preset?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
   const session = await requirePagePermission("people.analytics.view");
   const t = await getTranslations("AccountabilityPage");
-  const { emp, employee, view } = await searchParams;
+  const params = await searchParams;
+  const { emp, employee, view } = params;
+  const reviewerRange = resolveRange(params);
   const selectedId = emp ?? employee ?? null;
   const initialView =
     view === "scorecard" || selectedId
@@ -37,13 +48,14 @@ export default async function AccountabilityPage({
   // to what that lens needs. Scorecard-only data (full overview serialization,
   // finance badges, selected employee evidence) is loaded only for direct
   // scorecard links: ?view=scorecard or ?emp=...
-  const [cases, roster, caseMeta, scorecardData] = await Promise.all([
+  const [cases, roster, caseMeta, reviewers, scorecardData] = await Promise.all([
     getAccountabilityCases(session.orgId),
-    getAccountabilityRoster(session.orgId),
+    getAccountabilityRoster(session.orgId, reviewerRange.from, reviewerRange.to),
     syncAndGetCaseMeta(session.orgId),
+    getAccountabilityReviewers(session.orgId, reviewerRange.from, reviewerRange.to),
     needsScorecard
       ? Promise.all([
-          getAccountabilityOverview(session.orgId),
+          getAccountabilityOverview(session.orgId, reviewerRange.from, reviewerRange.to),
           selectedId
             ? getEmployeeAccountabilityEvidence(session.orgId, selectedId)
             : Promise.resolve(null),
@@ -64,6 +76,8 @@ export default async function AccountabilityPage({
         selectedId={selectedId}
         financeMap={scorecardData?.financeMap ?? null}
         initialView={initialView}
+        reviewers={reviewers}
+        reviewerRange={reviewerRange}
       />
     </div>
   );

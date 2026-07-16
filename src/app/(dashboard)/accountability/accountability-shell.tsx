@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { Gauge, Scale, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TeamWorkspace } from "./team-workspace";
 import { CasesWorkspace } from "./cases-workspace";
-import { AccountabilityWorkspace } from "./accountability-workspace";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type { AccountabilityCasesResult } from "@/lib/data/accountability-cases";
 import type { AccountabilityRoster } from "@/lib/data/accountability-roster";
@@ -14,6 +14,16 @@ import type {
   AccountabilityEvidence,
   AccountabilityOverview,
 } from "@/lib/data/accountability";
+import type { DashboardRange } from "@/lib/dashboard-range";
+
+// The scorecard is not rendered in the default team lens. Loading it only on
+// demand keeps its sizeable client workspace off the initial interaction.
+const AccountabilityWorkspace = dynamic(
+  () => import("./accountability-workspace").then((mod) => mod.AccountabilityWorkspace),
+  {
+    loading: () => <div className="h-96 animate-pulse rounded-xl border border-border bg-card/60" />,
+  },
+);
 
 type View = "team" | "cases" | "scorecard";
 
@@ -26,6 +36,8 @@ interface Props {
   selectedId: string | null;
   financeMap: ClientFinanceMap | null;
   initialView: View;
+  reviewers: AccountabilityOverview["reviewers"];
+  reviewerRange: DashboardRange;
 }
 
 // Three lenses on the same accountability data:
@@ -43,6 +55,8 @@ export function AccountabilityShell({
   selectedId,
   financeMap,
   initialView,
+  reviewers,
+  reviewerRange,
 }: Props) {
   const [view, setView] = useState<View>(initialView);
 
@@ -102,7 +116,13 @@ export function AccountabilityShell({
       </div>
 
       {view === "team" && (
-        <TeamWorkspace roster={roster} cases={cases.cases} caseMeta={caseMeta} />
+        <TeamWorkspace
+          roster={roster}
+          cases={cases.cases}
+          caseMeta={caseMeta}
+          reviewers={reviewers}
+          reviewerRange={reviewerRange}
+        />
       )}
       {view === "cases" && <CasesWorkspace data={cases} caseMeta={caseMeta} />}
       {view === "scorecard" && overview && financeMap && (
@@ -112,6 +132,7 @@ export function AccountabilityShell({
           evidence={evidence}
           selectedId={selectedId}
           financeMap={financeMap}
+          reviewerRange={reviewerRange}
         />
       )}
     </div>

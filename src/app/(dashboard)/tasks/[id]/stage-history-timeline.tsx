@@ -20,16 +20,21 @@ function formatDateTime(value: string, locale: string): string {
   });
 }
 
-// Wall-clock dwell for one stage segment. We compute it from
-// entered_at/exited_at rather than the stored `duration_seconds` column:
-// for Odoo-imported rows that column mirrors Odoo's working-hours
-// `total_duration_seconds` (nights + weekends stripped), which reads far
-// lower than Odoo's own calendar-based stage pills. Wall-clock matches the
-// pills (see page.tsx §TASK-INFO-1).
-function wallClockSeconds(
+// Working-hours dwell for one stage segment. Unlike the top pipeline bar
+// (StageStepper), which shows calendar wall-clock so a stuck task reads as
+// the real elapsed span, this "Task History" table is the SLA yardstick: it
+// must answer "did this stage stay inside its SLA?" the same way Rwasem does.
+// Rwasem/Odoo measures stage duration in WORKING HOURS (nights + weekends
+// stripped by the resource calendar), which we import into `duration_seconds`.
+// So we surface that column here to match Rwasem's Task Stage History Duration.
+// For local, non-Odoo moves `duration_seconds` may be absent — fall back to
+// the wall-clock span so those rows still show something.
+function stageDurationSeconds(
+  durationSeconds: number | null,
   enteredAt: string,
   exitedAt: string | null,
 ): number | null {
+  if (durationSeconds != null && durationSeconds > 0) return durationSeconds;
   if (!exitedAt) return null; // open segment (current stage)
   const secs =
     (new Date(exitedAt).getTime() - new Date(enteredAt).getTime()) / 1000;
@@ -78,7 +83,7 @@ export async function StageHistoryTimeline({
     <ol className="relative space-y-4 ms-3 border-s border-soft-2 ps-4">
       {rows.map((row) => {
         const duration = formatDuration(
-          wallClockSeconds(row.entered_at, row.exited_at),
+          stageDurationSeconds(row.duration_seconds, row.entered_at, row.exited_at),
           t,
         );
 

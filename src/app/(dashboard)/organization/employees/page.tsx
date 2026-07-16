@@ -4,6 +4,11 @@ import { requirePagePermission, hasPermission } from "@/lib/auth-server";
 import { listEmployees, listDepartments } from "@/lib/data/employees";
 import { listOrgRoleOptions } from "@/lib/data/organization";
 import { listPositions } from "@/lib/data/positions";
+import {
+  listResolvedWaIdentities,
+  canonicalWaPhone,
+  type WaIdentity,
+} from "@/lib/data/wa-identities";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { ROLE_LABELS } from "@/lib/labels";
@@ -22,12 +27,21 @@ export default async function EmployeesPage() {
   const tRoles = await getTranslations("RoleLabels");
   const canManage = hasPermission(session, "employees.manage");
 
-  const [employees, departments, roleOptions, positions] = await Promise.all([
-    listEmployees(session.orgId),
-    listDepartments(session.orgId),
-    listOrgRoleOptions(session.orgId),
-    listPositions(session.orgId),
-  ]);
+  const [employees, departments, roleOptions, positions, waIdentities] =
+    await Promise.all([
+      listEmployees(session.orgId),
+      listDepartments(session.orgId),
+      listOrgRoleOptions(session.orgId),
+      listPositions(session.orgId),
+      listResolvedWaIdentities(session.orgId),
+    ]);
+
+  // Match each employee's stored phone to a resolved WhatsApp identity so the
+  // row can show its linkage; unmatched employees get a "link" affordance.
+  const waByPhone = new Map<string, WaIdentity>();
+  for (const id of waIdentities) {
+    if (!waByPhone.has(id.phone)) waByPhone.set(id.phone, id);
+  }
 
   // Build a deptId → name lookup + manager_employee_id → full_name lookup so
   // the table can show resolved labels without extra round trips.
@@ -49,6 +63,8 @@ export default async function EmployeesPage() {
     const deptHeadId = e.department_id
       ? (deptHeadById.get(e.department_id) ?? null)
       : null;
+    const waKey = canonicalWaPhone(e.phone ?? null);
+    const wa = waKey ? (waByPhone.get(waKey) ?? null) : null;
     return {
       id: e.id,
       user_id: e.user_id ?? null,
@@ -70,6 +86,14 @@ export default async function EmployeesPage() {
       team_leader_name: teamLeaderId ? (empById.get(teamLeaderId) ?? null) : null,
       department_head_name: deptHeadId ? (empById.get(deptHeadId) ?? null) : null,
       external_source: (e as { external_source?: string | null }).external_source ?? null,
+      whatsapp: wa
+        ? {
+            phoneJid: wa.phoneJid,
+            displayName: wa.displayName,
+            messageCount: wa.messageCount,
+            groupCount: wa.groupCount,
+          }
+        : null,
     };
   });
 
@@ -116,6 +140,13 @@ export default async function EmployeesPage() {
           departments={deptOptions}
           positions={positions}
           canManage={canManage}
+          waIdentities={waIdentities.map((w) => ({
+            phoneJid: w.phoneJid,
+            phone: w.phone,
+            displayName: w.displayName,
+            messageCount: w.messageCount,
+            groupCount: w.groupCount,
+          }))}
         />
       )}
     </div>
