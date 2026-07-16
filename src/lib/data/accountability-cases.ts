@@ -5,6 +5,7 @@ import {
   getAccountabilityCaseOverview,
   type AccountabilityCaseOverview,
 } from "@/lib/data/accountability";
+import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-finance";
 
 // =========================================================================
 // Accountability Cases (/accountability — القضايا) — a Problems & Proof
@@ -60,6 +61,8 @@ export interface CaseProof {
   href: string | null; // deep link to the underlying evidence
   taskCode: string | null;
   clientName: string | null;
+  clientId: string | null; // canonical client — joins the case to contract value
+  stage: string | null; // raw stage enum on task proofs — feeds stage clustering
   date: string | null; // YYYY-MM-DD
   crossLinked: boolean; // this proof's task/client also appears in another stream
   // For execution overdue/stuck-task proofs: actions the responsible owner
@@ -68,6 +71,11 @@ export interface CaseProof {
   // "this task is late" into proof of neglect. null on non-task proofs.
   ownerActions?: number | null;
   windowDays?: number | null;
+  // Task proofs only: past its deadline (vs merely idle in its current stage).
+  // `windowDays` counts days in the CURRENT stage, so an overdue task that just
+  // changed stage has windowDays 0 — the two facts are independent and callers
+  // must not read staleness off the deadline or vice-versa.
+  overdue?: boolean;
 }
 
 export interface CaseLedger {
@@ -87,6 +95,21 @@ export interface CaseLedger {
   peerMedianActions: number; // team median 30-day actions
 }
 
+// What this case puts at stake, in the only unit a CEO budgets in: clients and
+// riyals. Deliberately NOT a loss forecast — a stuck task does not put a whole
+// contract at risk. `contractValue` is the live contract value of the clients
+// this person's stalled work touches: the exposure the case sits on top of.
+// `unpricedClients` are affected clients with no contract row at all (the
+// Odoo-only client population — value UNKNOWN, not zero, and never "churned").
+export interface CaseImpact {
+  clients: number; // distinct affected clients
+  pricedClients: number; // …of which carry a live contract (value is known)
+  unpricedClients: number; // …of which have no contract row → unknown value
+  contractValue: number; // SAR across pricedClients' live contracts
+  churnClients: string[]; // affected clients who threatened to leave
+  financeFlagClients: string[]; // affected clients with overdue installments
+}
+
 export interface AccountabilityCase {
   employeeId: string | null; // null = unmatched roster name (shown as text)
   employeeName: string;
@@ -97,6 +120,8 @@ export interface AccountabilityCase {
   severity: CaseSeverity;
   proof: CaseProof[]; // cross-linked first, then by stream
   clientNames: string[];
+  clientIds: string[]; // canonical ids of the affected clients
+  impact: CaseImpact;
   ledger: CaseLedger | null;
   sort: number;
 }
@@ -171,6 +196,13 @@ interface StuckRow {
   // task since it entered the current (stuck) stage — the "prove the problem"
   // number. 0 over many days = neglect.
   owner_actions_in_stage: number | null;
+  client_id: string | null;
+  client_name: string | null;
+}
+interface ClientValueRow {
+  client_id: string;
+  value: number;
+  live: number;
 }
 interface ContractRow {
   account_manager_name: string | null;
@@ -215,6 +247,7 @@ interface Bucket {
   proof: CaseProof[];
   tags: Set<string>;
   clients: Set<string>;
+  clientIds: Set<string>;
   hardSilent: boolean;
   // A case needs at least one MATERIAL proof (an overdue task, silence, rework,
   // a client complaint, a churn, a review problem, or a badly-stuck task).
@@ -249,7 +282,7 @@ async function _getAccountabilityCases(
   // The scorecard/reviewer overview is the execution backbone (already cached).
   // The four extra reads are per-stream evidence; each degrades to empty so a
   // single timeout can't take the page down.
-  const [ov, emps, ledger, stuck, contracts, analyses] = await Promise.all([
+  const [ov, emps, ledger, stuck, contracts, analyses, clientValues, financeMap] = await Promise.all([
     overview ? Promise.resolve(overview) : getAccountabilityCaseOverview(orgId),
     runSql<EmpRow>(empSql(org)).catch((e) => {
       console.error("[cases] empSql failed:", e);
@@ -270,6 +303,14 @@ async function _getAccountabilityCases(
     runSql<ClientAnalysisRow>(analysesSql(org)).catch((e) => {
       console.error("[cases] analysesSql failed:", e);
       return [] as ClientAnalysisRow[];
+    }),
+    runSql<ClientValueRow>(clientValueSql(org)).catch((e) => {
+      console.error("[cases] clientValueSql failed:", e);
+      return [] as ClientValueRow[];
+    }),
+    getClientFinanceMap(orgId).catch((e) => {
+      console.error("[cases] financeMap failed:", e);
+      return {} as ClientFinanceMap;
     }),
   ]);
 
@@ -329,7 +370,7 @@ async function _getAccountabilityCases(
     key: string,
     seed: () => Omit<
       Bucket,
-      "proof" | "tags" | "clients" | "hardSilent" | "material" | "execTaskCodes"
+      "proof" | "tags" | "clients" | "clientIds" | "hardSilent" | "material" | "execTaskCodes"
     >,
   ): Bucket => {
     let b = buckets.get(key);
@@ -339,6 +380,7 @@ async function _getAccountabilityCases(
         proof: [],
         tags: new Set(),
         clients: new Set(),
+        clientIds: new Set(),
         hardSilent: false,
         material: false,
         execTaskCodes: new Set(),
@@ -378,6 +420,8 @@ async function _getAccountabilityCases(
       if (s.overdue) anyOverdue = true;
       if (s.overdue || (s.days_in_stage ?? 0) >= STUCK_MATERIAL_DAYS) b.material = true;
       if (s.task_code) b.execTaskCodes.add(s.task_code);
+      if (s.client_id) b.clientIds.add(s.client_id);
+      if (s.client_name) b.clients.add(s.client_name);
       const d = s.days_in_stage ?? 0;
       const owner = s.owner_actions_in_stage ?? 0;
       // The proof: what did the OWNER actually do on this task while it sat stuck?
@@ -388,15 +432,18 @@ async function _getAccountabilityCases(
       b.proof.push({
         stream: "execution",
         kind: "overdue_task",
-        text: `${s.task_code ?? "مهمة"} — ${(s.title ?? "").trim() || "بدون عنوان"} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا${s.overdue ? " ومتأخرة عن موعدها" : ""} — ${actionTxt}.`,
+        text: `${s.task_code ?? "مهمة"} — ${(s.title ?? "").trim() || "بدون عنوان"}${s.client_name ? ` (${s.client_name})` : ""} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا${s.overdue ? " ومتأخرة عن موعدها" : ""} — ${actionTxt}.`,
         quote: null,
         href: `/tasks/${s.task_id}`,
         taskCode: s.task_code,
-        clientName: null,
+        clientName: s.client_name,
+        clientId: s.client_id,
+        stage: s.stage,
         date: s.last_action,
         crossLinked: false,
         ownerActions: owner,
         windowDays: d,
+        overdue: s.overdue,
       });
     }
     b.tags.add(anyOverdue ? "تأخير تسليم" : "تعثّر مرحلة");
@@ -421,6 +468,8 @@ async function _getAccountabilityCases(
         href: `/accountability`,
         taskCode: null,
         clientName: null,
+        clientId: null,
+        stage: null,
         date: l?.last_at ? l.last_at.slice(0, 10) : null,
         crossLinked: false,
       });
@@ -436,6 +485,8 @@ async function _getAccountabilityCases(
         href: `/accountability`,
         taskCode: null,
         clientName: null,
+        clientId: null,
+        stage: null,
         date: l?.last_at ? l.last_at.slice(0, 10) : null,
         crossLinked: false,
       });
@@ -454,6 +505,8 @@ async function _getAccountabilityCases(
         href: `/accountability`,
         taskCode: null,
         clientName: null,
+        clientId: null,
+        stage: null,
         date: null,
         crossLinked: false,
       });
@@ -477,6 +530,8 @@ async function _getAccountabilityCases(
           href: `/accountability`,
           taskCode: null,
           clientName: null,
+          clientId: null,
+          stage: null,
           date: null,
           crossLinked: false,
         });
@@ -498,6 +553,8 @@ async function _getAccountabilityCases(
           href: `/accountability`,
           taskCode: null,
           clientName: null,
+          clientId: null,
+          stage: null,
           date: null,
           crossLinked: false,
         });
@@ -526,6 +583,7 @@ async function _getAccountabilityCases(
         b.material = true;
         b.tags.add("شكوى عميل");
         b.clients.add(clientName);
+        if (a.client_id) b.clientIds.add(a.client_id);
         // Cross-link: this complaint cites a task actually stuck in their stage.
         const codes = Array.isArray(row.taskCodes) ? row.taskCodes : [];
         const crossLinked = codes.some((c) => b.execTaskCodes.has(c));
@@ -541,6 +599,8 @@ async function _getAccountabilityCases(
           href: `/satisfaction?client=${a.client_id}#accountability`,
           taskCode: codes[0] ?? null,
           clientName,
+          clientId: a.client_id,
+          stage: null,
           date: null,
           crossLinked,
         });
@@ -566,6 +626,7 @@ async function _getAccountabilityCases(
         b.material = true;
         b.tags.add("عميل مهدَّد");
         b.clients.add(clientName);
+        if (a.client_id) b.clientIds.add(a.client_id);
         const worst = churn[0];
         b.proof.push({
           stream: "commercial",
@@ -575,6 +636,8 @@ async function _getAccountabilityCases(
           href: `/satisfaction?client=${a.client_id}`,
           taskCode: null,
           clientName,
+          clientId: a.client_id,
+          stage: null,
           date: worst.date ?? null,
           crossLinked: false,
         });
@@ -583,6 +646,12 @@ async function _getAccountabilityCases(
   }
 
   // ---- assemble cases ----
+  const valueByClient = new Map(clientValues.map((c) => [c.client_id, c]));
+  const churnClientIds = new Set<string>();
+  for (const b of buckets.values())
+    for (const p of b.proof)
+      if (p.kind === "churn" && p.clientId) churnClientIds.add(p.clientId);
+
   const cases: AccountabilityCase[] = [];
   for (const b of buckets.values()) {
     if (b.proof.length === 0 || !b.material) continue;
@@ -631,12 +700,48 @@ async function _getAccountabilityCases(
         }
       : null;
 
+    // ---- impact: what this case puts at stake, in clients and riyals ----
+    const clientIds = [...b.clientIds];
+    let contractValue = 0;
+    let pricedClients = 0;
+    const churnClients: string[] = [];
+    const financeFlagClients: string[] = [];
+    for (const cid of clientIds) {
+      const v = valueByClient.get(cid);
+      if (v && v.live > 0) {
+        contractValue += v.value;
+        pricedClients += 1;
+      }
+      const nameOf = () =>
+        b.proof.find((p) => p.clientId === cid)?.clientName ?? "عميل";
+      if (churnClientIds.has(cid)) churnClients.push(nameOf());
+      if ((financeMap[cid]?.overdueInstallments ?? 0) > 0) financeFlagClients.push(nameOf());
+    }
+    const impact: CaseImpact = {
+      clients: clientIds.length,
+      pricedClients,
+      unpricedClients: clientIds.length - pricedClients,
+      contractValue: Math.round(contractValue),
+      churnClients,
+      financeFlagClients,
+    };
+
+    // Ranking. The old sort ordered by how WELL-PROVEN a case was — a metric
+    // about our detector, not about the business. A CEO ranks by what it costs,
+    // so impact leads: money at stake first, then corroboration as the
+    // tie-breaker (an expensive case we can prove outranks an expensive hunch).
+    // Value is log-scaled: a 100k client should outrank a 10k one, but not by
+    // 10× — a well-proven neglect case on a mid-size client still deserves air.
+    const valueScore = contractValue > 0 ? Math.log10(contractValue) * 60_000 : 0;
     const sort =
-      SEVERITY_RANK[severity] * 1_000_000 +
-      streams.length * 100_000 +
-      (crossLinked ? 50_000 : 0) +
-      (b.hardSilent ? 40_000 : 0) +
-      b.proof.length * 1_000 +
+      valueScore +
+      churnClients.length * 250_000 + // an actual leaving threat dominates
+      financeFlagClients.length * 40_000 +
+      impact.clients * 15_000 +
+      SEVERITY_RANK[severity] * 30_000 + // corroboration = tie-breaker, not lead
+      (crossLinked ? 20_000 : 0) +
+      (b.hardSilent ? 15_000 : 0) +
+      b.proof.length * 500 +
       (ledgerObj?.overdueOwned ?? 0) * 100;
 
     cases.push({
@@ -649,6 +754,8 @@ async function _getAccountabilityCases(
       severity,
       proof,
       clientNames: [...b.clients],
+      clientIds,
+      impact,
       ledger: ledgerObj,
       sort,
     });
@@ -753,9 +860,13 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
        (t.stage not in ('done','new') and t.planned_date < current_date) as overdue,
        (current_date - h.entered_at::date) as days_in_stage,
        max(tc.created_at)::date as last_action,
-       count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage
+       count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage,
+       coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
+       cl.name as client_name
   from attrib a
   join tasks t on t.id = a.task_id and t.archived_at is null
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
   join lateral (
     select h2.entered_at from task_stage_history h2
      where h2.task_id = t.id and h2.exited_at is null
@@ -769,7 +880,25 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
      (t.planned_date < current_date)
      or (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS}
    )
- group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at`;
+ group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at,
+          cl.id, cl.merged_into_client_id, cl.name`;
+}
+
+// Live contract value per CANONICAL client. Contracts sit on the sheet twin of
+// a merged client, so fold twin→canonical the same way client-finance does —
+// otherwise a merged client's work looks unpriced. Clients with no contract row
+// are absent here on purpose: unknown value, not zero.
+// See [[project_satisfaction_contract_bridge]].
+function clientValueSql(org: string): string {
+  return `
+select coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
+       sum(c.total_value)::float8 as value,
+       count(*)::int as live
+  from contracts c
+  join clients cl on cl.id = c.client_id
+ where c.organization_id = '${org}'
+   and c.status not in ('closed','lost')
+ group by 1`;
 }
 
 function contractsSql(org: string): string {

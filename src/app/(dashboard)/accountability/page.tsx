@@ -8,7 +8,11 @@ import {
 import { resolveRange } from "@/lib/dashboard-range";
 import { getAccountabilityCases } from "@/lib/data/accountability-cases";
 import { getAccountabilityRoster } from "@/lib/data/accountability-roster";
-import { syncAndGetCaseMeta } from "@/lib/data/accountability-cases-store";
+import {
+  getCaseHistorySummary,
+  syncAndGetCaseMeta,
+} from "@/lib/data/accountability-cases-store";
+import { buildCaseBrief } from "@/lib/data/accountability-case-brief";
 import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
 import { AccountabilityShell } from "./accountability-shell";
@@ -48,10 +52,11 @@ export default async function AccountabilityPage({
   // to what that lens needs. Scorecard-only data (full overview serialization,
   // finance badges, selected employee evidence) is loaded only for direct
   // scorecard links: ?view=scorecard or ?emp=...
-  const [cases, roster, caseMeta, reviewers, scorecardData] = await Promise.all([
+  const [cases, roster, caseMeta, history, reviewers, scorecardData] = await Promise.all([
     getAccountabilityCases(session.orgId),
     getAccountabilityRoster(session.orgId, reviewerRange.from, reviewerRange.to),
     syncAndGetCaseMeta(session.orgId),
+    getCaseHistorySummary(session.orgId).catch(() => null),
     getAccountabilityReviewers(session.orgId, reviewerRange.from, reviewerRange.to),
     needsScorecard
       ? Promise.all([
@@ -64,6 +69,13 @@ export default async function AccountabilityPage({
       : Promise.resolve(null),
   ]);
 
+  // The CEO band over the case feed: a pure fold over data already loaded.
+  const brief = buildCaseBrief(
+    cases,
+    history,
+    Object.fromEntries(Object.entries(caseMeta).map(([id, m]) => [id, m.timesSeen])),
+  );
+
   return (
     <div>
       <PageHeader title={t("title")} description={t("subtitle")} />
@@ -71,6 +83,7 @@ export default async function AccountabilityPage({
         roster={roster}
         cases={cases}
         caseMeta={caseMeta}
+        brief={brief}
         overview={scorecardData?.overview ?? null}
         evidence={scorecardData?.evidence ?? null}
         selectedId={selectedId}

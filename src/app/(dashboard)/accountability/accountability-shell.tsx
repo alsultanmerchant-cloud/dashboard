@@ -8,6 +8,7 @@ import { TeamWorkspace } from "./team-workspace";
 import { CasesWorkspace } from "./cases-workspace";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type { AccountabilityCasesResult } from "@/lib/data/accountability-cases";
+import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type { AccountabilityRoster } from "@/lib/data/accountability-roster";
 import type { PersistedCaseMeta } from "@/lib/accountability/case-status";
 import type {
@@ -31,6 +32,7 @@ interface Props {
   roster: AccountabilityRoster;
   cases: AccountabilityCasesResult;
   caseMeta: Record<string, PersistedCaseMeta>;
+  brief: CaseBrief;
   overview: AccountabilityOverview | null;
   evidence: AccountabilityEvidence | null;
   selectedId: string | null;
@@ -50,6 +52,7 @@ export function AccountabilityShell({
   roster,
   cases,
   caseMeta,
+  brief,
   overview,
   evidence,
   selectedId,
@@ -124,7 +127,7 @@ export function AccountabilityShell({
           reviewerRange={reviewerRange}
         />
       )}
-      {view === "cases" && <CasesWorkspace data={cases} caseMeta={caseMeta} />}
+      {view === "cases" && <CasesWorkspace data={cases} caseMeta={caseMeta} brief={brief} />}
       {view === "scorecard" && overview && financeMap && (
         <AccountabilityWorkspace
           key={selectedId ?? "none"}

@@ -175,6 +175,79 @@ export async function syncAndGetCaseMeta(
   }
 }
 
+// What moved since last week — the case feed's memory, for the overview band.
+//
+// HONESTY GATE: `first_seen_at` is bounded below by the day this store started
+// tracking (2026-07-09 in prod), NOT by when the problem actually began. On
+// live data 47 of 56 cases carry that exact day-zero stamp, so a naive
+// "first_seen >= today-7" would report ~every case as brand new — an artifact
+// of our own start date. So the day-zero cohort is excluded from `newCases` and
+// reported separately as `trackingSince`; a case only counts as NEW if it was
+// first detected strictly after tracking began. Until the store has more than
+// `windowDays` of history, `newCases` is honest-but-partial, and `partial` says so.
+export interface CaseHistorySummary {
+  windowDays: number;
+  trackingSince: string; // YYYY-MM-DD — day zero of the store
+  partial: boolean; // history shallower than the window → "new" undercounts age
+  newCases: number; // first detected after day zero, within the window
+  reopened: number; // resolved, then came back — the CEO's real signal
+  resolvedInWindow: number;
+  longRunning: number; // seen on 5+ distinct days and still current
+  decided: number; // cases a manager has actually ruled on (not left open)
+  openCases: number;
+}
+
+export async function getCaseHistorySummary(
+  orgId: string,
+  windowDays = 7,
+): Promise<CaseHistorySummary | null> {
+  const since = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
+
+  const [casesRes, eventsRes] = await Promise.all([
+    supabaseAdmin
+      .from("accountability_cases")
+      .select("first_seen_at, times_seen, is_current, status")
+      .eq("organization_id", orgId),
+    supabaseAdmin
+      .from("accountability_case_events")
+      .select("kind, created_at")
+      .eq("organization_id", orgId)
+      .gte("created_at", since),
+  ]);
+  if (casesRes.error) {
+    console.error("[cases-store] history summary failed:", casesRes.error.message);
+    return null;
+  }
+  const rows = (casesRes.data ?? []) as Array<{
+    first_seen_at: string;
+    times_seen: number;
+    is_current: boolean;
+    status: CaseStatus;
+  }>;
+  if (rows.length === 0) return null;
+
+  const dayZero = rows
+    .map((r) => r.first_seen_at.slice(0, 10))
+    .reduce((min, d) => (d < min ? d : min));
+  const events = (eventsRes.data ?? []) as Array<{ kind: string }>;
+
+  return {
+    windowDays,
+    trackingSince: dayZero,
+    partial: dayZero >= since,
+    // Strictly after day zero — a case stamped on day zero has unknown true age.
+    newCases: rows.filter((r) => {
+      const d = r.first_seen_at.slice(0, 10);
+      return d > dayZero && d >= since;
+    }).length,
+    reopened: events.filter((e) => e.kind === "reopened").length,
+    resolvedInWindow: events.filter((e) => e.kind === "resolved").length,
+    longRunning: rows.filter((r) => r.is_current && r.times_seen >= 5).length,
+    decided: rows.filter((r) => r.is_current && r.status !== "open").length,
+    openCases: rows.filter((r) => r.is_current && r.status === "open").length,
+  };
+}
+
 export async function getPersistedCaseMeta(
   orgId: string,
 ): Promise<Record<string, PersistedCaseMeta>> {

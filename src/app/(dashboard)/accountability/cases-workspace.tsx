@@ -17,12 +17,12 @@ import {
   Repeat,
   Scale,
   Sparkles,
-  Users,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { refreshAccountabilityScorecardAction, setCaseStatusAction } from "./_actions";
 import { Card, CardContent } from "@/components/ui/card";
+import { CaseOverview } from "./case-overview";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar } from "@/components/filter-bar";
 import { FilterChip } from "@/components/filter-chip";
@@ -34,6 +34,7 @@ import {
   type CaseStatus,
   type PersistedCaseMeta,
 } from "@/lib/accountability/case-status";
+import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type {
   AccountabilityCase,
   AccountabilityCasesResult,
@@ -71,9 +72,11 @@ const STATUS_TONE: Record<CaseStatus, string> = {
 export function CasesWorkspace({
   data,
   caseMeta,
+  brief,
 }: {
   data: AccountabilityCasesResult;
   caseMeta: Record<string, PersistedCaseMeta>;
+  brief: CaseBrief;
 }) {
   const [refreshing, startRefresh] = useTransition();
   const [query, setQuery] = useState("");
@@ -105,13 +108,6 @@ export function CasesWorkspace({
   const shown = filtered.slice(0, visible);
   const canLoadMore = shown.length < filtered.length;
 
-  const stats = [
-    { key: "critical", label: "قضايا حرجة", value: data.meta.critical, tone: "text-cc-red", icon: AlertOctagon },
-    { key: "proven", label: "قضايا مثبتة", value: data.meta.proven, tone: "text-amber", icon: AlertTriangle },
-    { key: "signal", label: "إشارات", value: data.meta.signal, tone: "text-cyan", icon: Info },
-    { key: "people", label: "موظفون بقضايا", value: data.meta.people, tone: "text-foreground", icon: Users },
-  ];
-
   const severityChips: { key: CaseSeverity | "all"; label: string; count: number }[] = [
     { key: "all", label: "الكل", count: data.cases.length },
     { key: "critical", label: "حرجة", count: data.meta.critical },
@@ -134,19 +130,7 @@ export function CasesWorkspace({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {stats.map((s) => (
-          <Card key={s.key}>
-            <CardContent className="p-4">
-              <s.icon className={cn("size-4", s.tone)} />
-              <p className={cn("mt-2 text-2xl font-bold tabular-nums", s.tone)} dir="ltr">
-                {s.value}
-              </p>
-              <p className="text-[11px] text-muted-foreground">{s.label}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <CaseOverview brief={brief} />
 
       <FilterBar
         className="mb-0"
