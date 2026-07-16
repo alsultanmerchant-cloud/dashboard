@@ -251,13 +251,27 @@ export async function getCaseHistorySummary(
 export async function getPersistedCaseMeta(
   orgId: string,
 ): Promise<Record<string, PersistedCaseMeta>> {
-  const { data, error } = await supabaseAdmin
-    .from("accountability_cases")
-    .select(
-      "employee_id, status, times_seen, first_seen_at, last_seen_at, is_current, decided_by, decided_at, decision_note, decider:employee_profiles!accountability_cases_decided_by_fkey(full_name)",
-    )
-    .eq("organization_id", orgId);
+  const [casesRes, reopenRes] = await Promise.all([
+    supabaseAdmin
+      .from("accountability_cases")
+      .select(
+        "id, employee_id, status, times_seen, first_seen_at, last_seen_at, is_current, decided_by, decided_at, decision_note, decider:employee_profiles!accountability_cases_decided_by_fkey(full_name)",
+      )
+      .eq("organization_id", orgId),
+    // Real recurrence: a case that was resolved and came back. `times_seen` is
+    // only a daily-poll counter and must not be read as recurrence.
+    supabaseAdmin
+      .from("accountability_case_events")
+      .select("case_id")
+      .eq("organization_id", orgId)
+      .eq("kind", "reopened"),
+  ]);
+  const { data, error } = casesRes;
   if (error) throw error;
+  const reopensByCase = new Map<string, number>();
+  for (const e of (reopenRes.data ?? []) as Array<{ case_id: string }>) {
+    reopensByCase.set(e.case_id, (reopensByCase.get(e.case_id) ?? 0) + 1);
+  }
   const map: Record<string, PersistedCaseMeta> = {};
   for (const r of (data ?? []) as unknown as Array<
     CaseRow & { decider: { full_name: string | null } | { full_name: string | null }[] | null }
@@ -266,6 +280,7 @@ export async function getPersistedCaseMeta(
     map[r.employee_id] = {
       status: r.status,
       timesSeen: r.times_seen,
+      reopenCount: reopensByCase.get(r.id) ?? 0,
       firstSeenAt: r.first_seen_at,
       lastSeenAt: r.last_seen_at,
       isCurrent: r.is_current,

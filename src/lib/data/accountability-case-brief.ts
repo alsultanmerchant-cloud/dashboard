@@ -4,6 +4,7 @@ import type {
   AccountabilityCasesResult,
 } from "@/lib/data/accountability-cases";
 import type { CaseHistorySummary } from "@/lib/data/accountability-cases-store";
+import type { PersistedCaseMeta } from "@/lib/accountability/case-status";
 
 // =========================================================================
 // Case Brief — the CEO layer over the القضايا feed.
@@ -43,7 +44,11 @@ export interface CaseAsk {
   contractValue: number;
   clientNames: string[]; // the ask's own client first
   moreClients: number;
-  timesSeenNote: string | null;
+  // Set ONLY when the case was resolved and came back. Deliberately not derived
+  // from `times_seen` — that is a daily-poll counter, identical (6) on 42 of 52
+  // live cases, and labelling it "تكرّرت N×" claimed a recurrence that never
+  // happened. Real recurrence is rare, so this badge stays meaningful.
+  recurrenceNote: string | null;
 }
 
 export interface CasePattern {
@@ -208,15 +213,16 @@ function deriveAsk(c: AccountabilityCase): {
   };
 }
 
-function fmtTimesSeen(timesSeen: number | undefined): string | null {
-  if (!timesSeen || timesSeen < 3) return null;
-  return `تكرّرت ${timesSeen}× دون أن تُغلق`;
+function fmtRecurrence(meta: PersistedCaseMeta | undefined): string | null {
+  const n = meta?.reopenCount ?? 0;
+  if (n < 1) return null;
+  return n === 1 ? "عادت بعد إغلاقها" : `عادت بعد إغلاقها ${n}×`;
 }
 
 export function buildCaseBrief(
   result: AccountabilityCasesResult,
   history: CaseHistorySummary | null,
-  timesSeenByEmp: Record<string, number> = {},
+  caseMeta: Record<string, PersistedCaseMeta> = {},
 ): CaseBrief {
   const cases = result.cases;
 
@@ -259,7 +265,7 @@ export function buildCaseBrief(
       contractValue: c.impact.contractValue,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
-      timesSeenNote: c.employeeId ? fmtTimesSeen(timesSeenByEmp[c.employeeId]) : null,
+      recurrenceNote: c.employeeId ? fmtRecurrence(caseMeta[c.employeeId]) : null,
     };
   });
 

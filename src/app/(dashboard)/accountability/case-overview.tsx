@@ -193,10 +193,10 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
             {money(a.contractValue)} ر.س
           </span>
         )}
-        {a.timesSeenNote && (
+        {a.recurrenceNote && (
           <span className="inline-flex items-center gap-1 rounded-md border border-cc-red/25 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red">
             <Repeat className="size-3" />
-            {a.timesSeenNote}
+            {a.recurrenceNote}
           </span>
         )}
       </div>

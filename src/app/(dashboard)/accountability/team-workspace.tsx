@@ -481,9 +481,14 @@ function EmployeeModal({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold">{e.name}</h2>
               <SeverityPill severity={e.severity} />
-              {meta && meta.timesSeen > 1 && (
-                <span className="rounded-md border border-amber/25 bg-amber-dim px-1.5 py-0.5 text-[10px] font-semibold text-amber">
-                  تكرّرت {meta.timesSeen}×
+              {/* times_seen is a daily-poll counter, not a recurrence count —
+                  see PersistedCaseMeta. Only a genuine reopen earns a badge. */}
+              {meta && meta.reopenCount > 0 && (
+                <span
+                  className="rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
+                  title={`أُغلقت ثم عادت للرصد · أول رصد ${meta.firstSeenAt.slice(0, 10)}`}
+                >
+                  عادت بعد إغلاقها{meta.reopenCount > 1 ? ` ${meta.reopenCount}×` : ""}
                 </span>
               )}
             </div>

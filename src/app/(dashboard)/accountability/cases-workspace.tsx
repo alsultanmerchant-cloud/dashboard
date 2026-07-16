@@ -304,13 +304,18 @@ function CaseCard({ c, meta }: { c: AccountabilityCase; meta: PersistedCaseMeta 
                 {c.role ?? "—"}
                 {c.department ? ` · ${c.department}` : ""}
               </span>
-              {meta && meta.timesSeen > 1 && (
+              {/* Real recurrence only: resolved, then detected again. This used
+                  to read "تكرّرت {timesSeen}×", but times_seen is a once-a-day
+                  poll counter — 42 of 52 live cases sit at the same value, so
+                  the badge fired on nearly every card while claiming a
+                  recurrence that never happened. */}
+              {meta && meta.reopenCount > 0 && (
                 <span
-                  className="inline-flex items-center gap-1 rounded-md border border-amber/25 bg-amber-dim px-1.5 py-0.5 text-[10px] font-semibold text-amber"
-                  title={`أول رصد ${meta.firstSeenAt.slice(0, 10)}`}
+                  className="inline-flex items-center gap-1 rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
+                  title={`أُغلقت ثم عادت للرصد · أول رصد ${meta.firstSeenAt.slice(0, 10)}`}
                 >
                   <Repeat className="size-3" />
-                  تكرّرت {meta.timesSeen}×
+                  عادت بعد إغلاقها{meta.reopenCount > 1 ? ` ${meta.reopenCount}×` : ""}
                 </span>
               )}
             </div>

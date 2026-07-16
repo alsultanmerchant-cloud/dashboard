@@ -70,11 +70,7 @@ export default async function AccountabilityPage({
   ]);
 
   // The CEO band over the case feed: a pure fold over data already loaded.
-  const brief = buildCaseBrief(
-    cases,
-    history,
-    Object.fromEntries(Object.entries(caseMeta).map(([id, m]) => [id, m.timesSeen])),
-  );
+  const brief = buildCaseBrief(cases, history, caseMeta);
 
   return (
     <div>
