@@ -36,6 +36,7 @@ import { ClientFinanceBadges } from "@/components/client-finance-badges";
 import { Explained, MetricInfo } from "@/components/metric-info";
 import { EmployeeEvidence } from "./employee-evidence";
 import { ReviewerRigorSection as SharedReviewerRigorSection } from "./reviewer-rigor-section";
+import { ClientEditsSection } from "./client-edits-section";
 import { AccountabilityRangePicker } from "./accountability-range-picker";
 import { AccountabilityPeriodTrend } from "./accountability-period-trend";
 import type { ClientFinanceMap } from "@/lib/data/client-finance";
@@ -46,6 +47,7 @@ import type {
   AccountabilityScorecardRow,
   AiLinkedSignal,
   ReviewerRigorRow,
+  ClientEditsRow,
 } from "@/lib/data/accountability";
 
 const NA = "—";
@@ -76,6 +78,7 @@ interface Props {
   evidence: AccountabilityEvidence | null;
   selectedId: string | null;
   financeMap: ClientFinanceMap;
+  clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
 }
 
@@ -235,7 +238,14 @@ function buildCoachingIssues(
   return issues.sort((a, b) => b.sort - a.sort);
 }
 
-export function AccountabilityWorkspace({ overview, evidence, selectedId, financeMap, reviewerRange }: Props) {
+export function AccountabilityWorkspace({
+  overview,
+  evidence,
+  selectedId,
+  financeMap,
+  clientEdits,
+  reviewerRange,
+}: Props) {
   const t = useTranslations("AccountabilityPage");
   const searchParams = useSearchParams();
   const [refreshing, startRefresh] = useTransition();
@@ -553,6 +563,9 @@ export function AccountabilityWorkspace({ overview, evidence, selectedId, financ
         onSelect={select}
         showRangePicker={false}
       />
+
+      {/* Its sibling: the client_changes turnaround, same attribution rule */}
+      <ClientEditsSection rows={clientEdits} range={reviewerRange} onSelect={select} />
 
       {/* Tier-B: AI-linked signals — always quoted, always labeled, never scored */}
       <AiLinkedSection signals={overview.aiSignals} financeMap={financeMap} t={t} />

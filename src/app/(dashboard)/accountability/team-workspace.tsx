@@ -31,9 +31,14 @@ import {
 import { getAccountabilityEvidenceAction } from "./_actions";
 import { EmployeeEvidence } from "./employee-evidence";
 import { ReviewerRigorSection } from "./reviewer-rigor-section";
+import { ClientEditsSection } from "./client-edits-section";
 import { AccountabilityRangePicker } from "./accountability-range-picker";
 import { AccountabilityPeriodTrend } from "./accountability-period-trend";
-import type { AccountabilityEvidence, AccountabilityOverview } from "@/lib/data/accountability";
+import type {
+  AccountabilityEvidence,
+  AccountabilityOverview,
+  ClientEditsRow,
+} from "@/lib/data/accountability";
 import type { DashboardRange } from "@/lib/dashboard-range";
 import type {
   AccountabilityRoster,
@@ -61,12 +66,14 @@ export function TeamWorkspace({
   cases,
   caseMeta,
   reviewers,
+  clientEdits,
   reviewerRange,
 }: {
   roster: AccountabilityRoster;
   cases: AccountabilityCase[];
   caseMeta: Record<string, PersistedCaseMeta>;
   reviewers: AccountabilityOverview["reviewers"];
+  clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
 }) {
   const [dept, setDept] = useState<string | null>(null);
@@ -273,6 +280,8 @@ export function TeamWorkspace({
         onSelect={setOpenId}
         showRangePicker={false}
       />
+
+      <ClientEditsSection rows={clientEdits} range={reviewerRange} onSelect={setOpenId} />
 
       {openEmp && (
         <EmployeeModal

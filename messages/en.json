@@ -2911,7 +2911,33 @@
       "hours": "{n} h",
       "workdays": "{n} workdays"
     },
-    "generatedAt": "Computed at"
+    "generatedAt": "Computed at",
+    "clientEdits": {
+      "title": "Client Edits",
+      "hint": "When a client sends work back, do we turn it around on time? Figures follow the selected range and are attributed to the client-changes stage owner set in each task's template.",
+      "subtitle": "client_changes stage — attributed to the employee matching this stage's owner in the task template, in any department.",
+      "empty": "No attributed client-edit activity in this range.",
+      "allDepts": "All departments",
+      "slaNote": "Client-edit SLA: {v} (from SLA settings, business hours). Breaches are counted as tasks.",
+      "col": {
+        "owner": "Owner",
+        "edits": "Edits",
+        "medianTime": "Median edit time",
+        "slaBreach": "Over SLA",
+        "editRate": "Edit rate",
+        "pending": "Pending"
+      },
+      "editRateDetail": "{k} of {n} delivered",
+      "slaBreachDetail": "of {n} edits",
+      "oldestPending": "Oldest: {v}",
+      "tooltip": {
+        "medianTime": "Median business-minutes a task sat in client_changes, for edits closed in the range. Median because dwell is right-skewed.",
+        "slaBreach": "Tasks whose edit time exceeded the client_changes SLA configured in settings.",
+        "editRate": "Of the tasks he actually delivered (reached done) in the range, the share that came back as a client edit first. Numerator and denominator are the same population, so it cannot exceed 100%.",
+        "pending": "Tasks sitting in client_changes right now under his ownership."
+      },
+      "deptChipTitle": "{people} people · {edits} edits in range"
+    }
   },
   "CustomFilter": {
     "title": "Add Custom Filter",

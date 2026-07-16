@@ -925,6 +925,184 @@ async function _getAccountabilityReviewers(
 
 export const getAccountabilityReviewers = cache(_getAccountabilityReviewers);
 
+// =========================================================================
+// Client edits (تعديلات العميل) — the sibling of reviewer rigor, pointed at
+// the `client_changes` stage. Review rigor asks "is the review real?"; this
+// asks "when a client sends work back, do we turn it around on time?".
+//
+// Attribution is the SAME template rule the rest of the engine uses: the
+// employee whose position matches the owner configured for client_changes on
+// that task (`accountable_position_for_stage`), one per task to prevent
+// fan-out. Live, that spans 8 departments (الجرافيك، UI، السوشيال ميديا،
+// Motion، محتوى السيو، السيو، البرمجة، الميديا) — not only the supporting
+// ones — so the section covers every owner and the UI filters by department.
+//
+// The SLA is real, not invented: `sla_rules.client_changes` (480 business
+// minutes today, business_hours_only). Dwell is business minutes too, so the
+// comparison is apples-to-apples.
+//
+// `editRate` deliberately measures ONE population: of the tasks this person
+// DELIVERED in the period (reached `done`), how many had come back as a client
+// edit. Counting "edits handled" over "tasks delivered" would mix two
+// populations and could exceed 100% (a task edited but not yet delivered).
+// =========================================================================
+export interface ClientEditsRow {
+  employeeId: string;
+  fullName: string;
+  department: string | null;
+  editsCompleted: number; // client_changes intervals closed in the period
+  medianEditBusinessMinutes: number | null;
+  slaBreachCount: number; // …of which blew the client_changes SLA
+  slaTargetMinutes: number;
+  deliveredCount: number; // tasks he owned that reached done in the period
+  deliveredEditedCount: number; // …of which had been through client_changes
+  editRate: number | null; // deliveredEdited / delivered, %
+  pendingEdits: number; // sitting in client_changes right now
+  oldestPendingBusinessMinutes: number | null;
+  sampleSize: number;
+  confidence: "high" | "low";
+}
+
+interface ClientEditsSqlRow {
+  employee_id: string;
+  full_name: string | null;
+  department: string | null;
+  edits: number;
+  median_min: number | null;
+  sla_breach: number;
+  sla_target: number;
+  delivered: number;
+  delivered_edited: number;
+  pending: number;
+  oldest_min: number | null;
+}
+
+function buildClientEditsSql(org: string, from: string, to: string): string {
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
+  return `
+with sla as (
+  select coalesce(max(max_minutes), 480)::int as m
+    from sla_rules
+   where organization_id = '${org}' and stage_key = 'client_changes'
+),
+hist as (
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+    from task_stage_history h
+    join tasks t on t.id = h.task_id and t.archived_at is null
+   where h.organization_id = '${org}'
+),
+owner_by_task as (
+  select distinct on (g.task_id) g.task_id, g.employee_id
+    from (
+      select ta.task_id, candidate.employee_id, count(*) as n
+        from task_assignees ta
+        join tasks t on t.id = ta.task_id and t.archived_at is null
+        cross join lateral (
+          values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
+        ) as candidate(employee_id)
+        join employee_profiles e on e.id = candidate.employee_id
+        join positions p on p.id = e.position_id
+       where ta.organization_id = '${org}'
+         and candidate.employee_id is not null
+         and p.role = public.accountable_position_for_stage(t.stage_owner_positions, 'client_changes')
+       group by 1, 2
+    ) g
+   order by g.task_id, g.n desc, g.employee_id
+),
+edits as (
+  select o.employee_id, h.task_id,
+         min(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(h.entered_at, h.exited_at))) as mins
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id
+    left join task_stage_dwell d on d.history_id = h.id
+   where h.stage = 'client_changes'
+     and h.exited_at >= '${start}'::timestamptz
+     and h.exited_at < '${endExclusive}'::timestamptz
+   group by 1, 2
+),
+agg as (
+  select employee_id, count(*)::int as edits,
+         percentile_cont(0.5) within group (order by mins) as median_min,
+         count(*) filter (where mins > (select m from sla))::int as sla_breach
+    from edits group by 1
+),
+delivered as (
+  select o.employee_id,
+         count(distinct h.task_id)::int as delivered,
+         count(distinct h.task_id) filter (where exists (
+           select 1 from task_stage_history c
+            where c.task_id = h.task_id
+              and c.to_stage = 'client_changes'
+              and c.entered_at < h.entered_at
+         ))::int as delivered_edited
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id
+   where h.stage = 'done'
+     and h.entered_at >= '${start}'::timestamptz
+     and h.entered_at < '${endExclusive}'::timestamptz
+   group by 1
+),
+pend as (
+  select o.employee_id, count(distinct h.task_id)::int as pending,
+         max(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(
+                        h.entered_at, least(now(), '${endExclusive}'::timestamptz)))) as oldest_min
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id
+    left join task_stage_dwell d on d.history_id = h.id
+   where h.stage = 'client_changes'
+     and h.entered_at >= '${start}'::timestamptz
+     and h.entered_at < '${endExclusive}'::timestamptz
+     and (h.exited_at is null or h.exited_at >= '${endExclusive}'::timestamptz)
+   group by 1
+),
+keys as (
+  select employee_id from agg
+  union select employee_id from pend
+)
+select e.id as employee_id, e.full_name, dep.name as department,
+       coalesce(a.edits, 0) as edits, a.median_min, coalesce(a.sla_breach, 0) as sla_breach,
+       (select m from sla) as sla_target,
+       coalesce(dl.delivered, 0) as delivered, coalesce(dl.delivered_edited, 0) as delivered_edited,
+       coalesce(p.pending, 0) as pending, p.oldest_min
+  from keys k
+  join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
+  left join departments dep on dep.id = e.department_id
+  left join agg a on a.employee_id = k.employee_id
+  left join delivered dl on dl.employee_id = k.employee_id
+  left join pend p on p.employee_id = k.employee_id
+ order by coalesce(a.edits, 0) desc, coalesce(p.pending, 0) desc`;
+}
+
+async function _getClientEditsRigor(
+  orgId: string,
+  from?: string,
+  to?: string,
+): Promise<ClientEditsRow[]> {
+  const org = assertUuid(orgId, "organization id");
+  const range = reviewerRange(from, to);
+  const rows = await runSql<ClientEditsSqlRow>(buildClientEditsSql(org, range.from, range.to));
+  return rows.map((r) => ({
+    employeeId: r.employee_id,
+    fullName: r.full_name ?? "—",
+    department: r.department,
+    editsCompleted: r.edits,
+    medianEditBusinessMinutes: r.median_min === null ? null : round1(r.median_min),
+    slaBreachCount: r.sla_breach,
+    slaTargetMinutes: r.sla_target,
+    deliveredCount: r.delivered,
+    deliveredEditedCount: r.delivered_edited,
+    editRate: r.delivered > 0 ? Math.round((r.delivered_edited / r.delivered) * 100) : null,
+    pendingEdits: r.pending,
+    oldestPendingBusinessMinutes: r.oldest_min === null ? null : round1(r.oldest_min),
+    sampleSize: r.edits,
+    confidence: r.edits >= LOW_SAMPLE ? "high" : "low",
+  }));
+}
+
+export const getClientEditsRigor = cache(_getClientEditsRigor);
+
 // The team and cases lenses need operational scores plus reviewer signals, but
 // never the coverage counters or AI-signal board. Those fields each trigger
 // live analytics work, so keep them off the default request path.

@@ -14,6 +14,7 @@ import type { PersistedCaseMeta } from "@/lib/accountability/case-status";
 import type {
   AccountabilityEvidence,
   AccountabilityOverview,
+  ClientEditsRow,
 } from "@/lib/data/accountability";
 import type { DashboardRange } from "@/lib/dashboard-range";
 
@@ -39,6 +40,7 @@ interface Props {
   financeMap: ClientFinanceMap | null;
   initialView: View;
   reviewers: AccountabilityOverview["reviewers"];
+  clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
 }
 
@@ -59,6 +61,7 @@ export function AccountabilityShell({
   financeMap,
   initialView,
   reviewers,
+  clientEdits,
   reviewerRange,
 }: Props) {
   const [view, setView] = useState<View>(initialView);
@@ -124,6 +127,7 @@ export function AccountabilityShell({
           cases={cases.cases}
           caseMeta={caseMeta}
           reviewers={reviewers}
+          clientEdits={clientEdits}
           reviewerRange={reviewerRange}
         />
       )}
@@ -135,6 +139,7 @@ export function AccountabilityShell({
           evidence={evidence}
           selectedId={selectedId}
           financeMap={financeMap}
+          clientEdits={clientEdits}
           reviewerRange={reviewerRange}
         />
       )}

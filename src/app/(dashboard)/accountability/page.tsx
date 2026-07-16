@@ -3,6 +3,7 @@ import { requirePagePermission } from "@/lib/auth-server";
 import {
   getAccountabilityOverview,
   getAccountabilityReviewers,
+  getClientEditsRigor,
   getEmployeeAccountabilityEvidence,
 } from "@/lib/data/accountability";
 import { resolveRange } from "@/lib/dashboard-range";
@@ -52,12 +53,16 @@ export default async function AccountabilityPage({
   // to what that lens needs. Scorecard-only data (full overview serialization,
   // finance badges, selected employee evidence) is loaded only for direct
   // scorecard links: ?view=scorecard or ?emp=...
-  const [cases, roster, caseMeta, history, reviewers, scorecardData] = await Promise.all([
+  const [cases, roster, caseMeta, history, reviewers, clientEdits, scorecardData] = await Promise.all([
     getAccountabilityCases(session.orgId),
     getAccountabilityRoster(session.orgId, reviewerRange.from, reviewerRange.to),
     syncAndGetCaseMeta(session.orgId),
     getCaseHistorySummary(session.orgId).catch(() => null),
     getAccountabilityReviewers(session.orgId, reviewerRange.from, reviewerRange.to),
+    getClientEditsRigor(session.orgId, reviewerRange.from, reviewerRange.to).catch((e) => {
+      console.error("[accountability] client edits failed:", e);
+      return [];
+    }),
     needsScorecard
       ? Promise.all([
           getAccountabilityOverview(session.orgId, reviewerRange.from, reviewerRange.to),
@@ -86,6 +91,7 @@ export default async function AccountabilityPage({
         financeMap={scorecardData?.financeMap ?? null}
         initialView={initialView}
         reviewers={reviewers}
+        clientEdits={clientEdits}
         reviewerRange={reviewerRange}
       />
     </div>
