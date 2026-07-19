@@ -381,6 +381,7 @@ export default async function TaskDetailPage({
                 <Link
                   href={`/projects/${project.id}`}
                   className="text-cyan transition-colors hover:text-cyan/80 hover:underline"
+                  data-private="client"
                 >
                   {project.name}
                 </Link>
@@ -1250,6 +1251,7 @@ function TaskFormSection({
       formattedCompletedAt={formattedCompletedAt}
       canEditCounts={canEditCounts}
       canEditDeadline={canEditDeadline}
+      isArchived={Boolean((task as { archived_at?: string | null }).archived_at)}
     />
   );
 }

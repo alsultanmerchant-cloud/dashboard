@@ -96,7 +96,8 @@ function TargetMetric({
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {label}
           </p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">
+          {/* Every TargetMetric on this page holds a revenue figure. */}
+          <p data-private="money" className="mt-2 text-2xl font-bold tabular-nums text-foreground">
             {value}
           </p>
           {hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null}
@@ -184,19 +185,19 @@ function AccountTargetsTable({
                   : "bg-cc-red";
             return (
               <TableRow key={row.account_manager_id}>
-                <TableCell className="font-semibold">
+                <TableCell className="font-semibold" data-private="person">
                   {row.account_manager_name ?? "غير محدد"}
                 </TableCell>
-                <TableCell className="text-end font-semibold tabular-nums">
+                <TableCell className="text-end font-semibold tabular-nums" data-private="money">
                   {formatMoney(row.expected_total, locale)}
                 </TableCell>
-                <TableCell className="text-end tabular-nums text-muted-foreground">
+                <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                   {formatMoney(row.breakdown?.expected_renewals ?? 0, locale)}
                 </TableCell>
-                <TableCell className="text-end tabular-nums text-muted-foreground">
+                <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                   {formatMoney(row.breakdown?.expected_installments ?? 0, locale)}
                 </TableCell>
-                <TableCell className="text-end font-semibold tabular-nums">
+                <TableCell className="text-end font-semibold tabular-nums" data-private="money">
                   {formatMoney(row.achieved_total, locale)}
                 </TableCell>
                 <TableCell className="text-end">
@@ -304,46 +305,46 @@ function DepartmentTargetsTable({
           {rows.map((row) => (
             <TableRow key={row.key}>
               <TableCell className="font-semibold">{row.section}</TableCell>
-              <TableCell className="text-end font-semibold tabular-nums">
+              <TableCell className="text-end font-semibold tabular-nums" data-private="money">
                 {formatMoney(row.expected, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.overdueInstallments, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.installments, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.onTargetClients, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.overdueClients, locale)}
               </TableCell>
-              <TableCell className="text-end font-semibold tabular-nums">
+              <TableCell className="text-end font-semibold tabular-nums" data-private="money">
                 {formatMoney(row.actual, locale)}
               </TableCell>
               <TableCell className="text-end font-semibold tabular-nums">
                 {formatPct(row.achievement)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.actualInstallments, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.actualOnTarget, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.actualOverdue, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.sdRenewed, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.upsell, locale)}
               </TableCell>
-              <TableCell className="text-end tabular-nums text-muted-foreground">
+              <TableCell className="text-end tabular-nums text-muted-foreground" data-private="money">
                 {formatMoney(row.winback, locale)}
               </TableCell>
-              <TableCell className="text-end font-semibold tabular-nums">
+              <TableCell className="text-end font-semibold tabular-nums" data-private="money">
                 {formatMoney(row.gap, locale)}
               </TableCell>
             </TableRow>
@@ -390,12 +391,12 @@ function BucketList({
               className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-soft-2 px-4 py-3 last:border-0"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{row.client_name ?? "عميل غير محدد"}</p>
+                <p className="truncate text-sm font-semibold" data-private="client">{row.client_name ?? "عميل غير محدد"}</p>
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {row.client_code ?? "بدون كود"} · {row.account_manager_name ?? "بدون أكونت"}
+                  {row.client_code ?? "بدون كود"} · <span data-private="person">{row.account_manager_name ?? "بدون أكونت"}</span>
                 </p>
               </div>
-              <div className="text-end text-sm font-bold tabular-nums">
+              <div className="text-end text-sm font-bold tabular-nums" data-private="money">
                 {formatMoney(row.value, locale)}
               </div>
             </div>
@@ -431,12 +432,12 @@ function InstallmentsList({
               className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-soft-2 px-4 py-3 last:border-0"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{row.client_name ?? "عميل غير محدد"}</p>
+                <p className="truncate text-sm font-semibold" data-private="client">{row.client_name ?? "عميل غير محدد"}</p>
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {row.account_manager_name ?? "بدون أكونت"} · {row.status}
+                  <span data-private="person">{row.account_manager_name ?? "بدون أكونت"}</span> · {row.status}
                 </p>
               </div>
-              <div className="text-end text-sm font-bold tabular-nums">
+              <div className="text-end text-sm font-bold tabular-nums" data-private="money">
                 {formatMoney(row.expected_amount, locale)}
               </div>
             </div>
@@ -552,10 +553,10 @@ function SheetTargetsSection({
             </div>
             <div className="grid grid-cols-2 gap-2 text-end text-xs sm:flex">
               <span className="rounded-lg border border-soft-2 bg-soft-1 px-3 py-2">
-                Account Expected <b className="ms-1 tabular-nums">{formatMoney(accountExpected, locale)}</b>
+                Account Expected <b className="ms-1 tabular-nums" data-private="money">{formatMoney(accountExpected, locale)}</b>
               </span>
               <span className="rounded-lg border border-soft-2 bg-soft-1 px-3 py-2">
-                Account Actual <b className="ms-1 tabular-nums">{formatMoney(accountActual, locale)}</b>
+                Account Actual <b className="ms-1 tabular-nums" data-private="money">{formatMoney(accountActual, locale)}</b>
               </span>
             </div>
           </div>

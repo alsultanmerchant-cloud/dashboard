@@ -27,6 +27,7 @@ export default async function OdooClientDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={client.name}
+        privateKind="client"
         breadcrumbs={[
           { label: "العملاء", href: "/clients" },
           { label: client.name },
@@ -139,7 +140,7 @@ export default async function OdooClientDetailPage({
                       className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-soft-2"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{p.name}</p>
+                        <p className="truncate text-sm font-medium" data-private="client">{p.name}</p>
                         <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
                           {p.managerName && (
                             <span className="truncate">{p.managerName}</span>

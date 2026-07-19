@@ -32,6 +32,7 @@ import {
 } from "@/lib/custom-filter/url-state";
 import type { FilterTree } from "@/lib/custom-filter/types";
 import type { ProjectSearchFacet } from "@/lib/data/projects";
+import type { PrivateCategory } from "@/lib/demo-mode";
 
 const PAGE_SIZE = 25;
 
@@ -92,6 +93,11 @@ type SmartBadge = {
   badgeClass?: string;
   iconClass: string;
   valueClass?: string;
+  /**
+   * Demo-mode category for the label. Set on badges whose label is a real
+   * name (account managers); the fixed-label overview badges leave it unset.
+   */
+  labelPrivateKind?: PrivateCategory;
 };
 
 export default async function ProjectsPage({
@@ -317,6 +323,7 @@ async function ProjectsOverviewBadges({
 
   const managerBadges: SmartBadge[] = smartData.topAccountManagers.map((manager) => ({
     label: manager.name,
+    labelPrivateKind: "person" as const,
     value: manager.openTasks,
     hint: `${manager.projects} مشروع مع مهام مفتوحة`,
     href: buildOverviewHref(searchParams, {
@@ -374,7 +381,10 @@ async function ProjectsOverviewBadges({
               {badge.icon}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[11px] font-semibold text-foreground">
+              <span
+                data-private={badge.labelPrivateKind}
+                className="block truncate text-[11px] font-semibold text-foreground"
+              >
                 {badge.label}
               </span>
               <span className="block truncate text-[10px] text-muted-foreground">

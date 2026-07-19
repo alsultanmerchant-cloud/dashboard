@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { PrivateCategory } from "@/lib/demo-mode";
 
 interface StatCardProps {
   value: string;
@@ -12,6 +13,8 @@ interface StatCardProps {
   tooltip?: string;
   onClick?: () => void;
   active?: boolean;
+  /** Blur the value in demo mode — see MetricCard.privateKind. */
+  privateKind?: PrivateCategory;
 }
 
 const COLOR_MAP: Record<string, {
@@ -72,7 +75,7 @@ const COLOR_MAP: Record<string, {
   },
 };
 
-export function StatCard({ value, label, color, progress, icon, subtext, muted, tooltip, onClick, active }: StatCardProps) {
+export function StatCard({ value, label, color, progress, icon, subtext, muted, tooltip, onClick, active, privateKind }: StatCardProps) {
   const c = COLOR_MAP[color];
   const content = (
     <div
@@ -92,7 +95,7 @@ export function StatCard({ value, label, color, progress, icon, subtext, muted, 
       <div className="flex items-start justify-between relative z-10">
         <div>
           <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-          <p className={cn("mt-2 text-3xl font-extrabold tracking-tight", c.text)}>{value}</p>
+          <p data-private={privateKind} className={cn("mt-2 text-3xl font-extrabold tracking-tight", c.text)}>{value}</p>
           {subtext && <p className="text-[11px] text-muted-foreground mt-1.5">{subtext}</p>}
         </div>
         {icon && (

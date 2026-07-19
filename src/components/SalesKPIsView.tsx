@@ -412,7 +412,7 @@ export default function SalesKPIsView({ deals, lostDeals }: SalesKPIsViewProps) 
                         </div>
                       </td>
                       <td style={{ padding: "12px 8px", color: cycleColor, fontFamily: "monospace" }}>{rep.avgCycle} يوم</td>
-                      <td style={{ padding: "12px 8px", fontWeight: 700, color: T.teal, fontFamily: "monospace" }}>{formatMoney(rep.value)}</td>
+                      <td style={{ padding: "12px 8px", fontWeight: 700, color: T.teal, fontFamily: "monospace" }} data-private="money">{formatMoney(rep.value)}</td>
                       <td style={{ padding: "12px 8px", textAlign: "center", fontSize: 18 }}>{medal}</td>
                     </tr>
                   );
@@ -442,7 +442,7 @@ export default function SalesKPIsView({ deals, lostDeals }: SalesKPIsViewProps) 
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: T.mid }}>القيمة الإجمالية</span>
-                    <span style={{ fontWeight: 700, color: T.teal, fontFamily: "monospace" }}>{formatMoney(s.value)}</span>
+                    <span style={{ fontWeight: 700, color: T.teal, fontFamily: "monospace" }} data-private="money">{formatMoney(s.value)}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: T.mid }}>معدل الإغلاق</span>
@@ -450,7 +450,7 @@ export default function SalesKPIsView({ deals, lostDeals }: SalesKPIsViewProps) 
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span style={{ color: T.mid }}>متوسط القيمة</span>
-                    <span style={{ fontWeight: 600, color: T.mid, fontFamily: "monospace" }}>{formatMoney(s.avgValue)}</span>
+                    <span style={{ fontWeight: 600, color: T.mid, fontFamily: "monospace" }} data-private="money">{formatMoney(s.avgValue)}</span>
                   </div>
                 </div>
               </div>

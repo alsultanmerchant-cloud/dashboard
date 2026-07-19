@@ -243,7 +243,7 @@ function RecommendationsList({
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-xs leading-relaxed text-foreground/90" data-brief-field={`rec:${i}`}>{rec.action}</p>
+                <p className="text-xs leading-relaxed text-foreground/90" data-brief-field={`rec:${i}`} data-private="client person">{rec.action}</p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", cat.chip)}>
                     {t(`categories.${rec.category}`)}
@@ -347,6 +347,10 @@ function BriefBody({
                 synth.isLoading && "animate-pulse",
               )}
               data-brief-field="synthesis"
+              // AI prose names clients and staff mid-sentence, so there is no
+              // substring to tag — the whole block blurs if either category is
+              // on.
+              data-private="client person"
             >
               {synthesis}
             </p>
@@ -389,6 +393,7 @@ function BriefBody({
             <p
               className={cn("text-sm leading-7 text-foreground/90", traj.isLoading && "animate-pulse")}
               data-brief-field="headline"
+              data-private="client person"
             >
               {headline}
             </p>
@@ -443,11 +448,12 @@ function BriefBody({
                         <Link
                           href={r.href}
                           className="text-sm font-semibold hover:text-cyan hover:underline"
+                          data-private="client person"
                         >
                           {r.title}
                         </Link>
                       ) : (
-                        <p className="text-sm font-semibold">{r.title}</p>
+                        <p className="text-sm font-semibold" data-private="client person">{r.title}</p>
                       )}
                       <span className={cn("text-[10px] font-medium", sev.text)}>
                         {t(`severity.${r.severity}`)}
@@ -463,11 +469,12 @@ function BriefBody({
                       <Link
                         href={r.href}
                         className="mt-1 block w-fit text-[11px] tabular-nums text-muted-foreground transition-colors hover:text-foreground"
+                        data-private="client person"
                       >
                         {r.metric}
                       </Link>
                     ) : (
-                      <p className="mt-1 text-[11px] tabular-nums text-muted-foreground">{r.metric}</p>
+                      <p className="mt-1 text-[11px] tabular-nums text-muted-foreground" data-private="client person">{r.metric}</p>
                     )}
                     <p
                       className={cn(
@@ -475,6 +482,7 @@ function BriefBody({
                         risksCtl.isLoading && "animate-pulse",
                       )}
                       data-brief-field={`risk:${r.id}`}
+                      data-private="client person"
                     >
                       {interpretation}
                     </p>

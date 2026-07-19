@@ -149,7 +149,7 @@ export default async function ClientsPage({
                   <DataTableRow key={c.id}>
                     <DataTableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        <Link href={detailHref} className="hover:text-cyan transition-colors">
+                        <Link href={detailHref} className="hover:text-cyan transition-colors" data-private="client">
                           {c.name}
                         </Link>
                         <span

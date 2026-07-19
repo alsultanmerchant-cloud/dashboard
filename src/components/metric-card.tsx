@@ -5,6 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowUpLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { PrivateCategory } from "@/lib/demo-mode";
 
 export type MetricTone = "default" | "success" | "warning" | "destructive" | "info" | "purple";
 
@@ -36,6 +37,12 @@ export interface MetricCardProps {
   trend?: { value: string; direction: "up" | "down" | "flat" };
   className?: string;
   size?: "default" | "compact";
+  /**
+   * Blur the value in demo mode. Opt-in per call site because a MetricCard is
+   * just as likely to hold a harmless count ("12 open tasks") as a revenue
+   * figure — only the caller knows which.
+   */
+  privateKind?: PrivateCategory;
 }
 
 export function MetricCard({
@@ -48,6 +55,7 @@ export function MetricCard({
   trend,
   className,
   size = "default",
+  privateKind,
 }: MetricCardProps) {
   const inner = (
     <div
@@ -73,6 +81,7 @@ export function MetricCard({
             {label}
           </div>
           <div
+            data-private={privateKind}
             className={cn(
               "font-bold tabular-nums text-foreground leading-none",
               size === "default" && "mt-2 text-3xl",
@@ -91,6 +100,8 @@ export function MetricCard({
             >
               {trend && (
                 <span
+                  // A trend like "+45,000" leaks the same figure the value does.
+                  data-private={privateKind}
                   className={cn(
                     "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
                     trend.direction === "up" && "bg-green-dim text-cc-green",
@@ -101,7 +112,7 @@ export function MetricCard({
                   {trend.value}
                 </span>
               )}
-              {hint && <span>{hint}</span>}
+              {hint && <span data-private={privateKind}>{hint}</span>}
             </div>
           )}
         </div>

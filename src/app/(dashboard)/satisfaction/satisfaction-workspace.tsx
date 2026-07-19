@@ -521,7 +521,7 @@ export function SatisfactionWorkspace({
                         ✓ {entry.issue}
                       </span>
                       {entry.evidence && (
-                        <span className="block text-[11px] text-muted-foreground">
+                        <span className="block text-[11px] text-muted-foreground" data-private="chat">
                           {entry.evidence}
                         </span>
                       )}
@@ -1047,7 +1047,7 @@ function BoardCard({
       )}
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-sm font-medium">
-          <span className="truncate">{row.clientName}</span>
+          <span className="truncate" data-private="client">{row.clientName}</span>
           {!row.hasActiveProject && (
             <span className="shrink-0 rounded bg-soft-2 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
               {t("relationFilter.lostBadge")}
@@ -2701,7 +2701,7 @@ function IndicatorGroup({
             )}
           </div>
           {ind.evidence && (
-            <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+            <p className="mt-1 text-[12px] leading-snug text-muted-foreground" data-private="chat">
               {ind.evidence}
             </p>
           )}
@@ -2814,7 +2814,7 @@ function SignalCountBadge({
               key={i}
               className="rounded-md border border-border bg-soft-1 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground"
             >
-              <span className="text-foreground">{ex.text}</span>
+              <span className="text-foreground" data-private="chat">{ex.text}</span>
               {ex.date && (
                 <span className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/70">
                   {ex.date}

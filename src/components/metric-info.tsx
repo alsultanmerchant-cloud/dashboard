@@ -79,3 +79,30 @@ export function Explained({
     </TooltipProvider>
   );
 }
+
+// Like `Explained`, but the trigger is a block-level <div> so it can BE a grid
+// cell / card (a <span> wrapper would collapse the layout). Use to make a whole
+// metric card hover-reveal the breakdown that produced its number.
+export function ExplainBlock({
+  text,
+  children,
+  className,
+}: {
+  text: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  if (!text) return <div className={className}>{children}</div>;
+  return (
+    <TooltipProvider delay={150}>
+      <Tooltip>
+        <TooltipTrigger render={<div className={cn("cursor-help", className)} />}>
+          {children}
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs whitespace-normal text-start leading-relaxed">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}

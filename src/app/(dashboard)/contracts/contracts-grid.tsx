@@ -374,6 +374,7 @@ function AmPill({ name }: { name: string | null }) {
     <span
       className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white whitespace-nowrap"
       style={{ backgroundColor: amColor(name) }}
+      data-private="person"
     >
       {name}
     </span>
@@ -714,11 +715,11 @@ export function ContractsGrid({
             </span>
             <span>
               {t("grid.summary.value")}:{" "}
-              <span className="text-foreground font-medium">{fmtMoney(totalValue)}</span>
+              <span className="text-foreground font-medium" data-private="money">{fmtMoney(totalValue)}</span>
             </span>
             <span>
               {t("grid.summary.paid")}:{" "}
-              <span className="text-foreground font-medium">{fmtMoney(totalPaid)}</span>
+              <span className="text-foreground font-medium" data-private="money">{fmtMoney(totalPaid)}</span>
             </span>
           </div>
         </div>
@@ -789,7 +790,7 @@ export function ContractsGrid({
                       </Link>
                     </Td>
                     <Td sticky stickyOffset="108px" className="font-medium">
-                      <Link href={`/contracts/${c.id}`} className="hover:underline">
+                      <Link href={`/contracts/${c.id}`} className="hover:underline" data-private="client">
                         {c.client_name ?? "—"}
                       </Link>
                     </Td>
@@ -960,7 +961,7 @@ export function ContractsGrid({
                         c.duration_months ?? "—"
                       )}
                     </Td>
-                    <Td className="text-end tabular-nums">
+                    <Td className="text-end tabular-nums" data-private="money">
                       {canEdit ? (
                         <EditableNumber
                           value={c.paid_value}
@@ -978,7 +979,7 @@ export function ContractsGrid({
                         fmtMoney(c.paid_value)
                       )}
                     </Td>
-                    <Td className="text-end tabular-nums text-muted-foreground">
+                    <Td className="text-end tabular-nums text-muted-foreground" data-private="money">
                       {canEdit ? (
                         <EditableNumber
                           value={c.repeated_services_value}
@@ -1061,7 +1062,7 @@ export function ContractsGrid({
                         (c.contract_status_label ?? statusLabel(t, c.status))
                       )}
                     </Td>
-                    <Td className="text-end tabular-nums text-muted-foreground">
+                    <Td className="text-end tabular-nums text-muted-foreground" data-private="money">
                       {canEdit ? (
                         <EditableNumber
                           value={c.next_contract_value}
@@ -1079,7 +1080,7 @@ export function ContractsGrid({
                         fmtMoney(c.next_contract_value)
                       )}
                     </Td>
-                    <Td className="text-end tabular-nums text-muted-foreground">
+                    <Td className="text-end tabular-nums text-muted-foreground" data-private="money">
                       {canEdit ? (
                         <EditableNumber
                           value={c.renewal_paid_value}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Building2,
   ChevronLeft,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import { ExplainBlock } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 import {
   SEVERITY_META,
@@ -39,7 +40,7 @@ import type {
   AccountabilityOverview,
   ClientEditsRow,
 } from "@/lib/data/accountability";
-import type { DashboardRange } from "@/lib/dashboard-range";
+import { daySpan, type DashboardRange } from "@/lib/dashboard-range";
 import type {
   AccountabilityRoster,
   DepartmentSummary,
@@ -59,6 +60,23 @@ const STATUS_TONE: Record<CaseStatus, string> = {
   excused: "border-cc-green/25 bg-green-dim text-cc-green",
   warned: "border-amber/30 bg-amber-dim text-amber",
   resolved: "border-border bg-soft-1 text-muted-foreground/60",
+};
+
+// Per-value hover explanations. الحالة = strength of the evidence (severity),
+// الوضع = where the case stands in the review workflow (status).
+const SEVERITY_HINT: Record<CaseSeverity, string> = {
+  critical: "حرجة — المصدران مترابطان: نفس المهمة/القضية تظهر في التنفيذ وشكوى العميل معًا. أخطر مستوى.",
+  proven: "مثبتة — مصدران متفقان (مثلاً تأخير في التنفيذ + شكوى عميل يشيران للمشكلة نفسها).",
+  signal: "إشارة — مصدر واحد فقط يرصد المشكلة (غير مؤكَّدة بعد). أضعف مستوى.",
+};
+const SEVERITY_CLEAN_HINT = "سليم — لا توجد قضية مفتوحة على هذا الموظف.";
+
+const STATUS_HINT: Record<CaseStatus, string> = {
+  open: "جديدة — القضية مفتوحة ولم يُتّخذ إجراء بعد.",
+  under_review: "قيد المراجعة — الإجراء جارٍ على القضية.",
+  excused: "مبرَّرة — روجعت وتبيّن أن هناك عذرًا مقبولًا.",
+  warned: "أُنذِر — صدر إنذار للموظف بشأن القضية.",
+  resolved: "انتهت — عولجت القضية وأُغلقت.",
 };
 
 export function TeamWorkspace({
@@ -218,17 +236,37 @@ export function TeamWorkspace({
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[810px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead>
                 <tr className="border-b border-border text-[11px] text-muted-foreground">
                   <th className="px-3 py-2 text-start font-medium">الموظف</th>
                   <th className="px-3 py-2 text-start font-medium">القسم</th>
-                  <th className="px-3 py-2 text-center font-medium">مفتوحة</th>
-                  <th className="px-3 py-2 text-center font-medium">متأخرة</th>
+                  <th className="px-3 py-2 text-center font-medium" title="إجمالي المهام المفتوحة المسندة إليه الآن (لايف)">
+                    مفتوحة
+                  </th>
+                  <th className="px-3 py-2 text-center font-medium" title="إجمالي المهام المتأخرة المسندة إليه الآن (لايف)">
+                    متأخرة
+                  </th>
+                  <th className="px-3 py-2 text-center font-medium" title="عدد المراحل التي كان مسؤولاً عنها خلال الفترة — تُحتسب لكل مرحلة على حدة">
+                    إجمالي المراحل
+                  </th>
+                  <th className="px-3 py-2 text-center font-medium" title="المراحل التي تجاوز فيها موعد التسليم خلال الفترة — لكل مرحلة على حدة">
+                    مراحل متأخرة
+                  </th>
                   <th className="px-3 py-2 text-center font-medium">الالتزام</th>
                   <th className="px-3 py-2 text-center font-medium">مقارنة بالفترة السابقة</th>
-                  <th className="px-3 py-2 text-center font-medium">الحالة</th>
-                  <th className="px-3 py-2 text-center font-medium">الوضع</th>
+                  <th
+                    className="px-3 py-2 text-center font-medium"
+                    title="قوة الدليل على القضية: سليم = لا قضية · إشارة = مصدر واحد · مثبتة = مصدران متفقان · حرجة = المصدران مترابطان"
+                  >
+                    الحالة
+                  </th>
+                  <th
+                    className="px-3 py-2 text-center font-medium"
+                    title="موضع القضية في المراجعة: جديدة · قيد المراجعة · مبرَّرة · أُنذِر · انتهت"
+                  >
+                    الوضع
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -237,6 +275,7 @@ export function TeamWorkspace({
                     key={e.id}
                     e={e}
                     status={caseMeta[e.id]?.status ?? null}
+                    problemCount={caseByEmp.get(e.id)?.proof.length ?? 0}
                     onOpen={() => setOpenId(e.id)}
                   />
                 ))}
@@ -289,6 +328,7 @@ export function TeamWorkspace({
           e={openEmp}
           kase={caseByEmp.get(openEmp.id) ?? null}
           meta={caseMeta[openEmp.id] ?? null}
+          range={reviewerRange}
           onClose={() => setOpenId(null)}
         />
       )}
@@ -364,7 +404,10 @@ function DepartmentCard({
 function SeverityPill({ severity }: { severity: CaseSeverity | null }) {
   if (!severity) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-cc-green/25 bg-green-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-green">
+      <span
+        title={SEVERITY_CLEAN_HINT}
+        className="inline-flex items-center gap-1 rounded-md border border-cc-green/25 bg-green-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-green"
+      >
         <ShieldCheck className="size-3" />
         سليم
       </span>
@@ -373,7 +416,10 @@ function SeverityPill({ severity }: { severity: CaseSeverity | null }) {
   const m = SEVERITY_META[severity];
   const Icon = m.icon;
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold", m.badge)}>
+    <span
+      title={SEVERITY_HINT[severity]}
+      className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold", m.badge)}
+    >
       <Icon className="size-3" />
       {m.label}
     </span>
@@ -383,10 +429,12 @@ function SeverityPill({ severity }: { severity: CaseSeverity | null }) {
 function EmployeeRow({
   e,
   status,
+  problemCount,
   onOpen,
 }: {
   e: RosterEmployee;
   status: CaseStatus | null;
+  problemCount: number;
   onOpen: () => void;
 }) {
   return (
@@ -412,6 +460,18 @@ function EmployeeRow({
         {e.overdueOwned}
       </td>
       <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground" dir="ltr">
+        {e.totalStages}
+      </td>
+      <td
+        className={cn(
+          "px-3 py-2.5 text-center tabular-nums",
+          e.lateStages > 0 ? "font-semibold text-amber" : "text-muted-foreground",
+        )}
+        dir="ltr"
+      >
+        {e.lateStages}
+      </td>
+      <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground" dir="ltr">
         {e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`}
       </td>
       <td className="px-3 py-2.5 text-center">
@@ -422,9 +482,27 @@ function EmployeeRow({
       </td>
       <td className="px-3 py-2.5 text-center">
         {status && e.hasCase ? (
-          <span className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold", STATUS_TONE[status])}>
-            {CASE_STATUS_LABEL[status]}
-          </span>
+          <button
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onOpen();
+            }}
+            className="inline-flex items-center gap-1"
+            title="عرض المشاكل واحدة واحدة"
+          >
+            <span
+              title={STATUS_HINT[status]}
+              className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold", STATUS_TONE[status])}
+            >
+              {CASE_STATUS_LABEL[status]}
+            </span>
+            {problemCount > 0 && (
+              <span className="rounded-md bg-cc-red/15 px-1.5 py-0.5 text-[10px] font-bold text-cc-red">
+                {problemCount} {problemCount === 1 ? "مشكلة" : problemCount === 2 ? "مشكلتان" : "مشاكل"}
+              </span>
+            )}
+          </button>
         ) : (
           <span className="text-[11px] text-muted-foreground/50">—</span>
         )}
@@ -438,22 +516,33 @@ function EmployeeModal({
   e,
   kase,
   meta,
+  range,
   onClose,
 }: {
   e: RosterEmployee;
   kase: AccountabilityCase | null;
   meta: PersistedCaseMeta | null;
+  range: DashboardRange;
   onClose: () => void;
 }) {
   const [showAdvice, setShowAdvice] = useState(false);
+  // Period stage الأدلة (range window, archived-inclusive).
   const [evidence, setEvidence] = useState<AccountabilityEvidence | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [evidenceAttempt, setEvidenceAttempt] = useState(0);
+  // Live stage الأدلة (default last-30-days, live tasks only) — the لايف tab.
+  const [liveEvidence, setLiveEvidence] = useState<AccountabilityEvidence | null>(null);
+  const [liveLoading, setLiveLoading] = useState(true);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveAttempt, setLiveAttempt] = useState(0);
+  // الدليل is split into two tabs: LIVE (current board) and الفترة المحددة
+  // (range window). Both tabs also carry the case problems (تنفيذ/صوت العميل).
+  const [evTab, setEvTab] = useState<"live" | "period">("live");
 
   useEffect(() => {
     let active = true;
-    getAccountabilityEvidenceAction(e.id)
+    getAccountabilityEvidenceAction(e.id, range.from, range.to)
       .then((res) => {
         if (!active) return;
         if (res.ok) {
@@ -473,7 +562,32 @@ function EmployeeModal({
     return () => {
       active = false;
     };
-  }, [e.id, evidenceAttempt]);
+  }, [e.id, range.from, range.to, evidenceAttempt]);
+
+  useEffect(() => {
+    let active = true;
+    // No range → the loader's default last-30-days live window.
+    getAccountabilityEvidenceAction(e.id)
+      .then((res) => {
+        if (!active) return;
+        if (res.ok) {
+          setLiveEvidence(res.evidence);
+        } else {
+          setLiveEvidence(null);
+          setLiveError(res.error);
+        }
+        setLiveLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setLiveEvidence(null);
+        setLiveError("failed");
+        setLiveLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [e.id, liveAttempt]);
 
   return (
     <div
@@ -519,18 +633,56 @@ function EmployeeModal({
         </div>
 
         <div className="space-y-4 p-4">
-          {/* Scorecard metrics — always shown */}
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-4">
-            <Metric label="مفتوحة" value={e.openTasks} />
-            <Metric label="متأخرة" value={e.overdueOwned} tone={e.overdueOwned > 0 ? "text-cc-red" : undefined} />
-            <Metric label="الالتزام في الفترة" value={e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`} />
-            <div className="bg-card px-2 py-2.5">
+          {/* Scorecard metrics — always shown. Hover any card for how it's derived. */}
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-3">
+            <Metric
+              label="مفتوحة (لايف)"
+              value={e.openTasks}
+              explain="إجمالي المهام غير المُنجزة المُسندة إليه الآن، من كل إسناداته وبغضّ النظر عن المرحلة الحالية. رقم لايف لا يتأثّر بفلتر المدة."
+            />
+            <Metric
+              label="متأخرة (لايف)"
+              value={e.overdueOwned}
+              tone={e.overdueOwned > 0 ? "text-cc-red" : undefined}
+              explain={`من مهامه المفتوحة (${e.openTasks})، التي فات موعد تسليمها اليوم وليست في مرحلة «جديد». رقم لايف.`}
+            />
+            <Metric
+              label="الالتزام في الفترة"
+              value={e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`}
+              explain={
+                e.periodTrend.currentSampleSize > 0
+                  ? `مراحل الـSLA المُنجزة داخل حدّها ÷ المراحل القابلة للقياس خلال الفترة = ${e.periodTrend.currentWithinSla}/${e.periodTrend.currentSampleSize}.`
+                  : "لا توجد مراحل قابلة لقياس الـSLA في هذه الفترة."
+              }
+            />
+            <Metric
+              label="إجمالي المراحل"
+              value={e.totalStages}
+              explain="عدد المراحل التي كان مسؤولاً عنها (حسب مالك المرحلة في القالب) ودخلها خلال الفترة — كل مرحلة تُحتسب على حدة، وتشمل المهام المؤرشفة التي وصلت «تم»."
+            />
+            <Metric
+              label="مراحل متأخرة"
+              value={e.lateStages}
+              tone={e.lateStages > 0 ? "text-amber" : undefined}
+              explain={`من إجمالي ${e.totalStages} مرحلة في الفترة، التي كان موعد تسليم المهمة قد فات وهو لا يزال مسؤولاً عن مرحلتها${
+                e.totalStages > 0 ? ` (${Math.round((e.lateStages / e.totalStages) * 100)}%)` : ""
+              }.`}
+            />
+            <ExplainBlock
+              className="bg-card px-2 py-2.5"
+              text={
+                e.periodTrend.difference === null
+                  ? "لا توجد عينة قابلة للمقارنة في الفترتين."
+                  : `التزام الفترة الحالية ${e.periodTrend.currentRate}% (${e.periodTrend.currentSampleSize} حدث) مقابل ${e.periodTrend.previousRate}% (${e.periodTrend.previousSampleSize} حدث) في الفترة السابقة — فرق ${e.periodTrend.difference} نقطة.`
+              }
+            >
               <AccountabilityPeriodTrend trend={e.periodTrend} prominent />
               <p className="mt-0.5 text-[10px] text-muted-foreground">مقارنة بالفترة السابقة</p>
-            </div>
+            </ExplainBlock>
           </div>
 
-          {kase ? (
+          {/* Case summary — streams/tags, ledger, advice, decision (always live) */}
+          {kase && (
             <>
               {/* Streams + tags */}
               <div className="flex flex-wrap items-center gap-1.5">
@@ -552,8 +704,9 @@ function EmployeeModal({
                 ))}
               </div>
 
-              {/* Ledger + 14-day heatmap */}
-              {kase.ledger && <LedgerStrip led={kase.ledger} />}
+              {/* Ledger + activity heatmap. Silence + heatmap follow the
+                  selected period (archived-inclusive) via the roster. */}
+              {kase.ledger && <LedgerStrip led={kase.ledger} silence={e.silence} />}
 
               {/* Advice (opt-in) */}
               <div>
@@ -573,31 +726,77 @@ function EmployeeModal({
                   قرار المدير{meta.decidedByName ? ` (${meta.decidedByName})` : ""}: {meta.decisionNote}
                 </p>
               )}
-
-              {/* Proof */}
-              <CaseEvidence c={kase} cap={99} />
             </>
-          ) : (
-            <div className="rounded-xl border border-cc-green/20 bg-green-dim/40 p-4 text-center">
-              <ShieldCheck className="mx-auto size-6 text-cc-green" />
-              <p className="mt-2 text-sm font-semibold text-cc-green">لا توجد قضايا مساءلة حالية</p>
-              <p className="text-[11px] text-muted-foreground">
-                لا مهام متأخرة في مرحلته، ولا شكاوى منسوبة إليه، ولا صمت تشغيلي مرصود.
-              </p>
-            </div>
           )}
 
-          {/* Stage-level proof behind this employee's accountability metrics. */}
-          <EmployeeEvidence
-            evidence={evidence}
-            loading={evidenceLoading}
-            error={evidenceError}
-            onRetry={() => {
-              setEvidenceLoading(true);
-              setEvidenceError(null);
-              setEvidenceAttempt((attempt) => attempt + 1);
-            }}
-          />
+          {/* الدليل — two tabs: LIVE (current-state case proof: تنفيذ/صوت العميل)
+              vs الفترة المحددة (stage evidence windowed to the range picker,
+              archived-inclusive). */}
+          <div className="space-y-2">
+            <div className="inline-flex rounded-lg border border-border bg-soft-1/50 p-0.5 text-[11px] font-medium">
+              {([
+                ["live", "لايف"],
+                ["period", `الفترة المحددة · ${daySpan(range.from, range.to)}ي`],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setEvTab(key)}
+                  aria-pressed={evTab === key}
+                  className={cn(
+                    "rounded-md px-3 py-1 transition-colors",
+                    evTab === key
+                      ? "bg-cyan-dim text-cyan"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* The problems (تنفيذ / صوت العميل) — the escalation itself. Shown in
+                BOTH tabs so «الفترة المحددة» is the problems PLUS the windowed
+                stage evidence, not a bare list. */}
+            {kase ? (
+              <CaseEvidence c={kase} cap={99} />
+            ) : (
+              <div className="rounded-xl border border-cc-green/20 bg-green-dim/40 p-4 text-center">
+                <ShieldCheck className="mx-auto size-6 text-cc-green" />
+                <p className="mt-2 text-sm font-semibold text-cc-green">لا توجد قضايا مساءلة حالية</p>
+                <p className="text-[11px] text-muted-foreground">
+                  لا مهام متأخرة في مرحلته، ولا شكاوى منسوبة إليه، ولا صمت تشغيلي مرصود.
+                </p>
+              </div>
+            )}
+
+            {/* Stage-level الأدلة: LIVE (current board / last 30d) vs الفترة
+                المحددة (range window, archived-inclusive). */}
+            {evTab === "period" && (
+              <EmployeeEvidence
+                evidence={evidence}
+                loading={evidenceLoading}
+                error={evidenceError}
+                onRetry={() => {
+                  setEvidenceLoading(true);
+                  setEvidenceError(null);
+                  setEvidenceAttempt((attempt) => attempt + 1);
+                }}
+              />
+            )}
+            {evTab === "live" && (
+              <EmployeeEvidence
+                evidence={liveEvidence}
+                loading={liveLoading}
+                error={liveError}
+                onRetry={() => {
+                  setLiveLoading(true);
+                  setLiveError(null);
+                  setLiveAttempt((attempt) => attempt + 1);
+                }}
+              />
+            )}
+          </div>
 
           {/* Deep link to the full stage-level evidence */}
           <Link
@@ -613,13 +812,23 @@ function EmployeeModal({
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+  explain,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+  explain?: ReactNode;
+}) {
   return (
-    <div className="bg-card px-2 py-2.5">
+    <ExplainBlock text={explain} className="bg-card px-2 py-2.5">
       <p className={cn("text-base font-bold tabular-nums", tone ?? "text-foreground")} dir="ltr">
         {value}
       </p>
       <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
-    </div>
+    </ExplainBlock>
   );
 }

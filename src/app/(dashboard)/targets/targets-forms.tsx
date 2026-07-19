@@ -26,7 +26,10 @@ export function EmployeeTargetForm({ members, defaultMonth }: { members: Member[
     <form action={action} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div>
         <Label htmlFor="et_emp">الموظف</Label>
-        <select id="et_emp" name="employee_profile_id" required className={selectClass()}>
+        {/* Tag the <select>, not the <option>s: the popup list is drawn by the
+            OS and CSS filters can't reach it. This blurs the closed control,
+            which is what a recording actually shows. */}
+        <select id="et_emp" name="employee_profile_id" required className={selectClass()} data-private="person">
           <option value="">— اختر —</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>{m.full_name}</option>

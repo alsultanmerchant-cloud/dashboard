@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import { getServerSession, hasPermission } from "@/lib/auth-server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
+  getClientEditsDetail,
   getEmployeeAccountabilityEvidence,
+  getReviewerRigorDetail,
   type AccountabilityEvidence,
+  type DrillTask,
 } from "@/lib/data/accountability";
 import {
   setCaseStatus,
@@ -34,16 +37,70 @@ export async function refreshAccountabilityScorecardAction(): Promise<{
 // swap the detail pane WITHOUT a full-page navigation (which would re-render
 // the whole server component and scroll-jump the reader). Same permission gate
 // as the page.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function getAccountabilityEvidenceAction(
   employeeId: string,
+  from?: string,
+  to?: string,
 ): Promise<{ ok: true; evidence: AccountabilityEvidence | null } | { ok: false; error: string }> {
   const session = await getServerSession();
   if (!session || !hasPermission(session, "people.analytics.view")) {
     return { ok: false, error: "Unauthorized" };
   }
+  // Both bounds valid → the «الفترة المحددة» tab (period window). Otherwise the
+  // loader falls back to its default last-30-days live view.
+  const range = from && to && ISO_DATE.test(from) && ISO_DATE.test(to) && from <= to
+    ? { from, to }
+    : { from: undefined, to: undefined };
   try {
-    const evidence = await getEmployeeAccountabilityEvidence(session.orgId, employeeId);
+    const evidence = await getEmployeeAccountabilityEvidence(
+      session.orgId,
+      employeeId,
+      range.from,
+      range.to,
+    );
     return { ok: true, evidence };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+// Drill-down: the exact tasks behind a صرامة المراجعة number (one reviewer, one
+// review stage, the selected window). Same permission gate as the page.
+export async function getReviewerRigorDetailAction(
+  employeeId: string,
+  stage: "manager_review" | "specialist_review",
+  from?: string,
+  to?: string,
+): Promise<{ ok: true; tasks: DrillTask[] } | { ok: false; error: string }> {
+  const session = await getServerSession();
+  if (!session || !hasPermission(session, "people.analytics.view")) {
+    return { ok: false, error: "Unauthorized" };
+  }
+  const range = from && to && ISO_DATE.test(from) && ISO_DATE.test(to) && from <= to ? { from, to } : {};
+  try {
+    const tasks = await getReviewerRigorDetail(session.orgId, employeeId, stage, range.from, range.to);
+    return { ok: true, tasks };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+// Drill-down: the exact tasks behind a تعديلات العميل number (one owner, window).
+export async function getClientEditsDetailAction(
+  employeeId: string,
+  from?: string,
+  to?: string,
+): Promise<{ ok: true; tasks: DrillTask[] } | { ok: false; error: string }> {
+  const session = await getServerSession();
+  if (!session || !hasPermission(session, "people.analytics.view")) {
+    return { ok: false, error: "Unauthorized" };
+  }
+  const range = from && to && ISO_DATE.test(from) && ISO_DATE.test(to) && from <= to ? { from, to } : {};
+  try {
+    const tasks = await getClientEditsDetail(session.orgId, employeeId, range.from, range.to);
+    return { ok: true, tasks };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "failed" };
   }

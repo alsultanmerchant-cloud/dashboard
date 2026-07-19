@@ -114,6 +114,7 @@ export default async function OdooProjectDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={project.name}
+        privateKind="client"
         breadcrumbs={[
           { label: "المشاريع", href: "/projects" },
           { label: project.name },
@@ -142,7 +143,7 @@ export default async function OdooProjectDetailPage({
               className="shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-xl font-bold text-foreground">{project.name}</h1>
+              <h1 className="truncate text-xl font-bold text-foreground" data-private="client">{project.name}</h1>
               <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-muted-foreground">
                 <span className="inline-flex items-center gap-1 tabular-nums">
                   <Hash className="size-3" /> {project.ref}

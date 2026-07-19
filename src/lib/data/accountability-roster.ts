@@ -2,9 +2,13 @@ import "server-only";
 import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
+  emptySilence,
+  getAccountabilityLiveTotals,
   getAccountabilityPeriodTrends,
   getAccountabilityScorecard,
+  getAccountabilitySilence,
   type AccountabilityPeriodTrend,
+  type AccountabilitySilence,
 } from "@/lib/data/accountability";
 import {
   getAccountabilityCases,
@@ -25,8 +29,16 @@ export interface RosterEmployee {
   name: string;
   role: string | null;
   department: string;
+  // مفتوحة / متأخرة — total LIVE open & overdue tasks the person is assigned to
+  // (not gated to the stages their role owns). See getAccountabilityLiveTotals.
   openTasks: number;
   overdueOwned: number;
+  // إجمالي المراحل / مراحل متأخرة — period-filtered, stage-ownership fan-out
+  // (one interval each, so two owned stages on one task count as two).
+  totalStages: number;
+  lateStages: number;
+  // أيام صامتة — period-scoped, archived-inclusive silence for this employee.
+  silence: AccountabilitySilence;
   onTimeRate: number | null;
   score: number | null;
   reworkReturns30d: number;
@@ -72,12 +84,16 @@ async function _getAccountabilityRoster(
   from?: string,
   to?: string,
 ): Promise<AccountabilityRoster> {
-  const [scorecard, trends, cases, depts] = await Promise.all([
+  const [scorecard, trends, liveTotals, silence, cases, depts] = await Promise.all([
     getAccountabilityScorecard(orgId),
     getAccountabilityPeriodTrends(orgId, from, to),
+    getAccountabilityLiveTotals(orgId),
+    getAccountabilitySilence(orgId, from, to),
     getAccountabilityCases(orgId),
     fetchDeptMap(orgId),
   ]);
+
+  const fallbackSilence = emptySilence(from, to);
 
   const sevByEmp = new Map<string, CaseSeverity>();
   for (const c of cases.cases) if (c.employeeId) sevByEmp.set(c.employeeId, c.severity);
@@ -87,8 +103,13 @@ async function _getAccountabilityRoster(
     name: r.fullName,
     role: r.positionLabel ?? r.jobTitle ?? null,
     department: depts.get(r.employeeId) ?? UNASSIGNED,
-    openTasks: r.openTasks,
-    overdueOwned: r.overdueOwned,
+    // Total live board (not stage-gated). Fall back to the scorecard's
+    // stage-owned counts only if the live query returned no row for them.
+    openTasks: liveTotals[r.employeeId]?.openLive ?? r.openTasks,
+    overdueOwned: liveTotals[r.employeeId]?.overdueLive ?? r.overdueOwned,
+    totalStages: (trends[r.employeeId] ?? r.periodTrend).currentTotalStages,
+    lateStages: (trends[r.employeeId] ?? r.periodTrend).currentLateStages,
+    silence: silence[r.employeeId] ?? fallbackSilence,
     onTimeRate: r.onTimeRate,
     score: r.score,
     reworkReturns30d: r.reworkReturns30d,

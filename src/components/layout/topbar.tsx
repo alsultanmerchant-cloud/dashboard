@@ -116,10 +116,16 @@ export function Topbar({
           <AppSwitcher className="hidden lg:inline-flex" />
 
           <div className="min-w-0 rtl:text-right">
-            <h2 className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate">
+            <h2
+              data-private={pageMeta?.privateKind}
+              className="text-base sm:text-xl font-extrabold tracking-tight text-white truncate"
+            >
               {title}
             </h2>
-            <p className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate">
+            <p
+              data-private={pageMeta?.privateKind}
+              className="mt-0.5 text-[10px] sm:text-xs text-white/72 dark:text-muted-foreground hidden md:block truncate"
+            >
               {subtitle}
             </p>
           </div>

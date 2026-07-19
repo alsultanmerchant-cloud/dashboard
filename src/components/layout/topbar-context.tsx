@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useCallback, useMemo, useState } from "react";
 import { MONTHS_AR } from "@/lib/utils/constants";
+import type { PrivateCategory } from "@/lib/demo-mode";
 
 interface TopbarControls {
   onRefresh?: () => void | Promise<void>;
@@ -12,6 +13,12 @@ interface TopbarControls {
 interface TopbarPageMeta {
   title: string;
   subtitle?: string;
+  /**
+   * Demo-mode category for the title. Detail pages put the client name or a
+   * person's name straight in the topbar, so the title needs blurring there
+   * too — not just in the page body.
+   */
+  privateKind?: PrivateCategory;
 }
 
 interface ModuleTabsMeta {

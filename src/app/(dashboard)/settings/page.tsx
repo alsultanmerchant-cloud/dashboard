@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ROLE_LABELS } from "@/lib/labels";
 import { ProjectManagerPicker } from "./project-manager-picker";
+import { DemoModeCard } from "./demo-mode-card";
 
 async function getOrgInfo(orgId: string) {
   const { data } = await supabaseAdmin
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
   const session = await requirePagePermission("settings.manage");
   const t = await getTranslations("SettingsPage");
   const tRoles = await getTranslations("RoleLabels");
+  const tDemo = await getTranslations("DemoMode");
   const [org, employees] = await Promise.all([
     getOrgInfo(session.orgId),
     listEmployees(session.orgId),
@@ -129,6 +131,9 @@ export default async function SettingsPage() {
           </Link>
         </CardContent>
       </Card>
+
+      <SectionTitle title={tDemo("sectionTitle")} description={tDemo("sectionDescription")} />
+      <DemoModeCard />
 
       <SectionTitle title={t("ai.title")} />
       <Card className="mb-8">

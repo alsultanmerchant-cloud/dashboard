@@ -415,7 +415,7 @@ export default async function ProjectDetailPage({
                     projectId={project.id}
                     initialFavorite={Boolean((project as { is_favorite?: boolean | null }).is_favorite)}
                   />
-                  <h1 className="truncate text-[1.65rem] font-semibold tracking-tight text-foreground">
+                  <h1 className="truncate text-[1.65rem] font-semibold tracking-tight text-foreground" data-private="client">
                     {project.name}
                   </h1>
                 </div>

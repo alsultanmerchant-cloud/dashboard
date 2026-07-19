@@ -5,7 +5,7 @@ import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import { nonLeadershipFilter } from "@/lib/data/leadership";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 import { resolveRange } from "@/lib/dashboard-range";
-import { riyadhDateRangeUtcBounds } from "@/lib/tz";
+import { riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
 
 // =========================================================================
 // Accountability Engine (/accountability) — CEO/department-head scorecard
@@ -56,6 +56,11 @@ export interface AccountabilityPeriodTrend {
   previousSampleSize: number;
   currentWithinSla: number;
   previousWithinSla: number;
+  // إجمالي المراحل / مراحل متأخرة for the CURRENT period — folded into this same
+  // query (they reuse its owned-intervals CTE) so the roster runs one heavy
+  // stage-history fan-out instead of two (the second one timed out under load).
+  currentTotalStages: number;
+  currentLateStages: number;
 }
 
 export interface AccountabilityScorecardRow {
@@ -202,6 +207,8 @@ const EMPTY_PERIOD_TREND: AccountabilityPeriodTrend = {
   previousSampleSize: 0,
   currentWithinSla: 0,
   previousWithinSla: 0,
+  currentTotalStages: 0,
+  currentLateStages: 0,
 };
 
 function assertUuid(value: string, label: string): string {
@@ -412,6 +419,8 @@ interface PeriodTrendSqlRow {
   current_ok: number;
   previous_n: number;
   previous_ok: number;
+  total_stages: number;
+  late_stages: number;
 }
 
 function addDaysIso(iso: string, delta: number): string {
@@ -437,7 +446,7 @@ async function loadPeriodTrends(
   const sql = `
 with owned_intervals as (
   select distinct h.id, ta.employee_id, h.entered_at, h.exited_at,
-         s.max_minutes,
+         s.max_minutes, t.planned_date,
          case
            when h.entered_at >= '${currentBounds.start}'::timestamptz
             and h.entered_at <  '${currentBounds.endExclusive}'::timestamptz
@@ -486,14 +495,30 @@ with owned_intervals as (
          )::int as within_sla
     from evaluated
    group by employee_id, period_key
+), stage_counts as (
+  -- إجمالي المراحل / مراحل متأخرة for the CURRENT period, straight off the same
+  -- owned-intervals fan-out (per interval, incl. archived-delivered). Late =
+  -- the deadline had passed while the person still held the stage.
+  select employee_id,
+         count(*) filter (where period_key = 'current')::int as total_stages,
+         count(*) filter (
+           where period_key = 'current'
+             and planned_date is not null
+             and planned_date < coalesce(exited_at::date, current_date)
+         )::int as late_stages
+    from owned_intervals
+   group by employee_id
 )
-select employee_id,
-       coalesce(max(sample_n) filter (where period_key = 'current'), 0)::int as current_n,
-       coalesce(max(within_sla) filter (where period_key = 'current'), 0)::int as current_ok,
-       coalesce(max(sample_n) filter (where period_key = 'previous'), 0)::int as previous_n,
-       coalesce(max(within_sla) filter (where period_key = 'previous'), 0)::int as previous_ok
-  from measured
- group by employee_id`;
+select m.employee_id,
+       coalesce(max(m.sample_n) filter (where m.period_key = 'current'), 0)::int as current_n,
+       coalesce(max(m.within_sla) filter (where m.period_key = 'current'), 0)::int as current_ok,
+       coalesce(max(m.sample_n) filter (where m.period_key = 'previous'), 0)::int as previous_n,
+       coalesce(max(m.within_sla) filter (where m.period_key = 'previous'), 0)::int as previous_ok,
+       coalesce(max(sc.total_stages), 0)::int as total_stages,
+       coalesce(max(sc.late_stages), 0)::int as late_stages
+  from measured m
+  left join stage_counts sc on sc.employee_id = m.employee_id
+ group by m.employee_id`;
 
   const rows = await runSql<PeriodTrendSqlRow>(sql);
   const result: Record<string, AccountabilityPeriodTrend> = {};
@@ -517,6 +542,8 @@ select employee_id,
       previousSampleSize: row.previous_n,
       currentWithinSla: row.current_ok,
       previousWithinSla: row.previous_ok,
+      currentTotalStages: row.total_stages,
+      currentLateStages: row.late_stages,
     };
   }
   return result;
@@ -907,6 +934,139 @@ async function _getAccountabilityPeriodTrends(
 
 export const getAccountabilityPeriodTrends = cache(_getAccountabilityPeriodTrends);
 
+// ---- Live totals (مفتوحة / متأخرة) ------------------------------------------
+// Total OPEN and OVERDUE tasks the employee is directly assigned to, LIVE and
+// current-state — NOT gated to the stages their role owns (that gating lives in
+// the period stage-counts below). "his open board", the way a person reads it.
+// Overdue uses the Rwasem definition (open task, deadline passed, `new` excluded
+// as ordinary not-started slip) in Asia/Riyadh, matching the CEO dashboard.
+export interface AccountabilityLiveTotals {
+  openLive: number;
+  overdueLive: number;
+}
+
+interface LiveTotalsSqlRow {
+  employee_id: string;
+  open_live: number;
+  overdue_live: number;
+}
+
+async function _getAccountabilityLiveTotals(
+  orgId: string,
+): Promise<Record<string, AccountabilityLiveTotals>> {
+  const org = assertUuid(orgId, "organization id");
+  const today = riyadhTodayIso();
+  const sql = `
+select ta.employee_id,
+       count(distinct t.id) filter (where t.stage <> 'done')::int as open_live,
+       count(distinct t.id) filter (
+         where t.stage not in ('done', 'new') and t.planned_date < '${today}'::date
+       )::int as overdue_live
+  from task_assignees ta
+  join tasks t on t.id = ta.task_id and t.organization_id = '${org}'
+ where ta.organization_id = '${org}'
+   and t.archived_at is null
+ group by 1`;
+  const rows = await runSql<LiveTotalsSqlRow>(sql);
+  const result: Record<string, AccountabilityLiveTotals> = {};
+  for (const r of rows) {
+    result[r.employee_id] = { openLive: r.open_live, overdueLive: r.overdue_live };
+  }
+  return result;
+}
+
+export const getAccountabilityLiveTotals = cache(_getAccountabilityLiveTotals);
+
+// ---- Silent days (أيام صامتة) ------------------------------------------------
+// Working days in the SELECTED PERIOD on which the person authored ZERO actions.
+// Deliberately archived-INCLUSIVE (no tasks join): working an archived task is
+// still working, so it must NOT read as a silent day. This is the one place the
+// engine counts archived activity — the productivity number (إجراءات ٣٠ي) stays
+// live-only to reconcile with نبض الفريق; silence answers a different question
+// ("was the person present at all?"). Window follows the range picker instead of
+// the old fixed 14 days.
+export interface AccountabilitySilence {
+  silentDays: number; // Sun–Thu days in the period with zero authored actions
+  windowDays: number; // calendar days in the period (for the label)
+  dailyActivity: { date: string; count: number }[]; // full period axis, oldest→newest
+}
+
+// Sun–Thu working day (getUTCDay: 5=Fri, 6=Sat are the Saudi weekend).
+function isWorkingDayIso(iso: string): boolean {
+  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  return dow !== 5 && dow !== 6;
+}
+
+interface SilenceSqlRow {
+  actor_employee_id: string;
+  d: string;
+  n: number;
+}
+
+async function _getAccountabilitySilence(
+  orgId: string,
+  from?: string,
+  to?: string,
+): Promise<Record<string, AccountabilitySilence>> {
+  const org = assertUuid(orgId, "organization id");
+  const range = reviewerRange(from, to);
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
+
+  // Riyadh calendar axis for the whole period (oldest→newest).
+  const axis: string[] = [];
+  for (let d = range.from; d <= range.to; d = addDaysIso(d, 1)) axis.push(d);
+  const workingAxis = axis.filter(isWorkingDayIso);
+
+  const sql = `
+select c.actor_employee_id,
+       (c.created_at at time zone 'Asia/Riyadh')::date::text as d,
+       count(*)::int as n
+  from task_comments c
+ where c.organization_id = '${org}'
+   and c.actor_employee_id is not null
+   and c.created_at >= '${start}'::timestamptz
+   and c.created_at <  '${endExclusive}'::timestamptz
+ group by 1, 2`;
+  const rows = await runSql<SilenceSqlRow>(sql);
+
+  const byEmpDay = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    let m = byEmpDay.get(r.actor_employee_id);
+    if (!m) {
+      m = new Map();
+      byEmpDay.set(r.actor_employee_id, m);
+    }
+    m.set(r.d, r.n);
+  }
+
+  const result: Record<string, AccountabilitySilence> = {};
+  for (const [employeeId, m] of byEmpDay) {
+    const silentDays = workingAxis.filter((d) => !(m.get(d) ?? 0)).length;
+    result[employeeId] = {
+      silentDays,
+      windowDays: axis.length,
+      dailyActivity: axis.map((date) => ({ date, count: m.get(date) ?? 0 })),
+    };
+  }
+  return result;
+}
+
+export const getAccountabilitySilence = cache(_getAccountabilitySilence);
+
+// A person absent from the silence query authored nothing all period — every
+// working day is silent. Roster/consumers use this to fill those gaps without
+// re-deriving the axis.
+export function emptySilence(from?: string, to?: string): AccountabilitySilence {
+  const range = reviewerRange(from, to);
+  const axis: string[] = [];
+  for (let d = range.from; d <= range.to; d = addDaysIso(d, 1)) axis.push(d);
+  return {
+    silentDays: axis.filter(isWorkingDayIso).length,
+    windowDays: axis.length,
+    dailyActivity: axis.map((date) => ({ date, count: 0 })),
+  };
+}
+
 function reviewerRange(from?: string, to?: string) {
   return from && to
     ? resolveRange({ preset: "custom", from, to })
@@ -1103,6 +1263,266 @@ async function _getClientEditsRigor(
 
 export const getClientEditsRigor = cache(_getClientEditsRigor);
 
+// =========================================================================
+// Drill-downs for صرامة المراجعة + تعديلات العميل — click any number and get
+// the exact tasks behind it, so the figures can be reconciled against Rwasem
+// (which has no equivalent filters). Each returns one flat, per-task list; the
+// UI slices it by `kind`/`flag` per clicked metric. Attribution mirrors the
+// aggregate SQL exactly so the drill-down count matches the cell.
+// =========================================================================
+export interface DrillTask {
+  taskId: string;
+  taskCode: string | null;
+  title: string;
+  projectName: string | null;
+  clientName: string | null;
+  minutes: number | null; // review / edit / pending business minutes
+  occurredAt: string | null; // reviewed_at / delivered_at (kind-dependent)
+  flag: boolean; // reviewer: entered client_changes after · edits: over SLA / was edited
+  kind: string; // reviewer: reviewed|pending · edits: edit|delivered|pending
+}
+
+interface DrillSqlRow {
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
+  client_name: string | null;
+  minutes: number | null;
+  occurred_at: string | null;
+  flag: boolean | null;
+  kind: string;
+}
+
+function mapDrill(rows: DrillSqlRow[]): DrillTask[] {
+  return rows.map((r) => ({
+    taskId: r.task_id,
+    taskCode: r.task_code,
+    title: (r.title ?? "").trim() || "—",
+    projectName: r.project_name,
+    clientName: r.client_name,
+    minutes: r.minutes === null ? null : round1(r.minutes),
+    occurredAt: r.occurred_at,
+    flag: r.flag ?? false,
+    kind: r.kind,
+  }));
+}
+
+// Reviewer rigor detail: the reviewed tasks (with review minutes + whether the
+// task later bounced to client_changes) and the tasks still pending this
+// person's review — for one reviewer, one stage, one window.
+function buildReviewerDetailSql(
+  org: string,
+  opts: { stage: "manager_review" | "specialist_review"; from: string; to: string; employeeId: string },
+): string {
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(opts.from, opts.to);
+  const emp = opts.employeeId;
+  return `
+with hist as (
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+    from task_stage_history h
+    join tasks t on t.id = h.task_id and t.archived_at is null
+   where h.organization_id = '${org}'
+),
+reviewer_by_task as (
+  select distinct on (g.task_id) g.task_id, g.employee_id
+    from (
+      select ta.task_id, candidate.employee_id, count(*) as n
+        from task_assignees ta
+        join tasks t on t.id = ta.task_id and t.archived_at is null
+        cross join lateral (
+          values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
+        ) as candidate(employee_id)
+        join employee_profiles e on e.id = candidate.employee_id
+        join positions p on p.id = e.position_id
+       where ta.organization_id = '${org}'
+         and candidate.employee_id is not null
+         and p.role = public.accountable_position_for_stage(t.stage_owner_positions, '${opts.stage}')
+       group by 1, 2
+    ) g
+   order by g.task_id, g.n desc, g.employee_id
+),
+review_intervals as (
+  select hist.id, hist.task_id, reviewer.employee_id,
+         coalesce(d.dwell_business_minutes::numeric,
+                  public.business_minutes_between(hist.entered_at, hist.exited_at)) as rev_min,
+         hist.exited_at as reviewed_at
+    from hist
+    join reviewer_by_task reviewer on reviewer.task_id = hist.task_id and reviewer.employee_id = '${emp}'
+    left join task_stage_dwell d on d.history_id = hist.id
+   where hist.stage = '${opts.stage}'
+     and hist.exited_at >= '${start}'::timestamptz
+     and hist.exited_at < '${endExclusive}'::timestamptz
+),
+reviewed_tasks as (
+  select task_id, min(rev_min) as rev_min, min(reviewed_at) as first_reviewed_at
+    from review_intervals group by 1
+),
+pending as (
+  select distinct hist.task_id,
+         max(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(hist.entered_at, least(now(), '${endExclusive}'::timestamptz)))) as pending_min
+    from hist
+    join reviewer_by_task reviewer on reviewer.task_id = hist.task_id and reviewer.employee_id = '${emp}'
+    left join task_stage_dwell d on d.history_id = hist.id
+   where hist.stage = '${opts.stage}'
+     and hist.entered_at >= '${start}'::timestamptz
+     and hist.entered_at < '${endExclusive}'::timestamptz
+     and (hist.exited_at is null or hist.exited_at >= '${endExclusive}'::timestamptz)
+   group by 1
+)
+select t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
+       rt.rev_min as minutes, rt.first_reviewed_at as occurred_at,
+       exists (
+         select 1 from task_stage_history h3
+          where h3.task_id = rt.task_id and h3.to_stage = 'client_changes'
+            and h3.entered_at > rt.first_reviewed_at
+            and h3.entered_at < '${endExclusive}'::timestamptz
+       ) as flag,
+       'reviewed' as kind
+  from reviewed_tasks rt
+  join tasks t on t.id = rt.task_id
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+union all
+select t.id, t.task_code, t.title, pj.name, cl.name,
+       p.pending_min as minutes, null::timestamptz as occurred_at, false as flag, 'pending' as kind
+  from pending p
+  join tasks t on t.id = p.task_id
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+ order by minutes asc nulls last`;
+}
+
+async function _getReviewerRigorDetail(
+  orgId: string,
+  employeeId: string,
+  stage: "manager_review" | "specialist_review",
+  from?: string,
+  to?: string,
+): Promise<DrillTask[]> {
+  const org = assertUuid(orgId, "organization id");
+  const emp = assertUuid(employeeId, "employee id");
+  const range = reviewerRange(from, to);
+  return mapDrill(
+    await runSql<DrillSqlRow>(buildReviewerDetailSql(org, { stage, from: range.from, to: range.to, employeeId: emp })),
+  );
+}
+
+export const getReviewerRigorDetail = cache(_getReviewerRigorDetail);
+
+// Client-edits detail: closed client_changes intervals (with over-SLA flag), the
+// tasks delivered in the window (flag = had been through client_changes), and
+// the ones sitting in client_changes right now — for one owner, one window.
+function buildClientEditsDetailSql(org: string, from: string, to: string, employeeId: string): string {
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
+  const emp = employeeId;
+  return `
+with sla as (
+  select coalesce(max(max_minutes), 480)::int as m
+    from sla_rules where organization_id = '${org}' and stage_key = 'client_changes'
+),
+hist as (
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+    from task_stage_history h
+    join tasks t on t.id = h.task_id and t.archived_at is null
+   where h.organization_id = '${org}'
+),
+owner_by_task as (
+  select distinct on (g.task_id) g.task_id, g.employee_id
+    from (
+      select ta.task_id, candidate.employee_id, count(*) as n
+        from task_assignees ta
+        join tasks t on t.id = ta.task_id and t.archived_at is null
+        cross join lateral (
+          values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
+        ) as candidate(employee_id)
+        join employee_profiles e on e.id = candidate.employee_id
+        join positions p on p.id = e.position_id
+       where ta.organization_id = '${org}'
+         and candidate.employee_id is not null
+         and p.role = public.accountable_position_for_stage(t.stage_owner_positions, 'client_changes')
+       group by 1, 2
+    ) g
+   order by g.task_id, g.n desc, g.employee_id
+),
+edits as (
+  select h.task_id,
+         min(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(h.entered_at, h.exited_at))) as mins
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
+    left join task_stage_dwell d on d.history_id = h.id
+   where h.stage = 'client_changes'
+     and h.exited_at >= '${start}'::timestamptz
+     and h.exited_at < '${endExclusive}'::timestamptz
+   group by 1
+),
+delivered as (
+  select distinct h.task_id,
+         exists (
+           select 1 from task_stage_history c
+            where c.task_id = h.task_id and c.to_stage = 'client_changes' and c.entered_at < h.entered_at
+         ) as was_edited,
+         min(h.entered_at) as delivered_at
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
+   where h.stage = 'done'
+     and h.entered_at >= '${start}'::timestamptz
+     and h.entered_at < '${endExclusive}'::timestamptz
+   group by h.task_id
+),
+pending as (
+  select distinct h.task_id,
+         max(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(h.entered_at, least(now(), '${endExclusive}'::timestamptz)))) as pending_min
+    from hist h
+    join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
+    left join task_stage_dwell d on d.history_id = h.id
+   where h.stage = 'client_changes'
+     and h.entered_at >= '${start}'::timestamptz
+     and h.entered_at < '${endExclusive}'::timestamptz
+     and (h.exited_at is null or h.exited_at >= '${endExclusive}'::timestamptz)
+   group by 1
+)
+select t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
+       e.mins as minutes, null::timestamptz as occurred_at,
+       (e.mins > (select m from sla)) as flag, 'edit' as kind
+  from edits e
+  join tasks t on t.id = e.task_id
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+union all
+select t.id, t.task_code, t.title, pj.name, cl.name,
+       null::numeric as minutes, dl.delivered_at as occurred_at, dl.was_edited as flag, 'delivered' as kind
+  from delivered dl
+  join tasks t on t.id = dl.task_id
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+union all
+select t.id, t.task_code, t.title, pj.name, cl.name,
+       p.pending_min as minutes, null::timestamptz as occurred_at, false as flag, 'pending' as kind
+  from pending p
+  join tasks t on t.id = p.task_id
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+ order by kind, minutes desc nulls last`;
+}
+
+async function _getClientEditsDetail(
+  orgId: string,
+  employeeId: string,
+  from?: string,
+  to?: string,
+): Promise<DrillTask[]> {
+  const org = assertUuid(orgId, "organization id");
+  const emp = assertUuid(employeeId, "employee id");
+  const range = reviewerRange(from, to);
+  return mapDrill(await runSql<DrillSqlRow>(buildClientEditsDetailSql(org, range.from, range.to, emp)));
+}
+
+export const getClientEditsDetail = cache(_getClientEditsDetail);
+
 // The team and cases lenses need operational scores plus reviewer signals, but
 // never the coverage counters or AI-signal board. Those fields each trigger
 // live analytics work, so keep them off the default request path.
@@ -1219,6 +1639,8 @@ interface EvidenceSqlRow {
 async function _getEmployeeAccountabilityEvidence(
   orgId: string,
   employeeId: string,
+  from?: string,
+  to?: string,
 ): Promise<AccountabilityEvidence | null> {
   const org = assertUuid(orgId, "organization id");
   const emp = assertUuid(employeeId, "employee id");
@@ -1232,6 +1654,22 @@ async function _getEmployeeAccountabilityEvidence(
   if (profileError) throw profileError;
   if (!profile) return null;
 
+  // Two modes:
+  //  • period (from+to given, the /accountability modal's «الفترة المحددة» tab):
+  //    intervals ENTERED inside the selected window, and archived-but-delivered
+  //    (`done`) tasks stay attributable — the historical contract used elsewhere.
+  //  • default (the scorecard deep-link): last WINDOW_DAYS, live tasks only.
+  const usePeriod = !!from && !!to;
+  const windowPredicate = usePeriod
+    ? (() => {
+        const { start, endExclusive } = riyadhDateRangeUtcBounds(from!, to!);
+        return `h.entered_at >= '${start}'::timestamptz and h.entered_at < '${endExclusive}'::timestamptz`;
+      })()
+    : `h.entered_at >= now() - interval '${WINDOW_DAYS} days'`;
+  const archivedPredicate = usePeriod
+    ? `(t.archived_at is null or t.stage = 'done')`
+    : `t.archived_at is null`;
+
   const sql = `
 with ${attribCte(org, { id: emp })}
 select t.id as task_id, t.task_code, t.title, (t.stage <> 'done' and t.planned_date < current_date) as is_overdue, t.delay_days,
@@ -1240,14 +1678,14 @@ select t.id as task_id, t.task_code, t.title, (t.stage <> 'done' and t.planned_d
                 public.business_minutes_between(h.entered_at, coalesce(h.exited_at, now()))) as dwell_min,
        c.name as client_name, p.name as project_name, a.role
   from attrib a
-  join tasks t on t.id = a.task_id and t.archived_at is null
+  join tasks t on t.id = a.task_id and ${archivedPredicate}
   join task_stage_history h on h.task_id = t.id
   left join task_stage_dwell d on d.history_id = h.id
   join projects p on p.id = t.project_id
   left join clients c on c.id = p.client_id
  where ${roleStagePredicate("a")}
    and h.to_stage::text <> 'done'
-   and h.entered_at >= now() - interval '${WINDOW_DAYS} days'
+   and ${windowPredicate}
  order by dwell_min desc
  limit 60`;
 

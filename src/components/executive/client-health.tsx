@@ -49,9 +49,9 @@ function HealthRow({
         />
       )}
       <div className="relative min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold">{row.clientName}</p>
+        <p className="truncate text-sm font-semibold" data-private="client">{row.clientName}</p>
         {isLead && mode === "worst" ? (
-          <p className="mt-0.5 text-[11px] text-cc-red truncate">{whyWorst(row)}</p>
+          <p className="mt-0.5 text-[11px] text-cc-red truncate" data-private="client">{whyWorst(row)}</p>
         ) : (
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {row.activeProjectCount} مشاريع · {row.openTaskCount} مهام

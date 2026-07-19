@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
 import {
   Activity,
@@ -10,8 +10,10 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ExternalLink,
   Info,
   Link2,
+  ListChecks,
   Quote,
   RefreshCw,
   Repeat,
@@ -24,6 +26,7 @@ import { refreshAccountabilityScorecardAction, setCaseStatusAction } from "./_ac
 import { Card, CardContent } from "@/components/ui/card";
 import { CaseOverview } from "./case-overview";
 import { EmptyState } from "@/components/empty-state";
+import { ExplainBlock } from "@/components/metric-info";
 import { FilterBar } from "@/components/filter-bar";
 import { FilterChip } from "@/components/filter-chip";
 import { cn } from "@/lib/utils";
@@ -35,6 +38,7 @@ import {
   type PersistedCaseMeta,
 } from "@/lib/accountability/case-status";
 import type { CaseBrief } from "@/lib/data/accountability-case-brief";
+import type { AccountabilitySilence } from "@/lib/data/accountability";
 import type {
   AccountabilityCase,
   AccountabilityCasesResult,
@@ -528,24 +532,78 @@ export function AdvicePanel({ employeeId }: { employeeId: string }) {
 }
 
 // ---- Ledger strip + 14-day heatmap -----------------------------------------
-export function LedgerStrip({ led }: { led: CaseLedger }) {
+export function LedgerStrip({
+  led,
+  silence,
+}: {
+  led: CaseLedger;
+  // When provided (the /accountability team modal), silence + the activity
+  // heatmap follow the SELECTED PERIOD and count archived-task work; otherwise
+  // they fall back to the case ledger's fixed 14-day, live-only view.
+  silence?: AccountabilitySilence | null;
+}) {
   const openDelta = led.openTasks - led.peerMedianOpen;
   const actionDelta = led.actions30d - led.peerMedianActions;
+  const silentDays = silence ? silence.silentDays : led.silentWorkingDays14;
+  const silentLabel = `أيام صامتة (${silence ? `${silence.windowDays}ي` : "١٤ي"})`;
+  const daily = silence ? silence.dailyActivity : led.dailyActivity;
+  const isWeekendIso = (iso: string) => {
+    const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    return dow === 5 || dow === 6;
+  };
+  const silentDates = daily.filter((d) => d.count === 0 && !isWeekendIso(d.date)).map((d) => d.date);
   return (
     <div className="mt-3 space-y-2">
       <div className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-6">
-        <LedgerCell label="مفتوحة" value={led.openTasks} sub={peerSub(openDelta)} />
-        <LedgerCell label="متأخرة" value={led.overdueOwned} tone={led.overdueOwned > 0 ? "text-cc-red" : undefined} />
-        <LedgerCell label="الالتزام" value={led.onTimeRate === null ? "—" : `${led.onTimeRate}%`} />
-        <LedgerCell label="إجراءات ٣٠ي" value={led.actions30d} sub={peerSub(actionDelta)} />
-        <LedgerCell label="أيام صامتة (١٤ي)" value={led.silentWorkingDays14} tone={led.silentWorkingDays14 >= 5 ? "text-cc-red" : led.silentWorkingDays14 >= 3 ? "text-amber" : undefined} />
+        <LedgerCell
+          label="مفتوحة"
+          value={led.openTasks}
+          sub={peerSub(openDelta)}
+          explain={`مهامه المفتوحة الآن. وسيط الفريق ${led.peerMedianOpen} مهمة.`}
+        />
+        <LedgerCell
+          label="متأخرة"
+          value={led.overdueOwned}
+          tone={led.overdueOwned > 0 ? "text-cc-red" : undefined}
+          explain="من مهامه المفتوحة، التي فات موعد تسليمها."
+        />
+        <LedgerCell
+          label="الالتزام"
+          value={led.onTimeRate === null ? "—" : `${led.onTimeRate}%`}
+          explain={led.onTimeRate === null ? "لا توجد مراحل كافية لقياس الالتزام." : "نسبة مراحله المُنجزة داخل حدّ الـSLA خلال آخر ٣٠ يومًا."}
+        />
+        <LedgerCell
+          label="إجراءات ٣٠ي"
+          value={led.actions30d}
+          sub={peerSub(actionDelta)}
+          explain={`الإجراءات التي سجّلها فعليًا (تحريك مراحل + ملاحظات) خلال ٣٠ يومًا على مهام غير مؤرشفة — نفس تعريف نبض الفريق. وسيط الفريق ${led.peerMedianActions}.`}
+        />
+        <LedgerCell
+          label={silentLabel}
+          value={silentDays}
+          tone={silentDays >= 5 ? "text-cc-red" : silentDays >= 3 ? "text-amber" : undefined}
+          explain={
+            silentDays === 0 ? (
+              "لا توجد أيام عمل صامتة في الفترة — سجّل إجراءً في كل يوم عمل."
+            ) : (
+              <span>
+                أيام العمل (الأحد–الخميس) في الفترة بلا أي إجراء مسجّل، شاملةً العمل على المهام المؤرشفة:
+                <span dir="ltr" className="mt-1 block tabular-nums">
+                  {silentDates.slice(0, 12).join("، ")}
+                  {silentDates.length > 12 ? ` +${silentDates.length - 12}` : ""}
+                </span>
+              </span>
+            )
+          }
+        />
         <LedgerCell
           label="آخر إجراء"
           value={led.daysSinceLastAction === null ? "—" : led.daysSinceLastAction === 0 ? "اليوم" : `${led.daysSinceLastAction}ي`}
           tone={led.daysSinceLastAction !== null && led.daysSinceLastAction >= 7 ? "text-cc-red" : undefined}
+          explain={led.lastActionAt ? `آخر إجراء مُسجّل بتاريخ ${led.lastActionAt.slice(0, 10)}.` : "لا يوجد أي إجراء مُسجّل."}
         />
       </div>
-      {led.dailyActivity.length > 0 && <Heatmap daily={led.dailyActivity} />}
+      {daily.length > 0 && <Heatmap daily={daily} />}
     </div>
   );
 }
@@ -555,19 +613,33 @@ function peerSub(delta: number): string | undefined {
   return delta > 0 ? `+${delta} عن الوسيط` : `${delta} عن الوسيط`;
 }
 
-function LedgerCell({ label, value, tone, sub }: { label: string; value: string | number; tone?: string; sub?: string }) {
+function LedgerCell({
+  label,
+  value,
+  tone,
+  sub,
+  explain,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+  sub?: string;
+  explain?: ReactNode;
+}) {
   return (
-    <div className="bg-card px-2 py-2">
+    <ExplainBlock text={explain} className="bg-card px-2 py-2">
       <p className={cn("text-sm font-bold tabular-nums", tone ?? "text-foreground")} dir="ltr">
         {value}
       </p>
       <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{label}</p>
       {sub && <p className="text-[9px] leading-tight text-muted-foreground/70">{sub}</p>}
-    </div>
+    </ExplainBlock>
   );
 }
 
-// 14-day authored-activity heatmap. Fri/Sat (weekend) shown hollow.
+// Authored-activity heatmap over the given axis (14 days by default, or the
+// selected period when silence is supplied). Fri/Sat (weekend) shown hollow;
+// wraps to multiple rows for longer periods.
 function Heatmap({ daily }: { daily: { date: string; count: number }[] }) {
   const max = Math.max(1, ...daily.map((d) => d.count));
   const level = (n: number) => {
@@ -582,9 +654,9 @@ function Heatmap({ daily }: { daily: { date: string; count: number }[] }) {
     return dow === 5 || dow === 6;
   };
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] text-muted-foreground">النشاط ١٤ يومًا</span>
-      <div className="flex items-end gap-0.5" dir="ltr">
+    <div className="flex items-start gap-2">
+      <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">النشاط {daily.length} يومًا</span>
+      <div className="flex flex-wrap items-end gap-0.5" dir="ltr">
         {daily.map((d) => (
           <span
             key={d.date}
@@ -601,6 +673,8 @@ function Heatmap({ daily }: { daily: { date: string; count: number }[] }) {
 }
 
 function ProofLine({ p }: { p: CaseProof }) {
+  const taskRefs = p.taskRefs ?? [];
+  const hasTaskRefs = taskRefs.length > 0;
   const body = (
     <>
       <span className="flex min-w-0 items-start gap-2">
@@ -626,7 +700,25 @@ function ProofLine({ p }: { p: CaseProof }) {
         >
           <Activity className="size-3" />
           {p.ownerActions === 0 ? "بلا إجراء" : `${p.ownerActions} إجراء`}
-          {typeof p.windowDays === "number" ? ` · ${p.windowDays} يوم` : ""}
+        </span>
+      )}
+      {/* Linkable tasks this proof concerns — name + project, never a raw code. */}
+      {hasTaskRefs && (
+        <span className="mt-1.5 flex flex-wrap gap-1.5">
+          {taskRefs.map((t) => (
+            <Link
+              key={t.taskId}
+              href={`/tasks/${t.taskId}`}
+              title={`فتح المهمة${t.projectName ? ` · ${t.projectName}` : ""}`}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-cyan/25 bg-cyan/10 px-1.5 py-0.5 text-[11px] font-medium text-cyan transition-colors hover:border-cyan/50 hover:bg-cyan/15"
+            >
+              <ListChecks className="size-3 shrink-0" />
+              <span className="truncate">{t.title}</span>
+              {t.projectName && (
+                <span className="shrink-0 text-cyan/60">· {t.projectName}</span>
+              )}
+            </Link>
+          ))}
         </span>
       )}
       {p.quote && (
@@ -638,12 +730,23 @@ function ProofLine({ p }: { p: CaseProof }) {
           </span>
         </span>
       )}
+      {/* When the task chips own the links, offer the original context as a
+          separate small link (nested anchors are invalid, so the card is a div). */}
+      {hasTaskRefs && p.href && (
+        <Link
+          href={p.href}
+          className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-cyan"
+        >
+          عرض السياق
+          <ExternalLink className="size-2.5" />
+        </Link>
+      )}
     </>
   );
   const cls = "block rounded-lg border border-border bg-card px-2.5 py-2 transition-colors";
   return (
     <li>
-      {p.href ? (
+      {p.href && !hasTaskRefs ? (
         <Link href={p.href} className={cn(cls, "hover:border-cyan/30 hover:bg-soft-1")}>
           {body}
         </Link>

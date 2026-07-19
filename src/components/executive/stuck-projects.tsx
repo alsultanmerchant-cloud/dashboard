@@ -65,8 +65,8 @@ export async function StuckProjectsSection({ rows, windowLabel }: { rows: StuckP
                     </span>
                     <ArrowRight className="size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 rtl:rotate-180" />
                   </div>
-                  <p className="mt-1.5 truncate text-sm font-semibold">{p.projectName}</p>
-                  <p className="truncate text-[10px] text-muted-foreground">
+                  <p className="mt-1.5 truncate text-sm font-semibold" data-private="client">{p.projectName}</p>
+                  <p className="truncate text-[10px] text-muted-foreground" data-private="client">
                     {p.clientName ?? "—"}
                   </p>
                   <div className="mt-3 flex items-baseline justify-between gap-2">

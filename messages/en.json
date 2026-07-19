@@ -1888,6 +1888,7 @@
       "tasks": "Tasks"
     },
     "delayPill": "{count}d delayed",
+    "archivedBadge": "Archived",
     "summary": {
       "project": "Project",
       "noClient": "No client",
@@ -4460,5 +4461,36 @@
         "saved": "Saved"
       }
     }
+  },
+  "DemoMode": {
+    "toggleTitle": "Demo mode",
+    "toggleDescription": "Blurs sensitive data across the dashboard so you can record videos and walk through features without exposing company data. Local to this browser only — it does not affect other users.",
+    "categoriesTitle": "What gets blurred",
+    "categories": {
+      "client": {
+        "label": "Client & company names",
+        "description": "Client names, contracts, and WhatsApp groups."
+      },
+      "money": {
+        "label": "Money & financials",
+        "description": "Contract values, dues, revenue, and targets."
+      },
+      "person": {
+        "label": "Employee names & photos",
+        "description": "Names and avatars in accountability, team pulse, and tasks."
+      },
+      "chat": {
+        "label": "Conversation content",
+        "description": "WhatsApp transcripts, comments, and analyses quoting them."
+      }
+    },
+    "revealTitle": "Reveal on hover",
+    "revealDescription": "Un-blurs an element while you hover it. Handy while presenting, but a stray cursor can expose data mid-recording.",
+    "shortcutHint": "Toggle while recording:",
+    "securityNote": "Note: the blur is visual only — real values remain in the page and are readable from devtools. Use it for recording and demos, not as a security guarantee.",
+    "indicatorLabel": "Demo mode",
+    "indicatorTooltip": "Demo mode is on — click to turn off",
+    "sectionTitle": "Presentation & privacy",
+    "sectionDescription": "Control what shows on screen while recording or sharing your screen."
   }
 }

@@ -547,7 +547,7 @@ export async function getTaskSummary(orgId: string, id: string) {
       actual_done_date, allocated_time_minutes, upload_due_date,
       external_id, external_source,
       progress_percent, expected_progress_percent, progress_slip_percent,
-      delay_days, hold_reason, hold_since, is_important,
+      delay_days, hold_reason, hold_since, is_important, archived_at,
       design_count, revision_count,
       project:projects ( id, name, client:clients ( id, name ) ),
       service:services ( id, name, slug ),

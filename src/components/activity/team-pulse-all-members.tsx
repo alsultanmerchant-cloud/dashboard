@@ -265,7 +265,7 @@ export function TeamPulseAllMembers({
                     <tr key={m.employeeId} className="border-b border-border/50 hover:bg-soft-1">
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-medium">{m.fullName}</span>
+                          <span className="font-medium" data-private="person">{m.fullName}</span>
                           {m.isLeadership && (
                             <span className="rounded bg-cyan/10 px-1.5 py-0.5 text-[9px] font-medium text-cyan">
                               قيادة

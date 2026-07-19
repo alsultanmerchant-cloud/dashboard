@@ -244,7 +244,7 @@ export default async function FinancePage({
                     {t("income.expected")}
                     <MetricInfo text={t("metricTooltips.finance_incomeExpected")} label={t("income.expected")} />
                   </p>
-                  <p className="mt-2 text-3xl font-bold tabular-nums text-cyan">
+                  <p className="mt-2 text-3xl font-bold tabular-nums text-cyan" data-private="money">
                     {formatMoney(income.expected, locale)} <span className="text-base text-muted-foreground">{currency}</span>
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
@@ -263,7 +263,7 @@ export default async function FinancePage({
                     {t("income.actual")}
                     <MetricInfo text={t("metricTooltips.finance_incomeActual")} label={t("income.actual")} />
                   </p>
-                  <p className="mt-2 text-3xl font-bold tabular-nums text-cc-green">
+                  <p className="mt-2 text-3xl font-bold tabular-nums text-cc-green" data-private="money">
                     {formatMoney(income.actual, locale)} <span className="text-base text-muted-foreground">{currency}</span>
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">

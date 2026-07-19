@@ -340,3 +340,48 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* ── Demo mode ────────────────────────────────────────────────────────────
+   Blurs elements tagged `data-private="<category>"` when their category is
+   listed in `<html data-demo="...">`. See src/lib/demo-mode.tsx.
+
+   Presentation only — the real values stay in the DOM. Never treat this as a
+   security control.
+
+   Blur radius is in `em` so it tracks font-size: a KPI number and a table cell
+   both end up equally unreadable without per-site tuning. */
+[data-demo~="client"] [data-private~="client"],
+[data-demo~="money"] [data-private~="money"],
+[data-demo~="person"] [data-private~="person"],
+[data-demo~="chat"] [data-private~="chat"] {
+  filter: blur(0.35em);
+  /* Stop the text from being copied or read via selection while blurred. */
+  user-select: none;
+  -webkit-user-select: none;
+  /* Blur alone leaves letter shapes legible at large sizes; the slight
+     contrast squash finishes the job without changing layout. */
+  opacity: 0.92;
+  transition: filter 120ms ease-out;
+}
+
+/* Avatars and images need a heavier hand — face shapes survive a text-tuned
+   blur. Fixed px because an <img> font-size is meaningless. */
+[data-demo~="person"] [data-private~="person"] img,
+[data-demo~="person"] img[data-private~="person"] {
+  filter: blur(8px);
+}
+
+/* Presenter escape hatch: hover to read the real value. Opt-in, because it
+   also means a stray cursor can expose data mid-recording. */
+[data-demo-reveal][data-demo] [data-private]:hover {
+  filter: none;
+  opacity: 1;
+  user-select: auto;
+  -webkit-user-select: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-demo] [data-private] {
+    transition: none;
+  }
+}

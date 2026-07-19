@@ -59,6 +59,7 @@ export default async function ClientDetailPage({
     <div className="pb-32">
       <PageHeader
         title={clientName}
+        privateKind="client"
         actions={
           <div className="flex items-center gap-3">
             {canManage && (
@@ -166,6 +167,7 @@ export default async function ClientDetailPage({
                       <Link
                         href={`/projects/${p.id}`}
                         className="hover:text-cyan transition-colors"
+                        data-private="client"
                       >
                         {p.name}
                       </Link>

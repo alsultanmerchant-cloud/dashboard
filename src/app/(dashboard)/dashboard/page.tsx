@@ -546,7 +546,7 @@ function AccountabilityAnalysisCard({ summary, t }: { summary: AccountabilitySum
                 className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs transition-colors hover:bg-soft-2/40"
               >
                 <span className="min-w-0">
-                  <span className="block truncate font-medium">{row.fullName}</span>
+                  <span className="block truncate font-medium" data-private="person">{row.fullName}</span>
                   <span className="text-[11px] text-muted-foreground">
                     {t("ceoAnalysis.accountabilityCard.rowSummary", {
                       role: roleLabel(row.role, t),
@@ -685,10 +685,10 @@ function ContractsAnalysisCard({ analysis, t }: { analysis: ContractAnalysis; t:
               {topAm.map((am) => (
                 <div key={am.account_manager_id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
                   <span className="min-w-0">
-                    <span className="block truncate font-medium">
+                    <span className="block truncate font-medium" data-private="person">
                       {am.account_manager_name ?? t("ceoAnalysis.contractsCard.unassigned")}
                     </span>
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-[11px] text-muted-foreground" data-private="money">
                       {fmtSR(am.achieved_total, t)} / {fmtSR(am.expected_total, t)}
                     </span>
                   </span>

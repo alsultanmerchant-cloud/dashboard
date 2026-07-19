@@ -104,6 +104,7 @@ export function TaskFormCard({
   formattedCompletedAt,
   canEditCounts,
   canEditDeadline,
+  isArchived,
 }: {
   task: TaskFormData;
   project: Project;
@@ -116,9 +117,11 @@ export function TaskFormCard({
   formattedCompletedAt: string | null;
   canEditCounts: boolean;
   canEditDeadline: boolean;
+  isArchived?: boolean;
 }) {
   const progress = task.progress_percent;
   const t = useTranslations("TaskDetailPage.form");
+  const tRoot = useTranslations("TaskDetailPage");
   const locale = useLocale();
   const progressNum =
     progress == null
@@ -134,7 +137,14 @@ export function TaskFormCard({
         : task.progress_slip_percent;
 
   return (
-    <Card>
+    <Card className="relative overflow-hidden">
+      {isArchived && (
+        <div className="pointer-events-none absolute -right-11 top-6 z-10 w-40 rotate-45">
+          <span className="block bg-gradient-to-b from-red-600 to-red-700 py-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]">
+            {tRoot("archivedBadge")}
+          </span>
+        </div>
+      )}
       <CardContent className="grid gap-x-8 gap-y-0 p-5 md:grid-cols-2">
         <dl className="divide-y divide-soft/40">
           <Row label={t("project")}>
@@ -144,13 +154,13 @@ export function TaskFormCard({
                 className="inline-flex items-center gap-1.5 font-medium hover:text-cyan transition-colors"
               >
                 <Briefcase className="size-3.5" />
-                {project.name}
+                <span data-private="client">{project.name}</span>
               </Link>
             ) : (
               <span className="text-muted-foreground">—</span>
             )}
             {client?.name && (
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-[11px] text-muted-foreground" data-private="client">
                 {client.name}
               </div>
             )}

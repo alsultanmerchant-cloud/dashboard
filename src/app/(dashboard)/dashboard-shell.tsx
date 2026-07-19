@@ -11,6 +11,8 @@ import { ModuleTabs } from "@/components/layout/module-tabs";
 import { RightRail } from "@/components/layout/right-rail";
 import { AuthProvider, useAuth, type AuthInitialUser } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
+import { DemoModeProvider } from "@/lib/demo-mode";
+import { DemoModeIndicator } from "@/components/demo-mode-indicator";
 import { createClient } from "@/lib/supabase/client";
 import { NotificationPanel } from "@/components/layout/notification-panel";
 import { emojiFor } from "@/lib/notifications/registry";
@@ -220,6 +222,7 @@ export function DashboardShell({
   return (
     <OrgProvider>
       <AuthProvider initialUser={initialUser}>
+        <DemoModeProvider>
         <TopbarProvider>
           <StackedSheetProvider>
           <CommandPaletteProvider />
@@ -268,9 +271,11 @@ export function DashboardShell({
               <AIChatFAB onClick={() => router.push("/agent")} />
             )}
             <DeferredDashboardSelectionAssistant />
+            <DemoModeIndicator />
           </div>
           </StackedSheetProvider>
         </TopbarProvider>
+        </DemoModeProvider>
       </AuthProvider>
     </OrgProvider>
   );

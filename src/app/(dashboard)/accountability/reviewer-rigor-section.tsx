@@ -1,14 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ChevronDown, Scale, Timer } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { MetricInfo } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 import type { DashboardRange } from "@/lib/dashboard-range";
-import type { AccountabilityOverview, ReviewerRigorRow } from "@/lib/data/accountability";
+import type { AccountabilityOverview, DrillTask, ReviewerRigorRow } from "@/lib/data/accountability";
 import { AccountabilityRangePicker } from "./accountability-range-picker";
+import { getReviewerRigorDetailAction } from "./_actions";
+import { DrillNumber, TaskDrillSheet, type DrillView } from "./task-drill-modal";
+
+type ReviewerStage = "manager_review" | "specialist_review";
+type ReviewerMetric = "reviews" | "fast" | "rework" | "pending";
+
+interface ReviewerDrill {
+  stage: ReviewerStage;
+  employeeId: string;
+  employeeName: string;
+  metric: ReviewerMetric;
+}
+
+const FAST_REVIEW_MINUTES = 10; // mirrors the server threshold
+
+function reviewerDrillView(drill: ReviewerDrill, all: DrillTask[]): Omit<DrillView, "loading" | "error"> {
+  const reviewed = all.filter((t) => t.kind === "reviewed");
+  switch (drill.metric) {
+    case "reviews":
+      return { title: `المراجعات — ${drill.employeeName}`, subtitle: "كل تاسك راجعه في الفترة", valueKind: "minutes", tasks: reviewed };
+    case "fast":
+      return {
+        title: `مراجعات خاطفة (<١٠د) — ${drill.employeeName}`,
+        subtitle: "أُغلقت في أقل من ١٠ دقائق عمل",
+        valueKind: "minutes",
+        tasks: reviewed.filter((t) => t.minutes !== null && t.minutes < FAST_REVIEW_MINUTES),
+      };
+    case "rework":
+      return {
+        title: `دخلت تعديلات العميل بعد المراجعة — ${drill.employeeName}`,
+        subtitle: "تاسكات راجعها ثم رجّعها العميل بتعديلات",
+        valueKind: "minutes",
+        tasks: reviewed.filter((t) => t.flag),
+      };
+    case "pending":
+      return { title: `قيد انتظار مراجعته — ${drill.employeeName}`, subtitle: "لم تُغلق حتى نهاية الفترة", valueKind: "minutes", tasks: all.filter((t) => t.kind === "pending") };
+  }
+}
 
 const NA = "—";
 
@@ -36,6 +74,46 @@ export function ReviewerRigorSection({
   const [open, setOpen] = useState(true);
   const total = reviewers.managerReview.length + reviewers.specialistReview.length;
 
+  // Drill-down: click a number → the tasks behind it. `tasks` holds ALL rows for
+  // the current (employee, stage); the modal slices by metric so switching
+  // metric on the same reviewer doesn't refetch.
+  const [drill, setDrill] = useState<ReviewerDrill | null>(null);
+  const [tasks, setTasks] = useState<DrillTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!drill) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getReviewerRigorDetailAction(drill.employeeId, drill.stage, range.from, range.to)
+      .then((res) => {
+        if (!active) return;
+        if (res.ok) setTasks(res.tasks);
+        else {
+          setTasks([]);
+          setError(res.error);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTasks([]);
+        setError("failed");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+    // metric intentionally excluded: same (employee, stage) reuses the fetch.
+  }, [drill?.employeeId, drill?.stage, range.from, range.to, attempt]);
+
+  const view: DrillView | null = drill
+    ? { ...reviewerDrillView(drill, tasks), loading, error }
+    : null;
+
   return (
     <Card>
       <CardContent className="p-4">
@@ -62,6 +140,9 @@ export function ReviewerRigorSection({
               subtitle={t("reviewers.managerReviewSubtitle")}
               rows={reviewers.managerReview}
               onSelect={onSelect}
+              onDrill={(employeeId, employeeName, metric) =>
+                setDrill({ stage: "manager_review", employeeId, employeeName, metric })
+              }
               t={t}
             />
             <ReviewerStageBlock
@@ -69,11 +150,15 @@ export function ReviewerRigorSection({
               subtitle={t("reviewers.specialistReviewSubtitle")}
               rows={reviewers.specialistReview}
               onSelect={onSelect}
+              onDrill={(employeeId, employeeName, metric) =>
+                setDrill({ stage: "specialist_review", employeeId, employeeName, metric })
+              }
               t={t}
             />
           </div>
         )}
       </CardContent>
+      {view && <TaskDrillSheet view={view} onClose={() => setDrill(null)} onRetry={() => setAttempt((a) => a + 1)} />}
     </Card>
   );
 }
@@ -83,12 +168,14 @@ function ReviewerStageBlock({
   subtitle,
   rows,
   onSelect,
+  onDrill,
   t,
 }: {
   title: string;
   subtitle: string;
   rows: ReviewerRigorRow[];
   onSelect?: (id: string) => void;
+  onDrill: (employeeId: string, employeeName: string, metric: ReviewerMetric) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
@@ -152,21 +239,32 @@ function ReviewerStageBlock({
                         </span>
                       )}
                     </td>
-                    <td className="p-2 text-center tabular-nums">{row.reviewsCompleted}</td>
+                    <td className="p-2 text-center tabular-nums">
+                      <DrillNumber
+                        value={row.reviewsCompleted}
+                        onClick={() => onDrill(row.employeeId, row.fullName, "reviews")}
+                      />
+                    </td>
                     <td className="p-2 text-center tabular-nums text-muted-foreground">
                       {formatMinutes(row.medianReviewBusinessMinutes, t)}
                     </td>
                     <td className="p-2 text-center">
-                      <span className={cn("inline-flex items-center gap-1 tabular-nums", row.fastReviewCount > 0 ? "font-semibold text-amber" : "text-muted-foreground")}>
+                      <DrillNumber
+                        value={row.fastReviewCount}
+                        onClick={() => onDrill(row.employeeId, row.fullName, "fast")}
+                        className={cn("inline-flex items-center gap-1 tabular-nums", row.fastReviewCount > 0 ? "font-semibold text-amber" : "text-muted-foreground")}
+                      >
                         {row.fastReviewCount > 0 && <Timer className="size-3" />}
                         <span dir="ltr">{row.fastReviewCount}</span>
-                      </span>
+                      </DrillNumber>
                       <div className="text-[10px] text-muted-foreground">من {row.reviewsCompleted} تاسك</div>
                     </td>
                     <td className="p-2 text-center">
-                      <span className={cn("tabular-nums", row.clientChangesAfterReviewCount > 0 ? "font-semibold text-amber" : "text-muted-foreground")} dir="ltr">
-                        {row.clientChangesAfterReviewCount}
-                      </span>
+                      <DrillNumber
+                        value={row.clientChangesAfterReviewCount}
+                        onClick={() => onDrill(row.employeeId, row.fullName, "rework")}
+                        className={cn("tabular-nums", row.clientChangesAfterReviewCount > 0 ? "font-semibold text-amber" : "text-muted-foreground")}
+                      />
                       {row.clientChangesAfterReviewRate !== null && (
                         <div className="text-[10px] tabular-nums text-muted-foreground" dir="ltr">
                           {row.clientChangesAfterReviewRate}% من المراجَع
@@ -174,7 +272,11 @@ function ReviewerStageBlock({
                       )}
                     </td>
                     <td className="p-2 text-center">
-                      <span className="tabular-nums">{row.pendingReviews}</span>
+                      <DrillNumber
+                        value={row.pendingReviews}
+                        onClick={() => onDrill(row.employeeId, row.fullName, "pending")}
+                        className="tabular-nums"
+                      />
                       {row.oldestPendingBusinessMinutes !== null && row.pendingReviews > 0 && (
                         <div className="text-[10px] tabular-nums text-muted-foreground">
                           {t("reviewers.oldestPending", { v: formatMinutes(row.oldestPendingBusinessMinutes, t) })}

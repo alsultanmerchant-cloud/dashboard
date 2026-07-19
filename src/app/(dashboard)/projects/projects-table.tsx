@@ -127,11 +127,11 @@ export function ProjectsTable({ items }: { items: LiveProject[] }) {
                       className="inline-block h-4 w-1 shrink-0 rounded-sm"
                       style={{ backgroundColor: stripe }}
                     />
-                    <span className="truncate font-medium">{p.name}</span>
+                    <span className="truncate font-medium" data-private="client">{p.name}</span>
                   </Link>
                 </td>
                 <td className="px-2 py-2 align-middle">
-                  <span className="block max-w-[18ch] truncate text-foreground/80">
+                  <span className="block max-w-[18ch] truncate text-foreground/80" data-private="client">
                     {p.clientName ?? "—"}
                   </span>
                 </td>

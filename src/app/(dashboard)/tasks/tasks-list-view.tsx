@@ -247,7 +247,7 @@ export function TasksListView({ tasks }: { tasks: ListTaskRow[] }) {
                       <OriginBadge source={t.external_source} className="ms-1.5 align-middle" />
                     </Link>
                   </DataTableCell>
-                  <DataTableCell className="max-w-[200px] text-xs">
+                  <DataTableCell className="max-w-[200px] text-xs" data-private="client">
                     <Link
                       href={`/projects/${t.project_id}`}
                       className="line-clamp-1 text-muted-foreground hover:text-cyan transition-colors"

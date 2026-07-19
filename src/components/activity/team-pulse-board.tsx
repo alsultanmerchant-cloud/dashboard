@@ -99,7 +99,7 @@ function DeptCard({ row }: { row: TeamPulseRow }) {
 
           <div className="mb-3">
             <p className="font-semibold group-hover:text-cyan">{row.departmentName}</p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground" data-private="person">
               {row.headName ? `يقودها ${row.headName}` : "بدون مسؤول"}
             </p>
           </div>

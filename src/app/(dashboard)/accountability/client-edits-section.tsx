@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ChevronDown, PencilRuler, Timer } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,8 +8,38 @@ import { FilterChip } from "@/components/filter-chip";
 import { MetricInfo } from "@/components/metric-info";
 import { cn } from "@/lib/utils";
 import type { DashboardRange } from "@/lib/dashboard-range";
-import type { ClientEditsRow } from "@/lib/data/accountability";
+import type { ClientEditsRow, DrillTask } from "@/lib/data/accountability";
 import { AccountabilityRangePicker } from "./accountability-range-picker";
+import { getClientEditsDetailAction } from "./_actions";
+import { DrillNumber, TaskDrillSheet, type DrillView } from "./task-drill-modal";
+
+type EditsMetric = "edits" | "slaBreach" | "editRate" | "pending";
+
+interface EditsDrill {
+  employeeId: string;
+  employeeName: string;
+  metric: EditsMetric;
+}
+
+function editsDrillView(drill: EditsDrill, all: DrillTask[]): Omit<DrillView, "loading" | "error"> {
+  const edits = all.filter((t) => t.kind === "edit");
+  switch (drill.metric) {
+    case "edits":
+      return { title: `تعديلات العميل المُنجزة — ${drill.employeeName}`, subtitle: "فترات تعديلات العميل التي أُغلقت في الفترة", valueKind: "minutes", tasks: edits };
+    case "slaBreach":
+      return { title: `تجاوزت مهلة SLA — ${drill.employeeName}`, subtitle: "تعديلات تجاوز زمنها الحدّ المسموح", valueKind: "minutes", tasks: edits.filter((t) => t.flag) };
+    case "editRate":
+      return {
+        title: `التسليمات ومنها ما رجع بتعديل — ${drill.employeeName}`,
+        subtitle: "كل تاسك سلّمه في الفترة؛ المميّز رجع من العميل بتعديل قبل تسليمه",
+        valueKind: "flag",
+        flagLabel: "رجع بتعديل",
+        tasks: all.filter((t) => t.kind === "delivered"),
+      };
+    case "pending":
+      return { title: `قيد التعديل الآن — ${drill.employeeName}`, subtitle: "جالسة في مرحلة تعديلات العميل حتى الآن", valueKind: "minutes", tasks: all.filter((t) => t.kind === "pending") };
+  }
+}
 
 // تعديلات العميل — the sibling of صرامة المراجعة, pointed at client_changes.
 // Same table shape on purpose: reviewer rigor asks "is the review real?", this
@@ -42,6 +72,44 @@ export function ClientEditsSection({
   const t = useTranslations("AccountabilityPage");
   const [open, setOpen] = useState(true);
   const [dept, setDept] = useState<string | null>(null);
+
+  // Drill-down: click any number → the exact tasks behind it (one owner's whole
+  // detail set; the modal slices by metric so switching metric doesn't refetch).
+  const [drill, setDrill] = useState<EditsDrill | null>(null);
+  const [tasks, setTasks] = useState<DrillTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!drill) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getClientEditsDetailAction(drill.employeeId, range.from, range.to)
+      .then((res) => {
+        if (!active) return;
+        if (res.ok) setTasks(res.tasks);
+        else {
+          setTasks([]);
+          setError(res.error);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTasks([]);
+        setError("failed");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [drill?.employeeId, range.from, range.to, attempt]);
+
+  const view: DrillView | null = drill ? { ...editsDrillView(drill, tasks), loading, error } : null;
+  const openDrill = (employeeId: string, employeeName: string, metric: EditsMetric) =>
+    setDrill({ employeeId, employeeName, metric });
 
   // Client edits span every department that owns the stage in a task template,
   // not just the supporting ones — so the department filter is the lens.
@@ -194,7 +262,12 @@ export function ClientEditsSection({
                               </span>
                             )}
                           </td>
-                          <td className="p-2 text-center tabular-nums">{row.editsCompleted}</td>
+                          <td className="p-2 text-center tabular-nums">
+                            <DrillNumber
+                              value={row.editsCompleted}
+                              onClick={() => openDrill(row.employeeId, row.fullName, "edits")}
+                            />
+                          </td>
                           <td className="p-2 text-center">
                             {/* Beside a real SLA, a median is a verdict, not trivia. */}
                             <span
@@ -207,7 +280,9 @@ export function ClientEditsSection({
                             </span>
                           </td>
                           <td className="p-2 text-center">
-                            <span
+                            <DrillNumber
+                              value={row.slaBreachCount}
+                              onClick={() => openDrill(row.employeeId, row.fullName, "slaBreach")}
                               className={cn(
                                 "inline-flex items-center gap-1 tabular-nums",
                                 row.slaBreachCount > 0 ? "font-semibold text-amber" : "text-muted-foreground",
@@ -215,7 +290,7 @@ export function ClientEditsSection({
                             >
                               {row.slaBreachCount > 0 && <Timer className="size-3" />}
                               <span dir="ltr">{row.slaBreachCount}</span>
-                            </span>
+                            </DrillNumber>
                             {row.editsCompleted > 0 && (
                               <div className="text-[10px] text-muted-foreground">
                                 {t("clientEdits.slaBreachDetail", { n: row.editsCompleted })}
@@ -227,15 +302,16 @@ export function ClientEditsSection({
                               <span className="text-muted-foreground">{NA}</span>
                             ) : (
                               <>
-                                <span
+                                <DrillNumber
+                                  value={row.deliveredCount}
+                                  onClick={() => openDrill(row.employeeId, row.fullName, "editRate")}
                                   className={cn(
                                     "tabular-nums",
                                     row.editRate >= 30 ? "font-semibold text-amber" : "text-muted-foreground",
                                   )}
-                                  dir="ltr"
                                 >
-                                  {row.editRate}%
-                                </span>
+                                  <span dir="ltr">{row.editRate}%</span>
+                                </DrillNumber>
                                 <div className="text-[10px] tabular-nums text-muted-foreground">
                                   {t("clientEdits.editRateDetail", {
                                     k: row.deliveredEditedCount,
@@ -246,7 +322,11 @@ export function ClientEditsSection({
                             )}
                           </td>
                           <td className="p-2 text-center">
-                            <span className="tabular-nums">{row.pendingEdits}</span>
+                            <DrillNumber
+                              value={row.pendingEdits}
+                              onClick={() => openDrill(row.employeeId, row.fullName, "pending")}
+                              className="tabular-nums"
+                            />
                             {row.oldestPendingBusinessMinutes !== null && row.pendingEdits > 0 && (
                               <div className="text-[10px] tabular-nums text-muted-foreground">
                                 {t("clientEdits.oldestPending", {
@@ -265,6 +345,7 @@ export function ClientEditsSection({
           </div>
         )}
       </CardContent>
+      {view && <TaskDrillSheet view={view} onClose={() => setDrill(null)} onRetry={() => setAttempt((a) => a + 1)} />}
     </Card>
   );
 }

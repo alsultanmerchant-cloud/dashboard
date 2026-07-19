@@ -45,6 +45,17 @@ import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-fi
 export type CaseStream = "execution" | "client" | "commercial";
 export type CaseSeverity = "critical" | "proven" | "signal";
 
+// A specific task a proof points at. The UI renders these as clickable
+// "<title> · <project>" chips that deep-link to /tasks/[id] — never a raw code
+// like "PRJ-01798-045", which no operator can act on. Any proof that references
+// concrete tasks (AI complaints citing a task, rework rebounds) carries these.
+export interface TaskRef {
+  taskId: string;
+  code: string | null;
+  title: string;
+  projectName: string | null;
+}
+
 export interface CaseProof {
   stream: CaseStream;
   kind:
@@ -71,6 +82,10 @@ export interface CaseProof {
   // "this task is late" into proof of neglect. null on non-task proofs.
   ownerActions?: number | null;
   windowDays?: number | null;
+  // Specific tasks this proof concerns, resolved to name + project + id so the
+  // UI can link straight to them. Empty/absent when the proof is not tied to
+  // identifiable tasks.
+  taskRefs?: TaskRef[];
   // Task proofs only: past its deadline (vs merely idle in its current stage).
   // `windowDays` counts days in the CURRENT stage, so an overdue task that just
   // changed stage has windowDays 0 — the two facts are independent and callers
@@ -166,6 +181,22 @@ async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
+// Task codes look like PRJ-01798-045 (migration 0050). The AI sometimes lists
+// them in `taskCodes` and sometimes only inside the prose, so we scan both.
+const TASK_CODE_RE = /PRJ-\d+-\d+/g;
+
+// Remove a task code (bracketed or bare, with any "المهمة/رقم" label) from AI
+// text once we render it as a linkable chip — otherwise the code is repeated.
+function stripTaskCode(text: string, code: string | null): string {
+  if (!text || !code) return text;
+  const esc = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`\\s*(?:المهمة\\s*|رقم\\s*)?\\[?\\s*${esc}\\s*\\]?`, "g"), " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([،.,:])/g, "$1")
+    .trim();
+}
+
 const SEVERITY_RANK: Record<CaseSeverity, number> = { critical: 3, proven: 2, signal: 1 };
 const STREAM_ORDER: Record<CaseStream, number> = { execution: 0, client: 1, commercial: 2 };
 
@@ -198,11 +229,25 @@ interface StuckRow {
   owner_actions_in_stage: number | null;
   client_id: string | null;
   client_name: string | null;
+  project_name: string | null;
 }
 interface ClientValueRow {
   client_id: string;
   value: number;
   live: number;
+}
+interface TaskRefRow {
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
+}
+interface ReworkTaskRow {
+  employee_id: string;
+  task_id: string;
+  task_code: string | null;
+  title: string | null;
+  project_name: string | null;
 }
 interface ContractRow {
   account_manager_name: string | null;
@@ -229,6 +274,16 @@ interface AccountabilityJson {
   confidence?: string;
   taskCodes?: string[];
   responsible?: ResponsibleJson[];
+}
+
+// Every task code an analysis row cites — the structured `taskCodes` plus any
+// PRJ-…-… the model wrote only into the prose. Deduped, order-stable.
+function rowTaskCodes(row: AccountabilityJson): string[] {
+  const set = new Set<string>();
+  for (const c of Array.isArray(row.taskCodes) ? row.taskCodes : []) if (c) set.add(c);
+  const blob = `${row.finding ?? ""} ${row.complaint ?? ""} ${row.evidence ?? ""}`;
+  for (const m of blob.matchAll(TASK_CODE_RE)) set.add(m[0]);
+  return [...set];
 }
 interface IndicatorJson {
   code?: string;
@@ -282,7 +337,8 @@ async function _getAccountabilityCases(
   // The scorecard/reviewer overview is the execution backbone (already cached).
   // The four extra reads are per-stream evidence; each degrades to empty so a
   // single timeout can't take the page down.
-  const [ov, emps, ledger, stuck, contracts, analyses, clientValues, financeMap] = await Promise.all([
+  const [ov, emps, ledger, stuck, contracts, analyses, clientValues, financeMap, reworkTasks] =
+    await Promise.all([
     overview ? Promise.resolve(overview) : getAccountabilityCaseOverview(orgId),
     runSql<EmpRow>(empSql(org)).catch((e) => {
       console.error("[cases] empSql failed:", e);
@@ -312,7 +368,26 @@ async function _getAccountabilityCases(
       console.error("[cases] financeMap failed:", e);
       return {} as ClientFinanceMap;
     }),
+    runSql<ReworkTaskRow>(reworkTasksSql(org)).catch((e) => {
+      console.error("[cases] reworkTasksSql failed:", e);
+      return [] as ReworkTaskRow[];
+    }),
   ]);
+
+  // Per-employee list of the tasks behind their rework count (capped for UI).
+  const reworkTasksByEmp = new Map<string, TaskRef[]>();
+  for (const r of reworkTasks) {
+    const list = reworkTasksByEmp.get(r.employee_id) ?? [];
+    if (list.length < 6) {
+      list.push({
+        taskId: r.task_id,
+        code: r.task_code,
+        title: (r.title ?? "").trim() || "مهمة",
+        projectName: r.project_name,
+      });
+    }
+    reworkTasksByEmp.set(r.employee_id, list);
+  }
 
   const nowMs = Date.now();
 
@@ -360,6 +435,30 @@ async function _getAccountabilityCases(
   const contractsByName = new Map<string, number>();
   for (const c of contracts) {
     if (c.account_manager_name) contractsByName.set(norm(c.account_manager_name), c.live);
+  }
+
+  // Resolve every task code the AI cited across the analyses to a linkable task
+  // (name + project + id). One extra indexed lookup, off the Promise.all because
+  // it depends on the analyses payload. Degrades to an empty map on failure.
+  const complaintCodes = new Set<string>();
+  for (const a of analyses) {
+    const rows = Array.isArray(a.accountability) ? (a.accountability as AccountabilityJson[]) : [];
+    for (const row of rows) for (const c of rowTaskCodes(row)) complaintCodes.add(c);
+  }
+  const taskRefByCode = new Map<string, TaskRef>();
+  if (complaintCodes.size > 0) {
+    const refs = await runSql<TaskRefRow>(taskRefsSql(org, [...complaintCodes])).catch((e) => {
+      console.error("[cases] taskRefsSql failed:", e);
+      return [] as TaskRefRow[];
+    });
+    for (const r of refs)
+      if (r.task_code)
+        taskRefByCode.set(r.task_code, {
+          taskId: r.task_id,
+          code: r.task_code,
+          title: (r.title ?? "").trim() || "مهمة",
+          projectName: r.project_name,
+        });
   }
 
   const buckets = new Map<string, Bucket>();
@@ -429,10 +528,15 @@ async function _getAccountabilityCases(
         owner === 0
           ? `دون أي إجراء منه عليها طوال هذه المدة`
           : `سجّل عليها ${arCount(owner, "إجراء", "إجراءين", "إجراءات")} خلال هذه المدة${s.last_action ? ` (آخر إجراء ${s.last_action})` : ""}`;
+      // Lead with the PROJECT name (the id is meaningless to a reader — the
+      // task title carries the identity). Keep the client only when the project
+      // name doesn't already carry it, to avoid "…- Chic Boutique (Chic Boutique)".
+      const projectName = (s.project_name ?? "").trim() || s.client_name || "مشروع";
+      const clientTag = s.client_name && !projectName.includes(s.client_name) ? ` (${s.client_name})` : "";
       b.proof.push({
         stream: "execution",
         kind: "overdue_task",
-        text: `${s.task_code ?? "مهمة"} — ${(s.title ?? "").trim() || "بدون عنوان"}${s.client_name ? ` (${s.client_name})` : ""} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا${s.overdue ? " ومتأخرة عن موعدها" : ""} — ${actionTxt}.`,
+        text: `${projectName} — ${(s.title ?? "").trim() || "بدون عنوان"}${clientTag} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا${s.overdue ? " ومتأخرة عن موعدها" : ""} — ${actionTxt}.`,
         quote: null,
         href: `/tasks/${s.task_id}`,
         taskCode: s.task_code,
@@ -497,13 +601,17 @@ async function _getAccountabilityCases(
       streamsAvailable.add("execution");
       b.material = true;
       b.tags.add("ارتداد عمل");
+      const reworkRefs = reworkTasksByEmp.get(r.employeeId) ?? [];
       b.proof.push({
         stream: "execution",
         kind: "rework",
         text: `${r.reworkReturns30d} ارتداد إلى تنفيذ/تعديلات العميل خلال آخر ٣٠ يومًا — عمل رجع بعد أن تقدّم.`,
         quote: null,
-        href: `/accountability`,
+        // The proof carries its own task links; keep the card anchored here only
+        // when we could not resolve any rebounded task.
+        href: reworkRefs.length ? null : `/accountability`,
         taskCode: null,
+        taskRefs: reworkRefs,
         clientName: null,
         clientId: null,
         stage: null,
@@ -585,10 +693,20 @@ async function _getAccountabilityCases(
         b.clients.add(clientName);
         if (a.client_id) b.clientIds.add(a.client_id);
         // Cross-link: this complaint cites a task actually stuck in their stage.
-        const codes = Array.isArray(row.taskCodes) ? row.taskCodes : [];
+        const codes = rowTaskCodes(row);
         const crossLinked = codes.some((c) => b.execTaskCodes.has(c));
-        const evidence = (row.evidence ?? "").trim();
-        const finding = (row.finding ?? row.complaint ?? "").trim();
+        // Resolve cited codes to linkable tasks; strip the raw codes from the
+        // text so we don't print an unclickable "PRJ-…" next to the chip.
+        const taskRefs = codes
+          .map((c) => taskRefByCode.get(c))
+          .filter((r): r is TaskRef => Boolean(r));
+        let evidence = (row.evidence ?? "").trim();
+        let finding = (row.finding ?? row.complaint ?? "").trim();
+        for (const c of codes) {
+          if (!taskRefByCode.has(c)) continue; // keep unresolved codes as a fallback
+          finding = stripTaskCode(finding, c);
+          evidence = stripTaskCode(evidence, c);
+        }
         b.proof.push({
           stream: "client",
           kind: "complaint",
@@ -598,6 +716,7 @@ async function _getAccountabilityCases(
           // top of the page (see AnalysisView hash-scroll effect).
           href: `/satisfaction?client=${a.client_id}#accountability`,
           taskCode: codes[0] ?? null,
+          taskRefs,
           clientName,
           clientId: a.client_id,
           stage: null,
@@ -815,11 +934,17 @@ select e.id, e.full_name, e.job_title as position_label, d.name as department
 function ledgerSql(org: string): string {
   return `
 with recent as (
-  select actor_employee_id, created_at
-    from task_comments
-   where organization_id = '${org}'
-     and actor_employee_id is not null
-     and created_at > now() - interval '30 days'
+  -- Author-attributed actions on LIVE tasks only. The tasks join (archived_at
+  -- is null) is load-bearing: it excludes actions on archived tasks so this
+  -- «إجراءات 30ي» reconciles with the نبض الفريق action-log (getEmployeeActionLog),
+  -- which is likewise non-archived, AND obeys the engine's "archived excluded
+  -- everywhere" rule. Without it the ledger over-counted (e.g. 111 vs 97).
+  select c.actor_employee_id, c.created_at
+    from task_comments c
+    join tasks t on t.id = c.task_id and t.archived_at is null
+   where c.organization_id = '${org}'
+     and c.actor_employee_id is not null
+     and c.created_at > now() - interval '30 days'
 ), ledger as (
   select actor_employee_id,
          count(*)::int as actions,
@@ -862,7 +987,7 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
        max(tc.created_at)::date as last_action,
        count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage,
        coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
-       cl.name as client_name
+       cl.name as client_name, pj.name as project_name
   from attrib a
   join tasks t on t.id = a.task_id and t.archived_at is null
   left join projects pj on pj.id = t.project_id
@@ -881,7 +1006,7 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
      or (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS}
    )
  group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at,
-          cl.id, cl.merged_into_client_id, cl.name`;
+          cl.id, cl.merged_into_client_id, cl.name, pj.name`;
 }
 
 // Live contract value per CANONICAL client. Contracts sit on the sheet twin of
@@ -919,4 +1044,43 @@ select csa.client_id, c.name as client_name, csa.accountability, csa.indicators
  where csa.organization_id = '${org}'
    and csa.is_current
    and jsonb_array_length(coalesce(csa.accountability, '[]'::jsonb)) > 0`;
+}
+
+// Resolve a set of human task codes (PRJ-01798-045) to their id/title/project so
+// the UI can link the AI's cited tasks instead of printing an unclickable code.
+// Codes are allow-listed to [A-Za-z0-9_-] before interpolation.
+function taskRefsSql(org: string, codes: string[]): string {
+  const safe = codes.filter((c) => /^[A-Za-z0-9_-]+$/.test(c)).map((c) => `'${c}'`);
+  return `
+select t.id::text as task_id, t.task_code, t.title, pj.name as project_name
+  from tasks t
+  left join projects pj on pj.id = t.project_id
+ where t.organization_id = '${org}'
+   and t.task_code in (${safe.join(",")})`;
+}
+
+// The specific tasks behind each employee's rework count: tasks that re-entered
+// the client_changes stage in the last 30 days on a stage that person's position
+// owns — the exact intervals refresh_accountability_scorecard counts as rework_30d
+// (migration 0223), so the listed tasks reconcile with the "N ارتداد" number.
+function reworkTasksSql(org: string): string {
+  return `
+with attrib as (
+  select distinct ta.task_id, ta.employee_id, pos.role as position_role
+    from task_assignees ta
+    join employee_profiles e on e.id = ta.employee_id
+    join positions pos on pos.id = e.position_id
+   where ta.organization_id = '${org}'
+     and public.accountability_role_of_position(pos.role) = 'agent'
+)
+select a.employee_id, t.id::text as task_id, t.task_code, t.title, pj.name as project_name
+  from attrib a
+  join tasks t on t.id = a.task_id and t.archived_at is null
+  left join projects pj on pj.id = t.project_id
+  join task_stage_history h on h.task_id = t.id
+   and h.to_stage::text = 'client_changes'
+   and h.entered_at >= now() - interval '30 days'
+ where a.position_role = public.accountable_position_for_stage(t.stage_owner_positions, 'client_changes')
+ group by a.employee_id, t.id, t.task_code, t.title, pj.name
+ order by max(h.entered_at) desc`;
 }

@@ -327,6 +327,7 @@ function TaskCard({
           onClick={(e) => e.stopPropagation()}
           className="relative z-10 mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary"
           title={task.project.name}
+          data-private="client"
         >
           <Briefcase className="size-3 shrink-0" />
           <span className="truncate">{task.project.name}</span>
@@ -770,10 +771,10 @@ function ProjectColumn({
             href={`/projects/${projectId}`}
             className="line-clamp-1 text-xs font-semibold hover:text-cyan transition-colors"
           >
-            {projectName}
+            <span data-private="client">{projectName}</span>
           </Link>
           {clientName && (
-            <div className="line-clamp-1 text-[10px] text-foreground/70">
+            <div className="line-clamp-1 text-[10px] text-foreground/70" data-private="client">
               {clientName}
             </div>
           )}

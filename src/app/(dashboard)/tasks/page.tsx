@@ -35,6 +35,8 @@ import {
   PROJECT_BOARD_LIMIT,
 } from "@/lib/data/tasks";
 
+const TASK_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default async function TasksPage({
   searchParams,
 }: {
@@ -51,6 +53,7 @@ export default async function TasksPage({
     cf?: string;
     flow?: string;
     fw?: string;
+    ids?: string;
   }>;
 }) {
   const [session, t, sp] = await Promise.all([
@@ -106,6 +109,18 @@ export default async function TasksPage({
   // Stage-transition drill-down (dashboard regressions card): resolved to the
   // exact task ids that made the from→to move in the window — see _flow_filter.ts.
   const flowFilter = parseFlowParam(sp.flow, sp.fw);
+
+  // Explicit id set (accountability صرامة المراجعة / تعديلات العميل "افتح الكل في
+  // المهام"): the drill-down sheet already knows the exact tasks, so it hands
+  // them over directly. Fed through the same customFilterTaskIds → p_task_ids
+  // plumbing as flow. Validated UUIDs only; capped so the URL stays sane.
+  const explicitTaskIds = sp.ids
+    ? sp.ids
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((id) => TASK_ID_RE.test(id))
+        .slice(0, 1000)
+    : null;
 
   // Denominator scope for the toolbar "من أصل N": when the view is drilled into a
   // stage facet (e.g. delivery-pipeline card → sf=[stage=in_progress]), the total
@@ -163,6 +178,7 @@ export default async function TasksPage({
           taskFilters={taskFilters}
           customFilterTaskIdsTree={sp.cf ?? null}
           flowFilter={flowFilter}
+          explicitTaskIds={explicitTaskIds}
           stageScope={stageScope}
           pageSize={pageSize}
           apiQueryString={apiQueryString}
@@ -208,6 +224,7 @@ async function TasksBoardSection({
   taskFilters,
   customFilterTaskIdsTree,
   flowFilter,
+  explicitTaskIds,
   stageScope,
   pageSize,
   apiQueryString,
@@ -224,6 +241,8 @@ async function TasksBoardSection({
   customFilterTaskIdsTree: string | null;
   // Non-null when drilled into a stage-transition (dashboard regressions card).
   flowFilter: FlowFilter | null;
+  // Non-null for the accountability drill-down "افتح الكل في المهام" (exact ids).
+  explicitTaskIds: string[] | null;
   // Stage facet values in the current view; scopes the toolbar "of N" denominator.
   stageScope: string[];
   pageSize: number;
@@ -265,7 +284,12 @@ async function TasksBoardSection({
     customFilterPromise,
     flowPromise,
   ]);
-  const customFilterTaskIds = combineTaskIdSets(customFilterTaskIdsRaw, flowTaskIds);
+  // Intersect custom-filter ∩ flow ∩ explicit-ids. Any null side is a passthrough
+  // (combineTaskIdSets), so a bare ?ids=… resolves straight to that set.
+  const customFilterTaskIds = combineTaskIdSets(
+    combineTaskIdSets(customFilterTaskIdsRaw, flowTaskIds),
+    explicitTaskIds,
+  );
   // Agent scope: restrict to the viewer's own tasks (assigned ∪ followed). We
   // resolve the id set once and reuse it for both the board filter (intersected
   // with any custom filter) and the toolbar KPI counts.

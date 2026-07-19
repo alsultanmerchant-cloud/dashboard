@@ -32,6 +32,11 @@ export async function generateMetadata(): Promise<Metadata> {
 // Inline script: apply theme class before paint to avoid FOUC.
 const themeBootstrap = `(function(){try{var k='rwasem-theme';var t=localStorage.getItem(k);if(t!=='light'&&t!=='dark')t='light';if(t==='dark')document.documentElement.classList.add('dark');document.documentElement.style.colorScheme=t;}catch(e){}})();`;
 
+// Inline script: apply demo-mode blur before paint. This one is not cosmetic —
+// without it, a hard reload paints real client data for a frame before React
+// hydrates, which is exactly the leak the feature exists to prevent.
+const demoModeBootstrap = `(function(){try{var s=JSON.parse(localStorage.getItem('rwasem-demo-mode')||'null');if(!s||s.enabled!==true)return;var all=['client','money','person','chat'];var c=(Array.isArray(s.categories)?s.categories:all).filter(function(x){return all.indexOf(x)>-1;});if(!c.length)return;document.documentElement.setAttribute('data-demo',c.join(' '));if(s.revealOnHover===true)document.documentElement.setAttribute('data-demo-reveal','');}catch(e){}})();`;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
@@ -45,6 +50,7 @@ export default async function RootLayout({
     <html lang={locale} dir={dir} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+        <script dangerouslySetInnerHTML={{ __html: demoModeBootstrap }} />
       </head>
       <body
         className={`${tajawal.variable} ${inter.variable} antialiased ${

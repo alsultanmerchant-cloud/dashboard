@@ -128,7 +128,10 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
             href={href}
             onClick={(e) => e.stopPropagation()}
             className="min-w-0 flex-1 truncate text-[15px] font-bold leading-snug text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40 rounded"
+            // Odoo projects are named after the client, so the project name is
+            // client-identifying data.
             title={p.name}
+            data-private="client"
           >
             {p.name}
           </Link>
@@ -197,7 +200,10 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
         {(p.clientName || p.managerName) && (
           <div className="mt-0.5 flex items-center gap-1.5 ps-6 text-[12px] text-foreground/80">
             <User className="size-3" />
-            <span className="truncate">{p.clientName ?? p.managerName}</span>
+            {/* Falls back to the manager, so tag whichever one is showing. */}
+            <span className="truncate" data-private={p.clientName ? "client" : "person"}>
+              {p.clientName ?? p.managerName}
+            </span>
           </div>
         )}
 
@@ -257,7 +263,7 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
         <dl className="mt-2.5 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[12px]">
           <>
             <dt className="font-bold text-foreground">{t("storeName")}:</dt>
-            <dd className="truncate text-foreground/80">
+            <dd className="truncate text-foreground/80" data-private="client">
               {p.storeName ?? p.clientName ?? "—"}
             </dd>
           </>
@@ -285,13 +291,13 @@ export function ProjectCard({ project: p }: { project: LiveProject }) {
           </>
           <>
             <dt className="font-bold text-foreground">{t("projectManager")}:</dt>
-            <dd className="truncate text-foreground/80">
+            <dd className="truncate text-foreground/80" data-private="person">
               {p.managerName ?? "—"}
             </dd>
           </>
           <>
             <dt className="font-bold text-foreground">{t("accountManager")}:</dt>
-            <dd className="truncate text-foreground/80">
+            <dd className="truncate text-foreground/80" data-private="person">
               {p.accountManagerName ?? "—"}
             </dd>
           </>

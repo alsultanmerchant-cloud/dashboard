@@ -74,7 +74,7 @@ function MessageBubble({ message, locale }: { message: ConversationMessage; loca
         )}
       >
         {message.body ? (
-          <p className="whitespace-pre-wrap break-words leading-6">{message.body}</p>
+          <p className="whitespace-pre-wrap break-words leading-6" data-private="chat">{message.body}</p>
         ) : null}
         {message.attachments.length > 0 && (
           <ul className="mt-2 space-y-1.5">
