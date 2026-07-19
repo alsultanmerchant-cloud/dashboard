@@ -52,14 +52,24 @@ export function TaskDrillSheet({
   onRetry?: () => void;
 }) {
   const fmt = useFmt();
+  const tStages = useTranslations("TasksBoard.stages");
+  const stageLabel = (stage: string | null) => {
+    if (!stage) return null;
+    try {
+      return tStages(stage);
+    } catch {
+      return stage;
+    }
+  };
   // Always open from the visual RIGHT. In the RTL (Arabic) layout the Sheet's
   // rtl: classes flip "left" to the right edge; LTR uses "right" directly.
   const side = useLocale() === "ar" ? "left" : "right";
 
   // "افتح الكل في المهام" — hands the exact ids in view to /tasks (list view,
-  // no default filter) so the same set is reproduced there for cross-checking.
-  const idsParam = view.tasks.map((task) => task.taskId).join(",");
-  const openAllHref = `/tasks?view=list&f=all&ids=${idsParam}`;
+  // no default filter) so the same set is reproduced there. DISTINCT because
+  // stage-interval rows can repeat a task (two owned stages on one task).
+  const distinctIds = [...new Set(view.tasks.map((task) => task.taskId))];
+  const openAllHref = `/tasks?view=list&f=all&ids=${distinctIds.join(",")}`;
   const canOpenAll = !view.loading && !view.error && view.tasks.length > 0;
 
   return (
@@ -131,6 +141,11 @@ export function TaskDrillSheet({
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2 text-[11px]">
+                      {task.stage && task.kind === "stage" && (
+                        <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {stageLabel(task.stage)}
+                        </span>
+                      )}
                       {view.valueKind === "minutes" && (
                         <span className="tabular-nums text-muted-foreground">{fmt(task.minutes)}</span>
                       )}
@@ -161,7 +176,7 @@ export function TaskDrillSheet({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan/30 bg-cyan/5 px-3 py-2 text-[13px] font-semibold text-cyan transition-colors hover:bg-cyan/10"
             >
               <ExternalLink className="size-4" />
-              افتح الكل في المهام ({view.tasks.length})
+              افتح الكل في المهام ({distinctIds.length})
             </Link>
           </div>
         )}

@@ -1277,9 +1277,10 @@ export interface DrillTask {
   projectName: string | null;
   clientName: string | null;
   minutes: number | null; // review / edit / pending business minutes
-  occurredAt: string | null; // reviewed_at / delivered_at (kind-dependent)
-  flag: boolean; // reviewer: entered client_changes after · edits: over SLA / was edited
-  kind: string; // reviewer: reviewed|pending · edits: edit|delivered|pending
+  occurredAt: string | null; // reviewed_at / delivered_at / deadline / entered_at (kind-dependent)
+  flag: boolean; // reviewer: entered client_changes after · edits: over SLA / was edited · stage: late
+  kind: string; // reviewer: reviewed|pending · edits: edit|delivered|pending · roster: task|stage
+  stage: string | null; // raw stage enum for stage-interval rows (roster إجمالي/متأخرة المراحل)
 }
 
 interface DrillSqlRow {
@@ -1292,6 +1293,7 @@ interface DrillSqlRow {
   occurred_at: string | null;
   flag: boolean | null;
   kind: string;
+  stage?: string | null;
 }
 
 function mapDrill(rows: DrillSqlRow[]): DrillTask[] {
@@ -1305,6 +1307,7 @@ function mapDrill(rows: DrillSqlRow[]): DrillTask[] {
     occurredAt: r.occurred_at,
     flag: r.flag ?? false,
     kind: r.kind,
+    stage: r.stage ?? null,
   }));
 }
 
@@ -1522,6 +1525,82 @@ async function _getClientEditsDetail(
 }
 
 export const getClientEditsDetail = cache(_getClientEditsDetail);
+
+// Drill-down for the /accountability team-table numbers (مفتوحة / متأخرة live,
+// إجمالي المراحل / مراحل متأخرة period). Same TaskDrillSheet plumbing as the
+// reviewer/edits sections, so a number can be reconciled against Rwasem.
+//   • open / overdue: the person's LIVE assigned tasks (open board; overdue =
+//     Rwasem def: open, past deadline, `new` excluded), occurredAt = deadline.
+//   • totalStages / lateStages: the owned stage INTERVALS entered in the window
+//     (per interval, incl. archived-delivered), same gate as the merged
+//     period-trends stage counts, occurredAt = entered_at, stage = the stage.
+export type EmployeeMetric = "open" | "overdue" | "totalStages" | "lateStages";
+
+function buildEmployeeMetricDrillSql(
+  org: string,
+  emp: string,
+  metric: EmployeeMetric,
+  from: string,
+  to: string,
+): string {
+  if (metric === "open" || metric === "overdue") {
+    const today = riyadhTodayIso();
+    const pred =
+      metric === "overdue"
+        ? `t.stage not in ('done', 'new') and t.planned_date < '${today}'::date`
+        : `t.stage <> 'done'`;
+    return `
+select distinct t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
+       null::numeric as minutes, t.planned_date::text as occurred_at, t.stage::text as stage,
+       (t.stage not in ('done', 'new') and t.planned_date < '${today}'::date) as flag, 'task' as kind
+  from task_assignees ta
+  join tasks t on t.id = ta.task_id and t.organization_id = '${org}' and t.archived_at is null
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+ where ta.organization_id = '${org}' and ta.employee_id = '${emp}' and ${pred}
+ order by occurred_at asc nulls last`;
+  }
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
+  const lateFilter = metric === "lateStages" ? "where flag" : "";
+  return `
+with owned as (
+  select distinct h.id as hid, t.id as task_id, t.task_code, t.title,
+         pj.name as project_name, cl.name as client_name,
+         h.to_stage::text as stage, h.entered_at as entered_at,
+         (t.planned_date is not null and t.planned_date < coalesce(h.exited_at::date, current_date)) as flag
+    from task_stage_history h
+    join tasks t on t.id = h.task_id and t.organization_id = '${org}'
+    join task_assignees ta on ta.task_id = t.id and ta.organization_id = '${org}' and ta.employee_id = '${emp}'
+    join employee_profiles e on e.id = ta.employee_id
+    join positions pos on pos.id = e.position_id
+    left join projects pj on pj.id = t.project_id
+    left join clients cl on cl.id = pj.client_id
+   where h.entered_at >= '${start}'::timestamptz
+     and h.entered_at <  '${endExclusive}'::timestamptz
+     and (t.archived_at is null or t.stage = 'done')
+     and pos.role = public.accountable_position_for_stage(t.stage_owner_positions, h.to_stage::text)
+)
+select task_id, task_code, title, project_name, client_name,
+       null::numeric as minutes, entered_at::text as occurred_at, stage, flag, 'stage' as kind
+  from owned
+ ${lateFilter}
+ order by entered_at desc`;
+}
+
+async function _getEmployeeMetricDrill(
+  orgId: string,
+  employeeId: string,
+  metric: EmployeeMetric,
+  from?: string,
+  to?: string,
+): Promise<DrillTask[]> {
+  const org = assertUuid(orgId, "organization id");
+  const emp = assertUuid(employeeId, "employee id");
+  const range = reviewerRange(from, to);
+  return mapDrill(await runSql<DrillSqlRow>(buildEmployeeMetricDrillSql(org, emp, metric, range.from, range.to)));
+}
+
+export const getEmployeeMetricDrill = cache(_getEmployeeMetricDrill);
 
 // The team and cases lenses need operational scores plus reviewer signals, but
 // never the coverage counters or AI-signal board. Those fields each trigger

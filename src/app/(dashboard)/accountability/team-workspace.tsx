@@ -29,7 +29,8 @@ import {
   type CaseStatus,
   type PersistedCaseMeta,
 } from "@/lib/accountability/case-status";
-import { getAccountabilityEvidenceAction } from "./_actions";
+import { getAccountabilityEvidenceAction, getEmployeeMetricDrillAction } from "./_actions";
+import { DrillNumber, TaskDrillSheet, type DrillView } from "./task-drill-modal";
 import { EmployeeEvidence } from "./employee-evidence";
 import { ReviewerRigorSection } from "./reviewer-rigor-section";
 import { ClientEditsSection } from "./client-edits-section";
@@ -39,6 +40,8 @@ import type {
   AccountabilityEvidence,
   AccountabilityOverview,
   ClientEditsRow,
+  DrillTask,
+  EmployeeMetric,
 } from "@/lib/data/accountability";
 import { daySpan, type DashboardRange } from "@/lib/dashboard-range";
 import type {
@@ -79,6 +82,26 @@ const STATUS_HINT: Record<CaseStatus, string> = {
   resolved: "انتهت — عولجت القضية وأُغلقت.",
 };
 
+// The tasks behind a team-table number (مفتوحة / متأخرة live, إجمالي المراحل /
+// مراحل متأخرة period) — reuses the same drill-down sheet as the reviewer/edits
+// sections so the figure can be reconciled against Rwasem.
+function metricDrillView(
+  metric: EmployeeMetric,
+  name: string,
+  tasks: DrillTask[],
+): Omit<DrillView, "loading" | "error"> {
+  switch (metric) {
+    case "open":
+      return { title: `المهام المفتوحة — ${name}`, subtitle: "كل المهام المفتوحة المسندة إليه الآن (لايف)", valueKind: "flag", flagLabel: "متأخرة", tasks };
+    case "overdue":
+      return { title: `المهام المتأخرة — ${name}`, subtitle: "مفتوحة وتجاوزت موعد التسليم اليوم، باستثناء «جديد» (لايف)", valueKind: "none", tasks };
+    case "totalStages":
+      return { title: `إجمالي المراحل — ${name}`, subtitle: "المراحل التي كان مسؤولاً عنها في الفترة — كل مرحلة على حدة", valueKind: "flag", flagLabel: "متأخرة", tasks };
+    case "lateStages":
+      return { title: `مراحل متأخرة — ${name}`, subtitle: "مراحل فات فيها موعد التسليم وهو مسؤول عنها في الفترة", valueKind: "none", tasks };
+  }
+}
+
 export function TeamWorkspace({
   roster,
   cases,
@@ -99,6 +122,49 @@ export function TeamWorkspace({
   const [sortKey, setSortKey] = useState<TeamSortKey>("onTime");
   const [page, setPage] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Number drill-down (مفتوحة / متأخرة / إجمالي المراحل / مراحل متأخرة → the tasks).
+  const [metricDrill, setMetricDrill] = useState<{
+    employeeId: string;
+    employeeName: string;
+    metric: EmployeeMetric;
+  } | null>(null);
+  const [drillTasks, setDrillTasks] = useState<DrillTask[]>([]);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError, setDrillError] = useState<string | null>(null);
+  const [drillAttempt, setDrillAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!metricDrill) return;
+    let active = true;
+    setDrillLoading(true);
+    setDrillError(null);
+    getEmployeeMetricDrillAction(metricDrill.employeeId, metricDrill.metric, reviewerRange.from, reviewerRange.to)
+      .then((res) => {
+        if (!active) return;
+        if (res.ok) setDrillTasks(res.tasks);
+        else {
+          setDrillTasks([]);
+          setDrillError(res.error);
+        }
+        setDrillLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setDrillTasks([]);
+        setDrillError("failed");
+        setDrillLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [metricDrill?.employeeId, metricDrill?.metric, reviewerRange.from, reviewerRange.to, drillAttempt]);
+
+  const drillView: DrillView | null = metricDrill
+    ? { ...metricDrillView(metricDrill.metric, metricDrill.employeeName, drillTasks), loading: drillLoading, error: drillError }
+    : null;
+  const openMetricDrill = (e: RosterEmployee, metric: EmployeeMetric) =>
+    setMetricDrill({ employeeId: e.id, employeeName: e.name, metric });
 
   const caseByEmp = useMemo(() => {
     const m = new Map<string, AccountabilityCase>();
@@ -277,6 +343,7 @@ export function TeamWorkspace({
                     status={caseMeta[e.id]?.status ?? null}
                     problemCount={caseByEmp.get(e.id)?.proof.length ?? 0}
                     onOpen={() => setOpenId(e.id)}
+                    onDrill={(metric) => openMetricDrill(e, metric)}
                   />
                 ))}
               </tbody>
@@ -330,6 +397,14 @@ export function TeamWorkspace({
           meta={caseMeta[openEmp.id] ?? null}
           range={reviewerRange}
           onClose={() => setOpenId(null)}
+        />
+      )}
+
+      {drillView && (
+        <TaskDrillSheet
+          view={drillView}
+          onClose={() => setMetricDrill(null)}
+          onRetry={() => setDrillAttempt((a) => a + 1)}
         />
       )}
     </div>
@@ -431,11 +506,13 @@ function EmployeeRow({
   status,
   problemCount,
   onOpen,
+  onDrill,
 }: {
   e: RosterEmployee;
   status: CaseStatus | null;
   problemCount: number;
   onOpen: () => void;
+  onDrill: (metric: EmployeeMetric) => void;
 }) {
   return (
     <tr
@@ -448,7 +525,7 @@ function EmployeeRow({
       </td>
       <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{e.department}</td>
       <td className="px-3 py-2.5 text-center tabular-nums" dir="ltr">
-        {e.openTasks}
+        <DrillNumber value={e.openTasks} onClick={() => onDrill("open")} />
       </td>
       <td
         className={cn(
@@ -457,10 +534,10 @@ function EmployeeRow({
         )}
         dir="ltr"
       >
-        {e.overdueOwned}
+        <DrillNumber value={e.overdueOwned} onClick={() => onDrill("overdue")} />
       </td>
       <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground" dir="ltr">
-        {e.totalStages}
+        <DrillNumber value={e.totalStages} onClick={() => onDrill("totalStages")} />
       </td>
       <td
         className={cn(
@@ -469,7 +546,7 @@ function EmployeeRow({
         )}
         dir="ltr"
       >
-        {e.lateStages}
+        <DrillNumber value={e.lateStages} onClick={() => onDrill("lateStages")} />
       </td>
       <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground" dir="ltr">
         {e.periodTrend.currentRate === null ? "—" : `${e.periodTrend.currentRate}%`}

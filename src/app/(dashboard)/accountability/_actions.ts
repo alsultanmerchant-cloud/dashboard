@@ -6,9 +6,11 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   getClientEditsDetail,
   getEmployeeAccountabilityEvidence,
+  getEmployeeMetricDrill,
   getReviewerRigorDetail,
   type AccountabilityEvidence,
   type DrillTask,
+  type EmployeeMetric,
 } from "@/lib/data/accountability";
 import {
   setCaseStatus,
@@ -100,6 +102,38 @@ export async function getClientEditsDetailAction(
   const range = from && to && ISO_DATE.test(from) && ISO_DATE.test(to) && from <= to ? { from, to } : {};
   try {
     const tasks = await getClientEditsDetail(session.orgId, employeeId, range.from, range.to);
+    return { ok: true, tasks };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+// Drill-down for the team-table numbers (مفتوحة / متأخرة live, إجمالي المراحل /
+// مراحل متأخرة period) — the exact tasks behind the figure.
+const EMPLOYEE_METRICS: EmployeeMetric[] = ["open", "overdue", "totalStages", "lateStages"];
+
+export async function getEmployeeMetricDrillAction(
+  employeeId: string,
+  metric: string,
+  from?: string,
+  to?: string,
+): Promise<{ ok: true; tasks: DrillTask[] } | { ok: false; error: string }> {
+  const session = await getServerSession();
+  if (!session || !hasPermission(session, "people.analytics.view")) {
+    return { ok: false, error: "Unauthorized" };
+  }
+  if (!EMPLOYEE_METRICS.includes(metric as EmployeeMetric)) {
+    return { ok: false, error: "Bad metric" };
+  }
+  const range = from && to && ISO_DATE.test(from) && ISO_DATE.test(to) && from <= to ? { from, to } : {};
+  try {
+    const tasks = await getEmployeeMetricDrill(
+      session.orgId,
+      employeeId,
+      metric as EmployeeMetric,
+      range.from,
+      range.to,
+    );
     return { ok: true, tasks };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "failed" };
