@@ -77,6 +77,7 @@ const TYPE_META: Record<string, TypeMeta> = {
   // 2026-07-14 ingestion blackout ran for four days with nothing watching it.
   WA_INGESTION_STALLED: { category: "system", emoji: "🛑", icon: Siren },
   WA_SESSION_WEDGED: { category: "system", emoji: "🧊", icon: AlertTriangle },
+  WA_SESSION_STORE_BROKEN: { category: "system", emoji: "📭", icon: AlertTriangle },
   WA_WEBHOOK_MISSING: { category: "system", emoji: "🔌", icon: Link2 },
   WA_WEBHOOK_ERRORS: { category: "system", emoji: "🐞", icon: AlertTriangle },
   WA_SESSION_MISSING: { category: "system", emoji: "❓", icon: AlertTriangle },

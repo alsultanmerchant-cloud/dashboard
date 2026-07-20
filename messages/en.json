@@ -4107,7 +4107,9 @@
       "resyncDone": "Webhooks registered for {count}/{total} numbers",
       "resyncFail": "Could not register webhooks",
       "wedgedTitle": "Session wedged — no activity for {hours}h",
-      "wedgedBody": "This number reports \"connected\" but has actually stopped receiving messages. Press \"Reconnect\" and re-scan the QR, then \"Pull history\" to recover what was missed."
+      "wedgedBody": "This number reports \"connected\" but has actually stopped receiving messages. Press \"Reconnect\" and re-scan the QR, then \"Pull history\" to recover what was missed.",
+      "noDeliveryTitle": "Connected but no messages for {hours}h",
+      "noDeliveryBody": "The number is connected yet delivering nothing — most likely its chat store is broken. Press \"Reconnect\", re-scan the QR, then \"Pull history\"."
     },
     "connectionBanner": {
       "title": "A WhatsApp number needs attention",

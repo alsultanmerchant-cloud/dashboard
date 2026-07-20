@@ -351,11 +351,17 @@ function AccountCard({
   // Warn only when we HAVE seen activity but it has gone quiet for 7+ days —
   // a connected number that silently stopped delivering. Never warn on null
   // (no provenance yet ≠ a problem).
-  const stale =
-    s === "CONNECTED" &&
-    a.last_seen_at != null &&
-    nowMs > 0 &&
-    nowMs - new Date(a.last_seen_at).getTime() > 7 * 24 * 3600 * 1000;
+  // "Connected but delivering nothing." last_seen_at is OUR ingestion heartbeat,
+  // so this catches the failure the gateway's own clock cannot see: a session
+  // that heartbeats happily while its WhatsApp store is empty/erroring (the
+  // second number on 2026-07-20 — status ready, lastActive fresh, /groups 500,
+  // zero messages for five days). The old threshold was 7 DAYS, so a five-day
+  // outage never tripped it; 48h clears a quiet weekend and still catches this.
+  const deliveryIdleHours =
+    s === "CONNECTED" && a.last_seen_at != null && nowMs > 0
+      ? (nowMs - new Date(a.last_seen_at).getTime()) / 3_600_000
+      : null;
+  const stale = deliveryIdleHours != null && deliveryIdleHours >= 48;
 
   // WEDGED: the gateway still reports CONNECTED but its own activity clock has
   // been frozen for hours. This is the 2026-07-14 failure — the primary number
@@ -512,9 +518,15 @@ function AccountCard({
           </div>
         ) : (
           stale && (
-            <p className="flex items-center gap-1.5 text-[11px] text-amber">
-              <AlertTriangle className="size-3.5" /> {t("stale")}
-            </p>
+            <div className="flex items-start gap-2 rounded-lg border border-amber/35 bg-amber/10 px-3 py-2 text-[11px] text-amber">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-semibold">
+                  {t("noDeliveryTitle", { hours: Math.round(deliveryIdleHours!) })}
+                </p>
+                <p className="leading-5 text-foreground/70">{t("noDeliveryBody")}</p>
+              </div>
+            </div>
           )
         )}
 

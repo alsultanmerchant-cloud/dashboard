@@ -8,6 +8,7 @@ import {
   listSessions,
   listSessionWebhooks,
   registerSessionWebhook,
+  probeSessionStore,
   waConfigured,
   isOwnSession,
 } from "@/lib/wa/openwa-client";
@@ -202,6 +203,30 @@ export async function POST(request: NextRequest) {
           `«${label}» يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة. ` +
           `الجلسة على الأرجح معلّقة — استخدم "إعادة الربط" على الرقم ثم "سحب السجل".`,
       });
+    }
+
+    // ---- 2b. Store health — the failure lastActive CANNOT see ---------------
+    // A session can heartbeat happily (fresh lastActive, webhook firing
+    // session.status) while its WhatsApp store is empty or erroring, so it
+    // never delivers a message and still looks green. Only probe when the
+    // lastActive check passed, so a wedged number raises one alert, not two.
+    if (!faults.includes("session_wedged") && session.status === "CONNECTED") {
+      const store = await probeSessionStore(session.uuid);
+      row.store = store.detail;
+      row.storeGroups = store.groups;
+      if (!store.ok) {
+        faults.push("store_unusable");
+        await notifyOwners({
+          orgId,
+          owners,
+          type: "WA_SESSION_STORE_BROKEN",
+          entityId: account.id as string,
+          title: `رقم واتساب متصل لكنه لا يستقبل: ${label}`,
+          body:
+            `«${label}» يظهر "متصل" لكن مخزون المحادثات لديه غير صالح (${store.detail}) — ` +
+            `لن تصل أي رسالة منه. استخدم "إعادة الربط" وأعد مسح رمز QR ثم "سحب السجل".`,
+        });
+      }
     }
 
     report.push(row);

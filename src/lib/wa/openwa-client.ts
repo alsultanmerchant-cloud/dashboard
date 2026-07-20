@@ -626,6 +626,33 @@ export async function listGroups(sessionName: string = WA_SESSION_ID): Promise<W
     .filter((g) => g.id.endsWith("@g.us"));
 }
 
+// Is the session's WhatsApp-Web store actually usable, or only *nominally*
+// connected? Two real failures on 2026-07-20 both reported healthy by status +
+// lastActive, and neither delivered a single message:
+//   • the primary HUNG — /groups never returns (504 after 90s);
+//   • the second answered fast with HTTP 500 and could not list a single group,
+//     returning 0 history for a chat it had previously served — an empty store,
+//     while still emitting session.status heartbeats that keep lastActive fresh.
+// So health checks must PROBE the store, not just read the status field.
+// `ok:false` means: connected on paper, useless in practice.
+export async function probeSessionStore(
+  uuid: string,
+  timeoutMs = 12_000,
+): Promise<{ ok: boolean; groups: number; detail: string }> {
+  try {
+    const { ok, status, json } = await call(`/api/sessions/${uuid}/groups`, { timeoutMs });
+    if (!ok) return { ok: false, groups: 0, detail: `groups HTTP ${status}` };
+    const list = Array.isArray(json)
+      ? json
+      : ((json as { data?: unknown }).data ?? (json as { groups?: unknown }).groups ?? []);
+    const groups = Array.isArray(list) ? list.length : 0;
+    return { ok: groups > 0, groups, detail: groups > 0 ? "ok" : "store empty (0 groups)" };
+  } catch (e) {
+    // Abort/timeout — the wedged case.
+    return { ok: false, groups: 0, detail: `groups unreachable: ${(e as Error).message}` };
+  }
+}
+
 export interface WaGroupMeta {
   memberCount: number;
   adminCount: number;
