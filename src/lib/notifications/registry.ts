@@ -73,6 +73,14 @@ const TYPE_META: Record<string, TypeMeta> = {
   // ---- System -------------------------------------------------------------
   ESCALATION_ACKNOWLEDGED: { category: "system", emoji: "⚠️", icon: AlertTriangle },
   EMPLOYEE_INVITED: { category: "system", emoji: "✨", icon: Sparkles },
+  // WhatsApp pipeline health (wa-health cron). These exist because the
+  // 2026-07-14 ingestion blackout ran for four days with nothing watching it.
+  WA_INGESTION_STALLED: { category: "system", emoji: "🛑", icon: Siren },
+  WA_SESSION_WEDGED: { category: "system", emoji: "🧊", icon: AlertTriangle },
+  WA_WEBHOOK_MISSING: { category: "system", emoji: "🔌", icon: Link2 },
+  WA_WEBHOOK_ERRORS: { category: "system", emoji: "🐞", icon: AlertTriangle },
+  WA_SESSION_MISSING: { category: "system", emoji: "❓", icon: AlertTriangle },
+  WA_GATEWAY_UNREACHABLE: { category: "system", emoji: "📡", icon: Siren },
 };
 
 export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
@@ -122,6 +130,9 @@ export function notificationHref(n: {
       return "/ai-insights";
   }
   if (n.entityType === "wa_group_link") return "/satisfaction/groups";
+  // Pipeline-health alerts land on Connect — that's where reconnect / resync /
+  // backfill live, i.e. where the operator actually fixes them.
+  if (n.entityType === "wa_account") return "/satisfaction/connect";
   if (!n.entityType) return null;
   switch (n.entityType) {
     case "task":

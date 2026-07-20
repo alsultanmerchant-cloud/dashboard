@@ -42,6 +42,23 @@ export function isOwnSession(sessionName: string | null | undefined): boolean {
   return sessionName === WA_SESSION_ID || sessionName.startsWith(`${WA_SESSION_ID}-`);
 }
 
+// A webhook URL the GATEWAY itself must be able to reach. `.env.local` points
+// WA_PUBLIC_WEBHOOK_URL at http://localhost:3000, so any connect/reconnect run
+// from a dev machine would happily delete the working production webhook and
+// replace it with an address the VPS can never reach — silently black-holing
+// every message. Enforced inside registerSessionWebhook so EVERY caller is
+// protected (add-number, connect, resync, wa-health), not just the resync route.
+export function isPubliclyRoutableWebhookUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return !/^(localhost$|127\.|0\.0\.0\.0$|::1$|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+}
+
 function base(): string {
   return (process.env.WA_API_URL ?? "").replace(/\/$/, "");
 }
@@ -120,6 +137,10 @@ export interface WaSessionInfo {
   phone: string | null;
   pushname: string | null;
   statusUpdatedAt?: string | null;
+  // See WaSessionRow.lastActive — a session can report CONNECTED while its
+  // browser is wedged and this clock is days old. The Connect page must show
+  // that instead of a green "متصل".
+  lastActive?: string | null;
   detail?: string;
 }
 
@@ -157,6 +178,7 @@ function parseSessionPayload(json: unknown): WaSessionInfo {
       (data?.updatedAt as string) ??
       (data?.updated_at as string) ??
       null,
+    lastActive: historyString(data?.lastActive, data?.last_active, data?.lastSeenAt) ?? null,
   };
 }
 
@@ -291,6 +313,12 @@ export async function registerSessionWebhook(
 ): Promise<boolean> {
   const webhookUrl = process.env.WA_PUBLIC_WEBHOOK_URL;
   if (!webhookUrl) return false;
+  // Bail BEFORE the delete pass below: a dev-machine run must never strip the
+  // live production webhook off the shared gateway.
+  if (!isPubliclyRoutableWebhookUrl(webhookUrl)) {
+    console.warn("[wa_webhook_register_skipped] WA_PUBLIC_WEBHOOK_URL is not publicly routable");
+    return false;
+  }
   if (!isOwnSession(sessionName)) return false; // never webhook a foreign tenant's session
   const basePath = webhookUrl.split("?")[0]; // our /api/wa/webhook, sans query
   const taggedUrl = `${webhookUrl}${webhookUrl.includes("?") ? "&" : "?"}account=${encodeURIComponent(sessionName)}`;
@@ -320,14 +348,21 @@ export async function registerSessionWebhook(
 // The webhooks currently registered on a session (id + url, for de-duplication).
 export async function listSessionWebhooks(
   uuid: string,
-): Promise<Array<{ id: string; url: string }>> {
+): Promise<Array<{ id: string; url: string; active: boolean }>> {
   const { ok, json } = await call(`/api/sessions/${uuid}/webhooks`);
   if (!ok) return [];
   const list = Array.isArray(json)
     ? json
     : ((json as { data?: unknown }).data ?? (json as { webhooks?: unknown }).webhooks ?? []);
   return (list as Array<Record<string, unknown>>)
-    .map((w) => ({ id: (w.id as string) ?? "", url: (w.url as string) ?? "" }))
+    .map((w) => ({
+      id: (w.id as string) ?? "",
+      url: (w.url as string) ?? "",
+      // The gateway can leave a row in place but flag it inactive. A registered
+      // -but-inactive webhook delivers nothing, so health checks must treat it
+      // as missing rather than trusting the row's existence.
+      active: w.active !== false,
+    }))
     .filter((w) => w.id && w.url);
 }
 
@@ -336,6 +371,11 @@ export interface WaSessionRow {
   uuid: string;
   phone: string | null;
   status: WaSessionStatus;
+  // Gateway's own "last time this session did anything" clock. A session can sit
+  // at status CONNECTED while its Chromium/WhatsApp-Web page is wedged and this
+  // clock stays frozen for days (the 2026-07-14 primary-number failure). Health
+  // checks must look at lastActive, NOT status alone.
+  lastActive: string | null;
 }
 
 // All sessions the gateway knows about, normalised. Lets the dashboard span
@@ -355,6 +395,8 @@ export async function listSessions(): Promise<WaSessionRow[]> {
       uuid: (s.id as string) ?? "",
       phone: (s.phone as string) ?? (s.me as string) ?? null,
       status: extractStatus(s) ?? "INITIALIZING",
+      lastActive:
+        historyString(s.lastActive, s.last_active, s.lastSeenAt, s.updatedAt) ?? null,
     }))
     .filter((s) => s.name && s.uuid);
 }

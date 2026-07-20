@@ -43,6 +43,9 @@ interface Account {
   status: Status;
   last_seen_at: string | null;
   status_updated_at?: string | null;
+  // The GATEWAY's activity clock (not our ingestion heartbeat). This is the only
+  // field that exposes a wedged session — see the wedged check below.
+  last_active_at?: string | null;
   pushname?: string | null;
 }
 
@@ -353,6 +356,18 @@ function AccountCard({
     a.last_seen_at != null &&
     nowMs > 0 &&
     nowMs - new Date(a.last_seen_at).getTime() > 7 * 24 * 3600 * 1000;
+
+  // WEDGED: the gateway still reports CONNECTED but its own activity clock has
+  // been frozen for hours. This is the 2026-07-14 failure — the primary number
+  // sat "متصل" for six days while delivering nothing, and the 7-day `stale`
+  // check above never fired. The gateway's lastActive ticks constantly on a
+  // healthy session (idle 0h) versus 138h on the wedged one, so hours — not
+  // days — is the right resolution. Matches WEDGED_HOURS in /api/cron/wa-health.
+  const wedgedIdleHours =
+    s === "CONNECTED" && a.last_active_at != null && nowMs > 0
+      ? (nowMs - new Date(a.last_active_at).getTime()) / 3_600_000
+      : null;
+  const wedged = wedgedIdleHours != null && wedgedIdleHours >= 6;
   const waitingForQr = s === "INITIALIZING" || s === "CONNECTING" || s === "SCAN_QR";
   const qrWaitStartedAt = a.status_updated_at
     ? new Date(a.status_updated_at).getTime()
@@ -372,10 +387,20 @@ function AccountCard({
             <span
               className={cn(
                 "flex size-10 items-center justify-center rounded-full",
-                s === "CONNECTED" ? "bg-green-dim text-cc-green" : "bg-soft-1 text-muted-foreground",
+                wedged
+                  ? "bg-red-dim text-cc-red"
+                  : s === "CONNECTED"
+                    ? "bg-green-dim text-cc-green"
+                    : "bg-soft-1 text-muted-foreground",
               )}
             >
-              {s === "CONNECTED" ? <CheckCircle2 className="size-5" /> : <Smartphone className="size-5" />}
+              {wedged ? (
+                <AlertTriangle className="size-5" />
+              ) : s === "CONNECTED" ? (
+                <CheckCircle2 className="size-5" />
+              ) : (
+                <Smartphone className="size-5" />
+              )}
             </span>
             <div>
               <p className="flex items-center gap-1.5 font-semibold">
@@ -475,10 +500,22 @@ function AccountCard({
           )}
         </div>
 
-        {stale && (
-          <p className="flex items-center gap-1.5 text-[11px] text-amber">
-            <AlertTriangle className="size-3.5" /> {t("stale")}
-          </p>
+        {wedged ? (
+          <div className="flex items-start gap-2 rounded-lg border border-cc-red/40 bg-red-dim px-3 py-2 text-[11px] text-cc-red">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <div className="space-y-0.5">
+              <p className="font-semibold">
+                {t("wedgedTitle", { hours: Math.round(wedgedIdleHours!) })}
+              </p>
+              <p className="leading-5 text-foreground/70">{t("wedgedBody")}</p>
+            </div>
+          </div>
+        ) : (
+          stale && (
+            <p className="flex items-center gap-1.5 text-[11px] text-amber">
+              <AlertTriangle className="size-3.5" /> {t("stale")}
+            </p>
+          )
         )}
 
         {backfillNote && (

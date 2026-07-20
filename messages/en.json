@@ -4063,7 +4063,9 @@
       "resyncing": "Re-registering…",
       "resyncHint": "Make sure every connected number streams live messages into the dashboard (run after adding or adopting a number).",
       "resyncDone": "Webhooks registered for {count}/{total} numbers",
-      "resyncFail": "Could not register webhooks"
+      "resyncFail": "Could not register webhooks",
+      "wedgedTitle": "Session wedged — no activity for {hours}h",
+      "wedgedBody": "This number reports \"connected\" but has actually stopped receiving messages. Press \"Reconnect\" and re-scan the QR, then \"Pull history\" to recover what was missed."
     },
     "connectionBanner": {
       "title": "A WhatsApp number needs attention",
@@ -4097,7 +4099,10 @@
       "resultBody": "This result was generated now, but its newest message is from {date}. Do not treat it as confirmation that current client communication is healthy.",
       "analysisRunAt": "Analysis run",
       "lastMessageAt": "Latest message received",
-      "unknownDate": "Unknown"
+      "unknownDate": "Unknown",
+      "stalledTitle": "WhatsApp ingestion looks stalled",
+      "stalledBody": "The latest message received is from {date} ({days} days ago). That is not a quiet client — ingestion has most likely stopped, so any analysis now would be based on stale data.",
+      "stalledCta": "Check WhatsApp numbers"
     },
     "archive": "Archive",
     "restore": "Restore",

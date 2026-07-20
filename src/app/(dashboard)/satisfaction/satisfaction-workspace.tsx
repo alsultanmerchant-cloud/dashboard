@@ -177,6 +177,25 @@ export function SatisfactionWorkspace({
     [rows, selectedId],
   );
 
+  // Clock captured AFTER mount — Date.now() during render desyncs SSR/client
+  // hydration. Until then ingestionStaleDays stays null and the ordinary banner
+  // shows, which is the safe direction.
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Beyond this, "no new messages" is far more likely a broken pipe than a quiet
+  // client. 3 days clears a Fri–Sat weekend without crying wolf.
+  const INGESTION_STALE_DAYS = 3;
+  const ingestionStaleDays = useMemo(() => {
+    if (!nowMs || !detail?.latestMessageAt) return null;
+    const days = Math.floor((nowMs - Date.parse(detail.latestMessageAt)) / 86_400_000);
+    return Number.isFinite(days) && days >= INGESTION_STALE_DAYS ? days : null;
+  }, [nowMs, detail?.latestMessageAt]);
+
   const select = (id: string) => {
     if (id) router.push(`/satisfaction?client=${id}`);
   };
@@ -374,22 +393,48 @@ export function SatisfactionWorkspace({
             <ClientFinanceBadges badge={financeMap[selectedId]} size="md" />
           )}
 
+          {/* "No new messages" is reassuring — and was catastrophically wrong
+              during the 2026-07-14 blackout, when ingestion had been dead for
+              four days and this banner read as "all fine". Past INGESTION_STALE_DAYS
+              the silence is far more likely to be a broken pipe than a quiet
+              client, so say that instead and point at the fix. */}
           {detail.analysis && detail.hasNewMessagesSinceAnalysis === false && (
-            <div className="flex items-start gap-2 rounded-xl border border-amber/35 bg-amber/10 px-4 py-3 text-sm text-amber">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <div>
-                <p className="font-semibold">
-                  {t("freshness.noNewBeforeTitle")}
-                </p>
-                <p className="mt-0.5 text-xs leading-6 text-foreground/70">
-                  {t("freshness.noNewBeforeBody", {
-                    date: detail.latestMessageAt
-                      ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
-                      : t("freshness.unknownDate"),
-                  })}
-                </p>
+            ingestionStaleDays !== null ? (
+              <div className="flex items-start gap-2 rounded-xl border border-cc-red/40 bg-red-dim px-4 py-3 text-sm text-cc-red">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">{t("freshness.stalledTitle")}</p>
+                  <p className="mt-0.5 text-xs leading-6 text-foreground/70">
+                    {t("freshness.stalledBody", {
+                      date: detail.latestMessageAt!.slice(0, 16).replace("T", " "),
+                      days: ingestionStaleDays,
+                    })}
+                  </p>
+                  <Link
+                    href="/satisfaction/connect"
+                    className="mt-1.5 inline-block text-xs font-semibold underline underline-offset-4"
+                  >
+                    {t("freshness.stalledCta")} ←
+                  </Link>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-start gap-2 rounded-xl border border-amber/35 bg-amber/10 px-4 py-3 text-sm text-amber">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">
+                    {t("freshness.noNewBeforeTitle")}
+                  </p>
+                  <p className="mt-0.5 text-xs leading-6 text-foreground/70">
+                    {t("freshness.noNewBeforeBody", {
+                      date: detail.latestMessageAt
+                        ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
+                        : t("freshness.unknownDate"),
+                    })}
+                  </p>
+                </div>
+              </div>
+            )
           )}
 
           {/* Analyze — two windows. Current week feeds the board; all time is

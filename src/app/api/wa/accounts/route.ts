@@ -66,6 +66,10 @@ export async function GET() {
         phone: live.phone ?? a.phone,
         pushname: live.pushname,
         status_updated_at: live.statusUpdatedAt ?? null,
+        // The gateway's own activity clock. CONNECTED alone is not health: on
+        // 2026-07-14 the primary number sat at CONNECTED for six days with this
+        // frozen, and the UI happily showed a green "متصل" the whole time.
+        last_active_at: live.lastActive ?? null,
       };
     }),
   );
