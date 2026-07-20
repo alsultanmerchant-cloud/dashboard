@@ -831,6 +831,13 @@ async function countApprovalsResolved(
 
 export interface ServiceHealthRow {
   serviceId: string;
+  /**
+   * EVERY service id folded into this row. A row merges a service with its
+   * "Renewal X" twin, so `serviceId` alone (the non-Renewal one) addresses only
+   * part of what the row counted — drill-downs must filter on all of these or
+   * they land on a smaller set than the number shown.
+   */
+  serviceIds: string[];
   name: string;
   slug: string;
   openCount: number;
@@ -1083,6 +1090,7 @@ async function _getServiceLineHealth(
     const trend: Array<number | null> = dailyTotals.map((d) => pctOf(d.onTime, d.total));
     return {
       serviceId: sid,
+      serviceIds: [sid],
       name: s.name as string,
       slug: s.slug as string,
       openCount: v?.open ?? 0,
@@ -1122,6 +1130,7 @@ async function _getServiceLineHealth(
       existing._cc += row._cc;
       existing._ccPrev += row._ccPrev;
       existing.includesRenewals = true;
+      existing.serviceIds = [...existing.serviceIds, ...row.serviceIds];
       for (let i = 0; i < existing._dailyTotals.length; i++) {
         existing._dailyTotals[i].total += row._dailyTotals[i].total;
         existing._dailyTotals[i].onTime += row._dailyTotals[i].onTime;
@@ -1137,6 +1146,7 @@ async function _getServiceLineHealth(
   // Re-derive rates / trend from the merged buckets.
   const rows: ServiceHealthRow[] = Array.from(grouped.values()).map((r) => ({
     serviceId: r.serviceId,
+    serviceIds: r.serviceIds,
     name: r.name,
     slug: r.slug,
     openCount: r.openCount,
@@ -1364,6 +1374,7 @@ async function _getSupportingDepartmentHealth(
       }
       return {
         serviceId: d.id,
+        serviceIds: [d.id],
         name: d.name,
         slug: d.slug,
         openCount: s?.open_now ?? 0,

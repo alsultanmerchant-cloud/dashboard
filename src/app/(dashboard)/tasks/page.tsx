@@ -48,6 +48,8 @@ export default async function TasksPage({
     q?: string;
     sf?: string;
     projectId?: string;
+    // Service-line drill-down from the CEO dashboard (comma-separated ids).
+    service?: string;
     odooProjectId?: string;
     groupBy?: string;
     cf?: string;

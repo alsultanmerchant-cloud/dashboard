@@ -123,6 +123,8 @@ export type TaskQueryParams = {
   groupBy?: string;
   projectId?: string;
   odooProjectId?: string;
+  // Comma-separated service ids (CEO dashboard service-line drill-down).
+  service?: string;
 };
 
 export function resolveTasksView(sp: Pick<TaskQueryParams, "view" | "projectId" | "odooProjectId">) {
@@ -131,6 +133,21 @@ export function resolveTasksView(sp: Pick<TaskQueryParams, "view" | "projectId" 
 }
 
 const FACET_FIELD_SET: ReadonlySet<string> = new Set(SEARCH_FACET_FIELDS);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// `?service=<uuid>[,<uuid>…]` — the dashboard's service-line rows merge a
+// service with its "Renewal X" twin, so a row can carry several ids and the
+// drill must filter on all of them. Non-uuid junk is dropped rather than
+// silently widening the board back to everything.
+export function parseServiceIds(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => UUID_RE.test(s));
+  return ids.length ? [...new Set(ids)] : undefined;
+}
 
 /**
  * Parse the `sf` param — a JSON array of {field,value} search facets written
@@ -246,6 +263,7 @@ export function buildTaskFiltersFromParams(
     followedByUserId: active.has("followed") ? opts.userId : undefined,
     assignedToEmployeeId: active.has("mine") ? (opts.employeeId ?? undefined) : undefined,
     projectId: opts.projectId,
+    serviceIds: parseServiceIds(sp.service),
     search,
     searchFacets,
     dateFilters: allDateFilters,

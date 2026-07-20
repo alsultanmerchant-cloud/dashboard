@@ -7,6 +7,10 @@ export type TaskFilters = {
   stage?: string[];
   priority?: string[];
   projectId?: string;
+  // Service-line scope (migration 0257). An ARRAY because the dashboard's
+  // service rows merge a service with its "Renewal X" twin, so a single row
+  // spans several service ids and the drill must cover all of them.
+  serviceIds?: string[];
   overdue?: boolean;
   // True → only tasks with planned_date == today.
   dueToday?: boolean;
@@ -242,6 +246,7 @@ async function fetchTaskBundle(
     p_stage: filters.stage?.length ? filters.stage : null,
     p_priority: filters.priority?.length ? filters.priority : null,
     p_project_id: filters.projectId ?? null,
+    p_service_ids: filters.serviceIds?.length ? filters.serviceIds : null,
     p_overdue: !!filters.overdue,
     p_due_today: !!filters.dueToday,
     p_behind_schedule: !!filters.behindSchedule,

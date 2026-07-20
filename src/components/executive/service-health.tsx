@@ -59,7 +59,14 @@ export async function ServiceHealthSection({
   empty,
   // Row destination. Services drill into their task list; other groupings (e.g.
   // supporting departments, which have no service filter) override this.
-  hrefBase = "/tasks?service=",
+  //
+  // `f=open` + the row's FULL service-id set reproduces exactly what the row
+  // counted (openCount = stage <> done AND not archived, summed across the
+  // service and its "Renewal X" twin). Previously this pointed at
+  // `/tasks?service=<single id>`, but /tasks accepted no `service` param at all,
+  // so the filter was silently dropped and every row landed on the full
+  // unfiltered board. The param is real as of migration 0257.
+  hrefBase = "/tasks?view=list&f=open&service=",
 }: {
   rows: ServiceHealthRow[];
   windowLabel?: string;
@@ -93,7 +100,7 @@ export async function ServiceHealthSection({
             return (
               <Link
                 key={s.serviceId}
-                href={`${hrefBase}${s.serviceId}`}
+                href={`${hrefBase}${(s.serviceIds?.length ? s.serviceIds : [s.serviceId]).join(",")}`}
                 className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-soft-1 md:grid-cols-[1.4fr_1fr_auto_auto_auto]"
               >
                 <div className="flex items-center gap-3 min-w-0">
