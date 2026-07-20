@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/audit";
 import { getDefaultOrgId } from "@/lib/wa/ingest";
+import { getOwnerAdminUserIds } from "@/lib/data/org-roles";
 import { replayWaWebhookDeadletter, countRecentlyParked } from "@/lib/wa/deadletter";
 import {
   listSessions,
@@ -42,36 +43,50 @@ const hoursSince = (iso: string | null | undefined): number | null => {
   return (Date.now() - t) / 3_600_000;
 };
 
-// One notification per fault per cooldown window, so a wedged number that stays
-// wedged for a week doesn't generate a week of identical alerts.
-async function notifyOnce(params: {
+// Fan the alert out to the org's owners/admins, deduped per recipient per
+// cooldown window, so a number that stays wedged for a week doesn't produce a
+// week of identical alerts.
+//
+// Two hard constraints on this table, both of which fail SILENTLY through
+// createNotification (it logs and returns null):
+//   • notifications_check requires a recipient — a row with both recipient
+//     columns null is rejected outright, so system alerts still need owners;
+//   • entity_id is UUID, so a friendly key like "ingestion" throws 22P02.
+//     Org-wide alerts therefore pass null, never a synthetic string.
+async function notifyOwners(params: {
   orgId: string;
+  owners: string[];
   type: string;
-  key: string;
+  entityId: string | null;
   title: string;
   body: string;
-}): Promise<boolean> {
+}): Promise<number> {
   const since = new Date(Date.now() - NOTIFY_COOLDOWN_HOURS * 3_600_000).toISOString();
-  const { data: recent } = await supabaseAdmin
-    .from("notifications")
-    .select("id")
-    .eq("organization_id", params.orgId)
-    .eq("type", params.type)
-    .eq("entity_type", "wa_account")
-    .eq("entity_id", params.key)
-    .gte("created_at", since)
-    .limit(1);
-  if (recent && recent.length > 0) return false;
+  let created = 0;
+  for (const userId of params.owners) {
+    let q = supabaseAdmin
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", params.orgId)
+      .eq("recipient_user_id", userId)
+      .eq("type", params.type)
+      .gte("created_at", since);
+    q = params.entityId ? q.eq("entity_id", params.entityId) : q.is("entity_id", null);
+    const { count } = await q;
+    if ((count ?? 0) > 0) continue;
 
-  await createNotification({
-    organizationId: params.orgId,
-    type: params.type,
-    title: params.title,
-    body: params.body,
-    entityType: "wa_account",
-    entityId: params.key,
-  });
-  return true;
+    await createNotification({
+      organizationId: params.orgId,
+      recipientUserId: userId,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      entityType: "wa_account",
+      entityId: params.entityId,
+    });
+    created++;
+  }
+  return created;
 }
 
 export async function POST(request: NextRequest) {
@@ -84,6 +99,8 @@ export async function POST(request: NextRequest) {
   }
 
   const orgId = await getDefaultOrgId();
+  // Alerts are useless without a recipient (notifications_check enforces one).
+  const owners = await getOwnerAdminUserIds(orgId);
   const webhookBase = (process.env.WA_PUBLIC_WEBHOOK_URL ?? "").split("?")[0];
 
   const { data: accounts, error } = await supabaseAdmin
@@ -99,10 +116,11 @@ export async function POST(request: NextRequest) {
   try {
     sessions = await listSessions();
   } catch (e) {
-    await notifyOnce({
+    await notifyOwners({
       orgId,
+      owners,
       type: "WA_GATEWAY_UNREACHABLE",
-      key: "gateway",
+      entityId: null,
       title: "بوابة واتساب غير متاحة",
       body: `تعذّر الوصول إلى بوابة OpenWA: ${(e as Error).message}`,
     });
@@ -128,10 +146,11 @@ export async function POST(request: NextRequest) {
     const session = byName.get(name);
     if (!session) {
       faults.push("session_missing");
-      await notifyOnce({
+      await notifyOwners({
         orgId,
+        owners,
         type: "WA_SESSION_MISSING",
-        key: account.id as string,
+        entityId: account.id as string,
         title: `رقم واتساب غير موجود على البوابة: ${label}`,
         body: `الجلسة ${name} غير موجودة على بوابة OpenWA — يلزم إعادة ربط الرقم.`,
       });
@@ -152,10 +171,11 @@ export async function POST(request: NextRequest) {
         if (ok) {
           healed.push("webhook_reregistered");
         } else {
-          await notifyOnce({
+          await notifyOwners({
             orgId,
+            owners,
             type: "WA_WEBHOOK_MISSING",
-            key: account.id as string,
+            entityId: account.id as string,
             title: `تعذّرت إعادة تسجيل إشعارات واتساب: ${label}`,
             body: `الرقم ${label} بلا webhook على البوابة ولم تنجح إعادة التسجيل تلقائيًا — الرسائل لن تصل.`,
           });
@@ -172,10 +192,11 @@ export async function POST(request: NextRequest) {
     row.idleHours = idleHours === null ? null : Math.round(idleHours);
     if (session.status === "CONNECTED" && idleHours !== null && idleHours >= WEDGED_HOURS) {
       faults.push("session_wedged");
-      await notifyOnce({
+      await notifyOwners({
         orgId,
+        owners,
         type: "WA_SESSION_WEDGED",
-        key: account.id as string,
+        entityId: account.id as string,
         title: `رقم واتساب متوقف عن النشاط: ${label}`,
         body:
           `الرقم ${label} يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة. ` +
@@ -196,10 +217,11 @@ export async function POST(request: NextRequest) {
   const newestSentAt = (newest?.[0] as { sent_at: string } | undefined)?.sent_at ?? null;
   const silentHours = hoursSince(newestSentAt);
   if (silentHours !== null && silentHours >= SILENT_HOURS) {
-    await notifyOnce({
+    await notifyOwners({
       orgId,
+      owners,
       type: "WA_INGESTION_STALLED",
-      key: "ingestion",
+      entityId: null,
       title: "توقّف استقبال رسائل واتساب",
       body:
         `لم تصل أي رسالة واتساب منذ ${Math.round(silentHours)} ساعة (آخر رسالة: ${newestSentAt}). ` +
@@ -214,10 +236,11 @@ export async function POST(request: NextRequest) {
   const parkedRecently = await countRecentlyParked();
   const deadletter = await replayWaWebhookDeadletter();
   if (parkedRecently > 0 && deadletter.stillFailing > 0) {
-    await notifyOnce({
+    await notifyOwners({
       orgId,
+      owners,
       type: "WA_WEBHOOK_ERRORS",
-      key: "endpoint",
+      entityId: null,
       title: "أخطاء في استقبال رسائل واتساب",
       body:
         `فشل معالجة ${parkedRecently} رسالة واردة خلال الساعتين الماضيتين ولم تنجح إعادة المحاولة. ` +
