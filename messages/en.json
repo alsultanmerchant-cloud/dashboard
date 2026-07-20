@@ -2363,115 +2363,157 @@
     "changed": "Status changed to {label}"
   },
   "ReportsPage": {
-    "metricTooltips": {
-      "reports_totalDesigns": "Total designs produced across all designers in the selected month (sum of the designs column).",
-      "reports_totalRevisions": "Total revisions done across all designers in the selected month (sum of the revisions column).",
-      "reports_employeeCount": "Number of designers who produced any designs or revisions in the selected month.",
-      "reports_designColumn": "Designs this designer produced in the month — counted from their completed tasks' design count.",
-      "reports_revisionColumn": "Revisions this designer did in the month — counted from their completed tasks' revision count.",
-      "reports_taskCountColumn": "Number of completed tasks backing this designer's design/revision totals.",
-      "reports_rowTotalColumn": "This designer's total output for the month (designs + revisions).",
-      "reports_stageDwell": "Average business-time tasks spend in each workflow stage — where work waits longest.",
-      "reports_specialistLoad": "Current open-task load per specialist — who is carrying the most active work right now.",
-      "reports_designerOutput": "Monthly design output per designer — designs and revisions completed, for the selected month.",
-      "reports_slipHeatmap": "How far tasks slip past their deadline, bucketed by lateness — a heatmap of slip severity.",
-      "reports_renewalDays": "Upcoming contract renewals ordered by how many days remain — the renewal forecast.",
-      "reports_onTime": "Share of tasks delivered on time over the recent weekly window (Odoo data). The hint shows the sample size.",
-      "reports_reviewBacklog": "Tasks currently waiting in a review stage — the live review backlog.",
-      "reports_rework": "Total rework occurrences (tasks bounced back to changes) in the window, across all projects.",
-      "reports_odooTasks": "Total tasks closed over the last 4 weeks (sum across the agent leaderboard).",
-      "reports_reworkByProject": "Rework occurrences grouped by project — which projects bounce work back the most.",
-      "reports_peopleBoard": "Agent leaderboard ranked by tasks closed — individual throughput.",
-      "reports_digestOnTime": "On-time delivery % captured in the latest stored weekly digest (a frozen snapshot, not live).",
-      "reports_digestWeekClosures": "Tasks closed during the digest week, from the latest stored weekly digest.",
-      "reports_digestReviewBacklog": "Review backlog count captured in the latest stored weekly digest.",
-      "reports_digestRenewals90d": "Contracts due for renewal within 90 days, from the latest stored weekly digest."
+    "title": "Reports Center",
+    "description": "A periodic executive report written like an analyst would — pick a period, generate, print",
+    "currency": "SAR",
+    "narrativeMissing": "The written analysis is unavailable for this chapter — the numbers below are complete and reliable.",
+    "print": {
+      "button": "Print report",
+      "noRunTitle": "No generated report for this period",
+      "noRunBody": "Go back to the Reports Center, generate the report first, then print it.",
+      "backToReports": "Back to Reports Center"
     },
-    "title": "Reports",
-    "description": "Agency performance indicators for this week, computed directly from Odoo data.",
-    "smartDigestBadge": "Phase 9 — Smart digest",
-    "executiveDigest": {
-      "title": "Executive week digest",
-      "description": "The Gemini model is fed only the four reports below and does not speculate beyond them."
+    "generate": {
+      "generate": "Generate report",
+      "regenerate": "Regenerate report",
+      "pending": "Preparing the report… this can take a minute",
+      "done": "Report ready",
+      "failed": "Report generation failed"
     },
-    "sections": {
-      "stageDwell": {
-        "title": "Average time spent in each stage",
-        "description": "In days, calculated from closed segments in the stage history.",
-        "empty": "No data yet. This needs tasks that passed through more than one stage."
-      },
-      "specialistLoad": {
-        "title": "Current specialist load",
-        "description": "Open task count per assignee, with total allocated hours.",
-        "empty": "No assigned open tasks."
-      },
-      "designerOutput": {
-        "title": "Monthly designer output",
-        "description": "Total designs and revisions per employee on tasks closed in the selected month."
-      },
-      "slipHeatmap": {
-        "title": "Schedule slip distribution",
-        "description": "Open tasks grouped by percentage deviation from the expected schedule."
-      },
-      "renewals": {
-        "title": "Renewal forecast — next 90 days",
-        "description": "Sorted by nearest renewal date.",
-        "openProjects": "Open projects",
-        "empty": "No renewals on the horizon."
-      }
+    "toolbar": {
+      "period": "Report period:",
+      "generatedAt": "Generated {date} (Riyadh time)",
+      "notGenerated": "No report generated for this period yet — generate it to freeze and print it."
     },
-    "footerNote": "Performance indicators, projects, and people metrics are computed directly from Odoo whenever the page opens. Renewals and the weekly digest are read from the dashboard database.",
-    "weeklyMetrics": {
-      "title": "Weekly metrics",
-      "description": "On-time delivery, review backlog, and rework, pulled directly from Odoo.",
-      "odooUnavailable": "Odoo is currently unavailable, so Odoo-backed weekly metrics cannot be shown. The remaining reports still load from the dashboard database.",
-      "cards": {
-        "onTime": "On-time delivery",
-        "reviewBacklog": "Review backlog",
-        "rework": "Rework (Client Changes)",
-        "odooTasks": "Odoo tasks (latest pull)"
-      },
-      "hints": {
-        "noSample": "No sample yet",
-        "sample": "Sample {count}",
-        "noDelay": "No delays",
-        "waitingReview": "Waiting for review",
-        "affectedProjects": "{count} affected project(s)",
-        "last4Weeks": "Closures over the last 4 weeks"
-      }
+    "empty": {
+      "title": "No report for this period",
+      "body": "Click “Generate report” and the system will gather this period's numbers from every module (money, delivery, team, clients) and write a full executive analysis around them."
     },
-    "projectCompliance": {
-      "title": "Deadline compliance by project",
-      "description": "Percentage of open tasks still within deadline — worst 10 projects.",
-      "empty": "No open tasks to evaluate for compliance."
+    "recent": {
+      "title": "Previous reports"
     },
-    "reworkByProject": {
-      "title": "Rework by project",
-      "description": "Tasks in the Client Changes stage — reveals the most draining projects.",
-      "empty": "No tasks are currently in the Client Changes stage."
+    "cover": {
+      "title": "Periodic Executive Report",
+      "period": "Period",
+      "days": "{count} days",
+      "generatedAt": "Generated",
+      "aiPartial": "Part of the written analysis failed to generate — numbers are complete; regenerate later to fill the narrative."
     },
-    "peopleBoard": {
-      "title": "People board — last 4 weeks",
-      "description": "Closed task count plus relative utilization (top performer = 100%).",
-      "empty": "No productivity data yet."
+    "summary": {
+      "title": "Executive Summary",
+      "keyFindings": "Key findings",
+      "recommendations": "Recommendations",
+      "recArea": "Area",
+      "recAction": "Action",
+      "recOwner": "Owner"
     },
-    "storedDigest": {
-      "title": "Stored week digest",
-      "generatedAt": "Generated at {date}",
-      "notGenerated": "No weekly digest has been generated yet. It is scheduled automatically on Sunday morning.",
-      "note": "This digest is delivered only to the in-app notifications inbox. Email and WhatsApp are deferred to phase T8.",
-      "empty": "It will appear here as soon as the first weekly-digest cycle runs.",
-      "cards": {
-        "onTime": "On-time delivery",
-        "weekClosures": "Week closures",
-        "reviewBacklog": "Review backlog",
-        "renewals90d": "90-day renewals"
-      }
+    "indicators": {
+      "title": "Period Indicators",
+      "subtitle": "Current value vs the previous equivalent period",
+      "projectsAtRisk": "Projects with delays",
+      "highRisk": "High-risk projects (≥{threshold} overdue)",
+      "overdue": "Overdue tasks",
+      "onTime": "On-time rate",
+      "clientChanges": "Client changes"
     },
-    "renewalInDays": "In {count} day(s)",
-    "loading": "Loading...",
-    "count": {
-      "task": "{count} task(s)"
+    "scores": {
+      "delivery": "Delivery",
+      "quality": "Quality",
+      "discipline": "Discipline",
+      "productivity": "Productivity",
+      "stability": "Stability",
+      "delta": "pts"
+    },
+    "finance": {
+      "title": "Money & Contracts",
+      "subtitle": "Month {month} — company income, client movement, AM targets",
+      "expected": "Expected income",
+      "actual": "Actual income",
+      "achievement": "Achievement",
+      "installments": "Due & overdue installments",
+      "movNew": "New clients",
+      "movRenewed": "Renewed",
+      "movLost": "Lost",
+      "rosterOverdue": "Overdue contracts",
+      "amTitle": "Account-manager targets",
+      "amName": "Account manager",
+      "amTarget": "Target",
+      "amAchieved": "Achieved",
+      "amPct": "Achievement"
+    },
+    "delivery": {
+      "title": "Delivery & Execution",
+      "subtitle": "Service-line performance, deadline discipline, client changes",
+      "editsActive": "In client changes now",
+      "editsEntered": "Entered changes this period",
+      "editsExisted": "Passed through changes this period",
+      "editsPrev": "Previous period",
+      "servicesTitle": "Service-line health",
+      "supportingTitle": "Supporting departments",
+      "colService": "Service",
+      "colDelivered": "Delivered",
+      "colOnTime": "On time",
+      "colPrevOnTime": "Prev. period",
+      "colOverdue": "Overdue",
+      "colOpen": "Open",
+      "colEdits": "Changes",
+      "dwellTitle": "Average dwell per stage",
+      "dwellStage": "Stage",
+      "dwellAvgDays": "Avg. days",
+      "dwellSamples": "Samples"
+    },
+    "team": {
+      "title": "Team & Accountability",
+      "subtitle": "Department pulse and individual performance from real work logs",
+      "headcount": "On duty",
+      "completedWeek": "Done this week",
+      "pendingLate": "Pending late",
+      "stalled": "Stalled members",
+      "deptTitle": "Department pulse",
+      "colDept": "Department",
+      "colHead": "Head",
+      "colHeadcount": "Members",
+      "colActive": "Active",
+      "colStalled": "Stalled",
+      "colLate": "Late",
+      "colCompleted": "Done/wk",
+      "topTitle": "Top performers",
+      "lowTitle": "Need intervention",
+      "colName": "Name",
+      "colRole": "Role",
+      "colScore": "Score",
+      "colOnTime": "On-time",
+      "colOverdueOwned": "Overdue owned",
+      "designersTitle": "Design output for the report month",
+      "colDesigns": "Designs",
+      "colRevisions": "Revisions",
+      "colTasks": "Tasks"
+    },
+    "clients": {
+      "title": "Clients & Satisfaction",
+      "subtitle": "WhatsApp-analyzed client satisfaction and per-client delivery health",
+      "avgSatisfaction": "Avg. satisfaction",
+      "briefAdherence": "Brief adherence",
+      "analyzed": "Analyzed clients",
+      "atRisk": "At churn risk",
+      "atRiskTitle": "Clients at risk",
+      "worstTitle": "Weakest delivery",
+      "bestTitle": "Best delivery",
+      "colClient": "Client",
+      "colSatisfaction": "Satisfaction",
+      "colSentiment": "Sentiment",
+      "colOnTime": "On time",
+      "colOverdue": "Overdue",
+      "colOpen": "Open"
+    },
+    "renewals": {
+      "title": "Renewals & Upcoming Deadlines",
+      "subtitle": "{count} renewals within 90 days · {deadlines} deadlines within 7 days",
+      "colProject": "Project",
+      "colClient": "Client",
+      "colDate": "Renewal date",
+      "colDays": "In (days)",
+      "empty": "No renewals in the next 90 days."
     }
   },
   "FinancePage": {
