@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
             type: "WA_WEBHOOK_MISSING",
             entityId: account.id as string,
             title: `تعذّرت إعادة تسجيل إشعارات واتساب: ${label}`,
-            body: `الرقم ${label} بلا webhook على البوابة ولم تنجح إعادة التسجيل تلقائيًا — الرسائل لن تصل.`,
+            body: `«${label}» بلا webhook على البوابة ولم تنجح إعادة التسجيل تلقائيًا — الرسائل لن تصل.`,
           });
         }
       }
@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
         entityId: account.id as string,
         title: `رقم واتساب متوقف عن النشاط: ${label}`,
         body:
-          `الرقم ${label} يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة. ` +
+          `«${label}» يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة. ` +
           `الجلسة على الأرجح معلّقة — استخدم "إعادة الربط" على الرقم ثم "سحب السجل".`,
       });
     }
