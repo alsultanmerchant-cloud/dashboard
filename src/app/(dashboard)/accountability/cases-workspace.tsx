@@ -22,7 +22,11 @@ import {
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
-import { refreshAccountabilityScorecardAction, setCaseStatusAction } from "./_actions";
+import {
+  refreshAccountabilityScorecardAction,
+  setCaseStatusAction,
+  setProblemStatusAction,
+} from "./_actions";
 import { Card, CardContent } from "@/components/ui/card";
 import { CaseOverview } from "./case-overview";
 import { EmptyState } from "@/components/empty-state";
@@ -37,6 +41,7 @@ import {
   type CaseStatus,
   type PersistedCaseMeta,
 } from "@/lib/accountability/case-status";
+import type { PersistedProblemMeta } from "@/lib/data/accountability-problems-store";
 import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type { AccountabilitySilence } from "@/lib/data/accountability";
 import type {
@@ -73,13 +78,73 @@ const STATUS_TONE: Record<CaseStatus, string> = {
   resolved: "border-border bg-soft-1 text-muted-foreground/60",
 };
 
+// ---- Per-problem status roll-up (migration 0262) ---------------------------
+// Status + reopen now live on each PROBLEM, not the whole person. The header
+// shows this compact roll-up so a reader still gets the at-a-glance picture,
+// while the decision itself is made on each «الدليل» line below.
+export interface ProblemRollup {
+  total: number;
+  open: number; // still awaiting a decision (status = open)
+  decided: number;
+  reopened: number; // problems closed then detected again
+  byStatus: Record<CaseStatus, number>;
+}
+
+export function rollupProblems(
+  proofs: CaseProof[],
+  problemMeta: Record<string, PersistedProblemMeta>,
+): ProblemRollup {
+  const byStatus: Record<CaseStatus, number> = {
+    open: 0,
+    under_review: 0,
+    excused: 0,
+    warned: 0,
+    resolved: 0,
+  };
+  let reopened = 0;
+  for (const p of proofs) {
+    const m = p.problemKey ? problemMeta[p.problemKey] : undefined;
+    byStatus[m?.status ?? "open"] += 1;
+    if ((m?.reopenCount ?? 0) > 0) reopened += 1;
+  }
+  const total = proofs.length;
+  return { total, open: byStatus.open, decided: total - byStatus.open, reopened, byStatus };
+}
+
+// Header summary: one small pill per present status + a reopened alarm. Silent
+// when there are no problems (a clean person).
+export function ProblemStatusRollup({ rollup }: { rollup: ProblemRollup }) {
+  if (rollup.total === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" title="حالة كل مشكلة على حدة — القرار يُتّخذ على كل سطر في الدليل بالأسفل">
+      {CASE_STATUSES.filter((s) => rollup.byStatus[s] > 0).map((s) => (
+        <span
+          key={s}
+          className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tabular-nums", STATUS_TONE[s])}
+        >
+          {rollup.byStatus[s]} {CASE_STATUS_LABEL[s]}
+        </span>
+      ))}
+      {rollup.reopened > 0 && (
+        <span
+          className="inline-flex items-center gap-1 rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
+          title="مشاكل أُغلقت ثم عادت للرصد"
+        >
+          <Repeat className="size-3" />
+          {rollup.reopened} عادت
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function CasesWorkspace({
   data,
-  caseMeta,
+  problemMeta,
   brief,
 }: {
   data: AccountabilityCasesResult;
-  caseMeta: Record<string, PersistedCaseMeta>;
+  problemMeta: Record<string, PersistedProblemMeta>;
   brief: CaseBrief;
 }) {
   const [refreshing, startRefresh] = useTransition();
@@ -168,11 +233,7 @@ export function CasesWorkspace({
       ) : (
         <div className="space-y-3">
           {shown.map((c) => (
-            <CaseCard
-              key={c.employeeId ?? c.employeeName}
-              c={c}
-              meta={c.employeeId ? caseMeta[c.employeeId] ?? null : null}
-            />
+            <CaseCard key={c.employeeId ?? c.employeeName} c={c} problemMeta={problemMeta} />
           ))}
         </div>
       )}
@@ -238,7 +299,15 @@ function MethodologyNote({ streams, unmatched }: { streams: CaseStream[]; unmatc
 }
 
 // ---- Proof, grouped by stream (shared by the card + the employee modal) ----
-export function CaseEvidence({ c, cap = 4 }: { c: AccountabilityCase; cap?: number }) {
+export function CaseEvidence({
+  c,
+  cap = 4,
+  problemMeta = {},
+}: {
+  c: AccountabilityCase;
+  cap?: number;
+  problemMeta?: Record<string, PersistedProblemMeta>;
+}) {
   const [expanded, setExpanded] = useState(false);
   const groups: { stream: CaseStream; proof: CaseProof[] }[] = (
     [
@@ -264,7 +333,12 @@ export function CaseEvidence({ c, cap = 4 }: { c: AccountabilityCase; cap?: numb
             </p>
             <ul className="space-y-1.5">
               {list.map((p, i) => (
-                <ProofLine key={`${g.stream}-${i}`} p={p} />
+                <ProofLine
+                  key={p.problemKey ?? `${g.stream}-${i}`}
+                  p={p}
+                  employeeId={c.employeeId}
+                  meta={p.problemKey ? problemMeta[p.problemKey] ?? null : null}
+                />
               ))}
             </ul>
           </div>
@@ -281,10 +355,17 @@ export function CaseEvidence({ c, cap = 4 }: { c: AccountabilityCase; cap?: numb
 }
 
 // ---- Case card -------------------------------------------------------------
-function CaseCard({ c, meta }: { c: AccountabilityCase; meta: PersistedCaseMeta | null }) {
+function CaseCard({
+  c,
+  problemMeta,
+}: {
+  c: AccountabilityCase;
+  problemMeta: Record<string, PersistedProblemMeta>;
+}) {
   const [showAdvice, setShowAdvice] = useState(false);
   const sev = SEVERITY_META[c.severity];
   const SevIcon = sev.icon;
+  const rollup = rollupProblems(c.proof, problemMeta);
 
   return (
     <Card className={cn("overflow-hidden border-s-2", sev.accent)}>
@@ -308,20 +389,6 @@ function CaseCard({ c, meta }: { c: AccountabilityCase; meta: PersistedCaseMeta 
                 {c.role ?? "—"}
                 {c.department ? ` · ${c.department}` : ""}
               </span>
-              {/* Real recurrence only: resolved, then detected again. This used
-                  to read "تكرّرت {timesSeen}×", but times_seen is a once-a-day
-                  poll counter — 42 of 52 live cases sit at the same value, so
-                  the badge fired on nearly every card while claiming a
-                  recurrence that never happened. */}
-              {meta && meta.reopenCount > 0 && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
-                  title={`أُغلقت ثم عادت للرصد · أول رصد ${meta.firstSeenAt.slice(0, 10)}`}
-                >
-                  <Repeat className="size-3" />
-                  عادت بعد إغلاقها{meta.reopenCount > 1 ? ` ${meta.reopenCount}×` : ""}
-                </span>
-              )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {c.streams.map((st) => {
@@ -350,7 +417,9 @@ function CaseCard({ c, meta }: { c: AccountabilityCase; meta: PersistedCaseMeta 
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1.5">
-            {c.employeeId && <StatusControl employeeId={c.employeeId} meta={meta} />}
+            {/* Status is per-problem now; the header shows the roll-up and the
+                decision itself is taken on each «الدليل» line below. */}
+            <ProblemStatusRollup rollup={rollup} />
             <button
               type="button"
               onClick={() => setShowAdvice((v) => !v)}
@@ -369,56 +438,44 @@ function CaseCard({ c, meta }: { c: AccountabilityCase; meta: PersistedCaseMeta 
         {/* Advice panel (opt-in) */}
         {showAdvice && c.employeeId && <AdvicePanel employeeId={c.employeeId} />}
 
-        {/* Manager decision note */}
-        {meta?.decisionNote && (
-          <p className="mt-3 rounded-md border border-border bg-soft-1/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-            قرار المدير{meta.decidedByName ? ` (${meta.decidedByName})` : ""}: {meta.decisionNote}
-          </p>
-        )}
-
         {/* Proof */}
-        <CaseEvidence c={c} />
+        <CaseEvidence c={c} problemMeta={problemMeta} />
       </CardContent>
     </Card>
   );
 }
 
 // ---- Status control (manager decision loop) --------------------------------
-export function StatusControl({ employeeId, meta }: { employeeId: string; meta: PersistedCaseMeta | null }) {
-  const router = useRouter();
+// Shared presentational dropdown; the employee- and problem-grain controls wrap
+// it with their own save call. `size=sm` is the compact per-problem variant.
+function StatusPicker({
+  current,
+  saving,
+  onPick,
+  size = "md",
+}: {
+  current: CaseStatus;
+  saving: boolean;
+  onPick: (s: CaseStatus) => void;
+  size?: "sm" | "md";
+}) {
   const [open, setOpen] = useState(false);
-  const [saving, startSave] = useTransition();
-  const current: CaseStatus = meta?.status ?? "open";
-
-  const setStatus = (status: CaseStatus) => {
-    setOpen(false);
-    if (status === current) return;
-    let note: string | null = null;
-    if (status === "excused" || status === "warned") {
-      note = window.prompt(status === "excused" ? "سبب اعتبارها مبرَّرة (اختياري):" : "ملاحظة الإنذار/الإجراء (اختياري):", "");
-    }
-    startSave(async () => {
-      const res = await setCaseStatusAction({ employeeId, status, note: note ?? undefined });
-      if (res.ok) {
-        toast.success("تم تحديث حالة القضية");
-        router.refresh();
-      } else {
-        toast.error(res.error ?? "تعذّر التحديث");
-      }
-    });
-  };
-
+  const pad = size === "sm" ? "px-2 py-1 text-[10px]" : "px-2.5 py-1.5 text-[11px]";
   return (
     <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={saving}
-        className={cn("inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-60", STATUS_TONE[current])}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-lg border font-semibold transition-colors disabled:opacity-60",
+          pad,
+          STATUS_TONE[current],
+        )}
       >
-        {saving ? <RefreshCw className="size-3 animate-spin" /> : null}
+        {saving ? <RefreshCw className={size === "sm" ? "size-2.5 animate-spin" : "size-3 animate-spin"} /> : null}
         {CASE_STATUS_LABEL[current]}
-        <ChevronDown className="size-3" />
+        <ChevronDown className={size === "sm" ? "size-2.5" : "size-3"} />
       </button>
       {open && (
         <>
@@ -428,7 +485,10 @@ export function StatusControl({ employeeId, meta }: { employeeId: string; meta: 
               <button
                 key={s}
                 type="button"
-                onClick={() => setStatus(s)}
+                onClick={() => {
+                  setOpen(false);
+                  onPick(s);
+                }}
                 className={cn(
                   "flex w-full items-center justify-between px-3 py-1.5 text-start text-[11px] transition-colors hover:bg-soft-1",
                   s === current && "bg-soft-1 font-semibold",
@@ -443,6 +503,67 @@ export function StatusControl({ employeeId, meta }: { employeeId: string; meta: 
       )}
     </div>
   );
+}
+
+// Ask for an optional justification/warning note before those two decisions.
+function promptNote(status: CaseStatus): string | null {
+  if (status === "excused")
+    return window.prompt("سبب اعتبارها مبرَّرة (اختياري):", "");
+  if (status === "warned")
+    return window.prompt("ملاحظة الإنذار/الإجراء (اختياري):", "");
+  return null;
+}
+
+// Employee-grain decision (kept for any per-person surface; the current case UI
+// decides per-problem via ProblemStatusControl below).
+export function StatusControl({ employeeId, meta }: { employeeId: string; meta: PersistedCaseMeta | null }) {
+  const router = useRouter();
+  const [saving, startSave] = useTransition();
+  const current: CaseStatus = meta?.status ?? "open";
+  const setStatus = (status: CaseStatus) => {
+    if (status === current) return;
+    const note = promptNote(status);
+    startSave(async () => {
+      const res = await setCaseStatusAction({ employeeId, status, note: note ?? undefined });
+      if (res.ok) {
+        toast.success("تم تحديث حالة القضية");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "تعذّر التحديث");
+      }
+    });
+  };
+  return <StatusPicker current={current} saving={saving} onPick={setStatus} />;
+}
+
+// Per-problem decision (migration 0262). Keyed by the stable problemKey so the
+// decision + its reopen history follow the individual problem, not the person.
+export function ProblemStatusControl({
+  problemKey,
+  employeeId,
+  meta,
+}: {
+  problemKey: string;
+  employeeId: string;
+  meta: PersistedProblemMeta | null;
+}) {
+  const router = useRouter();
+  const [saving, startSave] = useTransition();
+  const current: CaseStatus = meta?.status ?? "open";
+  const setStatus = (status: CaseStatus) => {
+    if (status === current) return;
+    const note = promptNote(status);
+    startSave(async () => {
+      const res = await setProblemStatusAction({ problemKey, employeeId, status, note: note ?? undefined });
+      if (res.ok) {
+        toast.success("تم تحديث حالة المشكلة");
+        router.refresh();
+      } else {
+        toast.error(res.error ?? "تعذّر التحديث");
+      }
+    });
+  };
+  return <StatusPicker current={current} saving={saving} onPick={setStatus} size="sm" />;
 }
 
 // ---- Advice panel (streamed, opt-in) ---------------------------------------
@@ -686,9 +807,21 @@ function Heatmap({ daily }: { daily: { date: string; count: number }[] }) {
   );
 }
 
-function ProofLine({ p }: { p: CaseProof }) {
+function ProofLine({
+  p,
+  meta,
+  employeeId,
+}: {
+  p: CaseProof;
+  meta?: PersistedProblemMeta | null;
+  employeeId?: string | null;
+}) {
   const taskRefs = p.taskRefs ?? [];
   const hasTaskRefs = taskRefs.length > 0;
+  // A decision can only be made when the problem has a stable key AND we know
+  // whose file it is (both always true for emitted proofs).
+  const canDecide = Boolean(p.problemKey && employeeId);
+  const reopened = meta?.reopenCount ?? 0;
   const body = (
     <>
       <span className="flex min-w-0 items-start gap-2">
@@ -759,13 +892,39 @@ function ProofLine({ p }: { p: CaseProof }) {
   );
   const cls = "block rounded-lg border border-border bg-card px-2.5 py-2 transition-colors";
   return (
-    <li>
+    <li className="space-y-1">
       {p.href && !hasTaskRefs ? (
         <Link href={p.href} className={cn(cls, "hover:border-cyan/30 hover:bg-soft-1")}>
           {body}
         </Link>
       ) : (
         <div className={cls}>{body}</div>
+      )}
+      {/* Per-problem decision + reopen — OUTSIDE the anchor above (a dropdown
+          inside a link is invalid and would navigate on click). This is where
+          «عادت بعد إغلاقها» now lives: on the exact problem that came back. */}
+      {canDecide && (
+        <div className="flex flex-wrap items-center justify-end gap-1.5 px-0.5">
+          {reopened > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
+              title={`هذه المشكلة أُغلقت ثم عادت للرصد${meta?.firstSeenAt ? ` · أول رصد ${meta.firstSeenAt.slice(0, 10)}` : ""}`}
+            >
+              <Repeat className="size-3" />
+              عادت بعد إغلاقها{reopened > 1 ? ` ${reopened}×` : ""}
+            </span>
+          )}
+          {meta?.decisionNote && (
+            <span
+              className="max-w-[16rem] truncate rounded-md border border-border bg-soft-1/60 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              title={meta.decisionNote}
+            >
+              {meta.decidedByName ? `${meta.decidedByName}: ` : ""}
+              {meta.decisionNote}
+            </span>
+          )}
+          <ProblemStatusControl problemKey={p.problemKey!} employeeId={employeeId!} meta={meta ?? null} />
+        </div>
       )}
     </li>
   );

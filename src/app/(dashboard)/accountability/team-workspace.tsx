@@ -17,16 +17,14 @@ import { cn } from "@/lib/utils";
 import {
   SEVERITY_META,
   STREAM_META,
-  StatusControl,
   LedgerStrip,
   AdvicePanel,
   CaseEvidence,
+  ProblemStatusRollup,
+  rollupProblems,
+  type ProblemRollup,
 } from "./cases-workspace";
-import {
-  CASE_STATUS_LABEL,
-  type CaseStatus,
-  type PersistedCaseMeta,
-} from "@/lib/accountability/case-status";
+import type { PersistedProblemMeta } from "@/lib/data/accountability-problems-store";
 import { getAccountabilityEvidenceAction, getEmployeeMetricDrillAction } from "./_actions";
 import { DrillNumber, TaskDrillSheet, type DrillView } from "./task-drill-modal";
 import { EmployeeEvidence } from "./employee-evidence";
@@ -55,30 +53,13 @@ import type {
 const PAGE_SIZE = 12;
 type TeamSortKey = "onTime" | "overdue" | "trend" | "name";
 
-const STATUS_TONE: Record<CaseStatus, string> = {
-  open: "border-border bg-soft-1 text-muted-foreground",
-  under_review: "border-cyan/25 bg-cyan/10 text-cyan",
-  excused: "border-cc-green/25 bg-green-dim text-cc-green",
-  warned: "border-amber/30 bg-amber-dim text-amber",
-  resolved: "border-border bg-soft-1 text-muted-foreground/60",
-};
-
-// Per-value hover explanations. الحالة = strength of the evidence (severity),
-// الوضع = where the case stands in the review workflow (status).
+// Per-value hover explanations. الحالة = strength of the evidence (severity).
 const SEVERITY_HINT: Record<CaseSeverity, string> = {
   critical: "حرجة — المصدران مترابطان: نفس المهمة/القضية تظهر في التنفيذ وشكوى العميل معًا. أخطر مستوى.",
   proven: "مثبتة — مصدران متفقان (مثلاً تأخير في التنفيذ + شكوى عميل يشيران للمشكلة نفسها).",
   signal: "إشارة — مصدر واحد فقط يرصد المشكلة (غير مؤكَّدة بعد). أضعف مستوى.",
 };
 const SEVERITY_CLEAN_HINT = "سليم — لا توجد قضية مفتوحة على هذا الموظف.";
-
-const STATUS_HINT: Record<CaseStatus, string> = {
-  open: "جديدة — القضية مفتوحة ولم يُتّخذ إجراء بعد.",
-  under_review: "قيد المراجعة — الإجراء جارٍ على القضية.",
-  excused: "مبرَّرة — روجعت وتبيّن أن هناك عذرًا مقبولًا.",
-  warned: "أُنذِر — صدر إنذار للموظف بشأن القضية.",
-  resolved: "انتهت — عولجت القضية وأُغلقت.",
-};
 
 // The tasks behind a team-table number (مفتوحة / متأخرة live, إجمالي المراحل /
 // مراحل متأخرة period) — reuses the same drill-down sheet as the reviewer/edits
@@ -103,14 +84,14 @@ function metricDrillView(
 export function TeamWorkspace({
   roster,
   cases,
-  caseMeta,
+  problemMeta,
   reviewers,
   clientEdits,
   reviewerRange,
 }: {
   roster: AccountabilityRoster;
   cases: AccountabilityCase[];
-  caseMeta: Record<string, PersistedCaseMeta>;
+  problemMeta: Record<string, PersistedProblemMeta>;
   reviewers: AccountabilityOverview["reviewers"];
   clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
@@ -350,8 +331,7 @@ export function TeamWorkspace({
                   <EmployeeRow
                     key={e.id}
                     e={e}
-                    status={caseMeta[e.id]?.status ?? null}
-                    problemCount={caseByEmp.get(e.id)?.proof.length ?? 0}
+                    rollup={rollupProblems(caseByEmp.get(e.id)?.proof ?? [], problemMeta)}
                     onOpen={() => setOpenId(e.id)}
                     onDrill={(metric) => openMetricDrill(e, metric)}
                   />
@@ -404,7 +384,7 @@ export function TeamWorkspace({
           key={openEmp.id}
           e={openEmp}
           kase={caseByEmp.get(openEmp.id) ?? null}
-          meta={caseMeta[openEmp.id] ?? null}
+          problemMeta={problemMeta}
           range={reviewerRange}
           peerMedianActionsPeriod={peerMedianActionsPeriod}
           onClose={() => setOpenId(null)}
@@ -514,14 +494,12 @@ function SeverityPill({ severity }: { severity: CaseSeverity | null }) {
 
 function EmployeeRow({
   e,
-  status,
-  problemCount,
+  rollup,
   onOpen,
   onDrill,
 }: {
   e: RosterEmployee;
-  status: CaseStatus | null;
-  problemCount: number;
+  rollup: ProblemRollup;
   onOpen: () => void;
   onDrill: (metric: EmployeeMetric) => void;
 }) {
@@ -569,27 +547,17 @@ function EmployeeRow({
         <SeverityPill severity={e.severity} />
       </td>
       <td className="px-3 py-2.5 text-center">
-        {status && e.hasCase ? (
+        {e.hasCase && rollup.total > 0 ? (
           <button
             type="button"
             onClick={(ev) => {
               ev.stopPropagation();
               onOpen();
             }}
-            className="inline-flex items-center gap-1"
-            title="عرض المشاكل واحدة واحدة"
+            className="inline-flex items-center justify-center gap-1"
+            title="افتح الملف لاتّخاذ قرار على كل مشكلة على حدة"
           >
-            <span
-              title={STATUS_HINT[status]}
-              className={cn("rounded-md border px-1.5 py-0.5 text-[10px] font-semibold", STATUS_TONE[status])}
-            >
-              {CASE_STATUS_LABEL[status]}
-            </span>
-            {problemCount > 0 && (
-              <span className="rounded-md bg-cc-red/15 px-1.5 py-0.5 text-[10px] font-bold text-cc-red">
-                {problemCount} {problemCount === 1 ? "مشكلة" : problemCount === 2 ? "مشكلتان" : "مشاكل"}
-              </span>
-            )}
+            <ProblemStatusRollup rollup={rollup} />
           </button>
         ) : (
           <span className="text-[11px] text-muted-foreground/50">—</span>
@@ -603,19 +571,20 @@ function EmployeeRow({
 function EmployeeModal({
   e,
   kase,
-  meta,
+  problemMeta,
   range,
   peerMedianActionsPeriod,
   onClose,
 }: {
   e: RosterEmployee;
   kase: AccountabilityCase | null;
-  meta: PersistedCaseMeta | null;
+  problemMeta: Record<string, PersistedProblemMeta>;
   range: DashboardRange;
   peerMedianActionsPeriod: number;
   onClose: () => void;
 }) {
   const [showAdvice, setShowAdvice] = useState(false);
+  const rollup = kase ? rollupProblems(kase.proof, problemMeta) : null;
   // Period stage الأدلة (range window, archived-inclusive).
   const [evidence, setEvidence] = useState<AccountabilityEvidence | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(true);
@@ -694,23 +663,16 @@ function EmployeeModal({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold">{e.name}</h2>
               <SeverityPill severity={e.severity} />
-              {/* times_seen is a daily-poll counter, not a recurrence count —
-                  see PersistedCaseMeta. Only a genuine reopen earns a badge. */}
-              {meta && meta.reopenCount > 0 && (
-                <span
-                  className="rounded-md border border-cc-red/30 bg-red-dim px-1.5 py-0.5 text-[10px] font-semibold text-cc-red"
-                  title={`أُغلقت ثم عادت للرصد · أول رصد ${meta.firstSeenAt.slice(0, 10)}`}
-                >
-                  عادت بعد إغلاقها{meta.reopenCount > 1 ? ` ${meta.reopenCount}×` : ""}
-                </span>
-              )}
+              {/* Status + «عادت بعد إغلاقها» are per-problem now — this is the
+                  roll-up; each problem carries its own decision + reopen badge in
+                  the الدليل list below. */}
+              {rollup && <ProblemStatusRollup rollup={rollup} />}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {e.role ?? "—"} · {e.department}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {kase && <StatusControl employeeId={e.id} meta={meta} />}
             <button
               type="button"
               onClick={onClose}
@@ -815,13 +777,6 @@ function EmployeeModal({
                 </button>
                 {showAdvice && <AdvicePanel employeeId={e.id} />}
               </div>
-
-              {/* Manager decision note */}
-              {meta?.decisionNote && (
-                <p className="rounded-md border border-border bg-soft-1/60 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-                  قرار المدير{meta.decidedByName ? ` (${meta.decidedByName})` : ""}: {meta.decisionNote}
-                </p>
-              )}
             </>
           )}
 
@@ -864,7 +819,7 @@ function EmployeeModal({
                 BOTH tabs so «الفترة المحددة» is the problems PLUS the windowed
                 stage evidence, not a bare list. */}
             {kase ? (
-              <CaseEvidence c={kase} cap={99} />
+              <CaseEvidence c={kase} cap={99} problemMeta={problemMeta} />
             ) : (
               <div className="rounded-xl border border-cc-green/20 bg-green-dim/40 p-4 text-center">
                 <ShieldCheck className="mx-auto size-6 text-cc-green" />

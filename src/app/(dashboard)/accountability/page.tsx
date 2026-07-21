@@ -10,9 +10,10 @@ import { resolveRange } from "@/lib/dashboard-range";
 import { getAccountabilityCases } from "@/lib/data/accountability-cases";
 import { getAccountabilityRoster } from "@/lib/data/accountability-roster";
 import {
-  getCaseHistorySummary,
-  syncAndGetCaseMeta,
-} from "@/lib/data/accountability-cases-store";
+  getProblemHistorySummary,
+  getReopenByEmployee,
+  syncAndGetProblemMeta,
+} from "@/lib/data/accountability-problems-store";
 import { buildCaseBrief } from "@/lib/data/accountability-case-brief";
 import { getClientFinanceMap } from "@/lib/data/client-finance";
 import { PageHeader } from "@/components/page-header";
@@ -53,11 +54,12 @@ export default async function AccountabilityPage({
   // to what that lens needs. Scorecard-only data (full overview serialization,
   // finance badges, selected employee evidence) is loaded only for direct
   // scorecard links: ?view=scorecard or ?emp=...
-  const [cases, roster, caseMeta, history, reviewers, clientEdits, scorecardData] = await Promise.all([
+  const [cases, roster, problemMeta, history, reopenByEmployee, reviewers, clientEdits, scorecardData] = await Promise.all([
     getAccountabilityCases(session.orgId),
     getAccountabilityRoster(session.orgId, reviewerRange.from, reviewerRange.to),
-    syncAndGetCaseMeta(session.orgId),
-    getCaseHistorySummary(session.orgId).catch(() => null),
+    syncAndGetProblemMeta(session.orgId),
+    getProblemHistorySummary(session.orgId).catch(() => null),
+    getReopenByEmployee(session.orgId).catch(() => ({})),
     getAccountabilityReviewers(session.orgId, reviewerRange.from, reviewerRange.to),
     getClientEditsRigor(session.orgId, reviewerRange.from, reviewerRange.to).catch((e) => {
       console.error("[accountability] client edits failed:", e);
@@ -75,7 +77,7 @@ export default async function AccountabilityPage({
   ]);
 
   // The CEO band over the case feed: a pure fold over data already loaded.
-  const brief = buildCaseBrief(cases, history, caseMeta);
+  const brief = buildCaseBrief(cases, history, reopenByEmployee);
 
   return (
     <div>
@@ -83,7 +85,7 @@ export default async function AccountabilityPage({
       <AccountabilityShell
         roster={roster}
         cases={cases}
-        caseMeta={caseMeta}
+        problemMeta={problemMeta}
         brief={brief}
         overview={scorecardData?.overview ?? null}
         evidence={scorecardData?.evidence ?? null}

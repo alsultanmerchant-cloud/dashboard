@@ -3,8 +3,7 @@ import type {
   AccountabilityCase,
   AccountabilityCasesResult,
 } from "@/lib/data/accountability-cases";
-import type { CaseHistorySummary } from "@/lib/data/accountability-cases-store";
-import type { PersistedCaseMeta } from "@/lib/accountability/case-status";
+import type { ProblemHistorySummary } from "@/lib/data/accountability-problems-store";
 
 // =========================================================================
 // Case Brief — the CEO layer over the القضايا feed.
@@ -80,7 +79,7 @@ export interface CaseBrief {
   exposure: CaseExposure;
   asks: CaseAsk[];
   patterns: CasePattern[];
-  history: CaseHistorySummary | null;
+  history: ProblemHistorySummary | null;
 }
 
 const STAGE_AR: Record<string, string> = {
@@ -213,16 +212,19 @@ function deriveAsk(c: AccountabilityCase): {
   };
 }
 
-function fmtRecurrence(meta: PersistedCaseMeta | undefined): string | null {
-  const n = meta?.reopenCount ?? 0;
-  if (n < 1) return null;
-  return n === 1 ? "عادت بعد إغلاقها" : `عادت بعد إغلاقها ${n}×`;
+// Person-level roll-up for the ask row: how many of this person's problems have
+// come back after being closed (from the per-problem store). 0 ⇒ no badge.
+function fmtRecurrence(reopenedProblems: number): string | null {
+  if (reopenedProblems < 1) return null;
+  return reopenedProblems === 1
+    ? "مشكلة عادت بعد إغلاقها"
+    : `${reopenedProblems} مشاكل عادت بعد إغلاقها`;
 }
 
 export function buildCaseBrief(
   result: AccountabilityCasesResult,
-  history: CaseHistorySummary | null,
-  caseMeta: Record<string, PersistedCaseMeta> = {},
+  history: ProblemHistorySummary | null,
+  reopenByEmployee: Record<string, number> = {},
 ): CaseBrief {
   const cases = result.cases;
 
@@ -265,7 +267,7 @@ export function buildCaseBrief(
       contractValue: c.impact.contractValue,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
-      recurrenceNote: c.employeeId ? fmtRecurrence(caseMeta[c.employeeId]) : null,
+      recurrenceNote: c.employeeId ? fmtRecurrence(reopenByEmployee[c.employeeId] ?? 0) : null,
     };
   });
 

@@ -91,6 +91,12 @@ export interface CaseProof {
   // changed stage has windowDays 0 — the two facts are independent and callers
   // must not read staleness off the deadline or vice-versa.
   overdue?: boolean;
+  // Stable per-problem identity, assigned once in the assembly step below. The
+  // per-problem status + reopen store keys off this, so it MUST be deterministic
+  // across re-detections: the same underlying problem yields the same key each
+  // load. Always set on emitted proofs (optional only so the push sites don't
+  // have to repeat it). See problemKeyFor().
+  problemKey?: string;
 }
 
 export interface CaseLedger {
@@ -330,6 +336,40 @@ function daysBetween(fromIso: string | null, nowMs: number): number | null {
   const t = new Date(fromIso).getTime();
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.round((nowMs - t) / 86_400_000));
+}
+
+// Small deterministic string hash (djb2) — only used to give a stable id to a
+// problem that has no natural key (a client complaint with no cited task code).
+function djb2(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+function taskIdFromHref(href: string | null): string | null {
+  const m = href?.match(/\/tasks\/([0-9a-f-]{36})/i);
+  return m ? m[1] : null;
+}
+
+// The identity of a problem WITHIN one person's file. Combined with the employee
+// id (below) it forms the global problem key. Deterministic by design:
+//   • a task problem IS the task (code, else its id, else a text hash);
+//   • a complaint IS the client + the cited task (else a hash of the finding, so
+//     two different complaints on one client stay distinct);
+//   • churn IS the client;
+//   • the operational signals (silence / low activity / rework / review rigor)
+//     are one-open-problem-per-person, so they carry no discriminator.
+function problemDiscriminator(p: CaseProof): string {
+  switch (p.kind) {
+    case "overdue_task":
+      return p.taskCode ?? taskIdFromHref(p.href) ?? djb2(p.text);
+    case "complaint":
+      return `${p.clientId ?? "?"}:${p.taskCode ?? djb2(norm(p.text))}`;
+    case "churn":
+      return p.clientId ?? "?";
+    default:
+      return "";
+  }
 }
 
 async function _getAccountabilityCases(
@@ -806,6 +846,19 @@ async function _getAccountabilityCases(
       if (x.crossLinked !== y.crossLinked) return x.crossLinked ? -1 : 1;
       return STREAM_ORDER[x.stream] - STREAM_ORDER[y.stream];
     });
+
+    // Stamp each proof with its stable per-problem key. Scoped by employee so the
+    // same client complaint naming two people yields two independent problems; a
+    // `#n` suffix disambiguates the rare within-person collision so two distinct
+    // problems never collapse onto one status row.
+    const seenKeys = new Set<string>();
+    for (const p of proof) {
+      const base = `${b.employeeId ?? "?"}::${p.kind}::${problemDiscriminator(p)}`;
+      let key = base;
+      for (let n = 2; seenKeys.has(key); n++) key = `${base}#${n}`;
+      seenKeys.add(key);
+      p.problemKey = key;
+    }
 
     const l = b.employeeId ? ledgerByEmp.get(b.employeeId) : undefined;
     const sc = b.employeeId ? scoreByEmp.get(b.employeeId) : undefined;

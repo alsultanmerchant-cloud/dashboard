@@ -112,13 +112,13 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
                   ما تغيّر هذا الأسبوع
                 </p>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Stat value={history.newCases} label="قضية جديدة" tone="text-amber" />
+                  <Stat value={history.newProblems} label="مشكلة جديدة" tone="text-amber" />
                   <Stat value={history.reopened} label="عادت بعد إغلاقها" tone="text-cc-red" icon={Repeat} />
                   <Stat value={history.resolvedInWindow} label="انتهت" tone="text-cc-green" />
                   <Stat value={history.longRunning} label="مزمنة (٥ رصدات+)" tone="text-foreground" />
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/70">
-                  {history.decided} من {history.openCases + history.decided} قضية حالية اتُّخذ فيها قرار.
+                  {history.decided} من {history.openProblems + history.decided} مشكلة حالية اتُّخذ فيها قرار.
                 </p>
                 {/* first_seen_at is floored by the store's own start date, so the
                     day-zero cohort is excluded from "new" rather than inflating it. */}
@@ -128,7 +128,7 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
                     <span dir="ltr" className="tabular-nums">
                       {history.trackingSince}
                     </span>
-                    ، لذا «الجديدة» تحسب فقط ما ظهر بعد ذلك اليوم — القضايا الأقدم عمرها الحقيقي غير معروف.
+                    ، لذا «الجديدة» تحسب فقط ما ظهر بعد ذلك اليوم — المشاكل الأقدم عمرها الحقيقي غير معروف.
                   </p>
                 )}
               </CardContent>

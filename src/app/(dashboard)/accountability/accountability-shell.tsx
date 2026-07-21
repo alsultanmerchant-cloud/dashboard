@@ -10,7 +10,7 @@ import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type { AccountabilityCasesResult } from "@/lib/data/accountability-cases";
 import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type { AccountabilityRoster } from "@/lib/data/accountability-roster";
-import type { PersistedCaseMeta } from "@/lib/accountability/case-status";
+import type { PersistedProblemMeta } from "@/lib/data/accountability-problems-store";
 import type {
   AccountabilityEvidence,
   AccountabilityOverview,
@@ -32,7 +32,7 @@ type View = "team" | "cases" | "scorecard";
 interface Props {
   roster: AccountabilityRoster;
   cases: AccountabilityCasesResult;
-  caseMeta: Record<string, PersistedCaseMeta>;
+  problemMeta: Record<string, PersistedProblemMeta>;
   brief: CaseBrief;
   overview: AccountabilityOverview | null;
   evidence: AccountabilityEvidence | null;
@@ -53,7 +53,7 @@ interface Props {
 export function AccountabilityShell({
   roster,
   cases,
-  caseMeta,
+  problemMeta,
   brief,
   overview,
   evidence,
@@ -125,13 +125,13 @@ export function AccountabilityShell({
         <TeamWorkspace
           roster={roster}
           cases={cases.cases}
-          caseMeta={caseMeta}
+          problemMeta={problemMeta}
           reviewers={reviewers}
           clientEdits={clientEdits}
           reviewerRange={reviewerRange}
         />
       )}
-      {view === "cases" && <CasesWorkspace data={cases} caseMeta={caseMeta} brief={brief} />}
+      {view === "cases" && <CasesWorkspace data={cases} problemMeta={problemMeta} brief={brief} />}
       {view === "scorecard" && overview && financeMap && (
         <AccountabilityWorkspace
           key={selectedId ?? "none"}

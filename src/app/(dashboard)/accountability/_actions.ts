@@ -17,6 +17,7 @@ import {
   CASE_STATUSES,
   type CaseStatus,
 } from "@/lib/data/accountability-cases-store";
+import { setProblemStatus } from "@/lib/data/accountability-problems-store";
 
 // On-demand refresh of the accountability_scorecard cache (otherwise pg_cron
 // every 10 min). Lets a manager pull the latest numbers immediately after work
@@ -161,6 +162,43 @@ export async function setCaseStatusAction(input: {
   try {
     await setCaseStatus(
       session.orgId,
+      input.employeeId,
+      input.status as CaseStatus,
+      note,
+      session.employeeId,
+    );
+    revalidatePath("/accountability");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+// A manager's decision on a single PROBLEM (per-problem grain, migration 0262).
+// problemKey is the stable identity assigned in accountability-cases.ts; the
+// employeeId lets the store materialize the row if a decision precedes the daily
+// sync. Same permission gate as the page.
+export async function setProblemStatusAction(input: {
+  problemKey: string;
+  employeeId: string;
+  status: string;
+  note?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const session = await getServerSession();
+  if (!session || !hasPermission(session, "people.analytics.view")) {
+    return { ok: false, error: "Unauthorized" };
+  }
+  const problemKey = (input.problemKey ?? "").trim();
+  if (!problemKey || problemKey.length > 300) return { ok: false, error: "Bad problem key" };
+  if (!UUID.test(input.employeeId)) return { ok: false, error: "Bad employee id" };
+  if (!CASE_STATUSES.includes(input.status as CaseStatus)) {
+    return { ok: false, error: "Bad status" };
+  }
+  const note = (input.note ?? "").trim().slice(0, 500) || null;
+  try {
+    await setProblemStatus(
+      session.orgId,
+      problemKey,
       input.employeeId,
       input.status as CaseStatus,
       note,

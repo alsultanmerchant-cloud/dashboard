@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { materializeAccountabilityCases } from "@/lib/data/accountability-cases-store";
+import { materializeAccountabilityProblems } from "@/lib/data/accountability-problems-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -36,8 +37,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const meta = await materializeAccountabilityCases(orgId);
-    return NextResponse.json({ ok: true, cases: Object.keys(meta).length });
+    // Employee-grain (0240) + per-problem (0262) freezes run together off the
+    // same cached live feed, so status + reopen stay accurate on days nobody
+    // opens the page.
+    const [meta, problemMeta] = await Promise.all([
+      materializeAccountabilityCases(orgId),
+      materializeAccountabilityProblems(orgId),
+    ]);
+    return NextResponse.json({
+      ok: true,
+      cases: Object.keys(meta).length,
+      problems: Object.keys(problemMeta).length,
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "failed" },
