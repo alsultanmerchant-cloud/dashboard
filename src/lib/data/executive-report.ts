@@ -51,12 +51,30 @@ export interface ReportTrend {
   direction: "increase" | "decrease" | "no_change";
 }
 
+/**
+ * How a period figure was measured. The dashboard's Executive-Indicator cards
+ * deliberately pair a LIVE main value with a PERIOD trend (client spec), which
+ * works on screen with tooltips but reads as an error on paper: the overdue
+ * tile said 108 while its own chip compared 888 vs 750, and the narrative
+ * quoted 888. A report states both, each labelled by how it was measured.
+ */
+export type PeriodBasis = "during_period" | "as_of_period_end";
+
+export interface ReportIndicator {
+  /** Point-in-time count as of today (the dashboard's "main value"). */
+  liveValue: number | null;
+  /** The period-scoped figure the trend actually compares — the headline here. */
+  periodValue: number | null;
+  periodBasis: PeriodBasis;
+  trend: ReportTrend | null;
+}
+
 export interface ReportIndicatorFacts {
-  projectsAtRisk: { value: number | null; trend: ReportTrend | null };
-  highRisk: { value: number | null; threshold: number; trend: ReportTrend | null };
-  overdue: { value: number | null; trend: ReportTrend | null };
+  projectsAtRisk: ReportIndicator;
+  highRisk: ReportIndicator & { threshold: number };
+  overdue: ReportIndicator;
   onTime: { pct: number | null; completedCount: number; trend: ReportTrend | null };
-  clientChanges: { value: number | null; trend: ReportTrend | null };
+  clientChanges: ReportIndicator;
 }
 
 export interface ReportScoresFacts {
@@ -81,6 +99,8 @@ export interface ReportFinanceFacts {
 }
 
 export interface ReportServiceRow {
+  /** Optional: absent on runs frozen before drill-downs shipped. */
+  serviceId?: string | null;
   name: string;
   openCount: number;
   delivered: number;
@@ -117,6 +137,7 @@ export interface ReportTeamFacts {
     overloadedCount: number;
   };
   departments: Array<{
+    departmentId?: string | null;
     name: string;
     headName: string | null;
     headcount: number;
@@ -126,9 +147,9 @@ export interface ReportTeamFacts {
     completedThisWeek: number;
     status: string;
   }>;
-  topPerformers: Array<{ name: string; role: string; score: number; onTimeRate: number | null; sampleSize: number }>;
-  lowPerformers: Array<{ name: string; role: string; score: number; onTimeRate: number | null; overdueOwned: number; sampleSize: number }>;
-  designerOutput: Array<{ name: string; designs: number; revisions: number; tasks: number }>;
+  topPerformers: Array<{ employeeId?: string | null; name: string; role: string; score: number; onTimeRate: number | null; sampleSize: number }>;
+  lowPerformers: Array<{ employeeId?: string | null; name: string; role: string; score: number; onTimeRate: number | null; overdueOwned: number; sampleSize: number }>;
+  designerOutput: Array<{ employeeId?: string | null; name: string; designs: number; revisions: number; tasks: number }>;
 }
 
 export interface ReportClientsFacts {
@@ -138,14 +159,14 @@ export interface ReportClientsFacts {
     analyzedClients: number;
     atRiskClients: number;
   };
-  atRiskList: Array<{ name: string; satisfactionScore: number | null; sentiment: string | null }>;
-  worstClients: Array<{ name: string; onTimePct: number | null; overdue: number; open: number; delivered: number }>;
-  bestClients: Array<{ name: string; onTimePct: number | null; overdue: number; open: number; delivered: number }>;
+  atRiskList: Array<{ clientId?: string | null; name: string; satisfactionScore: number | null; sentiment: string | null }>;
+  worstClients: Array<{ clientId?: string | null; name: string; onTimePct: number | null; overdue: number; open: number; delivered: number }>;
+  bestClients: Array<{ clientId?: string | null; name: string; onTimePct: number | null; overdue: number; open: number; delivered: number }>;
 }
 
 export interface ReportRenewalsFacts {
   next90Count: number;
-  next90: Array<{ project: string; client: string; date: string; daysUntil: number }>;
+  next90: Array<{ projectId?: string | null; project: string; client: string; date: string; daysUntil: number }>;
   deadlinesNext7Total: number;
   deadlinesNext7: Array<{ date: string; count: number }>;
 }
@@ -175,19 +196,39 @@ async function safe<T>(label: string, p: Promise<T>): Promise<T | null> {
   }
 }
 
-function pickTrend(t: {
+type KpiTrendLike = {
   current: number;
   previous: number;
   difference: number;
   direction: "increase" | "decrease" | "no_change";
   available: boolean;
-}): ReportTrend | null {
+};
+
+function pickTrend(t: KpiTrendLike): ReportTrend | null {
   if (!t.available) return null;
   return {
     current: t.current,
     previous: t.previous,
     difference: t.difference,
     direction: t.direction,
+  };
+}
+
+/**
+ * Split a dashboard KPI into its two honest halves: the live snapshot and the
+ * period figure its trend actually compares. Keeps the report from printing
+ * one number under a chip that measures a different one.
+ */
+function indicatorFrom(
+  kpi: { mainValue: number | null; trend: KpiTrendLike },
+  periodBasis: PeriodBasis,
+): ReportIndicator {
+  const trend = pickTrend(kpi.trend);
+  return {
+    liveValue: kpi.mainValue,
+    periodValue: trend ? trend.current : null,
+    periodBasis,
+    trend,
   };
 }
 
@@ -312,6 +353,7 @@ export async function buildExecutiveReportFacts(
   ]);
 
   const toServiceRow = (s: {
+    serviceId: string;
     name: string;
     openCount: number;
     delivered30d: number;
@@ -321,6 +363,7 @@ export async function buildExecutiveReportFacts(
     clientChanges: number;
     clientChangesPrev: number;
   }): ReportServiceRow => ({
+    serviceId: s.serviceId,
     name: s.name,
     openCount: s.openCount,
     delivered: s.delivered30d,
@@ -347,12 +390,14 @@ export async function buildExecutiveReportFacts(
     .sort((a, b) => (a.satisfactionScore ?? 0) - (b.satisfactionScore ?? 0));
 
   const toClientRow = (c: {
+    clientId: string;
     clientName: string;
     onTimePct30d: number | null;
     overdueTaskCount: number;
     openTaskCount: number;
     deliveredCount30d: number;
   }) => ({
+    clientId: c.clientId,
     name: c.clientName,
     onTimePct: c.onTimePct30d,
     overdue: c.overdueTaskCount,
@@ -368,28 +413,22 @@ export async function buildExecutiveReportFacts(
 
     indicators: indicators
       ? {
-          projectsAtRisk: {
-            value: indicators.projectsAtRisk.mainValue,
-            trend: pickTrend(indicators.projectsAtRisk.trend),
-          },
+          // At-risk trends compare boundary snapshots (as of each period's end),
+          // while overdue / client-changes trends count activity DURING the
+          // period — hence the differing bases.
+          projectsAtRisk: indicatorFrom(indicators.projectsAtRisk, "as_of_period_end"),
           highRisk: {
-            value: indicators.highRisk.mainValue,
+            ...indicatorFrom(indicators.highRisk, "as_of_period_end"),
             threshold: indicators.highRisk.threshold,
-            trend: pickTrend(indicators.highRisk.trend),
           },
-          overdue: {
-            value: indicators.overdue.mainValue,
-            trend: pickTrend(indicators.overdue.trend),
-          },
+          overdue: indicatorFrom(indicators.overdue, "during_period"),
           onTime: {
+            // Already period-scoped on both sides — no live/period split needed.
             pct: indicators.onTime.onTimePct,
             completedCount: indicators.onTime.completedCount,
             trend: pickTrend(indicators.onTime.trend),
           },
-          clientChanges: {
-            value: indicators.clientChanges.mainValue,
-            trend: pickTrend(indicators.clientChanges.trend),
-          },
+          clientChanges: indicatorFrom(indicators.clientChanges, "during_period"),
         }
       : null,
 
@@ -476,6 +515,7 @@ export async function buildExecutiveReportFacts(
             overloadedCount: pulse.totals.overloadedCount,
           },
           departments: pulse.rows.map((row) => ({
+            departmentId: row.departmentId,
             name: row.departmentName,
             headName: row.headName,
             headcount: row.headcount,
@@ -486,6 +526,7 @@ export async function buildExecutiveReportFacts(
             status: row.status,
           })),
           topPerformers: rankedRows.slice(0, 5).map((row) => ({
+            employeeId: row.employeeId,
             name: row.fullName,
             role: row.positionLabel ?? row.role,
             score: row.score as number,
@@ -497,6 +538,7 @@ export async function buildExecutiveReportFacts(
             .reverse()
             .filter((row) => (row.score as number) < 70)
             .map((row) => ({
+              employeeId: row.employeeId,
               name: row.fullName,
               role: row.positionLabel ?? row.role,
               score: row.score as number,
@@ -505,6 +547,7 @@ export async function buildExecutiveReportFacts(
               sampleSize: row.sampleSize,
             })),
           designerOutput: (designerOutput ?? []).slice(0, 8).map((row) => ({
+            employeeId: row.employee_id,
             name: row.full_name,
             designs: row.design_total,
             revisions: row.revision_total,
@@ -523,6 +566,7 @@ export async function buildExecutiveReportFacts(
               atRiskClients: 0,
             },
             atRiskList: liveAtRisk.slice(0, 8).map((row) => ({
+              clientId: row.clientId,
               name: row.clientName,
               satisfactionScore: row.satisfactionScore,
               sentiment: row.sentiment,
@@ -537,6 +581,7 @@ export async function buildExecutiveReportFacts(
         ? {
             next90Count: renewals?.length ?? 0,
             next90: (renewals ?? []).slice(0, 12).map((row) => ({
+              projectId: row.project_id,
               project: row.project_name,
               client: row.client_name,
               date: row.next_renewal_date,

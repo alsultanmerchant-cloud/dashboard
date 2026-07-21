@@ -444,20 +444,28 @@ async function loadPeriodTrends(
   const previousBounds = riyadhDateRangeUtcBounds(previousFrom, previousTo);
 
   const sql = `
-with owned_intervals as (
-  select distinct h.id, ta.employee_id, h.entered_at, h.exited_at,
-         s.max_minutes, t.planned_date,
-         case
-           when h.entered_at >= '${currentBounds.start}'::timestamptz
-            and h.entered_at <  '${currentBounds.endExclusive}'::timestamptz
-             then 'current'
-           else 'previous'
-         end as period_key,
-         case
-           when h.entered_at >= '${currentBounds.start}'::timestamptz
-             then least(now(), '${currentBounds.endExclusive}'::timestamptz)
-           else '${previousBounds.endExclusive}'::timestamptz
-         end as period_end
+with periods as (
+  select 'current'::text as period_key,
+         '${currentBounds.start}'::timestamptz as p_start,
+         least(now(), '${currentBounds.endExclusive}'::timestamptz) as p_end
+  union all
+  select 'previous',
+         '${previousBounds.start}'::timestamptz,
+         '${previousBounds.endExclusive}'::timestamptz
+), owned_intervals as (
+  -- Every stage interval the person OWNED that OVERLAPS a period.
+  --
+  -- The old filter keyed on entered_at alone ("entered inside the window"),
+  -- which silently dropped the longest-held work — precisely the work that
+  -- matters. A stage entered 13 Jul and left 21 Jul vanished from a 14–20 Jul
+  -- period even though he held it the entire week, and anything still OPEN that
+  -- started before the window (a task sitting in قيد التنفيذ for 5 days) never
+  -- appeared at all. Overlap is the correct test: started before the period
+  -- ended AND had not already left before it began.
+  -- planned_date is deliberately NOT selected: lateness here is the stage SLA,
+  -- not the task deadline, and pulling it widened every row of a scan that is
+  -- already the heaviest query on this page.
+  select distinct h.id, ta.employee_id, h.entered_at, h.exited_at, s.max_minutes
     from task_stage_history h
     join tasks t
       on t.id = h.task_id
@@ -470,18 +478,40 @@ with owned_intervals as (
     left join sla_rules s
       on s.organization_id = '${org}'
      and s.stage_key = h.to_stage::text
-   where h.entered_at >= '${previousBounds.start}'::timestamptz
-     and h.entered_at <  '${currentBounds.endExclusive}'::timestamptz
+   where h.entered_at < '${currentBounds.endExclusive}'::timestamptz
+     and (h.exited_at is null or h.exited_at >= '${previousBounds.start}'::timestamptz)
      and (t.archived_at is null or t.stage = 'done')
      and pos.role = public.accountable_position_for_stage(t.stage_owner_positions, h.to_stage::text)
+), expanded as (
+  -- One row per (interval, period it overlaps). An interval spanning both
+  -- periods is judged once against each, so current-vs-previous asks the same
+  -- question of both instead of assigning each interval to a single bucket.
+  select oi.*, p.period_key, p.p_end as period_end
+    from owned_intervals oi
+    join periods p
+      on oi.entered_at < p.p_end
+     and (oi.exited_at is null or oi.exited_at >= p.p_start)
 ), evaluated as (
   select employee_id, period_key, max_minutes,
          exited_at is not null and exited_at < period_end as exited_in_time,
-         public.business_minutes_between(
-           entered_at,
-           least(coalesce(exited_at, period_end), period_end)
-         ) as dwell_at_period_end
-    from owned_intervals
+         -- Dwell runs from the REAL stage entry, even if that predates the
+         -- window: the SLA measures total time held, not time-inside-the-window.
+         --
+         -- Guarded on max_minutes: business_minutes_between is plpgsql and slow,
+         -- and since the overlap rewrite this CTE carries every open interval in
+         -- the org (~13k × the assignee fan-out × 2 periods). Stages with no SLA
+         -- rule can never be late, so computing their dwell is pure waste — and
+         -- it was enough waste to blow the 12s statement timeout.
+         -- (Careful: agent_run_readonly_sql rejects a few English words anywhere
+         -- in the text, even inside comments — see its keyword regex.)
+         case
+           when max_minutes is null then null
+           else public.business_minutes_between(
+             entered_at,
+             least(coalesce(exited_at, period_end), period_end)
+           )
+         end as dwell_at_period_end
+    from expanded
 ), measured as (
   select employee_id, period_key,
          count(*) filter (
@@ -496,17 +526,29 @@ with owned_intervals as (
     from evaluated
    group by employee_id, period_key
 ), stage_counts as (
-  -- إجمالي المراحل / مراحل متأخرة for the CURRENT period, straight off the same
-  -- owned-intervals fan-out (per interval, incl. archived-delivered). Late =
-  -- the deadline had passed while the person still held the stage.
+  -- إجمالي المراحل / مراحل متأخرة for the CURRENT period.
+  --
+  -- إجمالي المراحل = EVERY stage the person owned during the period, including
+  -- stages with no SLA rule (جديد / قيد التنفيذ). The client reads this column
+  -- as "what was on his plate", so a New task the template makes him responsible
+  -- for must appear here even though no rule can judge how long he held it.
+  --
+  -- مراحل متأخرة = of those, the ones where he blew the STAGE's SLA (business
+  -- minutes held > the stage's limit) — NOT the task's delivery deadline, which
+  -- is the separate متأخرة column. Only SLA-bearing stages can breach, so an
+  -- un-judgeable stage counts in the denominator and never in the numerator.
+  --
+  -- Consequence, and it is intentional: الالتزام keeps its own SLA-measurable
+  -- denominator (sample_n), so it is NOT (total - late)/total for anyone holding
+  -- un-judgeable stages. Same reason a New stage can't be "on time" either.
   select employee_id,
          count(*) filter (where period_key = 'current')::int as total_stages,
          count(*) filter (
            where period_key = 'current'
-             and planned_date is not null
-             and planned_date < coalesce(exited_at::date, current_date)
+             and max_minutes is not null
+             and dwell_at_period_end > max_minutes
          )::int as late_stages
-    from owned_intervals
+    from evaluated
    group by employee_id
 )
 select m.employee_id,
@@ -599,17 +641,33 @@ function buildStageReviewerSql(
   const { start, endExclusive } = riyadhDateRangeUtcBounds(opts.from, opts.to);
   return `
 with hist as (
-  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+  -- Archived tasks are KEPT here. A completed review (exited the review stage
+  -- in the window) is a historical fact about the reviewer's work — it doesn't
+  -- un-happen when the task is later archived. Excluding archived rows dropped
+  -- >half of some reviewers' work (حسن ياسر: 5 of 9 in 90d), which is exactly
+  -- the undercount the team reported. archived_at is carried so the PENDING
+  -- CTE can still restrict itself to live tasks (an archived task isn't waiting
+  -- for review).
+  -- Narrowed to THIS review stage. hist is only ever read with
+  -- hist.stage = opts.stage below, so materializing every stage's history was
+  -- waste — and once the archived filter was dropped (to count archived-but-
+  -- delivered reviews) that waste tipped the query over the 12s RPC ceiling.
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
+         t.archived_at
     from task_stage_history h
-    join tasks t on t.id = h.task_id and t.archived_at is null
+    join tasks t on t.id = h.task_id
    where h.organization_id = '${org}'
+     and h.to_stage = '${opts.stage}'
 ),
 reviewer_by_task as (
+  -- Attribute only tasks that actually have a review interval (in hist), not
+  -- the whole org — evaluating accountable_position_for_stage per assignee is
+  -- the expensive part, so restricting which tasks enter here is the real win.
   select distinct on (g.task_id) g.task_id, g.employee_id
     from (
       select ta.task_id, candidate.employee_id, count(*) as n
         from task_assignees ta
-        join tasks t on t.id = ta.task_id and t.archived_at is null
+        join tasks t on t.id = ta.task_id
         cross join lateral (
           values
             (ta.employee_id),
@@ -619,6 +677,7 @@ reviewer_by_task as (
         join employee_profiles e on e.id = candidate.employee_id
         join positions p on p.id = e.position_id
        where ta.organization_id = '${org}'
+         and ta.task_id in (select task_id from hist)
          and candidate.employee_id is not null
          and p.role = public.accountable_position_for_stage(
                t.stage_owner_positions, '${opts.stage}')
@@ -670,6 +729,7 @@ pend as (
     join reviewer_by_task reviewer on reviewer.task_id = hist.task_id
     left join task_stage_dwell d on d.history_id = hist.id
    where hist.stage = '${opts.stage}'
+     and hist.archived_at is null
      and hist.entered_at >= '${start}'::timestamptz
      and hist.entered_at < '${endExclusive}'::timestamptz
      and (hist.exited_at is null or hist.exited_at >= '${endExclusive}'::timestamptz)
@@ -768,7 +828,7 @@ select
     where organization_id = '${org}' and archived_at is not null)::int as archived_excluded,
   (select count(*) from tasks t
     where t.organization_id = '${org}' and t.archived_at is null
-      and t.stage not in ('done', 'new') and t.planned_date < current_date
+      and t.stage <> 'done' and t.planned_date < current_date
       and exists (select 1 from task_assignees ta where ta.task_id = t.id))::int as distinct_overdue,
   (now() - interval '${WINDOW_DAYS} days') as window_start,
   now() as window_end`;
@@ -929,7 +989,19 @@ async function _getAccountabilityPeriodTrends(
 ): Promise<Record<string, AccountabilityPeriodTrend>> {
   const org = assertUuid(orgId, "organization id");
   const range = reviewerRange(from, to);
-  return loadPeriodTrends(org, range);
+  // Degrade instead of taking the page down. This is the heaviest live query on
+  // /accountability and it runs concurrently with five others; on a loaded
+  // instance any one of them can hit the 12s agent_run_readonly_sql ceiling.
+  // The roster already falls back per-employee (`trends[id] ?? r.periodTrend`),
+  // so an empty map costs a stale trend, not an error boundary — the same
+  // "each degrades so a single timeout can't take the page down" rule the cases
+  // loader follows.
+  try {
+    return await loadPeriodTrends(org, range);
+  } catch (e) {
+    console.error("[accountability] period trends failed, falling back:", e);
+    return {};
+  }
 }
 
 export const getAccountabilityPeriodTrends = cache(_getAccountabilityPeriodTrends);
@@ -960,7 +1032,10 @@ async function _getAccountabilityLiveTotals(
 select ta.employee_id,
        count(distinct t.id) filter (where t.stage <> 'done')::int as open_live,
        count(distinct t.id) filter (
-         where t.stage not in ('done', 'new') and t.planned_date < '${today}'::date
+         -- Canonical overdue (0257): open + deadline passed. A not-started
+         -- (new-stage) task past its deadline counts too — the team treats
+         -- un-started late work as a delay, not an exemption.
+         where t.stage <> 'done' and t.planned_date < '${today}'::date
        )::int as overdue_live
   from task_assignees ta
   join tasks t on t.id = ta.task_id and t.organization_id = '${org}'
@@ -989,6 +1064,11 @@ export interface AccountabilitySilence {
   silentDays: number; // Sun–Thu days in the period with zero authored actions
   windowDays: number; // calendar days in the period (for the label)
   dailyActivity: { date: string; count: number }[]; // full period axis, oldest→newest
+  // Authored actions inside the SELECTED PERIOD, counted the نبض الفريق way:
+  // non-archived tasks only. dailyActivity/silentDays stay archived-INCLUSIVE on
+  // purpose (a silent day is silent even if the work was later archived), so the
+  // two numbers are deliberately different populations — don't "reconcile" them.
+  actionsInPeriod: number;
 }
 
 // Sun–Thu working day (getUTCDay: 5=Fri, 6=Sat are the Saudi weekend).
@@ -1001,6 +1081,7 @@ interface SilenceSqlRow {
   actor_employee_id: string;
   d: string;
   n: number;
+  n_live: number;
 }
 
 async function _getAccountabilitySilence(
@@ -1017,19 +1098,44 @@ async function _getAccountabilitySilence(
   for (let d = range.from; d <= range.to; d = addDaysIso(d, 1)) axis.push(d);
   const workingAxis = axis.filter(isWorkingDayIso);
 
+  // n = all authored actions per day (heatmap + silent-days);
+  // n_live = of those, the ones on a still-live task (نبض الفريق's non-archived
+  // definition, for actionsInPeriod). The archived split is via a LEFT JOIN to
+  // ONLY the non-archived tasks (~1.4k of 13k here — 90% are archived Odoo
+  // history), so the covering index idx_task_comments_org_created_actor_task
+  // (0260) serves this as an index-only scan + tiny hash. An inner `join tasks`
+  // instead forced a 26k-row heap fetch and pushed a 90-day window over the 12s
+  // RPC ceiling, taking the whole page down.
   const sql = `
 select c.actor_employee_id,
        (c.created_at at time zone 'Asia/Riyadh')::date::text as d,
-       count(*)::int as n
+       count(*)::int as n,
+       count(live.id)::int as n_live
   from task_comments c
+  left join (
+    select id from tasks
+     where organization_id = '${org}' and archived_at is null
+  ) live on live.id = c.task_id
  where c.organization_id = '${org}'
    and c.actor_employee_id is not null
    and c.created_at >= '${start}'::timestamptz
    and c.created_at <  '${endExclusive}'::timestamptz
  group by 1, 2`;
-  const rows = await runSql<SilenceSqlRow>(sql);
+  // Degrade rather than take the page down: on the widest windows this runs
+  // alongside five other live queries against the 12s RPC ceiling. An empty
+  // map makes the roster fall back to emptySilence per employee (all working
+  // days silent, actionsInPeriod 0) — same "each degrades" rule the trends,
+  // reviewers and cases loaders follow.
+  let rows: SilenceSqlRow[];
+  try {
+    rows = await runSql<SilenceSqlRow>(sql);
+  } catch (e) {
+    console.error("[accountability] silence failed, degrading:", e);
+    return {};
+  }
 
   const byEmpDay = new Map<string, Map<string, number>>();
+  const liveActions = new Map<string, number>();
   for (const r of rows) {
     let m = byEmpDay.get(r.actor_employee_id);
     if (!m) {
@@ -1037,6 +1143,7 @@ select c.actor_employee_id,
       byEmpDay.set(r.actor_employee_id, m);
     }
     m.set(r.d, r.n);
+    liveActions.set(r.actor_employee_id, (liveActions.get(r.actor_employee_id) ?? 0) + r.n_live);
   }
 
   const result: Record<string, AccountabilitySilence> = {};
@@ -1046,6 +1153,7 @@ select c.actor_employee_id,
       silentDays,
       windowDays: axis.length,
       dailyActivity: axis.map((date) => ({ date, count: m.get(date) ?? 0 })),
+      actionsInPeriod: liveActions.get(employeeId) ?? 0,
     };
   }
   return result;
@@ -1064,6 +1172,7 @@ export function emptySilence(from?: string, to?: string): AccountabilitySilence 
     silentDays: axis.filter(isWorkingDayIso).length,
     windowDays: axis.length,
     dailyActivity: axis.map((date) => ({ date, count: 0 })),
+    actionsInPeriod: 0,
   };
 }
 
@@ -1091,9 +1200,11 @@ export const getAccountabilityReviewers = cache(_getAccountabilityReviewers);
 // asks "when a client sends work back, do we turn it around on time?".
 //
 // Attribution is the SAME template rule the rest of the engine uses: the
-// employee whose position matches the owner configured for client_changes on
-// that task (`accountable_position_for_stage`), one per task to prevent
-// fan-out. Live, that spans 8 departments (الجرافيك، UI، السوشيال ميديا،
+// every assigned employee whose position matches the owner configured for
+// client_changes on that task (`accountable_position_for_stage`). A task can
+// legitimately belong to multiple matching assignees, exactly like Rwasem's
+// Assignees filter; arbitrarily selecting one hid work from the others. Live,
+// that spans 8 departments (الجرافيك، UI، السوشيال ميديا،
 // Motion، محتوى السيو، السيو، البرمجة، الميديا) — not only the supporting
 // ones — so the section covers every owner and the UI filters by department.
 //
@@ -1101,22 +1212,28 @@ export const getAccountabilityReviewers = cache(_getAccountabilityReviewers);
 // minutes today, business_hours_only). Dwell is business minutes too, so the
 // comparison is apples-to-apples.
 //
-// `editRate` deliberately measures ONE population: of the tasks this person
-// DELIVERED in the period (reached `done`), how many had come back as a client
-// edit. Counting "edits handled" over "tasks delivered" would mix two
-// populations and could exceed 100% (a task edited but not yet delivered).
+// The period's completed edit population is the INTERSECTION of:
+//   1. tasks whose client_changes interval EXITED inside the selected window;
+//   2. tasks whose Actual Done Date is inside the same window and whose final
+//      state is Done or Cancelled (archived locally).
+// This closes the Rwasem-filter exception where a task left client_changes
+// before the window but reached Done during it. The main table adds the separate
+// live/pending snapshot; SLA/rate calculations continue to use completed edits.
+//
+// `editRate` is completed client edits divided by tasks delivered in the same
+// period. It is capped at 100%, matching the organization-level quality score.
 // =========================================================================
 export interface ClientEditsRow {
   employeeId: string;
   fullName: string;
   department: string | null;
-  editsCompleted: number; // client_changes intervals closed in the period
+  editsCompleted: number; // finalized in period AND exited client_changes in period
+  editsTotal: number; // editsCompleted + tasks sitting in client_changes now
   medianEditBusinessMinutes: number | null;
   slaBreachCount: number; // …of which blew the client_changes SLA
   slaTargetMinutes: number;
-  deliveredCount: number; // tasks he owned that reached done in the period
-  deliveredEditedCount: number; // …of which had been through client_changes
-  editRate: number | null; // deliveredEdited / delivered, %
+  deliveredCount: number; // owned tasks with Actual Done in-period, Done/Cancelled
+  editRate: number | null; // editsCompleted / deliveredCount, capped at 100%
   pendingEdits: number; // sitting in client_changes right now
   oldestPendingBusinessMinutes: number | null;
   sampleSize: number;
@@ -1132,7 +1249,6 @@ interface ClientEditsSqlRow {
   sla_breach: number;
   sla_target: number;
   delivered: number;
-  delivered_edited: number;
   pending: number;
   oldest_min: number | null;
 }
@@ -1146,17 +1262,42 @@ with sla as (
    where organization_id = '${org}' and stage_key = 'client_changes'
 ),
 hist as (
-  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+  -- Archived history stays visible. Candidate completed edits exited
+  -- client_changes inside the selected window.
+  -- Live rows are also fetched for the separate active-now snapshot, even when
+  -- their entry predates the selected window.
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
+         t.archived_at, t.stage::text as current_stage
     from task_stage_history h
-    join tasks t on t.id = h.task_id and t.archived_at is null
+    join tasks t on t.id = h.task_id
    where h.organization_id = '${org}'
+     and h.to_stage = 'client_changes'
+     and (
+       (h.exited_at >= '${start}'::timestamptz and h.exited_at < '${endExclusive}'::timestamptz)
+       or (h.exited_at is null and t.archived_at is null and t.stage = 'client_changes')
+     )
+),
+period_completed as (
+  -- Mirrors Rwasem's Done/Cancelled + Actual Done Date filters. Requiring this
+  -- AND an in-period client_changes exit prevents a late Done from pulling an
+  -- earlier edit into the selected period.
+  select t.id as task_id, t.actual_done_date
+    from tasks t
+   where t.organization_id = '${org}'
+     and t.actual_done_date >= '${from}'::date
+     and t.actual_done_date <= '${to}'::date
+     and (t.stage = 'done' or t.archived_at is not null)
+),
+relevant_tasks as (
+  select distinct task_id from hist
+  union
+  select task_id from period_completed
 ),
 owner_by_task as (
-  select distinct on (g.task_id) g.task_id, g.employee_id
-    from (
-      select ta.task_id, candidate.employee_id, count(*) as n
+  select distinct ta.task_id, candidate.employee_id
         from task_assignees ta
-        join tasks t on t.id = ta.task_id and t.archived_at is null
+        join relevant_tasks rt on rt.task_id = ta.task_id
+        join tasks t on t.id = ta.task_id
         cross join lateral (
           values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
         ) as candidate(employee_id)
@@ -1165,16 +1306,14 @@ owner_by_task as (
        where ta.organization_id = '${org}'
          and candidate.employee_id is not null
          and p.role = public.accountable_position_for_stage(t.stage_owner_positions, 'client_changes')
-       group by 1, 2
-    ) g
-   order by g.task_id, g.n desc, g.employee_id
 ),
 edits as (
   select o.employee_id, h.task_id,
-         min(coalesce(d.dwell_business_minutes::numeric,
+         max(coalesce(d.dwell_business_minutes::numeric,
                       public.business_minutes_between(h.entered_at, h.exited_at))) as mins
     from hist h
     join owner_by_task o on o.task_id = h.task_id
+    join period_completed pc on pc.task_id = h.task_id
     left join task_stage_dwell d on d.history_id = h.id
    where h.stage = 'client_changes'
      and h.exited_at >= '${start}'::timestamptz
@@ -1189,32 +1328,22 @@ agg as (
 ),
 delivered as (
   select o.employee_id,
-         count(distinct h.task_id)::int as delivered,
-         count(distinct h.task_id) filter (where exists (
-           select 1 from task_stage_history c
-            where c.task_id = h.task_id
-              and c.to_stage = 'client_changes'
-              and c.entered_at < h.entered_at
-         ))::int as delivered_edited
-    from hist h
-    join owner_by_task o on o.task_id = h.task_id
-   where h.stage = 'done'
-     and h.entered_at >= '${start}'::timestamptz
-     and h.entered_at < '${endExclusive}'::timestamptz
+         count(distinct pc.task_id)::int as delivered
+    from period_completed pc
+    join owner_by_task o on o.task_id = pc.task_id
    group by 1
 ),
 pend as (
   select o.employee_id, count(distinct h.task_id)::int as pending,
          max(coalesce(d.dwell_business_minutes::numeric,
-                      public.business_minutes_between(
-                        h.entered_at, least(now(), '${endExclusive}'::timestamptz)))) as oldest_min
+                      public.business_minutes_between(h.entered_at, now()))) as oldest_min
     from hist h
     join owner_by_task o on o.task_id = h.task_id
     left join task_stage_dwell d on d.history_id = h.id
    where h.stage = 'client_changes'
-     and h.entered_at >= '${start}'::timestamptz
-     and h.entered_at < '${endExclusive}'::timestamptz
-     and (h.exited_at is null or h.exited_at >= '${endExclusive}'::timestamptz)
+     and h.archived_at is null
+     and h.current_stage = 'client_changes'
+     and h.exited_at is null
    group by 1
 ),
 keys as (
@@ -1224,7 +1353,7 @@ keys as (
 select e.id as employee_id, e.full_name, dep.name as department,
        coalesce(a.edits, 0) as edits, a.median_min, coalesce(a.sla_breach, 0) as sla_breach,
        (select m from sla) as sla_target,
-       coalesce(dl.delivered, 0) as delivered, coalesce(dl.delivered_edited, 0) as delivered_edited,
+       coalesce(dl.delivered, 0) as delivered,
        coalesce(p.pending, 0) as pending, p.oldest_min
   from keys k
   join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
@@ -1232,7 +1361,8 @@ select e.id as employee_id, e.full_name, dep.name as department,
   left join agg a on a.employee_id = k.employee_id
   left join delivered dl on dl.employee_id = k.employee_id
   left join pend p on p.employee_id = k.employee_id
- order by coalesce(a.edits, 0) desc, coalesce(p.pending, 0) desc`;
+ order by (coalesce(a.edits, 0) + coalesce(p.pending, 0)) desc,
+          coalesce(a.edits, 0) desc`;
 }
 
 async function _getClientEditsRigor(
@@ -1248,12 +1378,12 @@ async function _getClientEditsRigor(
     fullName: r.full_name ?? "—",
     department: r.department,
     editsCompleted: r.edits,
+    editsTotal: r.edits + r.pending,
     medianEditBusinessMinutes: r.median_min === null ? null : round1(r.median_min),
     slaBreachCount: r.sla_breach,
     slaTargetMinutes: r.sla_target,
     deliveredCount: r.delivered,
-    deliveredEditedCount: r.delivered_edited,
-    editRate: r.delivered > 0 ? Math.round((r.delivered_edited / r.delivered) * 100) : null,
+    editRate: r.delivered > 0 ? Math.min(100, Math.round((r.edits / r.delivered) * 100)) : null,
     pendingEdits: r.pending,
     oldestPendingBusinessMinutes: r.oldest_min === null ? null : round1(r.oldest_min),
     sampleSize: r.edits,
@@ -1322,23 +1452,29 @@ function buildReviewerDetailSql(
   const emp = opts.employeeId;
   return `
 with hist as (
-  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+  -- Archived kept (carry archived/current stage so PENDING can stay live-only). A closed
+  -- review/edit interval and a delivery are historical facts. See the main
+  -- reviewer query for why excluding them undercounted.
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
+         t.archived_at, t.stage::text as current_stage
     from task_stage_history h
-    join tasks t on t.id = h.task_id and t.archived_at is null
+    join tasks t on t.id = h.task_id
    where h.organization_id = '${org}'
+     and h.to_stage = '${opts.stage}'
 ),
 reviewer_by_task as (
   select distinct on (g.task_id) g.task_id, g.employee_id
     from (
       select ta.task_id, candidate.employee_id, count(*) as n
         from task_assignees ta
-        join tasks t on t.id = ta.task_id and t.archived_at is null
+        join tasks t on t.id = ta.task_id
         cross join lateral (
           values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
         ) as candidate(employee_id)
         join employee_profiles e on e.id = candidate.employee_id
         join positions p on p.id = e.position_id
        where ta.organization_id = '${org}'
+         and ta.task_id in (select task_id from hist)
          and candidate.employee_id is not null
          and p.role = public.accountable_position_for_stage(t.stage_owner_positions, '${opts.stage}')
        group by 1, 2
@@ -1369,6 +1505,7 @@ pending as (
     join reviewer_by_task reviewer on reviewer.task_id = hist.task_id and reviewer.employee_id = '${emp}'
     left join task_stage_dwell d on d.history_id = hist.id
    where hist.stage = '${opts.stage}'
+     and hist.archived_at is null
      and hist.entered_at >= '${start}'::timestamptz
      and hist.entered_at < '${endExclusive}'::timestamptz
      and (hist.exited_at is null or hist.exited_at >= '${endExclusive}'::timestamptz)
@@ -1414,9 +1551,9 @@ async function _getReviewerRigorDetail(
 
 export const getReviewerRigorDetail = cache(_getReviewerRigorDetail);
 
-// Client-edits detail: closed client_changes intervals (with over-SLA flag), the
-// tasks delivered in the window (flag = had been through client_changes), and
-// the ones sitting in client_changes right now — for one owner, one window.
+// Client-edits detail: finalized tasks that also exited client_changes in the
+// window, all finalized tasks in the denominator, and the point-in-time live
+// snapshot — for one stage owner and one window.
 function buildClientEditsDetailSql(org: string, from: string, to: string, employeeId: string): string {
   const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
   const emp = employeeId;
@@ -1426,17 +1563,39 @@ with sla as (
     from sla_rules where organization_id = '${org}' and stage_key = 'client_changes'
 ),
 hist as (
-  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at
+  -- Archived history stays visible. Candidate completed edits exited
+  -- client_changes inside the selected window.
+  -- Live rows are also fetched for the separate active-now snapshot, even when
+  -- their entry predates the selected window.
+  select h.id, h.task_id, h.to_stage::text as stage, h.entered_at, h.exited_at,
+         t.archived_at, t.stage::text as current_stage
     from task_stage_history h
-    join tasks t on t.id = h.task_id and t.archived_at is null
+    join tasks t on t.id = h.task_id
    where h.organization_id = '${org}'
+     and h.to_stage = 'client_changes'
+     and (
+       (h.exited_at >= '${start}'::timestamptz and h.exited_at < '${endExclusive}'::timestamptz)
+       or (h.exited_at is null and t.archived_at is null and t.stage = 'client_changes')
+     )
+),
+period_completed as (
+  select t.id as task_id, t.actual_done_date
+    from tasks t
+   where t.organization_id = '${org}'
+     and t.actual_done_date >= '${from}'::date
+     and t.actual_done_date <= '${to}'::date
+     and (t.stage = 'done' or t.archived_at is not null)
+),
+relevant_tasks as (
+  select distinct task_id from hist
+  union
+  select task_id from period_completed
 ),
 owner_by_task as (
-  select distinct on (g.task_id) g.task_id, g.employee_id
-    from (
-      select ta.task_id, candidate.employee_id, count(*) as n
+  select distinct ta.task_id, candidate.employee_id
         from task_assignees ta
-        join tasks t on t.id = ta.task_id and t.archived_at is null
+        join relevant_tasks rt on rt.task_id = ta.task_id
+        join tasks t on t.id = ta.task_id
         cross join lateral (
           values (ta.employee_id), (ta.team_manager_employee_id), (ta.head_of_dept_employee_id)
         ) as candidate(employee_id)
@@ -1445,16 +1604,15 @@ owner_by_task as (
        where ta.organization_id = '${org}'
          and candidate.employee_id is not null
          and p.role = public.accountable_position_for_stage(t.stage_owner_positions, 'client_changes')
-       group by 1, 2
-    ) g
-   order by g.task_id, g.n desc, g.employee_id
 ),
 edits as (
   select h.task_id,
-         min(coalesce(d.dwell_business_minutes::numeric,
-                      public.business_minutes_between(h.entered_at, h.exited_at))) as mins
+         max(coalesce(d.dwell_business_minutes::numeric,
+                      public.business_minutes_between(h.entered_at, h.exited_at))) as mins,
+         max(h.exited_at) as exited_at
     from hist h
     join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
+    join period_completed pc on pc.task_id = h.task_id
     left join task_stage_dwell d on d.history_id = h.id
    where h.stage = 'client_changes'
      and h.exited_at >= '${start}'::timestamptz
@@ -1462,34 +1620,32 @@ edits as (
    group by 1
 ),
 delivered as (
-  select distinct h.task_id,
+  select pc.task_id, pc.actual_done_date::timestamptz as delivered_at,
          exists (
            select 1 from task_stage_history c
-            where c.task_id = h.task_id and c.to_stage = 'client_changes' and c.entered_at < h.entered_at
-         ) as was_edited,
-         min(h.entered_at) as delivered_at
-    from hist h
-    join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
-   where h.stage = 'done'
-     and h.entered_at >= '${start}'::timestamptz
-     and h.entered_at < '${endExclusive}'::timestamptz
-   group by h.task_id
+            where c.task_id = pc.task_id
+              and c.to_stage = 'client_changes'
+              and c.entered_at < (pc.actual_done_date + 1)::timestamptz
+         ) as was_edited
+    from period_completed pc
+    join owner_by_task o on o.task_id = pc.task_id and o.employee_id = '${emp}'
 ),
 pending as (
   select distinct h.task_id,
          max(coalesce(d.dwell_business_minutes::numeric,
-                      public.business_minutes_between(h.entered_at, least(now(), '${endExclusive}'::timestamptz)))) as pending_min
+                      public.business_minutes_between(h.entered_at, now()))) as pending_min,
+         min(h.entered_at) as entered_at
     from hist h
     join owner_by_task o on o.task_id = h.task_id and o.employee_id = '${emp}'
     left join task_stage_dwell d on d.history_id = h.id
    where h.stage = 'client_changes'
-     and h.entered_at >= '${start}'::timestamptz
-     and h.entered_at < '${endExclusive}'::timestamptz
-     and (h.exited_at is null or h.exited_at >= '${endExclusive}'::timestamptz)
+     and h.archived_at is null
+     and h.current_stage = 'client_changes'
+     and h.exited_at is null
    group by 1
 )
 select t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
-       e.mins as minutes, null::timestamptz as occurred_at,
+       e.mins as minutes, e.exited_at as occurred_at,
        (e.mins > (select m from sla)) as flag, 'edit' as kind
   from edits e
   join tasks t on t.id = e.task_id
@@ -1504,7 +1660,7 @@ select t.id, t.task_code, t.title, pj.name, cl.name,
   left join clients cl on cl.id = pj.client_id
 union all
 select t.id, t.task_code, t.title, pj.name, cl.name,
-       p.pending_min as minutes, null::timestamptz as occurred_at, false as flag, 'pending' as kind
+       p.pending_min as minutes, p.entered_at as occurred_at, false as flag, 'pending' as kind
   from pending p
   join tasks t on t.id = p.task_id
   left join projects pj on pj.id = t.project_id
@@ -1530,10 +1686,13 @@ export const getClientEditsDetail = cache(_getClientEditsDetail);
 // إجمالي المراحل / مراحل متأخرة period). Same TaskDrillSheet plumbing as the
 // reviewer/edits sections, so a number can be reconciled against Rwasem.
 //   • open / overdue: the person's LIVE assigned tasks (open board; overdue =
-//     Rwasem def: open, past deadline, `new` excluded), occurredAt = deadline.
+//     Rwasem def: open + past deadline, `new` INCLUDED per 0257), occurredAt =
+//     deadline. This is the DELIVERY-date failure.
 //   • totalStages / lateStages: the owned stage INTERVALS entered in the window
-//     (per interval, incl. archived-delivered), same gate as the merged
-//     period-trends stage counts, occurredAt = entered_at, stage = the stage.
+//     that are SLA-measurable (per interval, incl. archived-delivered), same
+//     gate as the merged period-trends stage counts, occurredAt = entered_at,
+//     minutes = business-minutes held. This is the STAGE-SLA failure — a
+//     different question from the task deadline above; don't conflate them.
 export type EmployeeMetric = "open" | "overdue" | "totalStages" | "lateStages";
 
 function buildEmployeeMetricDrillSql(
@@ -1547,12 +1706,12 @@ function buildEmployeeMetricDrillSql(
     const today = riyadhTodayIso();
     const pred =
       metric === "overdue"
-        ? `t.stage not in ('done', 'new') and t.planned_date < '${today}'::date`
+        ? `t.stage <> 'done' and t.planned_date < '${today}'::date`
         : `t.stage <> 'done'`;
     return `
 select distinct t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
        null::numeric as minutes, t.planned_date::text as occurred_at, t.stage::text as stage,
-       (t.stage not in ('done', 'new') and t.planned_date < '${today}'::date) as flag, 'task' as kind
+       (t.stage <> 'done' and t.planned_date < '${today}'::date) as flag, 'task' as kind
   from task_assignees ta
   join tasks t on t.id = ta.task_id and t.organization_id = '${org}' and t.archived_at is null
   left join projects pj on pj.id = t.project_id
@@ -1567,7 +1726,12 @@ with owned as (
   select distinct h.id as hid, t.id as task_id, t.task_code, t.title,
          pj.name as project_name, cl.name as client_name,
          h.to_stage::text as stage, h.entered_at as entered_at,
-         (t.planned_date is not null and t.planned_date < coalesce(h.exited_at::date, current_date)) as flag
+         s.max_minutes,
+         public.business_minutes_between(
+           h.entered_at,
+           least(coalesce(h.exited_at, now()), '${endExclusive}'::timestamptz)
+         ) as dwell_min,
+         h.exited_at is not null and h.exited_at < '${endExclusive}'::timestamptz as exited_in_time
     from task_stage_history h
     join tasks t on t.id = h.task_id and t.organization_id = '${org}'
     join task_assignees ta on ta.task_id = t.id and ta.organization_id = '${org}' and ta.employee_id = '${emp}'
@@ -1575,14 +1739,23 @@ with owned as (
     join positions pos on pos.id = e.position_id
     left join projects pj on pj.id = t.project_id
     left join clients cl on cl.id = pj.client_id
-   where h.entered_at >= '${start}'::timestamptz
-     and h.entered_at <  '${endExclusive}'::timestamptz
+    left join sla_rules s
+      on s.organization_id = '${org}' and s.stage_key = h.to_stage::text
+   where h.entered_at <  '${endExclusive}'::timestamptz
+     and (h.exited_at is null or h.exited_at >= '${start}'::timestamptz)
      and (t.archived_at is null or t.stage = 'done')
      and pos.role = public.accountable_position_for_stage(t.stage_owner_positions, h.to_stage::text)
+), judged as (
+  -- Mirrors loadPeriodTrends.stage_counts exactly: EVERY owned interval that
+  -- overlaps the period is listed (incl. جديد / قيد التنفيذ, which carry no SLA),
+  -- and «متأخرة» = the stage's business-minute SLA was blown — not the task's
+  -- delivery deadline. A stage with no SLA rule can never carry the flag.
+  select *, (max_minutes is not null and dwell_min > max_minutes) as flag
+    from owned
 )
 select task_id, task_code, title, project_name, client_name,
-       null::numeric as minutes, entered_at::text as occurred_at, stage, flag, 'stage' as kind
-  from owned
+       round(dwell_min)::numeric as minutes, entered_at::text as occurred_at, stage, flag, 'stage' as kind
+  from judged
  ${lateFilter}
  order by entered_at desc`;
 }
@@ -1735,14 +1908,20 @@ async function _getEmployeeAccountabilityEvidence(
 
   // Two modes:
   //  • period (from+to given, the /accountability modal's «الفترة المحددة» tab):
-  //    intervals ENTERED inside the selected window, and archived-but-delivered
+  //    intervals OVERLAPPING the selected window, and archived-but-delivered
   //    (`done`) tasks stay attributable — the historical contract used elsewhere.
-  //  • default (the scorecard deep-link): last WINDOW_DAYS, live tasks only.
+  //  • default (the scorecard deep-link + the «لايف» tab): last WINDOW_DAYS,
+  //    live tasks only. NOTE these two tabs are different WINDOWS, not a
+  //    subset relationship: a 7-day period legitimately shows fewer rows than a
+  //    30-day لايف tab. The UI labels must say so or it reads as data loss.
   const usePeriod = !!from && !!to;
   const windowPredicate = usePeriod
     ? (() => {
         const { start, endExclusive } = riyadhDateRangeUtcBounds(from!, to!);
-        return `h.entered_at >= '${start}'::timestamptz and h.entered_at < '${endExclusive}'::timestamptz`;
+        // Overlap, not entered-inside — same fix as loadPeriodTrends. Selecting
+        // on entered_at alone hid every stage a person was still holding from
+        // before the window, which is exactly the evidence that matters.
+        return `h.entered_at < '${endExclusive}'::timestamptz and (h.exited_at is null or h.exited_at >= '${start}'::timestamptz)`;
       })()
     : `h.entered_at >= now() - interval '${WINDOW_DAYS} days'`;
   const archivedPredicate = usePeriod

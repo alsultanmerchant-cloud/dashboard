@@ -27,11 +27,24 @@ function useFmt() {
   };
 }
 
+function formatOdooDuration(min: number | null): string {
+  if (min == null) return NA;
+  const total = Math.max(0, Math.round(min));
+  const days = Math.floor(total / (24 * 60));
+  const hours = Math.floor((total % (24 * 60)) / 60);
+  const minutes = total % 60;
+  return [days > 0 ? `${days}d` : null, hours > 0 || days > 0 ? `${hours}h` : null, `${minutes}m`]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export interface DrillView {
   title: string;
   subtitle?: string;
   // How to present the per-task value on the right of each row.
   valueKind: "minutes" | "flag" | "none";
+  // `odoo` uses Rwasem's 24-hour d chunks for direct visual reconciliation.
+  durationStyle?: "workdays" | "odoo";
   // Label for a truthy flag (valueKind "flag"), e.g. "دخلت تعديلات العميل".
   flagLabel?: string;
   tasks: DrillTask[];
@@ -130,24 +143,38 @@ export function TaskDrillSheet({
                       <ExternalLink className="size-3.5 shrink-0 text-muted-foreground/60" />
                       <span className="min-w-0">
                         <span className="block max-w-[16rem] truncate">{task.title}</span>
-                        {(task.projectName || task.clientName) && (
+                        {(task.taskCode || task.projectName || task.clientName) && (
                           <span
                             className="block max-w-[16rem] truncate text-[11px] text-muted-foreground"
                             title={task.projectName ?? task.clientName ?? ""}
                           >
+                            {task.taskCode && <span dir="ltr">{task.taskCode}</span>}
+                            {task.taskCode && (task.projectName || task.clientName) ? " · " : null}
                             {task.projectName ?? task.clientName}
                           </span>
                         )}
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2 text-[11px]">
+                      {task.kind === "edit" && (
+                        <span className="rounded bg-cyan/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan">
+                          مكتمل
+                        </span>
+                      )}
+                      {task.kind === "pending" && (
+                        <span className="rounded bg-amber-dim px-1.5 py-0.5 text-[10px] font-medium text-amber">
+                          لايف
+                        </span>
+                      )}
                       {task.stage && task.kind === "stage" && (
                         <span className="rounded bg-soft-2 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                           {stageLabel(task.stage)}
                         </span>
                       )}
                       {view.valueKind === "minutes" && (
-                        <span className="tabular-nums text-muted-foreground">{fmt(task.minutes)}</span>
+                        <span dir={view.durationStyle === "odoo" ? "ltr" : undefined} className="tabular-nums text-muted-foreground">
+                          {view.durationStyle === "odoo" ? formatOdooDuration(task.minutes) : fmt(task.minutes)}
+                        </span>
                       )}
                       {view.valueKind === "flag" && task.flag && (
                         <span className="rounded bg-amber-dim px-1.5 py-0.5 text-[10px] font-medium text-amber">
@@ -155,7 +182,17 @@ export function TaskDrillSheet({
                         </span>
                       )}
                       {task.occurredAt && (
-                        <span dir="ltr" className="tabular-nums text-muted-foreground/70">
+                        <span
+                          dir="ltr"
+                          className="tabular-nums text-muted-foreground/70"
+                          title={
+                            task.kind === "edit"
+                              ? "تاريخ الخروج من تعديلات العميل"
+                              : task.kind === "pending"
+                                ? "تاريخ الدخول إلى تعديلات العميل"
+                                : undefined
+                          }
+                        >
                           {task.occurredAt.slice(0, 10)}
                         </span>
                       )}

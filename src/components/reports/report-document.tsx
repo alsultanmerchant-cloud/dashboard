@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getTranslations, getLocale } from "next-intl/server";
 import {
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import type {
   ExecutiveReportFacts,
+  ReportIndicator,
   ReportTrend,
 } from "@/lib/data/executive-report";
 import type { ExecutiveReportResult } from "@/lib/executive-report-schema";
@@ -120,12 +122,15 @@ function StatTile({
   label,
   value,
   extra,
+  note,
   tone = "neutral",
   isPrivate,
 }: {
   label: string;
   value: string;
   extra?: React.ReactNode;
+  /** Secondary line — e.g. the live "as of today" figure beside a period value. */
+  note?: string;
   tone?: Tone;
   isPrivate?: "money" | "person" | "client";
 }) {
@@ -146,7 +151,42 @@ function StatTile({
         {value}
       </p>
       {extra ? <div className="mt-1">{extra}</div> : null}
+      {note ? (
+        <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">{note}</p>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Renders the PERIOD figure as the headline (it's what the trend compares and
+ * what the narrative quotes) with the live snapshot demoted to a labelled note.
+ * Falls back to the live value on runs where the period figure is unavailable.
+ */
+function IndicatorTile({
+  label,
+  indicator,
+  basisLabel,
+  liveLabel,
+}: {
+  label: string;
+  indicator: ReportIndicator;
+  basisLabel: string;
+  liveLabel: string;
+}) {
+  const headline = indicator.periodValue ?? indicator.liveValue;
+  const showLive =
+    indicator.periodValue !== null &&
+    indicator.liveValue !== null &&
+    indicator.liveValue !== indicator.periodValue;
+  return (
+    <StatTile
+      label={`${label} · ${basisLabel}`}
+      value={headline === null ? "—" : fmtInt(headline)}
+      extra={<TrendChip trend={indicator.trend} goodWhen="down" />}
+      note={showLive ? liveLabel : undefined}
+      tone={trendTone(indicator.trend, "down")}
+    />
   );
 }
 
@@ -197,6 +237,30 @@ function DataTable({
 }
 
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v)}%`);
+
+/**
+ * Table cell that drills into the filtered view behind the number, matching
+ * the rest of the app (a visible figure is a clickable figure). Runs frozen
+ * before drill-downs shipped carry no ids — those degrade to plain text.
+ * Print CSS strips link styling, so paper is unaffected.
+ */
+function EntityCell({
+  href,
+  label,
+  bold = true,
+}: {
+  href: string | null | undefined;
+  label: string;
+  bold?: boolean;
+}) {
+  const cls = bold ? "font-medium" : undefined;
+  if (!href) return <span className={cls}>{label}</span>;
+  return (
+    <Link href={href} className={cn(cls, "text-foreground hover:text-cyan hover:underline")}>
+      {label}
+    </Link>
+  );
+}
 
 export async function ReportDocument({
   facts,
@@ -286,35 +350,46 @@ export async function ReportDocument({
         >
           {facts.indicators ? (
             <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-              <StatTile
+              <IndicatorTile
                 label={t("indicators.projectsAtRisk")}
-                value={facts.indicators.projectsAtRisk.value === null ? "—" : fmtInt(facts.indicators.projectsAtRisk.value)}
-                extra={<TrendChip trend={facts.indicators.projectsAtRisk.trend} goodWhen="down" />}
-                tone={trendTone(facts.indicators.projectsAtRisk.trend, "down")}
+                indicator={facts.indicators.projectsAtRisk}
+                basisLabel={t("indicators.basisAsOfPeriodEnd")}
+                liveLabel={t("indicators.asOfToday", {
+                  value: fmtInt(facts.indicators.projectsAtRisk.liveValue ?? 0),
+                })}
               />
-              <StatTile
+              <IndicatorTile
                 label={t("indicators.highRisk", { threshold: facts.indicators.highRisk.threshold })}
-                value={facts.indicators.highRisk.value === null ? "—" : fmtInt(facts.indicators.highRisk.value)}
-                extra={<TrendChip trend={facts.indicators.highRisk.trend} goodWhen="down" />}
-                tone={trendTone(facts.indicators.highRisk.trend, "down")}
+                indicator={facts.indicators.highRisk}
+                basisLabel={t("indicators.basisAsOfPeriodEnd")}
+                liveLabel={t("indicators.asOfToday", {
+                  value: fmtInt(facts.indicators.highRisk.liveValue ?? 0),
+                })}
               />
-              <StatTile
+              <IndicatorTile
                 label={t("indicators.overdue")}
-                value={facts.indicators.overdue.value === null ? "—" : fmtInt(facts.indicators.overdue.value)}
-                extra={<TrendChip trend={facts.indicators.overdue.trend} goodWhen="down" />}
-                tone={trendTone(facts.indicators.overdue.trend, "down")}
+                indicator={facts.indicators.overdue}
+                basisLabel={t("indicators.basisDuringPeriod")}
+                liveLabel={t("indicators.openToday", {
+                  value: fmtInt(facts.indicators.overdue.liveValue ?? 0),
+                })}
               />
               <StatTile
                 label={t("indicators.onTime")}
                 value={pct(facts.indicators.onTime.pct)}
-                extra={<TrendChip trend={facts.indicators.onTime.trend} goodWhen="up" />}
+                extra={<TrendChip trend={facts.indicators.onTime.trend} goodWhen="up" suffix="%" />}
+                note={t("indicators.completedCount", {
+                  count: facts.indicators.onTime.completedCount,
+                })}
                 tone={trendTone(facts.indicators.onTime.trend, "up")}
               />
-              <StatTile
+              <IndicatorTile
                 label={t("indicators.clientChanges")}
-                value={facts.indicators.clientChanges.value === null ? "—" : fmtInt(facts.indicators.clientChanges.value)}
-                extra={<TrendChip trend={facts.indicators.clientChanges.trend} goodWhen="down" />}
-                tone={trendTone(facts.indicators.clientChanges.trend, "down")}
+                indicator={facts.indicators.clientChanges}
+                basisLabel={t("indicators.basisDuringPeriod")}
+                liveLabel={t("indicators.openToday", {
+                  value: fmtInt(facts.indicators.clientChanges.liveValue ?? 0),
+                })}
               />
             </div>
           ) : null}
@@ -436,6 +511,11 @@ export async function ReportDocument({
                   t("delivery.colEdits"),
                 ]}
                 rows={facts.delivery.services.map((s) => [
+                  // Deliberately NOT linked: /tasks has no service filter (its
+                  // `sf` facets are title/tags/assignee/project/stage only), so
+                  // `?service=<id>` silently returns the unfiltered board. A
+                  // link that doesn't scope is worse than no link. serviceId is
+                  // still carried in the facts, ready for a real service facet.
                   <span key="n" className="font-medium">{s.name}</span>,
                   fmtInt(s.delivered),
                   pct(s.onTimePct),
@@ -461,7 +541,12 @@ export async function ReportDocument({
                   t("delivery.colEdits"),
                 ]}
                 rows={facts.delivery.supportingDepartments.map((s) => [
-                  <span key="n" className="font-medium">{s.name}</span>,
+                  // Supporting "services" are departments — same shape, different route.
+                  <EntityCell
+                    key="n"
+                    href={s.serviceId ? `/team-activity?dept=${s.serviceId}` : null}
+                    label={s.name}
+                  />,
                   fmtInt(s.delivered),
                   pct(s.onTimePct),
                   pct(s.onTimePctPrev),
@@ -512,7 +597,11 @@ export async function ReportDocument({
                   t("team.colCompleted"),
                 ]}
                 rows={facts.team.departments.map((d) => [
-                  <span key="n" className="font-medium">{d.name}</span>,
+                  <EntityCell
+                    key="n"
+                    href={d.departmentId ? `/team-activity?dept=${d.departmentId}` : null}
+                    label={d.name}
+                  />,
                   d.headName ?? "—",
                   fmtInt(d.headcount),
                   fmtInt(d.activeCount),
@@ -531,7 +620,11 @@ export async function ReportDocument({
                 <DataTable
                   headers={[t("team.colName"), t("team.colRole"), t("team.colScore"), t("team.colOnTime")]}
                   rows={facts.team.topPerformers.map((p) => [
-                    p.name,
+                    <EntityCell
+                      key="n"
+                      href={p.employeeId ? `/accountability?emp=${p.employeeId}` : null}
+                      label={p.name}
+                    />,
                     p.role,
                     <span key="s" className="font-semibold text-status-success">{p.score}</span>,
                     pct(p.onTimeRate),
@@ -546,7 +639,11 @@ export async function ReportDocument({
                 <DataTable
                   headers={[t("team.colName"), t("team.colRole"), t("team.colScore"), t("team.colOverdueOwned")]}
                   rows={facts.team.lowPerformers.map((p) => [
-                    p.name,
+                    <EntityCell
+                      key="n"
+                      href={p.employeeId ? `/accountability?emp=${p.employeeId}` : null}
+                      label={p.name}
+                    />,
                     p.role,
                     <span key="s" className="font-semibold text-status-danger">{p.score}</span>,
                     fmtInt(p.overdueOwned),
@@ -562,7 +659,11 @@ export async function ReportDocument({
               <DataTable
                 headers={[t("team.colName"), t("team.colDesigns"), t("team.colRevisions"), t("team.colTasks")]}
                 rows={facts.team.designerOutput.map((d) => [
-                  d.name,
+                  <EntityCell
+                    key="n"
+                    href={d.employeeId ? `/accountability?emp=${d.employeeId}` : null}
+                    label={d.name}
+                  />,
                   fmtInt(d.designs),
                   fmtInt(d.revisions),
                   fmtInt(d.tasks),
@@ -606,7 +707,11 @@ export async function ReportDocument({
               <DataTable
                 headers={[t("clients.colClient"), t("clients.colSatisfaction"), t("clients.colSentiment")]}
                 rows={facts.clients.atRiskList.map((c) => [
-                  <span key="n" className="font-medium">{c.name}</span>,
+                  <EntityCell
+                    key="n"
+                    href={c.clientId ? `/satisfaction?client=${c.clientId}` : null}
+                    label={c.name}
+                  />,
                   c.satisfactionScore === null ? "—" : `${c.satisfactionScore}%`,
                   c.sentiment ?? "—",
                 ])}
@@ -621,7 +726,7 @@ export async function ReportDocument({
                 <DataTable
                   headers={[t("clients.colClient"), t("clients.colOnTime"), t("clients.colOverdue"), t("clients.colOpen")]}
                   rows={facts.clients.worstClients.map((c) => [
-                    c.name,
+                    <EntityCell key="n" href={c.clientId ? `/clients/${c.clientId}` : null} label={c.name} />,
                     pct(c.onTimePct),
                     c.overdue > 0 ? <span className="text-status-danger">{fmtInt(c.overdue)}</span> : "0",
                     fmtInt(c.open),
@@ -636,7 +741,7 @@ export async function ReportDocument({
                 <DataTable
                   headers={[t("clients.colClient"), t("clients.colOnTime"), t("clients.colOverdue"), t("clients.colOpen")]}
                   rows={facts.clients.bestClients.map((c) => [
-                    c.name,
+                    <EntityCell key="n" href={c.clientId ? `/clients/${c.clientId}` : null} label={c.name} />,
                     pct(c.onTimePct),
                     fmtInt(c.overdue),
                     fmtInt(c.open),
@@ -663,7 +768,11 @@ export async function ReportDocument({
             <DataTable
               headers={[t("renewals.colProject"), t("renewals.colClient"), t("renewals.colDate"), t("renewals.colDays")]}
               rows={facts.renewals.next90.map((r) => [
-                <span key="p" className="font-medium">{r.project}</span>,
+                <EntityCell
+                  key="p"
+                  href={r.projectId ? `/projects/${r.projectId}` : null}
+                  label={r.project}
+                />,
                 r.client,
                 <span key="d" dir="ltr">{r.date}</span>,
                 fmtInt(r.daysUntil),
@@ -675,6 +784,32 @@ export async function ReportDocument({
           )}
         </Section>
       ) : null}
+
+      {/* ── Method note ───────────────────────────────────────────────────
+          The reliability limits the system already knows about. These are fed
+          to the narrative model as hard constraints; printing them too keeps a
+          metric the system distrusts from reading as solid on paper. */}
+      <section className="report-section rounded-2xl border border-soft bg-soft-1/25 p-5">
+        <h2 className="mb-2 text-sm font-bold">{t("methodNote.title")}</h2>
+        <p className="mb-2 text-xs leading-6 text-muted-foreground">
+          {t("methodNote.body")}
+        </p>
+        {facts.dataQualityCaveats.length > 0 ? (
+          <>
+            <p className="mt-3 mb-1 text-xs font-semibold">{t("methodNote.caveatsTitle")}</p>
+            <ul className="space-y-1">
+              {facts.dataQualityCaveats.map((c, i) => (
+                <li key={i} className="flex gap-2 text-xs leading-6 text-muted-foreground">
+                  <span className="mt-2 size-1 shrink-0 rounded-full bg-amber" />
+                  {c}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="text-xs text-status-success">{t("methodNote.noCaveats")}</p>
+        )}
+      </section>
     </div>
   );
 }

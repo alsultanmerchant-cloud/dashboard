@@ -221,6 +221,10 @@ interface StuckRow {
   title: string | null;
   stage: string;
   overdue: boolean;
+  // The stage's SLA limit from sla_rules, or null when the template defines no
+  // limit for it (جديد / قيد التنفيذ). Null ⇒ the task can NEVER be reported as
+  // "stuck" — only a missed deadline can make it a case.
+  stage_sla_minutes: number | null;
   days_in_stage: number | null;
   last_action: string | null;
   // How many actions (notes / stage moves) the RESPONSIBLE owner logged on THIS
@@ -503,7 +507,10 @@ async function _getAccountabilityCases(
   // ---- EXECUTION: overdue / stuck owned tasks ----
   const stuckByEmp = new Map<string, StuckRow[]>();
   for (const s of stuck) {
-    if (!s.overdue && (s.days_in_stage ?? 0) < STUCK_MIN_DAYS) continue;
+    // Mirrors stuckSql's two arms. A stage with no SLA can only qualify by
+    // missing its DEADLINE — never by sitting, however long it sits.
+    const stuckEligible = s.stage_sla_minutes !== null;
+    if (!s.overdue && (!stuckEligible || (s.days_in_stage ?? 0) < STUCK_MIN_DAYS)) continue;
     const arr = stuckByEmp.get(s.employee_id);
     if (arr) arr.push(s);
     else stuckByEmp.set(s.employee_id, [s]);
@@ -517,7 +524,8 @@ async function _getAccountabilityCases(
     let anyOverdue = false;
     for (const s of top) {
       if (s.overdue) anyOverdue = true;
-      if (s.overdue || (s.days_in_stage ?? 0) >= STUCK_MATERIAL_DAYS) b.material = true;
+      if (s.overdue || (s.stage_sla_minutes !== null && (s.days_in_stage ?? 0) >= STUCK_MATERIAL_DAYS))
+        b.material = true;
       if (s.task_code) b.execTaskCodes.add(s.task_code);
       if (s.client_id) b.clientIds.add(s.client_id);
       if (s.client_name) b.clients.add(s.client_name);
@@ -536,7 +544,13 @@ async function _getAccountabilityCases(
       b.proof.push({
         stream: "execution",
         kind: "overdue_task",
-        text: `${projectName} — ${(s.title ?? "").trim() || "بدون عنوان"}${clientTag} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا${s.overdue ? " ومتأخرة عن موعدها" : ""} — ${actionTxt}.`,
+        // Lead with the failure that actually qualified the task. A missed
+        // DEADLINE is the finding; how long it has sat is context. Only say
+        // «عالقة» when the stage has a defined limit it has overstayed —
+        // otherwise a long-lived execution stage reads as a fault when it isn't.
+        text: s.overdue
+          ? `${projectName} — ${(s.title ?? "").trim() || "بدون عنوان"}${clientTag} تجاوزت موعد تسليمها وما زالت في ${stageAr(s.stage)} منذ ${d} يومًا — ${actionTxt}.`
+          : `${projectName} — ${(s.title ?? "").trim() || "بدون عنوان"}${clientTag} عالقة في ${stageAr(s.stage)} منذ ${d} يومًا رغم أن مهلة المرحلة ${slaLabel(s.stage_sla_minutes)} — ${actionTxt}.`,
         quote: null,
         href: `/tasks/${s.task_id}`,
         taskCode: s.task_code,
@@ -915,6 +929,15 @@ function stageAr(s: string): string {
 
 // Minimal Arabic count phrasing: 1 → "إجراء واحد", 2 → "إجراءين", 3-10 →
 // "N إجراءات", 11+ → "N إجراء". Enough for the small counts we show.
+// The stage's configured limit, in the units a reader thinks in. Only ever
+// called for SLA-bearing stages (the null case is a defensive fallback).
+function slaLabel(minutes: number | null): string {
+  if (minutes === null) return "غير محدّدة";
+  if (minutes < 60) return `${minutes} دقيقة`;
+  const hours = minutes / 60;
+  return Number.isInteger(hours) ? `${hours} ساعة عمل` : `${hours.toFixed(1)} ساعة عمل`;
+}
+
 function arCount(n: number, one: string, two: string, few: string): string {
   if (n === 1) return `${one} واحد`;
   if (n === 2) return two;
@@ -982,7 +1005,8 @@ with attrib as (
      and public.accountability_role_of_position(pos.role) is not null
 )
 select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as stage,
-       (t.stage not in ('done','new') and t.planned_date < current_date) as overdue,
+       (t.stage <> 'done' and t.planned_date < current_date) as overdue,
+       sla.max_minutes as stage_sla_minutes,
        (current_date - h.entered_at::date) as days_in_stage,
        max(tc.created_at)::date as last_action,
        count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage,
@@ -999,14 +1023,25 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
   ) h on true
   left join task_comments tc
     on tc.task_id = t.id and tc.actor_employee_id = a.employee_id
+  left join sla_rules sla
+    on sla.organization_id = t.organization_id and sla.stage_key = t.stage::text
  where a.position_role = public.accountable_position_for_stage(t.stage_owner_positions, t.stage::text)
-   and t.stage not in ('done','new')
+   and t.stage <> 'done'
    and (
+     -- Arm 1 — the DEADLINE was missed. True for any stage, including a
+     -- not-started (new) task nobody picked up (0257/0258).
      (t.planned_date < current_date)
-     or (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS}
+     -- Arm 2 — "stuck in a stage". Only meaningful where the template DEFINES a
+     -- limit for the stage: a task can only overstay a limit that exists. Stages
+     -- with no sla_rules row (جديد / قيد التنفيذ) are never called stuck — an
+     -- execution stage legitimately spans the client's whole month, so "عالقة
+     -- منذ 25 يومًا" on a monthly reporting task was a false alarm, not a
+     -- finding. Same rule as مراحل متأخرة on the team table.
+     or (sla.max_minutes is not null
+         and (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS})
    )
  group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at,
-          cl.id, cl.merged_into_client_id, cl.name, pj.name`;
+          sla.max_minutes, cl.id, cl.merged_into_client_id, cl.name, pj.name`;
 }
 
 // Live contract value per CANONICAL client. Contracts sit on the sheet twin of

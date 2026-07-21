@@ -19,25 +19,39 @@ interface EditsDrill {
   employeeId: string;
   employeeName: string;
   metric: EditsMetric;
+  editsCompleted?: number;
+  pendingEdits?: number;
+  deliveredCount?: number;
 }
 
 function editsDrillView(drill: EditsDrill, all: DrillTask[]): Omit<DrillView, "loading" | "error"> {
   const edits = all.filter((t) => t.kind === "edit");
+  const pending = all.filter((t) => t.kind === "pending");
   switch (drill.metric) {
     case "edits":
-      return { title: `تعديلات العميل المُنجزة — ${drill.employeeName}`, subtitle: "فترات تعديلات العميل التي أُغلقت في الفترة", valueKind: "minutes", tasks: edits };
+      return {
+        title: `تعديلات العميل — ${drill.employeeName}`,
+        subtitle: `${drill.editsCompleted ?? edits.length} خرج من التعديل ووصل Done/Cancelled خلال الفترة + ${drill.pendingEdits ?? pending.length} لايف الآن`,
+        valueKind: "minutes",
+        tasks: [...edits, ...pending],
+      };
     case "slaBreach":
       return { title: `تجاوزت مهلة SLA — ${drill.employeeName}`, subtitle: "تعديلات تجاوز زمنها الحدّ المسموح", valueKind: "minutes", tasks: edits.filter((t) => t.flag) };
     case "editRate":
       return {
-        title: `التسليمات ومنها ما رجع بتعديل — ${drill.employeeName}`,
-        subtitle: "كل تاسك سلّمه في الفترة؛ المميّز رجع من العميل بتعديل قبل تسليمه",
-        valueKind: "flag",
-        flagLabel: "رجع بتعديل",
-        tasks: all.filter((t) => t.kind === "delivered"),
+        title: `نسبة تعديلات العميل — ${drill.employeeName}`,
+        subtitle: `${drill.editsCompleted ?? 0} تعديل اكتمل ÷ ${drill.deliveredCount ?? 0} تاسك اتسلّم في الفترة`,
+        valueKind: "minutes",
+        tasks: edits,
       };
     case "pending":
-      return { title: `قيد التعديل الآن — ${drill.employeeName}`, subtitle: "جالسة في مرحلة تعديلات العميل حتى الآن", valueKind: "minutes", tasks: all.filter((t) => t.kind === "pending") };
+      return {
+        title: `قيد التعديل الآن — ${drill.employeeName}`,
+        subtitle: "جالسة في مرحلة تعديلات العميل حتى الآن",
+        valueKind: "minutes",
+        durationStyle: "odoo",
+        tasks: all.filter((t) => t.kind === "pending"),
+      };
   }
 }
 
@@ -56,6 +70,27 @@ function formatMinutes(min: number | null, t: ReturnType<typeof useTranslations>
   const h = m / 60;
   if (h < 8) return t("fmt.hours", { n: Math.round(h * 10) / 10 });
   return t("fmt.workdays", { n: Math.round((h / 8) * 10) / 10 });
+}
+
+// Rwasem/Odoo renders accumulated working hours in 24-hour `d` chunks. Thus
+// 83h 29m appears there as 3d 11h 29m, while the SLA view calls the same amount
+// 10.4 eight-hour workdays. Use the Odoo notation for the live pending clock so
+// the two screens can be compared without looking like contradictory data.
+// Wrap an LTR token (e.g. "3d 17h 9m") in Unicode isolate marks so it renders
+// intact inside an RTL label — LRI (U+2066) … PDI (U+2069). Without it, the
+// bidi algorithm splits the leading digit off the Arabic «الأقدم:» prefix.
+function ltrIsolate(s: string): string {
+  return `⁦${s}⁩`;
+}
+
+function formatOdooDuration(min: number): string {
+  const total = Math.max(0, Math.round(min));
+  const days = Math.floor(total / (24 * 60));
+  const hours = Math.floor((total % (24 * 60)) / 60);
+  const minutes = total % 60;
+  return [days > 0 ? `${days}d` : null, hours > 0 || days > 0 ? `${hours}h` : null, `${minutes}m`]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function ClientEditsSection({
@@ -80,13 +115,12 @@ export function ClientEditsSection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const drillEmployeeId = drill?.employeeId;
 
   useEffect(() => {
-    if (!drill) return;
+    if (!drillEmployeeId) return;
     let active = true;
-    setLoading(true);
-    setError(null);
-    getClientEditsDetailAction(drill.employeeId, range.from, range.to)
+    getClientEditsDetailAction(drillEmployeeId, range.from, range.to)
       .then((res) => {
         if (!active) return;
         if (res.ok) setTasks(res.tasks);
@@ -105,11 +139,25 @@ export function ClientEditsSection({
     return () => {
       active = false;
     };
-  }, [drill?.employeeId, range.from, range.to, attempt]);
+  }, [drillEmployeeId, range.from, range.to, attempt]);
 
   const view: DrillView | null = drill ? { ...editsDrillView(drill, tasks), loading, error } : null;
-  const openDrill = (employeeId: string, employeeName: string, metric: EditsMetric) =>
-    setDrill({ employeeId, employeeName, metric });
+  const openDrill = (
+    employeeId: string,
+    employeeName: string,
+    metric: EditsMetric,
+    counts?: Pick<EditsDrill, "editsCompleted" | "pendingEdits" | "deliveredCount">,
+  ) => {
+    setTasks([]);
+    setLoading(true);
+    setError(null);
+    setDrill({ employeeId, employeeName, metric, ...counts });
+  };
+  const retryDrill = () => {
+    setLoading(true);
+    setError(null);
+    setAttempt((a) => a + 1);
+  };
 
   // Client edits span every department that owns the stage in a task template,
   // not just the supporting ones — so the department filter is the lens.
@@ -122,7 +170,7 @@ export function ClientEditsSection({
       const key = r.department ?? NA;
       const cur = counts.get(key) ?? { people: 0, edits: 0 };
       cur.people += 1;
-      cur.edits += r.editsCompleted;
+      cur.edits += r.editsTotal;
       counts.set(key, cur);
     }
     return [...counts.entries()].sort((a, b) => b[1].edits - a[1].edits);
@@ -196,7 +244,15 @@ export function ClientEditsSection({
                   <thead>
                     <tr className="border-b border-border text-[11px] text-muted-foreground">
                       <th className="p-2 text-start font-medium">{t("clientEdits.col.owner")}</th>
-                      <th className="p-2 text-center font-medium">{t("clientEdits.col.edits")}</th>
+                      <th className="p-2 text-center font-medium">
+                        <span className="inline-flex items-center gap-1">
+                          {t("clientEdits.col.edits")}
+                          <MetricInfo
+                            text={t("clientEdits.tooltip.edits")}
+                            label={t("clientEdits.col.edits")}
+                          />
+                        </span>
+                      </th>
                       <th className="p-2 text-center font-medium">
                         <span className="inline-flex items-center gap-1">
                           {t("clientEdits.col.medianTime")}
@@ -264,9 +320,20 @@ export function ClientEditsSection({
                           </td>
                           <td className="p-2 text-center tabular-nums">
                             <DrillNumber
-                              value={row.editsCompleted}
-                              onClick={() => openDrill(row.employeeId, row.fullName, "edits")}
+                              value={row.editsTotal}
+                              onClick={() =>
+                                openDrill(row.employeeId, row.fullName, "edits", {
+                                  editsCompleted: row.editsCompleted,
+                                  pendingEdits: row.pendingEdits,
+                                })
+                              }
                             />
+                            <div className="text-[10px] tabular-nums text-muted-foreground">
+                              {t("clientEdits.editsBreakdown", {
+                                done: row.editsCompleted,
+                                live: row.pendingEdits,
+                              })}
+                            </div>
                           </td>
                           <td className="p-2 text-center">
                             {/* Beside a real SLA, a median is a verdict, not trivia. */}
@@ -303,8 +370,13 @@ export function ClientEditsSection({
                             ) : (
                               <>
                                 <DrillNumber
-                                  value={row.deliveredCount}
-                                  onClick={() => openDrill(row.employeeId, row.fullName, "editRate")}
+                                  value={row.editsCompleted}
+                                  onClick={() =>
+                                    openDrill(row.employeeId, row.fullName, "editRate", {
+                                      editsCompleted: row.editsCompleted,
+                                      deliveredCount: row.deliveredCount,
+                                    })
+                                  }
                                   className={cn(
                                     "tabular-nums",
                                     row.editRate >= 30 ? "font-semibold text-amber" : "text-muted-foreground",
@@ -314,7 +386,7 @@ export function ClientEditsSection({
                                 </DrillNumber>
                                 <div className="text-[10px] tabular-nums text-muted-foreground">
                                   {t("clientEdits.editRateDetail", {
-                                    k: row.deliveredEditedCount,
+                                    k: row.editsCompleted,
                                     n: row.deliveredCount,
                                   })}
                                 </div>
@@ -328,9 +400,19 @@ export function ClientEditsSection({
                               className="tabular-nums"
                             />
                             {row.oldestPendingBusinessMinutes !== null && row.pendingEdits > 0 && (
-                              <div className="text-[10px] tabular-nums text-muted-foreground">
-                                {t("clientEdits.oldestPending", {
+                              <div
+                                className="text-[10px] tabular-nums text-muted-foreground"
+                                title={t("clientEdits.tooltip.pendingDuration", {
                                   v: formatMinutes(row.oldestPendingBusinessMinutes, t),
+                                })}
+                              >
+                                {/* «الأقدم:» is RTL, the duration is an LTR token
+                                    (3d 17h 9m). Wrapping the value in LRI…PDI
+                                    isolate marks keeps it intact under RTL without
+                                    forcing the whole line dir="ltr" (which split
+                                    the leading digit off — see the bug). */}
+                                {t("clientEdits.oldestPending", {
+                                  v: ltrIsolate(formatOdooDuration(row.oldestPendingBusinessMinutes)),
                                 })}
                               </div>
                             )}
@@ -345,7 +427,7 @@ export function ClientEditsSection({
           </div>
         )}
       </CardContent>
-      {view && <TaskDrillSheet view={view} onClose={() => setDrill(null)} onRetry={() => setAttempt((a) => a + 1)} />}
+      {view && <TaskDrillSheet view={view} onClose={() => setDrill(null)} onRetry={retryDrill} />}
     </Card>
   );
 }

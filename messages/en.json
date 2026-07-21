@@ -2414,7 +2414,12 @@
       "highRisk": "High-risk projects (≥{threshold} overdue)",
       "overdue": "Overdue tasks",
       "onTime": "On-time rate",
-      "clientChanges": "Client changes"
+      "clientChanges": "Client changes",
+      "basisDuringPeriod": "during period",
+      "basisAsOfPeriodEnd": "as of period end",
+      "asOfToday": "As of today: {value}",
+      "openToday": "Open today: {value}",
+      "completedCount": "of {count} delivered tasks"
     },
     "scores": {
       "delivery": "Delivery",
@@ -2514,6 +2519,12 @@
       "colDate": "Renewal date",
       "colDays": "In (days)",
       "empty": "No renewals in the next 90 days."
+    },
+    "methodNote": {
+      "title": "Method & data limits",
+      "body": "Every number here is computed by the system from live operational sources (Odoo, contracts, WhatsApp threads); the written analysis only words those numbers — the model never creates one. Figures marked “during period” measure what happened between the report dates; “as of today” figures are a snapshot taken at generation time.",
+      "caveatsTitle": "Limits to keep in mind",
+      "noCaveats": "No data-quality limits detected for this period."
     }
   },
   "FinancePage": {
@@ -2964,22 +2975,25 @@
       "slaNote": "Client-edit SLA: {v} (from SLA settings, business hours). Breaches are counted as tasks.",
       "col": {
         "owner": "Owner",
-        "edits": "Edits",
+        "edits": "Total",
         "medianTime": "Median edit time",
         "slaBreach": "Over SLA",
         "editRate": "Edit rate",
         "pending": "Pending"
       },
-      "editRateDetail": "{k} of {n} delivered",
+      "editsBreakdown": "{done} completed + {live} live",
+      "editRateDetail": "{k} completed edits ÷ {n} deliveries",
       "slaBreachDetail": "of {n} edits",
       "oldestPending": "Oldest: {v}",
       "tooltip": {
-        "medianTime": "Median business-minutes a task sat in client_changes, for edits closed in the range. Median because dwell is right-skewed.",
-        "slaBreach": "Tasks whose edit time exceeded the client_changes SLA configured in settings.",
-        "editRate": "Of the tasks he actually delivered (reached done) in the range, the share that came back as a client edit first. Numerator and denominator are the same population, so it cannot exceed 100%.",
-        "pending": "Tasks sitting in client_changes right now under his ownership."
+        "edits": "Total = tasks that exited client_changes and reached Done/Cancelled within the same range + tasks live in the stage now. A late Done does not pull an earlier edit into the range.",
+        "medianTime": "Median edit time for tasks that both exited client_changes and reached Done/Cancelled within the selected range.",
+        "slaBreach": "Of tasks that exited client_changes and reached Done/Cancelled within the same range, how many exceeded the stage SLA.",
+        "editRate": "Tasks that exited client_changes and reached Done/Cancelled in the range ÷ all tasks that reached Done/Cancelled in the range. Live edits are excluded from the rate.",
+        "pending": "Tasks sitting in client_changes right now under his ownership. This is a live count and is not limited by the selected range's start date.",
+        "pendingDuration": "Matches Odoo notation: each d is 24 accumulated working hours. The same duration is {v} when one workday is treated as 8 hours."
       },
-      "deptChipTitle": "{people} people · {edits} edits in range"
+      "deptChipTitle": "{people} people · {edits} completed + live edits"
     }
   },
   "CustomFilter": {
@@ -4043,9 +4057,10 @@
         "missingTeam": "No team group",
         "linkClient": "Pick client group…",
         "linkTeam": "Pick team group…",
-        "linkHint": "Link a group to the project right here — pick a WhatsApp group for each missing slot.",
+        "linkHint": "Pick the client (contracts are the source of truth), then a WhatsApp group for each missing slot.",
         "noGroups": "No groups",
-        "linking": "Linking…"
+        "linking": "Linking…",
+        "selectClient": "Pick client (from contracts)…"
       },
       "numbersCovered": "{n} numbers"
     },

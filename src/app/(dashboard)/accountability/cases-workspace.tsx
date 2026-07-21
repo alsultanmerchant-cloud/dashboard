@@ -535,15 +535,27 @@ export function AdvicePanel({ employeeId }: { employeeId: string }) {
 export function LedgerStrip({
   led,
   silence,
+  peerMedianActionsPeriod,
 }: {
   led: CaseLedger;
   // When provided (the /accountability team modal), silence + the activity
-  // heatmap follow the SELECTED PERIOD and count archived-task work; otherwise
-  // they fall back to the case ledger's fixed 14-day, live-only view.
+  // heatmap + the action count follow the SELECTED PERIOD; otherwise they fall
+  // back to the case ledger's fixed 14-day / 30-day live-only view.
   silence?: AccountabilitySilence | null;
+  // Team median of actionsInPeriod for the same period. Only meaningful
+  // alongside `silence` — comparing a 7-day count to a 30-day median would
+  // manufacture a "below the team" signal out of nothing.
+  peerMedianActionsPeriod?: number;
 }) {
   const openDelta = led.openTasks - led.peerMedianOpen;
-  const actionDelta = led.actions30d - led.peerMedianActions;
+  // إجراءات must obey the period filter the user picked (it was pinned to 30
+  // days while أيام صامتة next to it followed the filter — same strip, two
+  // different windows). Definition is unchanged: authored actions on
+  // non-archived tasks, identical to نبض الفريق.
+  const actions = silence ? silence.actionsInPeriod : led.actions30d;
+  const peerActions = silence ? peerMedianActionsPeriod ?? 0 : led.peerMedianActions;
+  const actionDelta = actions - peerActions;
+  const actionsLabel = silence ? `إجراءات (${silence.windowDays}ي)` : "إجراءات ٣٠ي";
   const silentDays = silence ? silence.silentDays : led.silentWorkingDays14;
   const silentLabel = `أيام صامتة (${silence ? `${silence.windowDays}ي` : "١٤ي"})`;
   const daily = silence ? silence.dailyActivity : led.dailyActivity;
@@ -573,10 +585,12 @@ export function LedgerStrip({
           explain={led.onTimeRate === null ? "لا توجد مراحل كافية لقياس الالتزام." : "نسبة مراحله المُنجزة داخل حدّ الـSLA خلال آخر ٣٠ يومًا."}
         />
         <LedgerCell
-          label="إجراءات ٣٠ي"
-          value={led.actions30d}
+          label={actionsLabel}
+          value={actions}
           sub={peerSub(actionDelta)}
-          explain={`الإجراءات التي سجّلها فعليًا (تحريك مراحل + ملاحظات) خلال ٣٠ يومًا على مهام غير مؤرشفة — نفس تعريف نبض الفريق. وسيط الفريق ${led.peerMedianActions}.`}
+          explain={`الإجراءات التي سجّلها فعليًا (تحريك مراحل + ملاحظات) ${
+            silence ? "خلال الفترة المحددة" : "خلال ٣٠ يومًا"
+          } على مهام غير مؤرشفة — نفس تعريف نبض الفريق. وسيط الفريق ${peerActions}.`}
         />
         <LedgerCell
           label={silentLabel}

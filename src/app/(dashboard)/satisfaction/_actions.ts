@@ -700,6 +700,75 @@ export async function addWaGroupProjectAction(input: {
   return { ok: true };
 }
 
+// ---- Stamp the (contract) client onto every group serving a project -------
+// The coverage panel lets the operator set the client for a project directly;
+// contracts are the source of truth for client identity, so we write the chosen
+// client onto ALL wa_group_links currently linked to that project (via the 0203
+// join) and backfill their messages. A no-op when the project has no groups yet
+// — in that case the coverage row's linkGroup carries the client onto the first
+// group linked. Passing clientId=null clears the client from those groups.
+const SetProjectClientSchema = z.object({
+  projectId: z.string().uuid(),
+  clientId: z.string().uuid().nullable(),
+});
+
+export async function setProjectClientAction(input: {
+  projectId: string;
+  clientId: string | null;
+}): Promise<MapState> {
+  let session;
+  try {
+    session = await requirePermission("clients.manage");
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  const parsed = SetProjectClientSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
+  const { projectId, clientId } = parsed.data;
+
+  // Which group links serve this project?
+  const { data: gpRows, error: gpErr } = await supabaseAdmin
+    .from("wa_group_projects")
+    .select("group_link_id")
+    .eq("organization_id", session.orgId)
+    .eq("project_id", projectId);
+  if (gpErr) return { error: gpErr.message };
+  const linkIds = [...new Set((gpRows ?? []).map((r) => r.group_link_id as string))];
+  if (linkIds.length === 0) return { ok: true }; // no groups yet — nothing to stamp
+
+  const { data: links, error: upErr } = await supabaseAdmin
+    .from("wa_group_links")
+    .update({ client_id: clientId, updated_at: new Date().toISOString() })
+    .eq("organization_id", session.orgId)
+    .in("id", linkIds)
+    .select("chat_id");
+  if (upErr) return { error: upErr.message };
+
+  // Backfill the affected chats' messages so they flow into the client's
+  // transcript immediately (mirrors mapWaGroupAction).
+  const chatIds = [...new Set((links ?? []).map((l) => l.chat_id as string))];
+  if (chatIds.length > 0) {
+    await supabaseAdmin
+      .from("wa_messages")
+      .update({ client_id: clientId })
+      .eq("organization_id", session.orgId)
+      .in("chat_id", chatIds);
+  }
+
+  await logAudit({
+    organizationId: session.orgId,
+    actorUserId: session.userId,
+    action: "wa_group.project_client_set",
+    entityType: "project",
+    entityId: projectId,
+    metadata: { projectId, clientId, linkIds },
+  });
+
+  revalidatePath("/satisfaction/groups");
+  revalidatePath("/satisfaction");
+  return { ok: true };
+}
+
 // ---- Auto-link groups → projects by name (high-confidence only) -----------
 export type AutoLinkState = {
   ok?: true;

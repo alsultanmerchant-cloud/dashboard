@@ -27,6 +27,7 @@ import {
   mapWaGroupAction,
   setWaGroupProjectsAction,
   addWaGroupProjectAction,
+  setProjectClientAction,
   syncWaGroupsAction,
   autoLinkWaProjectsAction,
   refreshWaMembersAction,
@@ -156,6 +157,7 @@ export function WaGroupsWorkspace({
             value: l.chatId,
             label: l.chatName ?? l.chatId,
           }))}
+          clientOptions={options}
           t={t}
           onLinked={() => router.refresh()}
         />
@@ -518,11 +520,13 @@ function SuggestionRow({
 function CoverageSection({
   gaps,
   groupOptions,
+  clientOptions,
   t,
   onLinked,
 }: {
   gaps: ProjectCoverageGap[];
   groupOptions: { value: string; label: string }[];
+  clientOptions: { value: string; label: string }[];
   t: ReturnType<typeof useTranslations>;
   onLinked: () => void;
 }) {
@@ -541,6 +545,7 @@ function CoverageSection({
               key={g.projectId}
               g={g}
               groupOptions={groupOptions}
+              clientOptions={clientOptions}
               t={t}
               onLinked={onLinked}
             />
@@ -554,21 +559,44 @@ function CoverageSection({
 function CoverageRow({
   g,
   groupOptions,
+  clientOptions,
   t,
   onLinked,
 }: {
   g: ProjectCoverageGap;
   groupOptions: { value: string; label: string }[];
+  clientOptions: { value: string; label: string }[];
   t: ReturnType<typeof useTranslations>;
   onLinked: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Contracts are the source of truth for a client's identity, so the operator
+  // picks the client here rather than us auto-stamping the project's Odoo
+  // client. Initialise from the client actually stamped on the project's linked
+  // group(s) — empty when none is set yet, so the picker tells the truth.
+  const [clientId, setClientId] = useState(g.linkedClientId ?? "");
+
+  // Persist the chosen client onto the project's already-linked groups. A no-op
+  // server-side when no groups exist yet — in that case linkGroup carries the
+  // client onto the first group linked below.
+  const changeClient = (next: string) => {
+    setClientId(next);
+    setError(null);
+    startTransition(async () => {
+      const res = await setProjectClientAction({
+        projectId: g.projectId,
+        clientId: next || null,
+      });
+      if (res.error) setError(res.error);
+      else onLinked();
+    });
+  };
 
   // Link the chosen WhatsApp group to this project, stamping it with the
-  // project's client + the slot's kind so it satisfies coverage immediately.
-  // Additive (0203): a shared group can cover several projects, so this ADDS
-  // the project link instead of re-pointing the group's single project.
+  // operator-selected client + the slot's kind so it satisfies coverage
+  // immediately. Additive (0203): a shared group can cover several projects, so
+  // this ADDS the project link instead of re-pointing the group's single project.
   const linkGroup = (chatId: string, kind: GroupKind) => {
     if (!chatId) return;
     setError(null);
@@ -576,7 +604,7 @@ function CoverageRow({
       const res = await addWaGroupProjectAction({
         chatId,
         projectId: g.projectId,
-        ...(g.clientId ? { clientId: g.clientId } : {}),
+        ...(clientId ? { clientId } : {}),
         groupKind: kind,
       });
       if (res.error) setError(res.error);
@@ -596,6 +624,25 @@ function CoverageRow({
         {g.clientName && <p className="text-xs text-muted-foreground">{g.clientName}</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {/* Client picker — contracts are the source of truth, so the operator
+            confirms/sets the client that the linked group belongs to. The
+            project stays in this list until a client is set (red icon). */}
+        <div className="flex items-center gap-1.5">
+          <Users className={cn("size-3.5", g.hasClient ? "text-cc-green" : "text-cc-red")} />
+          <div className="min-w-[200px]">
+          <SearchableSelect
+            value={clientId}
+            onValueChange={changeClient}
+            options={clientOptions}
+            placeholder={t("groups.coverage.selectClient")}
+            searchPlaceholder={t("searchClient")}
+            emptyMessage={t("noClients")}
+            ariaLabel={t("groups.col.client")}
+            clearable
+            clearLabel={t("groups.unmapped")}
+          />
+          </div>
+        </div>
         {!g.hasClientGroup && (
           <div className="flex items-center gap-1.5">
             <MessageSquare className="size-3.5 text-cc-red" />

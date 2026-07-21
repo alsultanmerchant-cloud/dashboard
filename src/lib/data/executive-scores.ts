@@ -378,15 +378,15 @@ async function _getExecutiveScores(
     revision_count: number | null;
   };
   const openTasks = (openTasksRes.data ?? []) as unknown as OpenTask[];
-  // Canonical overdue (migration 0219): open + non-archived + a passed deadline,
-  // EXCLUDING the `new` (not-started) stage — those are ordinary slip, not
-  // delivery distress. Rows are already open + non-archived (query above), so we
-  // test the date plus the stage. Boundary is Riyadh "today", matching the
-  // `tasks.is_overdue` column that the /tasks?filter=overdue drill-down reads, so
-  // the danger-card count and the drill-down list agree.
+  // Canonical overdue (migration 0257): open + non-archived + a passed deadline.
+  // A not-started (`new`) task past its deadline counts too — 0219 exempted it as
+  // "ordinary slip"; the team rejected that (un-started late work is the worst
+  // delay) and Rwasem's own filter counts it. Rows are already open + non-archived
+  // (query above), so we only test the date. Boundary is Riyadh "today", matching
+  // the `tasks.is_overdue` column that /tasks?filter=overdue reads, so the
+  // danger-card count and the drill-down list agree.
   const todayStr = riyadhTodayIso();
-  const isOverdue = (t: OpenTask) =>
-    t.stage !== "new" && t.planned_date != null && t.planned_date < todayStr;
+  const isOverdue = (t: OpenTask) => t.planned_date != null && t.planned_date < todayStr;
   const openCount = openTasks.length;
   const overdueCount = openTasks.filter(isOverdue).length;
   const blockedTasks = openTasks.filter((t) => t.hold_since !== null).length;

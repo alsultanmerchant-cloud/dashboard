@@ -303,7 +303,15 @@ async function TasksBoardSection({
         ? customFilterTaskIds.filter((id) => new Set(agentTaskIds).has(id))
         : agentTaskIds)
     : customFilterTaskIds;
-  const effectiveFilters = { ...taskFilters, customFilterTaskIds: scopedTaskIds };
+  const effectiveFilters = {
+    ...taskFilters,
+    customFilterTaskIds: scopedTaskIds,
+    // An exact report drill-down can legitimately contain work that was
+    // completed and archived after the measured event. Preserve that evidence
+    // instead of silently hiding it behind the tasks page's default live-only
+    // filter.
+    includeArchived: explicitTaskIds !== null || taskFilters.includeArchived,
+  };
 
   // Balanced kanban load: when grouping by a server-partitionable dimension,
   // fetch the newest N per column so every column is populated up front instead

@@ -2358,8 +2358,12 @@ export interface ProjectCoverageGap {
   projectCode: string | null;
   clientId: string | null;
   clientName: string | null;
+  hasClient: boolean;
   hasClientGroup: boolean;
   hasTechnicalGroup: boolean;
+  // The client actually stamped on the project's linked group(s), if any — the
+  // coverage picker reflects THIS (real state), not the project's Odoo client.
+  linkedClientId: string | null;
 }
 
 async function _getProjectGroupCoverage(
@@ -2423,8 +2427,14 @@ async function _getProjectGroupCoverage(
   const gaps: ProjectCoverageGap[] = [];
   for (const p of projects) {
     const singleActive = !!p.client_id && activeByClient.get(p.client_id) === 1;
-    let hasClient = false;
+    let hasClientGroup = false;
     let hasTech = false;
+    // A project is only fully set up once its linked groups also carry a
+    // client (contracts are the source of truth). Track whether any belonging
+    // group has a client stamped so a group linked without a client keeps the
+    // project in this list instead of silently dropping to the table below.
+    let hasClient = false;
+    let linkedClientId: string | null = null;
     for (const l of links) {
       const projSet = projSetByLink.get(l.id);
       const belongs =
@@ -2434,10 +2444,16 @@ async function _getProjectGroupCoverage(
           !!l.client_id &&
           l.client_id === p.client_id);
       if (!belongs) continue;
-      if (l.group_kind === "client") hasClient = true;
+      if (l.client_id) {
+        hasClient = true;
+        // Prefer the client group's client; otherwise take the first seen.
+        if (l.group_kind === "client" || linkedClientId == null)
+          linkedClientId = l.client_id;
+      }
+      if (l.group_kind === "client") hasClientGroup = true;
       else if (l.group_kind === "technical") hasTech = true;
     }
-    if (hasClient && hasTech) continue;
+    if (hasClient && hasClientGroup && hasTech) continue;
     const c = Array.isArray(p.client) ? p.client[0] : p.client;
     gaps.push({
       projectId: p.id,
@@ -2446,17 +2462,16 @@ async function _getProjectGroupCoverage(
       clientId: p.client_id,
       clientName:
         (p.client_id ? displayNames.get(p.client_id) : null) ?? c?.name ?? null,
-      hasClientGroup: hasClient,
+      hasClient,
+      hasClientGroup,
       hasTechnicalGroup: hasTech,
+      linkedClientId,
     });
   }
-  // Worst first: missing both, then missing one.
-  gaps.sort(
-    (a, b) =>
-      Number(a.hasClientGroup) +
-      Number(a.hasTechnicalGroup) -
-      (Number(b.hasClientGroup) + Number(b.hasTechnicalGroup)),
-  );
+  // Worst first: fewest of the three slots filled (client + both groups).
+  const filled = (g: ProjectCoverageGap) =>
+    Number(g.hasClient) + Number(g.hasClientGroup) + Number(g.hasTechnicalGroup);
+  gaps.sort((a, b) => filled(a) - filled(b));
   return gaps;
 }
 export const getProjectGroupCoverage = cache(_getProjectGroupCoverage);

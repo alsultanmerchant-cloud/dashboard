@@ -1,12 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Building2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Search,
   ShieldCheck,
   Users,
@@ -94,11 +92,11 @@ function metricDrillView(
     case "open":
       return { title: `المهام المفتوحة — ${name}`, subtitle: "كل المهام المفتوحة المسندة إليه الآن (لايف)", valueKind: "flag", flagLabel: "متأخرة", tasks };
     case "overdue":
-      return { title: `المهام المتأخرة — ${name}`, subtitle: "مفتوحة وتجاوزت موعد التسليم اليوم، باستثناء «جديد» (لايف)", valueKind: "none", tasks };
+      return { title: `المهام المتأخرة — ${name}`, subtitle: "مفتوحة وتجاوزت موعد التسليم اليوم، بما فيها «جديد» (لايف)", valueKind: "none", tasks };
     case "totalStages":
-      return { title: `إجمالي المراحل — ${name}`, subtitle: "المراحل التي كان مسؤولاً عنها في الفترة — كل مرحلة على حدة", valueKind: "flag", flagLabel: "متأخرة", tasks };
+      return { title: `إجمالي المراحل — ${name}`, subtitle: "المراحل التي كان مسؤولاً عنها في الفترة ولها مهلة SLA — كل مرحلة على حدة", valueKind: "minutes", flagLabel: "تجاوزت المهلة", tasks };
     case "lateStages":
-      return { title: `مراحل متأخرة — ${name}`, subtitle: "مراحل فات فيها موعد التسليم وهو مسؤول عنها في الفترة", valueKind: "none", tasks };
+      return { title: `مراحل متأخرة — ${name}`, subtitle: "مراحل تجاوز فيها مهلة المرحلة (SLA) وهو مسؤول عنها — لا علاقة لها بموعد تسليم المهمة", valueKind: "minutes", tasks };
   }
 }
 
@@ -199,6 +197,18 @@ export function TeamWorkspace({
     const critical = roster.employees.filter((e) => e.severity === "critical").length;
     return { total: roster.employees.length, withCases, critical, depts: roster.departments.length };
   }, [roster]);
+
+  // Team median of period-scoped actions, so the modal's "vs الفريق" delta
+  // compares like with like. The ledger's own peerMedianActions is a fixed
+  // 30-day figure — pairing it with a 7-day count would invent a shortfall.
+  const peerMedianActionsPeriod = useMemo(() => {
+    const vals = roster.employees
+      .map((e) => e.silence.actionsInPeriod)
+      .sort((a, b) => a - b);
+    if (vals.length === 0) return 0;
+    const mid = Math.floor(vals.length / 2);
+    return vals.length % 2 ? vals[mid]! : Math.round((vals[mid - 1]! + vals[mid]!) / 2);
+  }, [roster.employees]);
 
   const openEmp = openId ? roster.employees.find((e) => e.id === openId) ?? null : null;
 
@@ -313,10 +323,10 @@ export function TeamWorkspace({
                   <th className="px-3 py-2 text-center font-medium" title="إجمالي المهام المتأخرة المسندة إليه الآن (لايف)">
                     متأخرة
                   </th>
-                  <th className="px-3 py-2 text-center font-medium" title="عدد المراحل التي كان مسؤولاً عنها خلال الفترة — تُحتسب لكل مرحلة على حدة">
+                  <th className="px-3 py-2 text-center font-medium" title="عدد المراحل ذات المهلة (SLA) التي كان مسؤولاً عنها خلال الفترة — تُحتسب لكل مرحلة على حدة">
                     إجمالي المراحل
                   </th>
-                  <th className="px-3 py-2 text-center font-medium" title="المراحل التي تجاوز فيها موعد التسليم خلال الفترة — لكل مرحلة على حدة">
+                  <th className="px-3 py-2 text-center font-medium" title="المراحل التي تجاوز فيها مهلة المرحلة نفسها (SLA) — وليس موعد تسليم المهمة">
                     مراحل متأخرة
                   </th>
                   <th className="px-3 py-2 text-center font-medium">الالتزام</th>
@@ -396,6 +406,7 @@ export function TeamWorkspace({
           kase={caseByEmp.get(openEmp.id) ?? null}
           meta={caseMeta[openEmp.id] ?? null}
           range={reviewerRange}
+          peerMedianActionsPeriod={peerMedianActionsPeriod}
           onClose={() => setOpenId(null)}
         />
       )}
@@ -594,12 +605,14 @@ function EmployeeModal({
   kase,
   meta,
   range,
+  peerMedianActionsPeriod,
   onClose,
 }: {
   e: RosterEmployee;
   kase: AccountabilityCase | null;
   meta: PersistedCaseMeta | null;
   range: DashboardRange;
+  peerMedianActionsPeriod: number;
   onClose: () => void;
 }) {
   const [showAdvice, setShowAdvice] = useState(false);
@@ -721,7 +734,7 @@ function EmployeeModal({
               label="متأخرة (لايف)"
               value={e.overdueOwned}
               tone={e.overdueOwned > 0 ? "text-cc-red" : undefined}
-              explain={`من مهامه المفتوحة (${e.openTasks})، التي فات موعد تسليمها اليوم وليست في مرحلة «جديد». رقم لايف.`}
+              explain={`من مهامه المفتوحة (${e.openTasks})، التي فات موعد تسليمها اليوم — بما فيها مهام مرحلة «جديد» التي لم تبدأ أصلًا. رقم لايف.`}
             />
             <Metric
               label="الالتزام في الفترة"
@@ -735,15 +748,15 @@ function EmployeeModal({
             <Metric
               label="إجمالي المراحل"
               value={e.totalStages}
-              explain="عدد المراحل التي كان مسؤولاً عنها (حسب مالك المرحلة في القالب) ودخلها خلال الفترة — كل مرحلة تُحتسب على حدة، وتشمل المهام المؤرشفة التي وصلت «تم»."
+              explain="عدد المراحل التي كان مسؤولاً عنها (حسب مالك المرحلة في القالب) ودخلها خلال الفترة ولها مهلة SLA مُعرّفة — كل مرحلة تُحتسب على حدة، وتشمل المهام المؤرشفة التي وصلت «تم». المراحل بلا مهلة (جديد / قيد التنفيذ) لا يمكن الحكم عليها فلا تدخل هنا ولا في الالتزام."
             />
             <Metric
               label="مراحل متأخرة"
               value={e.lateStages}
               tone={e.lateStages > 0 ? "text-amber" : undefined}
-              explain={`من إجمالي ${e.totalStages} مرحلة في الفترة، التي كان موعد تسليم المهمة قد فات وهو لا يزال مسؤولاً عن مرحلتها${
+              explain={`من إجمالي ${e.totalStages} مرحلة في الفترة، التي تجاوز فيها مهلة المرحلة نفسها (SLA بدقائق العمل) وهو مسؤول عنها${
                 e.totalStages > 0 ? ` (${Math.round((e.lateStages / e.totalStages) * 100)}%)` : ""
-              }.`}
+              }. هذا تأخير في تمرير المرحلة، وليس تأخير تسليم المهمة — ذاك في عمود «متأخرة».`}
             />
             <ExplainBlock
               className="bg-card px-2 py-2.5"
@@ -781,9 +794,15 @@ function EmployeeModal({
                 ))}
               </div>
 
-              {/* Ledger + activity heatmap. Silence + heatmap follow the
-                  selected period (archived-inclusive) via the roster. */}
-              {kase.ledger && <LedgerStrip led={kase.ledger} silence={e.silence} />}
+              {/* Ledger + activity heatmap. Silence, heatmap and the action
+                  count all follow the selected period via the roster. */}
+              {kase.ledger && (
+                <LedgerStrip
+                  led={kase.ledger}
+                  silence={e.silence}
+                  peerMedianActionsPeriod={peerMedianActionsPeriod}
+                />
+              )}
 
               {/* Advice (opt-in) */}
               <div>
@@ -811,13 +830,22 @@ function EmployeeModal({
               archived-inclusive). */}
           <div className="space-y-2">
             <div className="inline-flex rounded-lg border border-border bg-soft-1/50 p-0.5 text-[11px] font-medium">
+              {/* The two tabs are different WINDOWS, not nested sets — لايف is a
+                  fixed last-30-days view of live tasks, so a 7-day الفترة
+                  المحددة legitimately shows fewer rows. The labels say the
+                  window out loud, otherwise it reads as missing evidence. */}
               {([
-                ["live", "لايف"],
-                ["period", `الفترة المحددة · ${daySpan(range.from, range.to)}ي`],
-              ] as const).map(([key, label]) => (
+                ["live", "لايف · آخر ٣٠ يومًا", "المهام الحيّة فقط خلال آخر ٣٠ يومًا — نافذة ثابتة لا تتأثّر بالفلتر أعلى الصفحة."],
+                [
+                  "period",
+                  `الفترة المحددة · ${daySpan(range.from, range.to)}ي`,
+                  "كل مرحلة كان مسؤولاً عنها خلال الفترة المحددة، بما فيها المهام المؤرشفة التي سُلِّمت. نافذة أقصر من «لايف» تعني عددًا أقل من الأدلة — هذا متوقَّع.",
+                ],
+              ] as const).map(([key, label, hint]) => (
                 <button
                   key={key}
                   type="button"
+                  title={hint}
                   onClick={() => setEvTab(key)}
                   aria-pressed={evTab === key}
                   className={cn(
@@ -874,15 +902,6 @@ function EmployeeModal({
               />
             )}
           </div>
-
-          {/* Deep link to the full stage-level evidence */}
-          <Link
-            href={`/accountability?emp=${e.id}&view=scorecard`}
-            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan hover:underline"
-          >
-            <ExternalLink className="size-3.5" />
-            عرض السجل الكامل للمراحل والدرجات
-          </Link>
         </div>
       </div>
     </div>
