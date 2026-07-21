@@ -6,21 +6,28 @@
 // (scores, accountability, everything else untouched). Idempotent: already-
 // complete analyses are skipped. See memory: the SignalCountBadge drill-down.
 //
-//   bun --preload ./scripts/_preload-stub-server-only.ts scripts/repair-satisfaction-examples.ts [--apply]
+//   bun --preload ./scripts/_preload-stub-server-only.ts scripts/repair-satisfaction-examples.ts [--apply] [--client=<uuid>]
 //
 // Dry-run by default (reports what it would fill); --apply writes.
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { logAiEvent, logAudit } from "@/lib/audit";
 import { buildClientTranscripts } from "@/lib/data/satisfaction";
 import { fillMissingSignalExamples } from "@/lib/satisfaction-analyze";
+import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 
 const ORG = process.env.RAWASM_ORG_ID || "11111111-1111-1111-1111-111111111111";
 const APPLY = process.argv.includes("--apply");
+const CLIENT_ID = process.argv
+  .find((arg) => arg.startsWith("--client="))
+  ?.slice("--client=".length);
 
 const REQ = ["new", "edit", "complaint", "inquiry", "approval"] as const;
 const APPR = ["approved", "rejected", "changesRequested", "noResponse"] as const;
 
-function isBroken(cg: any): boolean {
+type ClientGroupSignals = SatisfactionResult["clientGroupSignals"];
+
+function isBroken(cg: ClientGroupSignals | null): boolean {
   if (!cg) return false;
   const mr = REQ.some(
     (k) => (cg.requests?.[k] ?? 0) > 0 && (cg.requestExamples?.[k]?.length ?? 0) === 0,
@@ -35,10 +42,13 @@ const { data: rows, error } = await supabaseAdmin
   .from("client_satisfaction_analyses")
   .select("id, client_id, client_group_signals")
   .eq("organization_id", ORG)
-  .eq("is_current", true);
+  .eq("is_current", true)
+  .match(CLIENT_ID ? { client_id: CLIENT_ID } : {});
 if (error) throw error;
 
-const broken = (rows ?? []).filter((r) => isBroken(r.client_group_signals));
+const broken = (rows ?? []).filter((r) =>
+  isBroken(r.client_group_signals as unknown as ClientGroupSignals),
+);
 console.log(`\n=== Repair satisfaction examples (${APPLY ? "APPLY" : "DRY RUN"}) ===`);
 console.log(`current analyses: ${rows?.length ?? 0} · broken: ${broken.length}\n`);
 
@@ -57,7 +67,7 @@ for (const row of broken) {
   try {
     const transcripts = await buildClientTranscripts(ORG, clientId);
     const clientTranscript = transcripts.client || "";
-    const cg = row.client_group_signals as any;
+    const cg = row.client_group_signals as unknown as ClientGroupSignals;
     const filled = await fillMissingSignalExamples(cg, clientTranscript);
     if (!filled) {
       console.log(`  · ${label}: no examples recovered (transcript thin) — skipped`);
@@ -74,6 +84,29 @@ for (const row of broken) {
         console.log(`  ✗ ${label}: update failed — ${uErr.message}`);
         continue;
       }
+      await logAudit({
+        organizationId: ORG,
+        actorUserId: null,
+        action: "client.satisfaction_examples_repaired",
+        entityType: "client",
+        entityId: clientId,
+        metadata: {
+          analysisId: row.id,
+          requestExamples: reqCount,
+          approvalExamples: aprCount,
+        },
+      });
+      await logAiEvent({
+        organizationId: ORG,
+        eventType: "CLIENT_SATISFACTION_EXAMPLES_REPAIRED",
+        entityType: "client",
+        entityId: clientId,
+        payload: {
+          analysisId: row.id,
+          requestExamples: reqCount,
+          approvalExamples: aprCount,
+        },
+      });
     }
     fixed++;
     console.log(`  ✓ ${label}: filled ${reqCount} request + ${aprCount} approval examples`);

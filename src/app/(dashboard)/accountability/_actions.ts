@@ -19,9 +19,9 @@ import {
 } from "@/lib/data/accountability-cases-store";
 import { setProblemStatus } from "@/lib/data/accountability-problems-store";
 
-// On-demand refresh of the accountability_scorecard cache (otherwise pg_cron
-// every 10 min). Lets a manager pull the latest numbers immediately after work
-// moves in Rwasem instead of waiting for the next scheduled refresh.
+// On-demand refresh of both caches behind the accountability page (otherwise
+// pg_cron every 10 min). The live desk counters intentionally come from the
+// same team_activity_cache as Team Pulse, so refresh both to keep them aligned.
 export async function refreshAccountabilityScorecardAction(): Promise<{
   ok: boolean;
   error?: string;
@@ -30,7 +30,11 @@ export async function refreshAccountabilityScorecardAction(): Promise<{
   if (!session || !hasPermission(session, "people.analytics.view")) {
     return { ok: false, error: "Unauthorized" };
   }
-  const { error } = await supabaseAdmin.rpc("refresh_accountability_scorecard");
+  const [scorecardResult, teamActivityResult] = await Promise.all([
+    supabaseAdmin.rpc("refresh_accountability_scorecard"),
+    supabaseAdmin.rpc("refresh_team_activity"),
+  ]);
+  const error = scorecardResult.error ?? teamActivityResult.error;
   if (error) return { ok: false, error: error.message };
   revalidatePath("/accountability");
   return { ok: true };

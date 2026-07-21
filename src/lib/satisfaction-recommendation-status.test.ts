@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   classifyRecommendationLiveStatus,
+  deduplicateRecommendations,
   extractRecommendationTaskCodes,
+  recommendationsDescribeSameProblem,
   type RecommendationTaskState,
 } from "./satisfaction-recommendation-status";
 
@@ -117,5 +119,80 @@ describe("recommendation live reconciliation", () => {
     expect(result.reason).toBe("unverifiable");
     // task chip still surfaced for context
     expect(result.matchedTasks.map((t) => t.taskCode)).toEqual(["PRJ-01794-321"]);
+  });
+});
+
+describe("recommendation problem identity", () => {
+  test("treats recommendations sharing a task code as one problem", () => {
+    expect(
+      recommendationsDescribeSameProblem(
+        {
+          ...recommendation("وجود مهام قيد التنفيذ للفيديوهات والمقالات"),
+          taskCodes: ["PRJ-01815-304", "PRJ-01815-303"],
+        },
+        {
+          ...recommendation("تأخر فيديو الموشن"),
+          taskCodes: ["PRJ-01815-304"],
+        },
+      ),
+    ).toBe(true);
+  });
+
+  test("matches a recommendation and a differently worded risk about leads", () => {
+    expect(
+      recommendationsDescribeSameProblem(
+        recommendation(
+          "الحاجة لبيانات العملاء (Leads) لتحسين أداء الميديا باير.",
+        ),
+        recommendation(
+          "احتمالية تأخر تحسين الحملات الإعلانية في حال عدم تزويد العميلة ببيانات التواصل من الحملة (Leads).",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test("matches the Cocktail Mazza recommendation and risk", () => {
+    expect(
+      recommendationsDescribeSameProblem(
+        recommendation(
+          "مهمة تصاميم الأسبوع الثاني عالقة في مرحلة انتظار العميل منذ 4 أيام.",
+        ),
+        recommendation(
+          "تأخر اعتماد تصاميم الأسبوع الثاني قد يؤدي إلى فجوة في جدول النشر المخطط له.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test("keeps unrelated recommendations separate", () => {
+    expect(
+      recommendationsDescribeSameProblem(
+        recommendation("تأخر اعتماد تصاميم الأسبوع الثاني"),
+        recommendation("الحاجة لبيانات العملاء لتحسين الحملة"),
+      ),
+    ).toBe(false);
+  });
+
+  test("deduplicates new model output and unions its task codes", () => {
+    const result = deduplicateRecommendations([
+      {
+        ...recommendation("مهمة الفيديو متأخرة"),
+        priority: "medium",
+        taskCodes: ["PRJ-01815-304"],
+        resolutionKind: "task_completion",
+      },
+      {
+        ...recommendation("الفيديو لم يكتمل"),
+        taskCodes: ["PRJ-01815-304", "PRJ-01815-305"],
+        resolutionKind: "manual_confirmation",
+      },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].priority).toBe("high");
+    expect(result[0].taskCodes).toEqual([
+      "PRJ-01815-304",
+      "PRJ-01815-305",
+    ]);
+    expect(result[0].resolutionKind).toBe("manual_confirmation");
   });
 });

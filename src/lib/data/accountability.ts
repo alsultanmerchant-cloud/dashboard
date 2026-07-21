@@ -3,9 +3,14 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import { nonLeadershipFilter } from "@/lib/data/leadership";
+import {
+  getEmployeeOwnedDeskTasks,
+  getEmployeePendingLateTasks,
+  getPendingLateTasks,
+} from "@/lib/data/team-pulse";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 import { resolveRange } from "@/lib/dashboard-range";
-import { riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
+import { riyadhDateRangeUtcBounds } from "@/lib/tz";
 
 // =========================================================================
 // Accountability Engine (/accountability) — CEO/department-head scorecard
@@ -32,8 +37,8 @@ import { riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
 //   * Attribution fan-out: scorecard counters are PER (employee, role)
 //     RELATIONSHIP. A task with several agents / conflicting team-manager
 //     rows charges the same interval to each of them ("each accountable").
-//     NEVER sum counters across scorecard rows — org-level rollups must
-//     aggregate over distinct history rows (see coverage.distinctOverdueTasks).
+//     NEVER sum counters across scorecard rows — org-level rollups must use
+//     the task-grained Team Pulse late list (see coverage.distinctOverdueTasks).
 //
 // Heavy aggregation runs through `agent_run_readonly_sql` (migration 0126,
 // service_role-only, single read-only SELECT/WITH) so the SQL
@@ -73,6 +78,8 @@ export interface AccountabilityScorecardRow {
   positionRole: string | null;
   positionLabel: string | null; // positionRole → Arabic, else jobTitle
   role: AccountabilityRole;
+  // Same live desk counters as نبض الفريق: current-stage ownership, with late
+  // meaning the stage's SLA is breached (not the task delivery date).
   openTasks: number;
   overdueOwned: number;
   avgDwellBusinessMinutes: number | null; // closed intervals in window
@@ -139,9 +146,9 @@ export interface AccountabilityCoverage {
   tasksWithAgent: number;
   tasksWithAccountManager: number;
   archivedExcluded: number;
-  // Distinct live overdue tasks with at least one assignee — the org-level
-  // overdue number. Per-row overdueOwned fans out across co-assignees and
-  // must not be summed.
+  // Distinct current-desk tasks whose stage SLA is breached — the same
+  // organization-level count as Team Pulse. Per-row overdueOwned can fan out
+  // across co-owners and must not be summed.
   distinctOverdueTasks: number;
   // The analysis window (now - WINDOW_DAYS → now), NOT the history extent.
   windowStart: string | null;
@@ -288,6 +295,8 @@ interface ScorecardSqlRow {
   sla_n: number;
   sla_ok: number;
   rework_30d: number;
+  pulse_open: number | null;
+  pulse_late: number | null;
 }
 
 async function loadScorecard(org: string): Promise<AccountabilityScorecardRow[]> {
@@ -303,10 +312,14 @@ async function loadScorecard(org: string): Promise<AccountabilityScorecardRow[]>
   const sql = `
 select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.role,
        sc.open_tasks, sc.overdue_owned, sc.avg_dwell, sc.sample_size,
-       sc.sla_n, sc.sla_ok, sc.rework_30d
+       sc.sla_n, sc.sla_ok, sc.rework_30d,
+       pulse.owned_open as pulse_open, pulse.pending_late as pulse_late
   from accountability_scorecard sc
   join employee_profiles e on e.id = sc.employee_id and e.organization_id = '${org}'
   left join positions pp on pp.id = e.position_id
+  left join team_activity_cache pulse
+    on pulse.employee_id = sc.employee_id
+   and pulse.organization_id = sc.organization_id
  where sc.organization_id = '${org}'
    and ${nonLeadershipFilter("pp")}`;
 
@@ -323,6 +336,8 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
       positionRole: string | null;
       openTasks: number;
       overdueOwned: number;
+      pulseOpen: number | null;
+      pulseLate: number | null;
       dwellSum: number;
       sampleSize: number;
       slaN: number;
@@ -341,6 +356,8 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
         positionRole: r.position_role,
         openTasks: 0,
         overdueOwned: 0,
+        pulseOpen: r.pulse_open,
+        pulseLate: r.pulse_late,
         dwellSum: 0,
         sampleSize: 0,
         slaN: 0,
@@ -352,6 +369,8 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
     }
     agg.openTasks += r.open_tasks;
     agg.overdueOwned += r.overdue_owned;
+    if (r.pulse_open !== null) agg.pulseOpen = r.pulse_open;
+    if (r.pulse_late !== null) agg.pulseLate = r.pulse_late;
     agg.dwellSum += (r.avg_dwell ?? 0) * r.sample_size;
     agg.sampleSize += r.sample_size;
     agg.slaN += r.sla_n;
@@ -365,6 +384,10 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
 
   const rows: AccountabilityScorecardRow[] = [];
   for (const [employeeId, a] of byEmp) {
+    // Live workload is a single cross-page contract: use the same cache as
+    // نبض الفريق so 50/2 cannot turn into 50/7 on the accountability page.
+    const openTasks = a.pulseOpen ?? a.openTasks;
+    const overdueOwned = a.pulseLate ?? a.overdueOwned;
     let role: AccountabilityRole = "agent";
     let best = -1;
     for (const [rl, w] of a.roleWeight) {
@@ -375,7 +398,7 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
     }
     const onTimeRate = a.slaN > 0 ? Math.round((a.slaOk / a.slaN) * 100) : null;
     const overdueFactor =
-      a.openTasks > 0 ? 100 * (1 - a.overdueOwned / a.openTasks) : null;
+      openTasks > 0 ? 100 * (1 - overdueOwned / openTasks) : null;
     // Score: SLA adherence of measured intervals (0.6) + share of the
     // employee's open board that is NOT overdue (0.4). Null components drop
     // out; fully unmeasurable employees stay null ("غير مُقاس").
@@ -393,8 +416,8 @@ select sc.employee_id, e.full_name, e.job_title, pp.role as position_role, sc.ro
           a.jobTitle)
         : a.jobTitle,
       role,
-      openTasks: a.openTasks,
-      overdueOwned: a.overdueOwned,
+      openTasks,
+      overdueOwned,
       avgDwellBusinessMinutes:
         a.sampleSize > 0 ? round1(a.dwellSum / a.sampleSize) : null,
       onTimeRate,
@@ -1006,12 +1029,12 @@ async function _getAccountabilityPeriodTrends(
 
 export const getAccountabilityPeriodTrends = cache(_getAccountabilityPeriodTrends);
 
-// ---- Live totals (مفتوحة / متأخرة) ------------------------------------------
-// Total OPEN and OVERDUE tasks the employee is directly assigned to, LIVE and
-// current-state — NOT gated to the stages their role owns (that gating lives in
-// the period stage-counts below). "his open board", the way a person reads it.
-// Overdue uses the Rwasem definition (open task, deadline passed, `new` excluded
-// as ordinary not-started slip) in Asia/Riyadh, matching the CEO dashboard.
+// ---- Live desk totals (مفتوحة / معلّقة متأخرة) -------------------------------
+// This is intentionally the SAME cache and meaning as نبض الفريق:
+//   openLive    = tasks whose current stage this employee owns now;
+//   overdueLive = those tasks whose current-stage SLA has been breached.
+// Keeping the alias names avoids a wide API churn while making the displayed
+// values and their drill-downs reconcile exactly across both pages.
 export interface AccountabilityLiveTotals {
   openLive: number;
   overdueLive: number;
@@ -1027,21 +1050,12 @@ async function _getAccountabilityLiveTotals(
   orgId: string,
 ): Promise<Record<string, AccountabilityLiveTotals>> {
   const org = assertUuid(orgId, "organization id");
-  const today = riyadhTodayIso();
   const sql = `
-select ta.employee_id,
-       count(distinct t.id) filter (where t.stage <> 'done')::int as open_live,
-       count(distinct t.id) filter (
-         -- Canonical overdue (0257): open + deadline passed. A not-started
-         -- (new-stage) task past its deadline counts too — the team treats
-         -- un-started late work as a delay, not an exemption.
-         where t.stage <> 'done' and t.planned_date < '${today}'::date
-       )::int as overdue_live
-  from task_assignees ta
-  join tasks t on t.id = ta.task_id and t.organization_id = '${org}'
- where ta.organization_id = '${org}'
-   and t.archived_at is null
- group by 1`;
+select employee_id,
+       owned_open::int as open_live,
+       pending_late::int as overdue_live
+  from team_activity_cache
+ where organization_id = '${org}'`;
   const rows = await runSql<LiveTotalsSqlRow>(sql);
   const result: Record<string, AccountabilityLiveTotals> = {};
   for (const r of rows) {
@@ -1682,12 +1696,11 @@ async function _getClientEditsDetail(
 
 export const getClientEditsDetail = cache(_getClientEditsDetail);
 
-// Drill-down for the /accountability team-table numbers (مفتوحة / متأخرة live,
+// Drill-down for the /accountability team-table numbers (مفتوحة / معلّقة متأخرة live,
 // إجمالي المراحل / مراحل متأخرة period). Same TaskDrillSheet plumbing as the
 // reviewer/edits sections, so a number can be reconciled against Rwasem.
-//   • open / overdue: the person's LIVE assigned tasks (open board; overdue =
-//     Rwasem def: open + past deadline, `new` INCLUDED per 0257), occurredAt =
-//     deadline. This is the DELIVERY-date failure.
+//   • open / overdue: exact نبض الفريق desk queries. `open` means the person
+//     owns the current stage; `overdue` means that stage breached its SLA.
 //   • totalStages / lateStages: the owned stage INTERVALS entered in the window
 //     that are SLA-measurable (per interval, incl. archived-delivered), same
 //     gate as the merged period-trends stage counts, occurredAt = entered_at,
@@ -1698,27 +1711,10 @@ export type EmployeeMetric = "open" | "overdue" | "totalStages" | "lateStages";
 function buildEmployeeMetricDrillSql(
   org: string,
   emp: string,
-  metric: EmployeeMetric,
+  metric: "totalStages" | "lateStages",
   from: string,
   to: string,
 ): string {
-  if (metric === "open" || metric === "overdue") {
-    const today = riyadhTodayIso();
-    const pred =
-      metric === "overdue"
-        ? `t.stage <> 'done' and t.planned_date < '${today}'::date`
-        : `t.stage <> 'done'`;
-    return `
-select distinct t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
-       null::numeric as minutes, t.planned_date::text as occurred_at, t.stage::text as stage,
-       (t.stage <> 'done' and t.planned_date < '${today}'::date) as flag, 'task' as kind
-  from task_assignees ta
-  join tasks t on t.id = ta.task_id and t.organization_id = '${org}' and t.archived_at is null
-  left join projects pj on pj.id = t.project_id
-  left join clients cl on cl.id = pj.client_id
- where ta.organization_id = '${org}' and ta.employee_id = '${emp}' and ${pred}
- order by occurred_at asc nulls last`;
-  }
   const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
   const lateFilter = metric === "lateStages" ? "where flag" : "";
   return `
@@ -1769,8 +1765,42 @@ async function _getEmployeeMetricDrill(
 ): Promise<DrillTask[]> {
   const org = assertUuid(orgId, "organization id");
   const emp = assertUuid(employeeId, "employee id");
+  if (metric === "open") {
+    const rows = await getEmployeeOwnedDeskTasks(org, emp);
+    return rows.map((row) => ({
+      taskId: row.taskId,
+      taskCode: row.taskCode,
+      title: row.title,
+      projectName: row.projectName,
+      clientName: null,
+      minutes: row.elapsedMinutes,
+      occurredAt: row.stageEnteredAt,
+      flag: row.isLate,
+      kind: "task",
+      stage: row.stage,
+    }));
+  }
+  if (metric === "overdue") {
+    const rows = await getEmployeePendingLateTasks(org, emp);
+    return rows.map((row) => ({
+      taskId: row.taskId,
+      taskCode: row.taskCode,
+      title: row.title,
+      projectName: row.projectName,
+      clientName: null,
+      minutes: row.overdueMinutes,
+      occurredAt: row.stageEnteredAt,
+      flag: true,
+      kind: "task",
+      stage: row.stage,
+    }));
+  }
   const range = reviewerRange(from, to);
-  return mapDrill(await runSql<DrillSqlRow>(buildEmployeeMetricDrillSql(org, emp, metric, range.from, range.to)));
+  return mapDrill(
+    await runSql<DrillSqlRow>(
+      buildEmployeeMetricDrillSql(org, emp, metric, range.from, range.to),
+    ),
+  );
 }
 
 export const getEmployeeMetricDrill = cache(_getEmployeeMetricDrill);
@@ -1825,7 +1855,7 @@ async function _getAccountabilityOverview(
   // if it fails, the page genuinely can't render, so we let it throw. The other
   // three are live analytics queries under a 12s statement timeout; a timeout on
   // any of them must NOT white-screen the whole page, so they degrade to empty.
-  const [baseRows, trendsR, reviewersR, coverageR, aiSignalsR] = await Promise.all([
+  const [baseRows, trendsR, reviewersR, coverageR, pendingLateR, aiSignalsR] = await Promise.all([
     getAccountabilityScorecard(orgId),
     reviewerFrom && reviewerTo
       ? getAccountabilityPeriodTrends(orgId, range.from, range.to).catch((e) => {
@@ -1841,6 +1871,10 @@ async function _getAccountabilityOverview(
       console.error("[accountability] loadCoverage failed, degrading:", e);
       return null;
     }),
+    getPendingLateTasks(org).then((tasks) => tasks.length).catch((e) => {
+      console.error("[accountability] pending-late total failed, degrading:", e);
+      return null;
+    }),
     loadAiSignals(org).catch((e) => {
       console.error("[accountability] loadAiSignals failed, degrading:", e);
       return [] as AiLinkedSignal[];
@@ -1852,15 +1886,19 @@ async function _getAccountabilityOverview(
     periodTrend: trendsR[row.employeeId] ?? EMPTY_PERIOD_TREND,
   }));
 
-  // When coverage times out, fall back to a distinct-overdue floor derived from
-  // the scorecard rows (the max any single row reports — since overdueOwned fans
-  // out across co-assignees, no row exceeds the true distinct count, so max is a
-  // safe lower bound rather than a fabricated total).
-  const coverage: AccountabilityCoverage =
+  // Coverage metadata still comes from the accountability query, but the live
+  // late headline comes from the exact task-grained Team Pulse list. If that
+  // list is temporarily unavailable, retain the legacy coverage value; if both
+  // fail, use the largest employee desk count as an honest lower bound.
+  const coverageBase: AccountabilityCoverage =
     coverageR ?? {
       ...EMPTY_COVERAGE,
       distinctOverdueTasks: rows.reduce((m, r) => Math.max(m, r.overdueOwned), 0),
     };
+  const coverage: AccountabilityCoverage = {
+    ...coverageBase,
+    distinctOverdueTasks: pendingLateR ?? coverageBase.distinctOverdueTasks,
+  };
 
   return {
     generatedAt: new Date().toISOString(),

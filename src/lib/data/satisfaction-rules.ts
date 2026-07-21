@@ -61,6 +61,47 @@ export function isClientRelationshipActive(s: ClientActivitySignals): boolean {
   return true; // genuine no-signal (duplicate/sheet row) → keep active
 }
 
+// ---- Rule 1b: historical HOLD events -------------------------------------
+
+export interface ContractLifecycleStatus {
+  contractCode?: string | null;
+  status: string | null;
+}
+
+export interface ContractLifecycleEventStatus {
+  logType: string;
+  contractCode?: string | null;
+  // Current status joined from the event's contract row, when available.
+  contractStatus?: string | null;
+}
+
+// `ON HOLD` is an event in history, not a durable current-state flag. It is
+// resolved when that same contract is no longer `hold`; for old analysis
+// snapshots that did not store contractCode, the safe portfolio fallback is:
+// no currently-held contract means every old HOLD event has been lifted/ended.
+export function isResolvedHistoricalHold(
+  event: ContractLifecycleEventStatus,
+  currentContracts: ContractLifecycleStatus[],
+): boolean {
+  const isEnteredHold =
+    /(?:ON|ENTERED) HOLD/i.test(event.logType) &&
+    !/(?:LIFTED|LEFT) HOLD/i.test(event.logType);
+  if (!isEnteredHold) return false;
+
+  const isHold = (status: string | null | undefined) =>
+    (status ?? "").trim().toLowerCase() === "hold";
+
+  if (event.contractCode) {
+    const current = currentContracts.find(
+      (contract) => contract.contractCode === event.contractCode,
+    );
+    if (current) return !isHold(current.status);
+  }
+
+  if (event.contractStatus) return !isHold(event.contractStatus);
+  return currentContracts.length > 0 && !currentContracts.some((c) => isHold(c.status));
+}
+
 // ---- Rule 2: contract payment (no false "outstanding dues") ---------------
 
 export interface ContractPaymentInput {

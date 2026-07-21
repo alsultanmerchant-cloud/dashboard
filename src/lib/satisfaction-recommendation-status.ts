@@ -29,7 +29,8 @@ export interface RecommendationLiveStatus {
   matchedTasks: RecommendationTaskState[];
 }
 
-type Recommendation = SatisfactionResult["recommendations"][number];
+export type SatisfactionRecommendation =
+  SatisfactionResult["recommendations"][number];
 
 // Human-readable task codes are intentionally the bridge for legacy AI output:
 // old recommendations predate structured entity references, but already mention
@@ -40,7 +41,9 @@ const DELAY_WORD_RE = /(?:متأخر|متأخرة|متأخرات|تأخر|تأخ
 const BRIEF_WORD_RE = /(?:بريف|brief)/iu;
 const MISSING_WORD_RE = /(?:ناقص|ناقصة|مفقود|غير\s+(?:متاح|متوفر|موجود)|missing|absent|unavailable)/iu;
 
-export function extractRecommendationTaskCodes(recommendation: Recommendation): string[] {
+export function extractRecommendationTaskCodes(
+  recommendation: SatisfactionRecommendation,
+): string[] {
   const matches = `${recommendation.issue}\n${recommendation.action}`.match(TASK_CODE_RE) ?? [];
   return [
     ...new Set(
@@ -51,13 +54,17 @@ export function extractRecommendationTaskCodes(recommendation: Recommendation): 
   ];
 }
 
-export function isOverdueTaskRecommendation(recommendation: Recommendation): boolean {
+export function isOverdueTaskRecommendation(
+  recommendation: SatisfactionRecommendation,
+): boolean {
   if (recommendation.resolutionKind === "no_overdue_tasks") return true;
   const text = `${recommendation.issue}\n${recommendation.action}`;
   return TASK_WORD_RE.test(text) && DELAY_WORD_RE.test(text);
 }
 
-export function isMissingBriefRecommendation(recommendation: Recommendation): boolean {
+export function isMissingBriefRecommendation(
+  recommendation: SatisfactionRecommendation,
+): boolean {
   if (recommendation.resolutionKind === "brief_attached") return true;
   const text = `${recommendation.issue}\n${recommendation.action}`;
   return BRIEF_WORD_RE.test(text) && MISSING_WORD_RE.test(text);
@@ -71,7 +78,7 @@ export function classifyRecommendationLiveStatus({
   hasBrief,
   checkedAt,
 }: {
-  recommendation: Recommendation;
+  recommendation: SatisfactionRecommendation;
   recommendationIndex: number;
   tasksByCode: ReadonlyMap<string, RecommendationTaskState>;
   liveOverdueCount: number | null;
@@ -187,4 +194,152 @@ export function classifyRecommendationLiveStatus({
     liveOverdueCount,
     matchedTasks: [],
   };
+}
+
+// The analysis has two layers that can describe the same operational problem:
+// a recommendation and a risk. The workspace also adds a generic overdue-tasks
+// fallback. Without a stable comparison, one underlying problem appears two or
+// three times with slightly different Arabic wording and every wording gets an
+// independent manual-resolution state.
+//
+// Prefer shared task codes because they are the strongest identity. Historical
+// risks often omit codes, so the fallback is deliberately conservative: at
+// least three meaningful normalized words must overlap and cover a substantial
+// part of the shorter sentence.
+const PROBLEM_STOP_WORDS = new Set([
+  "اجل",
+  "اكثر",
+  "التي",
+  "الذي",
+  "العميل",
+  "العميله",
+  "المشكله",
+  "المشروع",
+  "ايام",
+  "بشكل",
+  "تجنب",
+  "حاله",
+  "حيث",
+  "خلال",
+  "ذلك",
+  "ضمان",
+  "علي",
+  "عدم",
+  "عن",
+  "فتره",
+  "في",
+  "قد",
+  "كان",
+  "كما",
+  "كل",
+  "لدي",
+  "مرحله",
+  "مما",
+  "من",
+  "منذ",
+  "مهمه",
+  "مهام",
+  "هذا",
+  "هذه",
+  "هناك",
+  "هو",
+  "هي",
+  "وجود",
+  "يوجد",
+]);
+
+function normalizeProblemToken(rawToken: string): string {
+  let token = rawToken
+    .toLocaleLowerCase("ar")
+    .replace(/[\u064b-\u065f\u0670\u0640]/gu, "")
+    .replace(/[أإآ]/gu, "ا")
+    .replace(/ى/gu, "ي")
+    .replace(/ة/gu, "ه")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+  // Arabic conjunctions/prepositions are commonly attached to the word. This
+  // makes `لبيانات` and `ببيانات` compare as the same meaningful token.
+  if (token.length >= 5 && /^[وفبكل]/u.test(token)) token = token.slice(1);
+  if (token.length >= 5 && token.startsWith("ال")) token = token.slice(2);
+  return token;
+}
+
+function problemTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .split(/\s+/u)
+      .map(normalizeProblemToken)
+      .filter(
+        (token) =>
+          token.length >= 3 &&
+          !/^\d+$/u.test(token) &&
+          !PROBLEM_STOP_WORDS.has(token) &&
+          !/^prj\d/iu.test(token),
+      ),
+  );
+}
+
+export function recommendationsDescribeSameProblem(
+  first: SatisfactionRecommendation,
+  second: SatisfactionRecommendation,
+): boolean {
+  const firstCodes = new Set(extractRecommendationTaskCodes(first));
+  if (
+    extractRecommendationTaskCodes(second).some((code) => firstCodes.has(code))
+  ) {
+    return true;
+  }
+
+  const firstTokens = problemTokens(first.issue);
+  const secondTokens = problemTokens(second.issue);
+  const shorterSize = Math.min(firstTokens.size, secondTokens.size);
+  if (shorterSize < 3) return false;
+  let shared = 0;
+  for (const token of firstTokens) if (secondTokens.has(token)) shared += 1;
+  return shared >= 3 && shared / shorterSize >= 0.34;
+}
+
+const RECOMMENDATION_PRIORITY_RANK = { high: 0, medium: 1, low: 2 } as const;
+
+/**
+ * Server-side guardrail for new analyses. Gemini is still instructed not to
+ * repeat itself, but this makes the stored snapshot deterministic when it does.
+ */
+export function deduplicateRecommendations(
+  recommendations: SatisfactionRecommendation[],
+): SatisfactionRecommendation[] {
+  const unique: SatisfactionRecommendation[] = [];
+  for (const recommendation of recommendations) {
+    const duplicateIndex = unique.findIndex((candidate) =>
+      recommendationsDescribeSameProblem(candidate, recommendation),
+    );
+    if (duplicateIndex === -1) {
+      unique.push(recommendation);
+      continue;
+    }
+
+    const current = unique[duplicateIndex];
+    const taskCodes = [
+      ...new Set([
+        ...extractRecommendationTaskCodes(current),
+        ...extractRecommendationTaskCodes(recommendation),
+      ]),
+    ];
+    unique[duplicateIndex] = {
+      ...current,
+      priority:
+        RECOMMENDATION_PRIORITY_RANK[recommendation.priority] <
+        RECOMMENDATION_PRIORITY_RANK[current.priority]
+          ? recommendation.priority
+          : current.priority,
+      taskCodes,
+      // Manual confirmation is the safer close rule if the model disagreed
+      // about whether a duplicate can be closed from task state alone.
+      resolutionKind:
+        current.resolutionKind === "manual_confirmation" ||
+        recommendation.resolutionKind === "manual_confirmation"
+          ? "manual_confirmation"
+          : (current.resolutionKind ?? recommendation.resolutionKind),
+    };
+  }
+  return unique;
 }

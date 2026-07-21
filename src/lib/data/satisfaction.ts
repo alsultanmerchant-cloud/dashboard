@@ -1896,6 +1896,12 @@ export interface ContractActivityEvent {
   logTime: string | null;
   notes: string | null;
   accountManager: string | null;
+  // The lifecycle event belongs to ONE contract, not automatically to the
+  // client's whole relationship. These fields let the model/UI distinguish a
+  // stopped service from a fully lost client in a multi-contract portfolio.
+  contractCode?: string | null;
+  contractStatus?: ContractStatus | null;
+  contractTarget?: ContractTarget | null;
 }
 
 // Free-form strings as stored in the contracts sheet — real values include
@@ -1932,8 +1938,12 @@ export interface ClientContractContext {
   startDate: string; // earliest start across the portfolio
   endDate: string | null; // latest end across the portfolio
   // ---- The actual portfolio the model reads ----
-  contractCount: number; // number of contracts in `contracts`
+  contractCount: number; // total contracts across the client's identity
+  liveContractCount?: number; // active/hold contracts (optional for old snapshots)
   contracts: ContractLine[]; // all LIVE contracts (active/hold); else the most-recent one
+  // Complete current + historical portfolio. Optional so analyses persisted
+  // before this field was introduced remain readable.
+  portfolioContracts?: ContractLine[];
   // Recent contract activity-log events (newest first), across ALL the client's
   // contracts, when available.
   recentActivity?: ContractActivityEvent[];
@@ -1955,6 +1965,7 @@ async function _getClientContractContext(
     )
     .eq("organization_id", orgId)
     .in("client_id", ids)
+    .eq("sheet_present", true)
     .order("start_date", { ascending: false });
   if (error || !data || data.length === 0) return null;
 
@@ -1986,6 +1997,7 @@ async function _getClientContractContext(
   const live = rows
     .filter((r) => r.status === "active" || r.status === "hold")
     .map(toLine);
+  const portfolioContracts = rows.map(toLine);
   const contracts = live.length ? live : [toLine(rows[0])];
 
   // `contracts` is ordered newest-first (start_date desc), so contracts[0] is the
@@ -2005,8 +2017,10 @@ async function _getClientContractContext(
     paidValue: contracts.reduce((s, c) => s + c.paidValue, 0),
     startDate: starts[0],
     endDate: ends.length ? ends[ends.length - 1] : null,
-    contractCount: contracts.length,
+    contractCount: rows.length,
+    liveContractCount: live.length,
     contracts,
+    portfolioContracts,
   };
 }
 export const getClientContractContext = cache(_getClientContractContext);
@@ -2022,10 +2036,11 @@ async function _getClientContractActivity(
   const { data, error } = await supabaseAdmin
     .from("contract_sheet_logs")
     .select(
-      "log_type, log_time, notes, account_manager, contract:contracts!inner(client_id)",
+      "log_type, log_time, notes, account_manager, contract:contracts!inner(client_id, contract_code, status, target, sheet_present)",
     )
     .eq("organization_id", orgId)
     .in("contract.client_id", ids)
+    .eq("contract.sheet_present", true)
     .order("log_time", { ascending: false, nullsFirst: false })
     .limit(15);
   if (error || !data) return [];
@@ -2035,13 +2050,32 @@ async function _getClientContractActivity(
       log_time: string | null;
       notes: string | null;
       account_manager: string | null;
+      contract:
+        | {
+            contract_code: string | null;
+            status: ContractStatus | null;
+            target: ContractTarget | null;
+            sheet_present: boolean | null;
+          }
+        | {
+            contract_code: string | null;
+            status: ContractStatus | null;
+            target: ContractTarget | null;
+            sheet_present: boolean | null;
+          }[];
     }>
-  ).map((r) => ({
-    logType: r.log_type,
-    logTime: r.log_time,
-    notes: r.notes,
-    accountManager: r.account_manager,
-  }));
+  ).map((r) => {
+    const contract = Array.isArray(r.contract) ? r.contract[0] : r.contract;
+    return {
+      logType: r.log_type,
+      logTime: r.log_time,
+      notes: r.notes,
+      accountManager: r.account_manager,
+      contractCode: contract?.contract_code ?? null,
+      contractStatus: contract?.status ?? null,
+      contractTarget: contract?.target ?? null,
+    };
+  });
 }
 export const getClientContractActivity = cache(_getClientContractActivity);
 

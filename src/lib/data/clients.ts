@@ -34,7 +34,20 @@ export async function listContractClientOptions(orgId: string) {
     listClientOptions(orgId),
     foldedContractsByCanonical(orgId),
   ]);
-  return clients.filter((c) => (folded.get(c.id as string)?.length ?? 0) > 0);
+  return clients.flatMap((c) => {
+    const contracts = folded.get(c.id as string) ?? [];
+    if (contracts.length === 0) return [];
+    return [
+      {
+        ...c,
+        contract_count: contracts.length,
+        live_contract_count: contracts.filter(
+          (contract) =>
+            contract.status === "active" || contract.status === "hold",
+        ).length,
+      },
+    ];
+  });
 }
 
 // Per-client search keywords for pickers: the names by which a human might look
@@ -78,22 +91,47 @@ export async function getClientSearchKeywords(orgId: string): Promise<Map<string
 // Contracts are the source of truth for a client's IDENTITY. Odoo-synced names
 // (external_source='odoo') and manual rows must defer to the contract sheet:
 // when such a client carries ≥1 contract, its display name is taken from the
-// newest contract's `sheet_client_name`. Sheet-sourced clients keep their own
-// `name` — that value was ALREADY imported from the contracts sheet (the
-// unified client name) and is cleaner than the per-row service label stored on
-// `sheet_client_name`, so we don't override it. Clients with no contract keep
-// their existing name until linked.
+// newest LIVE contract's `sheet_client_name` (then newest historical as a
+// fallback). Sheet-sourced clients keep their own `name` only when every
+// contract is historical; a live service name must win so linking reflects the
+// work still being delivered. Clients with no contract keep their existing
+// name until linked.
 // ---------------------------------------------------------------------------
 export function resolveClientName(
   fallbackName: string,
-  contracts: { sheet_client_name: string | null; start_date: string | null }[] | null | undefined,
+  contracts:
+    | {
+        sheet_client_name: string | null;
+        start_date: string | null;
+        status?: string | null;
+        sheet_present?: boolean | null;
+      }[]
+    | null
+    | undefined,
   externalSource?: string | null,
 ): string {
-  // Sheet clients already carry the contract-sourced name — leave it be.
-  if (externalSource === "excel-acc-sheet") return fallbackName;
   const named = (contracts ?? [])
+    .filter((c) => c.sheet_present !== false)
     .filter((c) => (c.sheet_client_name ?? "").trim().length > 0)
-    .sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? ""));
+    .sort((a, b) => {
+      // A client can have several service contracts. A running contract must
+      // name the relationship ahead of a newer-but-closed sibling; otherwise
+      // the WhatsApp linker appears to offer only the lost service and hides
+      // the client operators are still serving.
+      const aLive = a.status === "active" || a.status === "hold";
+      const bLive = b.status === "active" || b.status === "hold";
+      if (aLive !== bLive) return bLive ? 1 : -1;
+      return (b.start_date ?? "").localeCompare(a.start_date ?? "");
+    });
+  const activeName = named.find(
+    (c) => c.status === "active" || c.status === "hold",
+  )?.sheet_client_name?.trim();
+  if (activeName) return activeName;
+
+  // Sheet clients usually already carry the clean, unified source name. When
+  // every contract is historical, keep that stable label instead of replacing
+  // it with a service suffix from the last closed row.
+  if (externalSource === "excel-acc-sheet") return fallbackName;
   return named[0]?.sheet_client_name?.trim() || fallbackName;
 }
 
@@ -114,7 +152,13 @@ export function resolveClientName(
 // matter which row physically holds the contract. See
 // [[project_satisfaction_contract_bridge]] and [[project_clients_centralization]].
 // ---------------------------------------------------------------------------
-export type FoldedContract = { id?: string; sheet_client_name: string | null; start_date: string | null };
+export type FoldedContract = {
+  id?: string;
+  sheet_client_name: string | null;
+  start_date: string | null;
+  status: string | null;
+  sheet_present: boolean | null;
+};
 
 async function _foldedContractsByCanonical(
   orgId: string,
@@ -126,7 +170,9 @@ async function _foldedContractsByCanonical(
       .eq("organization_id", orgId),
     supabaseAdmin
       .from("contracts")
-      .select("id, client_id, project_id, sheet_client_name, start_date, project:projects(client_id)")
+      .select(
+        "id, client_id, project_id, sheet_client_name, start_date, status, sheet_present, project:projects(client_id)",
+      )
       .eq("organization_id", orgId),
   ]);
   if (clientsRes.error) throw clientsRes.error;
@@ -155,12 +201,18 @@ async function _foldedContractsByCanonical(
     project_id: string | null;
     sheet_client_name: string | null;
     start_date: string | null;
+    status: string | null;
+    sheet_present: boolean | null;
     project: { client_id: string | null } | { client_id: string | null }[] | null;
   };
   const out = new Map<string, FoldedContract[]>();
   const seen = new Map<string, Set<string>>();
   const add = (clientId: string | null | undefined, k: ContractRow) => {
     if (!clientId) return;
+    // Rows removed from the source sheet are importer tombstones, not members
+    // of the current contract book. They must not keep a client in pickers or
+    // win display-name selection.
+    if (k.sheet_present === false) return;
     const canon = mergeMap.get(clientId) ?? clientId;
     if (placeholderIds.has(canon)) return; // never fold a brand onto the catch-all bucket
     const key = k.id ?? `${k.sheet_client_name ?? ""}:${k.start_date ?? ""}`;
@@ -169,7 +221,13 @@ async function _foldedContractsByCanonical(
     seenForClient.add(key);
     seen.set(canon, seenForClient);
     const arr = out.get(canon) ?? [];
-    arr.push({ id: k.id, sheet_client_name: k.sheet_client_name, start_date: k.start_date });
+    arr.push({
+      id: k.id,
+      sheet_client_name: k.sheet_client_name,
+      start_date: k.start_date,
+      status: k.status,
+      sheet_present: k.sheet_present,
+    });
     out.set(canon, arr);
   };
 

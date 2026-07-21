@@ -25,11 +25,13 @@ import {
 import { getClientBrief } from "@/lib/satisfaction-brief";
 import {
   isContractPaymentComplete,
+  isResolvedHistoricalHold,
   summarizeContractPayments,
 } from "@/lib/data/satisfaction-rules";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { aiModel, MODELS } from "@/lib/ai-model";
+import { deduplicateRecommendations } from "@/lib/satisfaction-recommendation-status";
 
 // Shared client-satisfaction analysis core. Used by the on-demand API route
 // (/api/satisfaction/analyze), the streaming re-analyze route
@@ -245,13 +247,37 @@ export async function buildSatisfactionInput(
 
   const contract = await getClientContractContext(orgId, clientId);
   const activity = await getClientContractActivity(orgId, clientId);
+  const liveContractCount = contract
+    ? (contract.liveContractCount ??
+      contract.contracts.filter(
+        (c) => c.status === "active" || c.status === "hold",
+      ).length)
+    : 0;
+  const relationshipContinues = liveContractCount > 0;
   const activityBlock = activity.length
-    ? `\nسجل نشاط العقد (الأحدث أولًا — أحداث سلوكية: ON HOLD=تجميد/احتكاك، HOLD LIFTED=رفع التجميد، Contract Close (Lost)=خسارة/إنهاء، Contract Close (Renew)=تجديد، EDIT MODE=تعديل بنود):\n${activity
+    ? `\nسجل نشاط العقود (الأحدث أولًا — كل حدث يخص العقد المبيّن بجانبه، وليس العميل كله تلقائيًا):\n${activity
         .map(
-          (a) =>
-            `- ${a.logTime ? a.logTime.slice(0, 10) : "?"} ${a.logType}${
+          (a) => {
+            const partialLoss =
+              relationshipContinues && /Lost/i.test(a.logType);
+            const resolvedHold = isResolvedHistoricalHold(
+              a,
+              contract?.contracts ?? [],
+            );
+            return `- ${a.logTime ? a.logTime.slice(0, 10) : "?"} ${
+              a.contractCode ? `[${a.contractCode}] ` : ""
+            }${a.logType}${a.contractStatus ? ` — حالة هذا العقد الآن: ${a.contractStatus}` : ""}${
               a.notes ? ` — ${a.notes.replace(/\s+/g, " ").trim().slice(0, 240)}` : ""
-            }`,
+            }${
+              partialLoss
+                ? ` — تنبيه: هذا فقد/إغلاق لعقد واحد فقط؛ علاقة العميل ما زالت قائمة عبر ${liveContractCount} عقد نشط/موقوف مؤقتًا ولا يجوز وصف العميل نفسه بأنه مفقود.`
+                : ""
+            }${
+              resolvedHold
+                ? " — تنبيه: هذا تجميد تاريخي تم رفعه؛ العقد ليس في HOLD الآن ولا يجوز عرضه أو تحليله كتجميد قائم."
+                : ""
+            }`;
+          },
         )
         .join("\n")}`
     : "";
@@ -277,7 +303,7 @@ export async function buildSatisfactionInput(
       }`;
     return `الدفع: غير محدّد — مدفوع ${c.paidValue} من ${c.totalValue}`;
   };
-  const contractLines =
+  const liveContractLines =
     contract && contract.contracts.length
       ? contract.contracts
           .map(
@@ -286,15 +312,39 @@ export async function buildSatisfactionInput(
           )
           .join("\n")
       : "";
+  const portfolioContracts = contract?.portfolioContracts ?? contract?.contracts ?? [];
+  const historicalContracts = portfolioContracts.filter(
+    (c) => c.status !== "active" && c.status !== "hold",
+  );
+  const historicalContractLines = historicalContracts.length
+    ? historicalContracts
+        .map(
+          (c, i) =>
+            `  ${i + 1}) ${c.contractCode ? `[${c.contractCode}] ` : ""}الوضع: ${c.target} — الحالة: ${c.status} — من ${c.startDate}${c.endDate ? ` إلى ${c.endDate}` : ""}`,
+        )
+        .join("\n")
+    : "";
   // Outstanding + all-complete come from the shared, unit-tested payment rule so
   // a completed-but-stale paid_value can never resurface as a false due.
   const { outstanding, allComplete } = summarizeContractPayments(contract?.contracts ?? []);
   const contractBlock = contract
-    ? `\n\n=== حالة العقد (${contract.contractCount} عقد${contract.contractCount > 1 ? " — محفظة العميل" : ""}) ===\n${contractLines}\nالإجمالي عبر العقود: القيمة ${contract.totalValue} — المدفوع ${contract.paidValue} — ${
+    ? `\n\n=== حالة العقد / العلاقة التعاقدية (${contract.contractCount} عقد إجمالًا: ${liveContractCount} قائم، ${Math.max(0, contract.contractCount - liveContractCount)} منتهٍ/تاريخي) ===\n${
+        relationshipContinues
+          ? `العقود القائمة الآن:\n${liveContractLines}`
+          : `لا يوجد عقد قائم الآن. أحدث عقد مسجّل:\n${liveContractLines}`
+      }${
+        historicalContractLines
+          ? `\nالعقود المنتهية/التاريخية (للسياق فقط، ولا تحدد حالة العميل الحالية ما دام له عقد قائم):\n${historicalContractLines}`
+          : ""
+      }\nالإجمالي عبر العقود القائمة: القيمة ${contract.totalValue} — المدفوع ${contract.paidValue} — ${
         allComplete
           ? "المدفوعات مكتملة لكل العقود ✅ (لا مستحقات)"
           : `مستحقات غير مكتملة الدفع: ${outstanding} (من عقود الأقساط غير المكتملة فقط — قد تكون دُفعت ولم يُحدَّث الشيت)`
-      } — أسوأ وضع (target): ${contract.target} — الحالة الغالبة: ${contract.status}\nملاحظة مالية: اعتمد حالة الدفع (مكتمل/أقساط) لا فرق القيمة. لا تذكر «مستحقات مالية متبقية» أو أن العميل «عليه دفعة» إلا إذا كانت حالة الدفع غير مكتملة فعلاً، ووضّح أنها بيانات شيت قد تكون متأخرة التحديث. التحصيل مسؤولية قسم الحسابات وليس مؤشّر رضا.${activityBlock}`
+      } — وضع العقد القائم الأحدث (target): ${contract.target} — حالته: ${contract.status}\nقاعدة إلزامية لحالة العلاقة: ${
+        relationshipContinues
+          ? `العميل ما زال قائمًا لأن لديه ${liveContractCount} عقد نشط/موقوف مؤقتًا. إغلاق أو Lost لأي عقد تاريخي يعني توقف تلك الخدمة فقط، ولا يعني فقد العميل ولا يبرر خفض التقييم التجاري كأنه غادر بالكامل.`
+          : "لا يوجد عقد قائم؛ يمكن قراءة أحداث الإغلاق/الفقد كإشارة لانتهاء العلاقة إذا وافقتها بقية البيانات."
+      }\nملاحظة مالية: اعتمد حالة الدفع (مكتمل/أقساط) لا فرق القيمة. لا تذكر «مستحقات مالية متبقية» أو أن العميل «عليه دفعة» إلا إذا كانت حالة الدفع غير مكتملة فعلاً، ووضّح أنها بيانات شيت قد تكون متأخرة التحديث. التحصيل مسؤولية قسم الحسابات وليس مؤشّر رضا.${activityBlock}`
     : `\n\n=== حالة العقد ===\n(لا يوجد عقد مسجّل لهذا العميل)${activityBlock}`;
 
   // The accountability roster: who works the client's tasks, who owns the stuck
@@ -377,6 +427,7 @@ ${briefInstruction}
 
 — recommendations (الأكشنز المقترحة، الأهم أولاً، حتى ٦) —
 اربط ما يشكو/يطلبه العميل بالعمل الفعلي في التاسكات. issue = المشكلة موصولة بالواقع، action = الخطوة العملية. استخدم رموز/عناوين المهام عند توفرها. لا تخترع مهاماً. إن لم توجد مشكلة جوهرية أعِد مصفوفة فارغة.
+لا تكرر المشكلة نفسها في توصيتين بصياغتين مختلفتين. إذا كانت عدة إشارات أو مهام تعود لنفس السبب التشغيلي، ادمجها في توصية واحدة واجمع أكواد المهام المرتبطة بها.
 لكل توصية أضف taskCodes = أكواد المهام المذكورة فعليًا (أو [] إن لم توجد)، وresolutionKind حسب دليل الإغلاق الآلي: task_completion إذا تُغلق باكتمال المهام المذكورة، no_overdue_tasks إذا تتعلق بعدد المهام المتأخرة عمومًا، brief_attached إذا تتعلق بغياب البريف، وإلا manual_confirmation. لا تعتبر تغيّر شعور العميل قابلاً للإغلاق من التاسكات وحدها.
 
 — accountability (اربط الشكوى/التعثّر بالمسؤول — أهم مخرج لهذه الصفحة، حتى ٦) —
@@ -503,6 +554,9 @@ export async function persistSatisfaction(
   // Same guard for the per-cause owner name.
   result.causes = (result.causes ?? []).map((c) =>
     c.ownerName && rosterNames.has(norm(c.ownerName)) ? c : { ...c, ownerName: null },
+  );
+  result.recommendations = deduplicateRecommendations(
+    result.recommendations ?? [],
   );
 
   const { data: imp } = await supabaseAdmin

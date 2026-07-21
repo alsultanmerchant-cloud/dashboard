@@ -29,8 +29,8 @@ export interface RosterEmployee {
   name: string;
   role: string | null;
   department: string;
-  // مفتوحة / متأخرة — total LIVE open & overdue tasks the person is assigned to
-  // (not gated to the stages their role owns). See getAccountabilityLiveTotals.
+  // على مكتبه / معلّقة متأخرة — the same LIVE current-stage ownership and
+  // stage-SLA counters shown in Team Pulse. See getAccountabilityLiveTotals.
   openTasks: number;
   overdueOwned: number;
   // إجمالي المراحل / مراحل متأخرة — period-filtered, stage-ownership fan-out
@@ -103,8 +103,8 @@ async function _getAccountabilityRoster(
     name: r.fullName,
     role: r.positionLabel ?? r.jobTitle ?? null,
     department: depts.get(r.employeeId) ?? UNASSIGNED,
-    // Total live board (not stage-gated). Fall back to the scorecard's
-    // stage-owned counts only if the live query returned no row for them.
+    // Exact Team Pulse desk counters. Fall back to the already-normalized
+    // scorecard values only if the live cache returned no row for this person.
     openTasks: liveTotals[r.employeeId]?.openLive ?? r.openTasks,
     overdueOwned: liveTotals[r.employeeId]?.overdueLive ?? r.overdueOwned,
     totalStages: (trends[r.employeeId] ?? r.periodTrend).currentTotalStages,

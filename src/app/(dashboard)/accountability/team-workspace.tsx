@@ -61,9 +61,9 @@ const SEVERITY_HINT: Record<CaseSeverity, string> = {
 };
 const SEVERITY_CLEAN_HINT = "سليم — لا توجد قضية مفتوحة على هذا الموظف.";
 
-// The tasks behind a team-table number (مفتوحة / متأخرة live, إجمالي المراحل /
-// مراحل متأخرة period) — reuses the same drill-down sheet as the reviewer/edits
-// sections so the figure can be reconciled against Rwasem.
+// The tasks behind a team-table number (على مكتبه / معلّقة متأخرة live, إجمالي
+// المراحل / مراحل متأخرة period) — reuses the same drill-down sheet as the
+// reviewer/edits sections so the figure can be reconciled against Rwasem.
 function metricDrillView(
   metric: EmployeeMetric,
   name: string,
@@ -71,9 +71,9 @@ function metricDrillView(
 ): Omit<DrillView, "loading" | "error"> {
   switch (metric) {
     case "open":
-      return { title: `المهام المفتوحة — ${name}`, subtitle: "كل المهام المفتوحة المسندة إليه الآن (لايف)", valueKind: "flag", flagLabel: "متأخرة", tasks };
+      return { title: `المهام على المكتب — ${name}`, subtitle: "المهام المفتوحة التي يملك الموظف مرحلتها الحالية — نفس قائمة نبض الفريق (لايف)", valueKind: "flag", flagLabel: "تجاوزت SLA", tasks };
     case "overdue":
-      return { title: `المهام المتأخرة — ${name}`, subtitle: "مفتوحة وتجاوزت موعد التسليم اليوم، بما فيها «جديد» (لايف)", valueKind: "none", tasks };
+      return { title: `المهام المعلّقة المتأخرة — ${name}`, subtitle: "المهام على مكتبه التي تجاوزت مهلة المرحلة الحالية (SLA) — نفس قائمة نبض الفريق (لايف)", valueKind: "none", tasks };
     case "totalStages":
       return { title: `إجمالي المراحل — ${name}`, subtitle: "المراحل التي كان مسؤولاً عنها في الفترة ولها مهلة SLA — كل مرحلة على حدة", valueKind: "minutes", flagLabel: "تجاوزت المهلة", tasks };
     case "lateStages":
@@ -102,7 +102,7 @@ export function TeamWorkspace({
   const [page, setPage] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Number drill-down (مفتوحة / متأخرة / إجمالي المراحل / مراحل متأخرة → the tasks).
+  // Number drill-down (على مكتبه / معلّقة متأخرة / إجمالي المراحل / مراحل متأخرة → the tasks).
   const [metricDrill, setMetricDrill] = useState<{
     employeeId: string;
     employeeName: string;
@@ -298,11 +298,11 @@ export function TeamWorkspace({
                 <tr className="border-b border-border text-[11px] text-muted-foreground">
                   <th className="px-3 py-2 text-start font-medium">الموظف</th>
                   <th className="px-3 py-2 text-start font-medium">القسم</th>
-                  <th className="px-3 py-2 text-center font-medium" title="إجمالي المهام المفتوحة المسندة إليه الآن (لايف)">
-                    مفتوحة
+                  <th className="px-3 py-2 text-center font-medium" title="المهام المفتوحة التي يملك مرحلتها الحالية — نفس معلّقة في نبض الفريق (لايف)">
+                    على مكتبه
                   </th>
-                  <th className="px-3 py-2 text-center font-medium" title="إجمالي المهام المتأخرة المسندة إليه الآن (لايف)">
-                    متأخرة
+                  <th className="px-3 py-2 text-center font-medium" title="المهام على مكتبه التي تجاوزت SLA المرحلة الحالية — نفس متأخر في نبض الفريق (لايف)">
+                    معلّقة متأخرة
                   </th>
                   <th className="px-3 py-2 text-center font-medium" title="عدد المراحل ذات المهلة (SLA) التي كان مسؤولاً عنها خلال الفترة — تُحتسب لكل مرحلة على حدة">
                     إجمالي المراحل
@@ -688,15 +688,15 @@ function EmployeeModal({
           {/* Scorecard metrics — always shown. Hover any card for how it's derived. */}
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-3">
             <Metric
-              label="مفتوحة (لايف)"
+              label="على مكتبه (لايف)"
               value={e.openTasks}
-              explain="إجمالي المهام غير المُنجزة المُسندة إليه الآن، من كل إسناداته وبغضّ النظر عن المرحلة الحالية. رقم لايف لا يتأثّر بفلتر المدة."
+              explain="المهام المفتوحة التي يملك هذا الموظف مرحلتها الحالية الآن. هو نفس رقم «معلّقة» في نبض الفريق، ولا يتأثّر بفلتر المدة."
             />
             <Metric
-              label="متأخرة (لايف)"
+              label="معلّقة متأخرة (لايف)"
               value={e.overdueOwned}
               tone={e.overdueOwned > 0 ? "text-cc-red" : undefined}
-              explain={`من مهامه المفتوحة (${e.openTasks})، التي فات موعد تسليمها اليوم — بما فيها مهام مرحلة «جديد» التي لم تبدأ أصلًا. رقم لايف.`}
+              explain={`من مهامه الموجودة على مكتبه (${e.openTasks})، التي تجاوزت مهلة المرحلة الحالية (SLA). هو نفس رقم «متأخر» في نبض الفريق، وليس موعد تسليم المهمة.`}
             />
             <Metric
               label="الالتزام في الفترة"
@@ -718,7 +718,7 @@ function EmployeeModal({
               tone={e.lateStages > 0 ? "text-amber" : undefined}
               explain={`من إجمالي ${e.totalStages} مرحلة في الفترة، التي تجاوز فيها مهلة المرحلة نفسها (SLA بدقائق العمل) وهو مسؤول عنها${
                 e.totalStages > 0 ? ` (${Math.round((e.lateStages / e.totalStages) * 100)}%)` : ""
-              }. هذا تأخير في تمرير المرحلة، وليس تأخير تسليم المهمة — ذاك في عمود «متأخرة».`}
+              }. هذا قياس تاريخي داخل الفترة، أما «معلّقة متأخرة» فيقيس وضع مكتبه الحالي لايف.`}
             />
             <ExplainBlock
               className="bg-card px-2 py-2.5"
@@ -825,7 +825,7 @@ function EmployeeModal({
                 <ShieldCheck className="mx-auto size-6 text-cc-green" />
                 <p className="mt-2 text-sm font-semibold text-cc-green">لا توجد قضايا مساءلة حالية</p>
                 <p className="text-[11px] text-muted-foreground">
-                  لا مهام متأخرة في مرحلته، ولا شكاوى منسوبة إليه، ولا صمت تشغيلي مرصود.
+                  لا مهام على مكتبه تجاوزت SLA مرحلتها، ولا شكاوى منسوبة إليه، ولا صمت تشغيلي مرصود.
                 </p>
               </div>
             )}

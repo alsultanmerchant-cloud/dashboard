@@ -78,10 +78,14 @@ import type {
   SatisfactionRow,
 } from "@/lib/data/satisfaction";
 import type { RefreshSummary } from "@/lib/satisfaction-refresh";
-import type {
+import {
+  isOverdueTaskRecommendation,
+  recommendationsDescribeSameProblem,
+  type SatisfactionRecommendation,
   RecommendationLiveStatus,
   RecommendationResolutionReason,
 } from "@/lib/satisfaction-recommendation-status";
+import { isResolvedHistoricalHold } from "@/lib/data/satisfaction-rules";
 
 interface Props {
   canManageClients: boolean;
@@ -1449,11 +1453,20 @@ function taskEventDate(task: ClientExecutionSnapshot["topTasks"][number]) {
 }
 
 // Short label for a contract activity-log event (mirrors log-type-meta keys).
-function contractEventLabel(logType: string): string {
-  if (/Lost/i.test(logType)) return "📄 إغلاق العقد (خسارة)";
+function contractEventLabel(
+  logType: string,
+  opts: { partialLoss?: boolean; resolvedHold?: boolean } = {},
+): string {
+  if (/Lost/i.test(logType))
+    return opts.partialLoss
+      ? "📄 إغلاق عقد فرعي (العلاقة مستمرة)"
+      : "📄 إغلاق العقد (خسارة)";
   if (/Renew/i.test(logType)) return "📄 تجديد العقد";
   if (/LIFTED/i.test(logType)) return "📄 رفع تجميد العقد";
-  if (/HOLD/i.test(logType)) return "📄 تجميد العقد";
+  if (/HOLD/i.test(logType))
+    return opts.resolvedHold
+      ? "📄 تجميد سابق — تم رفعه"
+      : "📄 تجميد العقد";
   if (/EDIT MODE ON/i.test(logType)) return "📄 بدء تعديل بنود العقد";
   if (/EDIT MODE OFF/i.test(logType)) return "📄 انتهاء تعديل بنود العقد";
   return `📄 ${logType}`;
@@ -1517,29 +1530,117 @@ function buildClientTimelineEvents(
   }
 
   // Contract activity-log events — holds/edits/close/renew as dated timeline
-  // entries. Lost/Hold are critical; Renew reads as a positive (approval) beat.
-  (analysis.contractContext?.recentActivity ?? [])
+  // entries. A lost event is critical only when the whole relationship has no
+  // live contract. In a multi-contract portfolio it can mean one stopped
+  // service while the team continues serving another.
+  const contractContext = analysis.contractContext;
+  const liveContractCount = contractContext
+    ? (contractContext.liveContractCount ??
+      contractContext.contracts.filter(
+        (c) => c.status === "active" || c.status === "hold",
+      ).length)
+    : 0;
+  (contractContext?.recentActivity ?? [])
     .slice(0, 6)
     .forEach((ev, index) => {
       const isLost = /Lost/i.test(ev.logType);
       const isRenew = /Renew/i.test(ev.logType);
       const isHold = /HOLD/i.test(ev.logType) && !/LIFTED/i.test(ev.logType);
-      const critical = isLost || isHold;
+      const partialLoss = isLost && liveContractCount > 0;
+      const resolvedHold = isResolvedHistoricalHold(
+        ev,
+        contractContext?.contracts ?? [],
+      );
+      const critical = (isLost && !partialLoss) || (isHold && !resolvedHold);
       const note = ev.notes
         ? ev.notes.replace(/\s+/g, " ").trim().slice(0, 120)
         : "";
       events.push({
         id: `contract-${index}`,
-        title: `${contractEventLabel(ev.logType)}${note ? ` — ${note}` : ""}`,
+        title: `${contractEventLabel(ev.logType, { partialLoss, resolvedHold })}${
+          ev.contractCode ? ` · ${ev.contractCode}` : ""
+        }${note ? ` — ${note}` : ""}`,
         date: ev.logTime ?? analysis.createdAt,
         source: "system",
         category: isRenew ? "approval" : critical ? "complaint" : "decision",
         critical,
-        severity: isLost ? "critical" : isHold ? "high" : "medium",
+        severity:
+          isLost && !partialLoss
+            ? "critical"
+            : isHold && !resolvedHold
+              ? "high"
+              : "medium",
       });
     });
 
   return events.sort((a, b) => parseTime(b.date) - parseTime(a.date));
+}
+
+type DisplayRecommendation = SatisfactionRecommendation & {
+  liveStatus: RecommendationLiveStatus;
+  relatedIssues: string[];
+};
+
+function mergeRecommendationStatuses(
+  first: RecommendationLiveStatus,
+  second: RecommendationLiveStatus,
+): RecommendationLiveStatus {
+  const statuses = [first, second];
+  const manual = statuses.find(
+    (status) => status.reason === "manual_confirmed",
+  );
+  const selected =
+    manual ??
+    (statuses.every((status) => status.state === "resolved")
+      ? first
+      : (statuses.find((status) => status.state === "open") ??
+        statuses.find((status) => status.state === "needs_confirmation") ??
+        first));
+  const matchedTasks = [
+    ...new Map(
+      statuses
+        .flatMap((status) => status.matchedTasks)
+        .map((task) => [task.id, task]),
+    ).values(),
+  ];
+  return {
+    ...selected,
+    // Keep the visible card's index as the primary action target. The complete
+    // group is carried separately in `relatedIssues`.
+    recommendationIndex: first.recommendationIndex,
+    checkedAt:
+      first.checkedAt > second.checkedAt ? first.checkedAt : second.checkedAt,
+    matchedTasks,
+  };
+}
+
+function addOrMergeRecommendation(
+  recommendations: DisplayRecommendation[],
+  incoming: DisplayRecommendation,
+) {
+  const existing = recommendations.find((candidate) =>
+    recommendationsDescribeSameProblem(candidate, incoming),
+  );
+  if (!existing) {
+    recommendations.push(incoming);
+    return;
+  }
+
+  existing.relatedIssues = [
+    ...new Set([...existing.relatedIssues, ...incoming.relatedIssues]),
+  ];
+  existing.taskCodes = [
+    ...new Set([...(existing.taskCodes ?? []), ...(incoming.taskCodes ?? [])]),
+  ];
+  if (
+    REC_PRIORITY_RANK[incoming.priority] < REC_PRIORITY_RANK[existing.priority]
+  ) {
+    existing.priority = incoming.priority;
+  }
+  existing.liveStatus = mergeRecommendationStatuses(
+    existing.liveStatus,
+    incoming.liveStatus,
+  );
 }
 
 function buildFallbackRecommendations(
@@ -1556,9 +1657,11 @@ function buildFallbackRecommendations(
   );
   const resolvedIssues = new Set(manualResolvedIssues);
   const checkedAt = recommendationStatuses[0]?.checkedAt ?? analysis.createdAt;
-  const recs = analysis.recommendations.map(
-    (recommendation, recommendationIndex) => ({
+  const recs: DisplayRecommendation[] = [];
+  analysis.recommendations.forEach((recommendation, recommendationIndex) => {
+    addOrMergeRecommendation(recs, {
       ...recommendation,
+      relatedIssues: [recommendation.issue],
       liveStatus:
         statusByIndex.get(recommendationIndex) ??
         ({
@@ -1570,9 +1673,22 @@ function buildFallbackRecommendations(
           liveOverdueCount: null,
           matchedTasks: [],
         } satisfies RecommendationLiveStatus),
-    }),
+    });
+  });
+  // A generic overdue card adds no information when a stored recommendation
+  // already names the concrete open tasks. This was the source of the first
+  // duplicated pair in the reported ARTDECO / Cocktail Mazza examples.
+  const hasConcreteOpenTaskRecommendation = recs.some(
+    (recommendation) =>
+      recommendation.liveStatus.reason === "linked_tasks_open" ||
+      isOverdueTaskRecommendation(recommendation),
   );
-  if (execution && execution.overdueCount > 0 && recs.length < 6) {
+  if (
+    execution &&
+    execution.overdueCount > 0 &&
+    recs.length < 6 &&
+    !hasConcreteOpenTaskRecommendation
+  ) {
     const stage = execution.byStage[0]?.stage;
     recs.push({
       priority:
@@ -1580,6 +1696,7 @@ function buildFallbackRecommendations(
       issue: `يوجد ${execution.overdueCount} مهام متأخرة${stage ? `، أكثرها في مرحلة ${stage}` : ""}.`,
       action:
         "تحديد مالك لكل مهمة متأخرة وإرسال موعد تسليم واضح للعميل خلال 48 ساعة.",
+      relatedIssues: [],
       liveStatus: {
         recommendationIndex: recs.length,
         state: "open" as const,
@@ -1594,13 +1711,14 @@ function buildFallbackRecommendations(
   if (analysis.risks.length > 0 && recs.length < 6) {
     const riskIssue = analysis.risks[0];
     const riskResolved = resolvedIssues.has(riskIssue);
-    recs.push({
+    addOrMergeRecommendation(recs, {
       priority: "medium" as const,
       issue: riskIssue,
       action:
         "تحويل الخطر إلى قرار متابعة: من المسؤول، ما الإجراء، وما موعد الإغلاق.",
+      relatedIssues: [riskIssue],
       liveStatus: {
-        recommendationIndex: recs.length,
+        recommendationIndex: analysis.recommendations.length,
         state: riskResolved
           ? ("resolved" as const)
           : ("needs_confirmation" as const),
@@ -2315,13 +2433,7 @@ function RecommendationsPanel({
   canManageClients,
   t,
 }: {
-  recommendations: Array<
-    NonNullable<
-      ClientSatisfactionDetail["analysis"]
-    >["recommendations"][number] & {
-      liveStatus: RecommendationLiveStatus;
-    }
-  >;
+  recommendations: DisplayRecommendation[];
   analysisCreatedAt: string;
   analysisId: string;
   clientId: string;
@@ -2464,9 +2576,7 @@ function RecommendationItem({
   canManageClients,
   t,
 }: {
-  recommendation: NonNullable<
-    ClientSatisfactionDetail["analysis"]
-  >["recommendations"][number] & { liveStatus: RecommendationLiveStatus };
+  recommendation: DisplayRecommendation;
   analysisId: string;
   clientId: string;
   canManageClients: boolean;
@@ -2501,6 +2611,7 @@ function RecommendationItem({
         analysisId,
         recommendationIndex: status.recommendationIndex,
         issue: recommendation.issue,
+        relatedIssues: recommendation.relatedIssues,
         state,
       });
       if (result.error) {
@@ -2822,10 +2933,12 @@ function SignalCountBadge({
   label,
   count,
   examples,
+  emptyMessage,
 }: {
   label: string;
   count: number;
   examples: { text: string; date: string | null }[];
+  emptyMessage: string;
 }) {
   const hasExamples = examples.length > 0;
   const chipClass =
@@ -2836,12 +2949,16 @@ function SignalCountBadge({
       <span className="font-semibold tabular-nums">{count}</span>
     </>
   );
-  if (!hasExamples) {
+  // Zero has nothing to drill into. Every POSITIVE count stays interactive,
+  // even for a legacy/partial analysis whose quote arrays are missing; the
+  // popover then explains the data gap instead of looking like a broken chip.
+  if (count <= 0) {
     return <span className={chipClass}>{inner}</span>;
   }
   return (
     <Popover>
       <PopoverTrigger
+        aria-label={`${label} · ${count}`}
         className={cn(
           chipClass,
           "cursor-pointer transition-colors hover:border-cyan/50 hover:bg-cyan/10",
@@ -2853,21 +2970,29 @@ function SignalCountBadge({
         <p className="text-[11px] font-semibold text-foreground">
           {label} · {count}
         </p>
-        <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
-          {examples.map((ex, i) => (
-            <li
-              key={i}
-              className="rounded-md border border-border bg-soft-1 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground"
-            >
-              <span className="text-foreground" data-private="chat">{ex.text}</span>
-              {ex.date && (
-                <span className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/70">
-                  {ex.date}
+        {hasExamples ? (
+          <ul className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+            {examples.map((ex, i) => (
+              <li
+                key={`${ex.date ?? "unknown"}-${i}`}
+                className="rounded-md border border-border bg-soft-1 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground"
+              >
+                <span className="text-foreground" data-private="chat">
+                  {ex.text}
                 </span>
-              )}
-            </li>
-          ))}
-        </ul>
+                {ex.date ? (
+                  <span className="mt-0.5 block text-[10px] tabular-nums text-muted-foreground/70">
+                    {ex.date}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-md border border-amber/25 bg-amber/10 px-2.5 py-2 text-[12px] leading-relaxed text-amber">
+            {emptyMessage}
+          </p>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -2910,6 +3035,7 @@ function ClientSignalsPanel({
                 label={t(`signals.req.${k}`)}
                 count={signals.requests[k]}
                 examples={signals.requestExamples?.[k] ?? []}
+                emptyMessage={t("signals.noSavedExamples")}
               />
             ))}
           </div>
@@ -2929,6 +3055,7 @@ function ClientSignalsPanel({
                 label={t(`signals.appr.${k}`)}
                 count={signals.approvals[k]}
                 examples={signals.approvalExamples?.[k] ?? []}
+                emptyMessage={t("signals.noSavedExamples")}
               />
             ))}
           </div>

@@ -53,6 +53,10 @@ const RecommendationStatusSchema = z.object({
   analysisId: z.string().uuid(),
   recommendationIndex: z.number().int().min(0).max(5),
   issue: z.string().trim().min(1).max(2_000),
+  relatedIssues: z
+    .array(z.string().trim().min(1).max(2_000))
+    .max(12)
+    .optional(),
   state: z.enum(["resolved", "cleared"]),
 });
 
@@ -63,6 +67,7 @@ export async function setRecommendationStatusAction(input: {
   analysisId: string;
   recommendationIndex: number;
   issue: string;
+  relatedIssues?: string[];
   state: "resolved" | "cleared";
 }): Promise<RecommendationStatusState> {
   let session;
@@ -74,7 +79,14 @@ export async function setRecommendationStatusAction(input: {
 
   const parsed = RecommendationStatusSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" };
-  const { clientId, analysisId, recommendationIndex, issue, state } = parsed.data;
+  const {
+    clientId,
+    analysisId,
+    recommendationIndex,
+    issue,
+    relatedIssues,
+    state,
+  } = parsed.data;
 
   // Verify the immutable snapshot and exact row text so a stale browser cannot
   // confirm a different recommendation after navigation/history changes.
@@ -96,33 +108,39 @@ export async function setRecommendationStatusAction(input: {
   // derived cards outright, so their "confirm resolved" button could never succeed
   // (and reload/re-analyze never helped, since they are never in the stored array).
   // A card is confirmable when its issue matches a stored recommendation OR a stored risk.
-  const knownIssues = new Set<string>();
-  for (const rec of recommendations) {
+  const knownIssueIndexes = new Map<string, number>();
+  for (const [index, rec] of recommendations.entries()) {
     if (rec && !Array.isArray(rec) && typeof rec === "object" && typeof rec.issue === "string") {
-      knownIssues.add(rec.issue);
+      knownIssueIndexes.set(rec.issue, index);
     }
   }
-  for (const risk of risks) {
-    if (typeof risk === "string") knownIssues.add(risk);
+  for (const [index, risk] of risks.entries()) {
+    if (typeof risk === "string") {
+      knownIssueIndexes.set(risk, recommendations.length + index);
+    }
   }
-  if (!knownIssues.has(issue)) {
+  const issues = [...new Set([issue, ...(relatedIssues ?? [])])];
+  if (issues.some((knownIssue) => !knownIssueIndexes.has(knownIssue))) {
     return { error: "التوصية تغيّرت أو لم تعد موجودة؛ حدّث الصفحة وحاول مجددًا" };
   }
 
-  const { error } = await supabaseAdmin.from("ai_events").insert({
-    organization_id: session.orgId,
-    actor_user_id: session.userId,
-    event_type: "SATISFACTION_RECOMMENDATION_STATUS_CHANGED",
-    entity_type: "satisfaction_analysis",
-    entity_id: analysisId,
-    importance: "normal",
-    payload: {
-      clientId,
-      recommendationIndex,
-      issue,
-      state,
-    },
-  });
+  const { error } = await supabaseAdmin.from("ai_events").insert(
+    issues.map((knownIssue) => ({
+      organization_id: session.orgId,
+      actor_user_id: session.userId,
+      event_type: "SATISFACTION_RECOMMENDATION_STATUS_CHANGED",
+      entity_type: "satisfaction_analysis",
+      entity_id: analysisId,
+      importance: "normal",
+      payload: {
+        clientId,
+        recommendationIndex:
+          knownIssueIndexes.get(knownIssue) ?? recommendationIndex,
+        issue: knownIssue,
+        state,
+      },
+    })),
+  );
   if (error) return { error: error.message };
 
   await logAudit({
@@ -134,7 +152,7 @@ export async function setRecommendationStatusAction(input: {
         : "satisfaction.recommendation_confirmation_cleared",
     entityType: "satisfaction_analysis",
     entityId: analysisId,
-    metadata: { clientId, recommendationIndex, issue },
+    metadata: { clientId, recommendationIndex, issue, relatedIssues: issues },
   });
 
   revalidatePath("/satisfaction");

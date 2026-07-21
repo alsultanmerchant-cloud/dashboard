@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isClientRelationshipActive,
   isContractPaymentComplete,
+  isResolvedHistoricalHold,
   summarizeContractPayments,
 } from "./satisfaction-rules";
 
@@ -160,5 +161,50 @@ describe("contract payment (issue 1)", () => {
     const s = summarizeContractPayments([]);
     expect(s.allComplete).toBe(false);
     expect(s.outstanding).toBe(0);
+  });
+});
+
+describe("historical HOLD reconciliation", () => {
+  test("an ON HOLD event is resolved when its contract is active now", () => {
+    expect(
+      isResolvedHistoricalHold(
+        {
+          logType: "ON HOLD",
+          contractCode: "C164-1",
+          contractStatus: "active",
+        },
+        [{ contractCode: "C164-1", status: "active" }],
+      ),
+    ).toBe(true);
+  });
+
+  test("an ON HOLD event stays current when that contract is still held", () => {
+    expect(
+      isResolvedHistoricalHold(
+        { logType: "Entered HOLD", contractCode: "C164-1" },
+        [{ contractCode: "C164-1", status: "hold" }],
+      ),
+    ).toBe(false);
+  });
+
+  test("legacy event without a contract code resolves when no contract is held", () => {
+    expect(
+      isResolvedHistoricalHold(
+        { logType: "ON HOLD" },
+        [
+          { contractCode: "C164-1", status: "active" },
+          { contractCode: "C164-2", status: "active" },
+        ],
+      ),
+    ).toBe(true);
+  });
+
+  test("HOLD LIFTED is not itself treated as an entered-hold event", () => {
+    expect(
+      isResolvedHistoricalHold(
+        { logType: "HOLD LIFTED", contractCode: "C164-1" },
+        [{ contractCode: "C164-1", status: "active" }],
+      ),
+    ).toBe(false);
   });
 });

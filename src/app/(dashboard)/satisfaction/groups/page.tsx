@@ -27,7 +27,17 @@ export default async function WaGroupsPage() {
     getWaLinkSuggestions(session.orgId),
     getProjectGroupCoverage(session.orgId),
   ]);
-  const options = clients.map((c) => ({ value: c.id as string, label: c.name as string }));
+  const options = clients.map((c) => ({
+    value: c.id as string,
+    label:
+      c.contract_count > 1
+        ? t("groups.clientContractSummary", {
+            name: c.name as string,
+            live: c.live_contract_count,
+            total: c.contract_count,
+          })
+        : (c.name as string),
+  }));
   const projectOptions = projects.map((p) => ({
     value: p.id as string,
     label: p.project_code ? `${p.project_code} · ${p.name}` : (p.name as string),

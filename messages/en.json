@@ -2836,7 +2836,7 @@
     "stats": {
       "measured": "Employees on the board",
       "medianScore": "Median score",
-      "overdueOwned": "Overdue owned tasks",
+      "overdueOwned": "Late pending tasks",
       "lowConfidence": "Low confidence / unmeasured"
     },
     "search": "Search employees…",
@@ -2854,8 +2854,8 @@
       "score": "Score",
       "onTime": "On-time rate",
       "avgDwell": "Avg stage dwell",
-      "openTasks": "Open now",
-      "overdue": "Overdue",
+      "openTasks": "On their desk now",
+      "overdue": "Late pending",
       "sample": "Sample",
       "rework": "Returns (30d)"
     },
@@ -2863,10 +2863,10 @@
     "lowSample": "Small sample ({n})",
     "lowSampleHint": "Fewer than 5 SLA-measured events back this number — treat it as an early indication, not a verdict.",
     "help": {
-      "score": "Score = 60% on-time commitment + 40% of open tasks that aren't overdue, blended over the last 30 days of stage history. It's a formula, not a guess — any component with no data drops out and the rest is reweighted.",
+      "score": "Score = 60% stage-SLA adherence + 40% of tasks on the employee's current desk that have not breached their stage SLA. Desk counters exactly match Team Pulse; any component with no data drops out and the rest is reweighted.",
       "onTime": "On-time % = stage steps finished within their SLA ÷ steps that had an SLA rule, over the last 30 days. Small samples (under 5) show neutral, never red.",
-      "scoreBreakdown": "This score = on-time {onTime} × 60% + non-overdue {nonOverdue} × 40%.",
-      "scoreBreakdownNoOpen": "This score = on-time {onTime} (no open tasks to weigh overdue against)."
+      "scoreBreakdown": "This score = on-time {onTime} × 60% + non-late desk work {nonOverdue} × 40%.",
+      "scoreBreakdownNoOpen": "This score = on-time {onTime} (no tasks on their desk to weigh lateness against)."
     },
     "showingRows": "Showing {shown} of {total}",
     "loadMore": "Load more",
@@ -2906,12 +2906,12 @@
     "metricTooltips": {
       "accountability_measured": "How many employees have a computed accountability scorecard in the current window. Anyone with at least one closed stage interval is counted; the score itself may still be low-confidence.",
       "accountability_medianScore": "The median accountability score (0–100) across high-confidence rows only — small-sample rows are excluded so a couple of events can't swing it. Blends on-time delivery, rework and dwell within each role's accountable stages.",
-      "accountability_overdueOwned": "Distinct live overdue tasks owned by measured employees right now. Counted once per task (de-duplicated) — per-row owned counts fan out across co-assignees, so they are never summed.",
+      "accountability_overdueOwned": "Tasks currently on employees' desks whose current-stage SLA is breached. This uses the same definition as Team Pulse's late-pending count; the organization total counts each task once.",
       "accountability_lowConfidence": "Rows shown neutrally because the sample is too small to judge (fewer than 5 SLA-decidable intervals) or no score could be computed. They are never coloured red.",
       "accountability_sample": "Closed stage intervals in the window backing this row. Confidence drops to low under 5 — a tiny sample is shown neutrally, never as an indictment.",
-      "accountability_overdue": "Live overdue tasks this person owns (their accountable stage is the one currently holding the task past its deadline).",
+      "accountability_overdue": "Tasks on this person's current desk that have breached the current-stage SLA — the same late count as Team Pulse, not the task delivery deadline.",
       "accountability_rework": "Times this person's work re-entered in_progress or client_changes within the window — i.e. it bounced back after moving on (an agent-side quality signal).",
-      "accountability_openTasks": "Tasks sitting in this person's accountable stage right now (open, not yet exited).",
+      "accountability_openTasks": "Open tasks whose current stage this person owns — the same pending count as Team Pulse.",
       "accountability_avgDwell": "Average business-time the task spent in this person's accountable stages, over closed intervals in the window. Business hours only (Sun–Thu 09:00–17:00 Riyadh).",
       "accountability_reviewerReviews": "Completed reviews credited to this reviewer in the window — closed intervals of the review stage. On Odoo-synced data these are credited by assignment, not by who moved the task.",
       "accountability_reviewerMedianTime": "Median business-time spent in the review stage (50th percentile of dwell, which is right-skewed). Business hours only (Sun–Thu 09:00–17:00 Riyadh).",
@@ -2923,7 +2923,7 @@
       "accountability_covWithAgent": "Tasks that have an assigned specialist/agent — required to attribute execution work.",
       "accountability_covWithAm": "Tasks that have an account manager — required to attribute client-facing handoff stages.",
       "accountability_covArchived": "Archived tasks, excluded from every measure above.",
-      "accountability_covOverdueDistinct": "Distinct live overdue tasks (de-duplicated across co-assignees) — the org-level overdue number.",
+      "accountability_covOverdueDistinct": "Distinct pending tasks whose current-stage SLA is breached — the same organization total as Team Pulse.",
       "accountability_aiKind": "The type of AI-derived signal (complaint / praise / risk / delay) extracted from client WhatsApp chats and system events. Always shown with the original quote and NEVER fed into the scores above.",
       "accountability_evidenceDwell": "Business-time the task spent in this specific stage interval — the evidence behind the row's numbers. Business hours only (Sun–Thu 09:00–17:00 Riyadh)."
     },
@@ -2937,7 +2937,7 @@
       "archivedExcluded": "Archived (excluded)",
       "window": "Measurement window:",
       "allTime": "Full history",
-      "overdueDistinct": "Overdue live tasks (distinct)"
+      "overdueDistinct": "Late pending tasks (distinct)"
     },
     "ai": {
       "title": "AI-linked signals",
@@ -3854,6 +3854,7 @@
       "blockers": "Blockers",
       "delayCauses": "Delay causes",
       "accountEvaluation": "Internal account evaluation",
+      "noSavedExamples": "This count exists in the analysis, but its supporting messages were not saved. Re-run the analysis to generate the details.",
       "req": {
         "new": "New",
         "edit": "Edits",
@@ -4021,6 +4022,7 @@
       "synced": "Synced — {n} groups",
       "empty": "No groups yet. Run sync or wait for the first message via the webhook.",
       "unmapped": "Unmapped",
+      "clientContractSummary": "{name} · {live} active of {total} contracts",
       "save": "Save",
       "col": {
         "group": "Group",
