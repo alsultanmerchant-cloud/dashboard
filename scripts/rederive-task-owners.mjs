@@ -37,13 +37,18 @@ function norm(s) {
   return t.replace(/\s+/g, " ").trim().toLowerCase();
 }
 const EXEC = ["in_progress", "client_changes"];
+// Mirrors src/lib/tasks/effective-stage-owner.ts: execution follows the doer role
+// actually on the task — agent (المنفذ) if present, else specialist, else template.
 function withEffectiveExecutionOwner(owners, roles) {
-  if (roles.has("agent") || !roles.has("specialist")) return owners;
+  const preferred = roles.has("agent") ? "agent" : roles.has("specialist") ? "specialist" : null;
+  if (!preferred) return owners;
   let resolved = owners;
   for (const st of EXEC) {
-    if (owners[st] !== "agent") continue;
+    const cur = owners[st];
+    if (cur !== "agent" && cur !== "specialist") continue;
+    if (cur === preferred) continue;
     if (resolved === owners) resolved = { ...owners };
-    resolved[st] = "specialist";
+    resolved[st] = preferred;
   }
   return resolved;
 }

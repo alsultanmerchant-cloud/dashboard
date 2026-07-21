@@ -32,4 +32,20 @@ describe("withEffectiveExecutionOwner", () => {
     expect(resolved.manager_review).toBe("manager");
     expect(resolved.specialist_review).toBe("specialist");
   });
+
+  test("gives execution to the agent (المنفذ) when one is assigned, even if the template says specialist", () => {
+    const specialistExecution = { ...owners, in_progress: "specialist", client_changes: "specialist" };
+    expect(withEffectiveExecutionOwner(specialistExecution, new Set(["agent", "specialist"]))).toEqual({
+      ...owners,
+      in_progress: "agent",
+      client_changes: "agent",
+    });
+  });
+
+  test("never reassigns account-manager-owned execution to a doer role", () => {
+    const amExecution = { ...owners, in_progress: "account_manager", client_changes: "account_manager" };
+    const resolved = withEffectiveExecutionOwner(amExecution, new Set(["agent", "specialist"]));
+    expect(resolved.in_progress).toBe("account_manager");
+    expect(resolved.client_changes).toBe("account_manager");
+  });
 });
