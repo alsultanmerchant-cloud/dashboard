@@ -3,7 +3,9 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
   getAccountabilityCaseOverview,
+  getAccountabilityLiveTotals,
   type AccountabilityCaseOverview,
+  type AccountabilityLiveTotals,
 } from "@/lib/data/accountability";
 import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-finance";
 
@@ -379,11 +381,25 @@ async function _getAccountabilityCases(
   const org = assertUuid(orgId, "organization id");
 
   // The scorecard/reviewer overview is the execution backbone (already cached).
-  // The four extra reads are per-stream evidence; each degrades to empty so a
-  // single timeout can't take the page down.
-  const [ov, emps, ledger, stuck, contracts, analyses, clientValues, financeMap, reworkTasks] =
-    await Promise.all([
+  // Each supporting evidence read degrades to empty so a single timeout cannot
+  // take the whole page down.
+  const [
+    ov,
+    liveTotals,
+    emps,
+    ledger,
+    stuck,
+    contracts,
+    analyses,
+    clientValues,
+    financeMap,
+    reworkTasks,
+  ] = await Promise.all([
     overview ? Promise.resolve(overview) : getAccountabilityCaseOverview(orgId),
+    getAccountabilityLiveTotals(orgId).catch((e) => {
+      console.error("[cases] live desk totals failed:", e);
+      return {} as Record<string, AccountabilityLiveTotals>;
+    }),
     runSql<EmpRow>(empSql(org)).catch((e) => {
       console.error("[cases] empSql failed:", e);
       return [] as EmpRow[];
@@ -451,7 +467,12 @@ async function _getAccountabilityCases(
     for (const day of r.daily) m.set(day.d, day.n);
   }
   // Team medians (peer comparison) across all measured employees.
-  const peerMedianOpen = median(ov.rows.map((r) => r.openTasks)) ?? 0;
+  const peerMedianOpen =
+    median(
+      ov.rows.map(
+        (r) => liveTotals[r.employeeId]?.openLive ?? r.openTasks,
+      ),
+    ) ?? 0;
   const peerMedianActions = median(ledger.map((l) => l.actions)) ?? 0;
   // Sun–Thu working day? getUTCDay: 0=Sun … 4=Thu, 5=Fri, 6=Sat.
   const isWorkingDay = (iso: string) => {
@@ -875,8 +896,11 @@ async function _getAccountabilityCases(
           activeDays: l?.active_days ?? 0,
           lastActionAt: l?.last_at ?? null,
           daysSinceLastAction: daysBetween(l?.last_at ?? null, nowMs),
-          openTasks: sc.openTasks,
-          overdueOwned: sc.overdueOwned,
+          // The ledger is the lower, live Team Pulse strip — deliberately
+          // separate from the modal's top delivery-deadline scorecard.
+          openTasks: liveTotals[sc.employeeId]?.openLive ?? sc.openTasks,
+          overdueOwned:
+            liveTotals[sc.employeeId]?.overdueLive ?? sc.overdueOwned,
           onTimeRate: sc.onTimeRate,
           liveContracts,
           dailyActivity: daily.dailyActivity,

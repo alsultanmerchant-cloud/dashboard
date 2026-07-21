@@ -33,6 +33,11 @@ export interface RosterEmployee {
   // stage-SLA counters shown in Team Pulse. See getAccountabilityLiveTotals.
   openTasks: number;
   overdueOwned: number;
+  // General live workload for the modal's TOP scorecard. These preserve the
+  // accountability cache meaning: open current-stage work and delivery-date
+  // overdue work, independent of the stage SLA counters above.
+  generalOpenTasks: number;
+  generalOverdueTasks: number;
   // إجمالي المراحل / مراحل متأخرة — period-filtered, stage-ownership fan-out
   // (one interval each, so two owned stages on one task count as two).
   totalStages: number;
@@ -107,6 +112,8 @@ async function _getAccountabilityRoster(
     // scorecard values only if the live cache returned no row for this person.
     openTasks: liveTotals[r.employeeId]?.openLive ?? r.openTasks,
     overdueOwned: liveTotals[r.employeeId]?.overdueLive ?? r.overdueOwned,
+    generalOpenTasks: r.openTasks,
+    generalOverdueTasks: r.overdueOwned,
     totalStages: (trends[r.employeeId] ?? r.periodTrend).currentTotalStages,
     lateStages: (trends[r.employeeId] ?? r.periodTrend).currentLateStages,
     silence: silence[r.employeeId] ?? fallbackSilence,

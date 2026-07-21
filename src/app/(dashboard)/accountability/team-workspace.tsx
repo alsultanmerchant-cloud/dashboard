@@ -688,15 +688,15 @@ function EmployeeModal({
           {/* Scorecard metrics — always shown. Hover any card for how it's derived. */}
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-3">
             <Metric
-              label="على مكتبه (لايف)"
-              value={e.openTasks}
-              explain="المهام المفتوحة التي يملك هذا الموظف مرحلتها الحالية الآن. هو نفس رقم «معلّقة» في نبض الفريق، ولا يتأثّر بفلتر المدة."
+              label="المهام المفتوحة (لايف)"
+              value={e.generalOpenTasks}
+              explain="كل المهام المفتوحة التي تقع مرحلتها الحالية تحت مسؤولية الموظف، بغضّ النظر عن مهلة المرحلة (SLA)."
             />
             <Metric
-              label="معلّقة متأخرة (لايف)"
-              value={e.overdueOwned}
-              tone={e.overdueOwned > 0 ? "text-cc-red" : undefined}
-              explain={`من مهامه الموجودة على مكتبه (${e.openTasks})، التي تجاوزت مهلة المرحلة الحالية (SLA). هو نفس رقم «متأخر» في نبض الفريق، وليس موعد تسليم المهمة.`}
+              label="المهام المتأخرة (لايف)"
+              value={e.generalOverdueTasks}
+              tone={e.generalOverdueTasks > 0 ? "text-cc-red" : undefined}
+              explain={`من مهامه المفتوحة (${e.generalOpenTasks})، التي تجاوزت موعد التسليم المخطط. هذا الرقم عام ولا يعتمد على SLA المرحلة.`}
             />
             <Metric
               label="الالتزام في الفترة"
@@ -718,7 +718,7 @@ function EmployeeModal({
               tone={e.lateStages > 0 ? "text-amber" : undefined}
               explain={`من إجمالي ${e.totalStages} مرحلة في الفترة، التي تجاوز فيها مهلة المرحلة نفسها (SLA بدقائق العمل) وهو مسؤول عنها${
                 e.totalStages > 0 ? ` (${Math.round((e.lateStages / e.totalStages) * 100)}%)` : ""
-              }. هذا قياس تاريخي داخل الفترة، أما «معلّقة متأخرة» فيقيس وضع مكتبه الحالي لايف.`}
+              }. هذا قياس تاريخي داخل الفترة، أما «معلّقة متأخرة» في الشريط أدناه فتقيس وضع مكتبه الحالي لايف.`}
             />
             <ExplainBlock
               className="bg-card px-2 py-2.5"
