@@ -84,6 +84,15 @@ export function TaskDrillSheet({
   const distinctIds = [...new Set(view.tasks.map((task) => task.taskId))];
   const openAllHref = `/tasks?view=list&f=all&ids=${distinctIds.join(",")}`;
   const canOpenAll = !view.loading && !view.error && view.tasks.length > 0;
+  // Stage drills count each stage INTERVAL (إجمالي المراحل), so a task that
+  // passed through two owned stages in the period contributes two rows while the
+  // tasks board (per-task) shows it once. Without this note the header (stages)
+  // and «افتح الكل في المهام» (tasks) read as two conflicting totals.
+  const isStageDrill = view.tasks.some((task) => task.kind === "stage");
+  const stageOverTaskNote =
+    !view.loading && !view.error && isStageDrill && view.tasks.length !== distinctIds.length
+      ? `${view.tasks.length} مرحلة موزّعة على ${distinctIds.length} مهمة — بعض المهام مرّت بأكثر من مرحلة في الفترة، لذلك يظهر عدد المهام أقل عند فتحها.`
+      : null;
 
   return (
     <Sheet
@@ -103,6 +112,11 @@ export function TaskDrillSheet({
             )}
           </div>
           {view.subtitle && <SheetDescription className="text-[11px]">{view.subtitle}</SheetDescription>}
+          {stageOverTaskNote && (
+            <p className="mt-1 rounded-md border border-border bg-soft-1/60 px-2 py-1 text-[10px] leading-relaxed text-muted-foreground">
+              {stageOverTaskNote}
+            </p>
+          )}
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto p-3">
