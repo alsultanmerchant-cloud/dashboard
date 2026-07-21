@@ -145,8 +145,8 @@ export function TaskDrillSheet({
             </p>
           ) : (
             <ul className="space-y-1.5">
-              {view.tasks.map((task) => (
-                <li key={`${task.taskId}-${task.kind}`}>
+              {view.tasks.map((task, i) => (
+                <li key={`${task.taskId}-${task.kind}-${i}`}>
                   <Link
                     href={`/tasks/${task.taskId}`}
                     target="_blank"
