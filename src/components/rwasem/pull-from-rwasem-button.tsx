@@ -24,6 +24,7 @@ type Kind = "task" | "project" | "tasks" | "projects";
 export function PullFromRwasemButton({
   kind,
   odooId,
+  projectId,
   label = "تحديث من رواسم",
   size = "sm",
   variant = "outline",
@@ -31,6 +32,8 @@ export function PullFromRwasemButton({
 }: {
   kind: Kind;
   odooId?: number | null;
+  /** Scopes the tasks-list deletion reconciliation to the current project. */
+  projectId?: string | null;
   label?: string;
   size?: "sm" | "default" | "icon";
   variant?: "outline" | "ghost" | "secondary" | "default";
@@ -50,7 +53,7 @@ export function PullFromRwasemButton({
           : kind === "project"
             ? await pullProjectAction(odooId as number)
             : kind === "tasks"
-              ? await pullTasksIncrementalAction()
+              ? await pullTasksIncrementalAction(projectId ?? undefined)
               : await pullProjectsIncrementalAction();
 
       if ("error" in res) {

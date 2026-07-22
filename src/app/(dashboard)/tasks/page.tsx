@@ -360,7 +360,7 @@ async function TasksBoardSection({
         </Suspense>
         {canManage && (
           <div className="ms-auto">
-            <PullFromRwasemButton kind="tasks" />
+            <PullFromRwasemButton kind="tasks" projectId={resolvedProjectId} />
           </div>
         )}
       </div>

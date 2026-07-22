@@ -2673,6 +2673,14 @@ export async function syncOneTask(
 export async function reconcileOdooDeletions(
   odoo: OdooClient,
   organizationSlug: string,
+  options: {
+    /** Limit a manual reconciliation to tasks; the nightly cron keeps the default "all" scope. */
+    scope?: "all" | "tasks";
+    /** Native dashboard rows are preserved for manual pulls unless explicitly requested. */
+    deleteNative?: boolean;
+    /** When set, reconcile only tasks belonging to this Odoo project id. */
+    taskProjectOdooId?: number;
+  } = {},
 ): Promise<{
   projectsArchived: number;
   projectsDeleted: number;
@@ -2686,15 +2694,30 @@ export async function reconcileOdooDeletions(
   let tasksDeleted = 0;
   const DEL = 500;
   const PAGE = 1000;
+  const scope = options.scope ?? "all";
+  const deleteNative = options.deleteNative ?? scope === "all";
 
   // ── Projects ───────────────────────────────────────────────────────────
-  try {
+  if (scope === "all") {
+    try {
+    const projectDomain: unknown[] = [["active", "in", [true, false]]];
+    const projectContext = { active_test: false };
+    const expectedProjectCount = await odoo.searchCount(
+      "project.project",
+      projectDomain,
+      { context: projectContext },
+    );
     const odooProjects = await odoo.searchRead<{ id: number }>(
       "project.project",
-      [["active", "in", [true, false]]],
+      projectDomain,
       ["id"],
-      { limit: 100000, context: { active_test: false } },
+      { limit: 100000, context: projectContext },
     );
+    if (odooProjects.length !== expectedProjectCount) {
+      throw new Error(
+        `incomplete Odoo project id set (${odooProjects.length}/${expectedProjectCount})`,
+      );
+    }
     const liveIds = new Set(odooProjects.map((p) => p.id));
     const staleIds: string[] = [];
     const nativeIds: string[] = [];
@@ -2707,7 +2730,7 @@ export async function reconcileOdooDeletions(
       if (error) throw new Error(error.message);
       if (!rows || rows.length === 0) break;
       for (const r of rows) {
-        if (r.external_source == null) {
+        if (deleteNative && r.external_source == null) {
           nativeIds.push(r.id as string);
         } else if (r.external_source === SOURCE) {
           const ext = r.external_id == null ? NaN : Number(r.external_id);
@@ -2734,31 +2757,67 @@ export async function reconcileOdooDeletions(
       if (error) errors.push(`delete native projects: ${error.message}`);
       else projectsDeleted += Math.min(DEL, nativeIds.length - i);
     }
-  } catch (e) {
-    errors.push(`projects reconcile skipped: ${(e as Error).message}`);
+    } catch (e) {
+      errors.push(`projects reconcile skipped: ${(e as Error).message}`);
+    }
   }
 
   // ── Tasks ──────────────────────────────────────────────────────────────
   try {
+    const taskProjectOdooId = options.taskProjectOdooId;
+    let taskProjectUuid: string | null = null;
+    if (taskProjectOdooId != null) {
+      const { data: project, error } = await supabaseAdmin
+        .from("projects")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("external_source", SOURCE)
+        .eq("external_id", String(taskProjectOdooId))
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!project) {
+        throw new Error(`Odoo project ${taskProjectOdooId} is not synced locally`);
+      }
+      taskProjectUuid = project.id as string;
+    }
+
+    const taskDomain: unknown[] = taskProjectOdooId == null
+      ? []
+      : [["project_id", "=", taskProjectOdooId]];
+    const taskContext = { active_test: false };
+    const expectedTaskCount = await odoo.searchCount(
+      "project.task",
+      taskDomain,
+      { context: taskContext },
+    );
     const odooTasks = await odoo.searchRead<{ id: number }>(
       "project.task",
-      [],
+      taskDomain,
       ["id"],
-      { limit: 1000000, context: { active_test: false } },
+      { limit: 1000000, context: taskContext },
     );
+    // Never reconcile from a truncated response. A partial id set would make
+    // valid dashboard tasks look deleted and turn a read problem into data loss.
+    if (odooTasks.length !== expectedTaskCount) {
+      throw new Error(
+        `incomplete Odoo task id set (${odooTasks.length}/${expectedTaskCount})`,
+      );
+    }
     const liveIds = new Set(odooTasks.map((t) => t.id));
     const ghostIds: string[] = [];
     const nativeIds: string[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data: rows, error } = await supabaseAdmin
+      let query = supabaseAdmin
         .from("tasks")
         .select("id, external_id, external_source")
         .eq("organization_id", organizationId)
         .range(from, from + PAGE - 1);
+      if (taskProjectUuid) query = query.eq("project_id", taskProjectUuid);
+      const { data: rows, error } = await query;
       if (error) throw new Error(error.message);
       if (!rows || rows.length === 0) break;
       for (const r of rows) {
-        if (r.external_source == null) {
+        if (deleteNative && r.external_source == null) {
           nativeIds.push(r.id as string);
         } else if (r.external_source === SOURCE) {
           const ext = r.external_id == null ? NaN : Number(r.external_id);
