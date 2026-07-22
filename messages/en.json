@@ -1806,7 +1806,8 @@
     "calendar": "Calendar",
     "calendarView": "Calendar view",
     "pivot": "Pivot",
-    "pivotView": "Pivot view"
+    "pivotView": "Pivot view",
+    "unlinkedTasks": "Unlinked"
   },
   "TasksPage": {
     "projectScope": "Project tasks",
@@ -4558,5 +4559,41 @@
     "indicatorTooltip": "Demo mode is on — click to turn off",
     "sectionTitle": "Presentation & privacy",
     "sectionDescription": "Control what shows on screen while recording or sharing your screen."
+  },
+  "UnlinkedTasksPage": {
+    "title": "Tasks not linked to templates",
+    "description": "Tasks the matcher couldn't confidently tie to a template item. Link them to make accountability template-accurate — the system learns the name and auto-links similar tasks next time.",
+    "emptyTitle": "All tasks are linked",
+    "emptyDescription": "No unlinked tasks right now. Any new task that can't be matched will show up here.",
+    "coverage": {
+      "linked": "Linked"
+    },
+    "status": {
+      "unmatched": "No match",
+      "ambiguous": "Ambiguous",
+      "adHoc": "No service"
+    },
+    "table": {
+      "code": "Code",
+      "task": "Task",
+      "service": "Service",
+      "project": "Project",
+      "reason": "Reason",
+      "action": "Action"
+    },
+    "link": {
+      "trigger": "Link",
+      "title": "Link task to a template item",
+      "description": "Pick the template item that represents this task's workflow.",
+      "pickPlaceholder": "Choose a template item",
+      "search": "Search…",
+      "empty": "No matching items",
+      "allServices": "Show items from all services",
+      "createAlias": "Remember this name",
+      "aliasHint": "Auto-link future tasks with the same name to this item.",
+      "cancel": "Cancel",
+      "confirm": "Link",
+      "success": "Task linked to template"
+    }
   }
 }

@@ -42,7 +42,8 @@ const MODULES: Module[] = [
       { labelKey: "tasks", href: "/tasks", match: /^\/tasks/ },
       { labelKey: "projectCategory", href: "/service-categories", match: /^\/service-categories/ },
       { labelKey: "reporting", href: "/reports", match: /^\/reports/ },
-      { labelKey: "taskTemplates", href: "/task-templates", match: /^\/task-templates/ },
+      { labelKey: "taskTemplates", href: "/task-templates", match: /^\/task-templates(?!\/unlinked)/ },
+      { labelKey: "unlinkedTasks", href: "/task-templates/unlinked", match: /^\/task-templates\/unlinked/ },
     ],
   },
   {
