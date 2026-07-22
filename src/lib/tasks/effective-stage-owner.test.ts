@@ -10,12 +10,11 @@ const owners = {
 };
 
 describe("withEffectiveExecutionOwner", () => {
-  test("falls back to the specialist when no active agent is assigned", () => {
-    expect(withEffectiveExecutionOwner(owners, new Set(["specialist", "manager"]))).toEqual({
-      ...owners,
-      in_progress: "specialist",
-      client_changes: "specialist",
-    });
+  test("keeps agent-owned execution with the agent role when only a specialist is assigned (never demotes design execution onto the specialist)", () => {
+    // Template says the منفّذ executes (in_progress/client_changes = agent). With
+    // no active منفّذ assigned, execution must NOT fall onto the social
+    // specialist — it stays with the agent role (unassigned).
+    expect(withEffectiveExecutionOwner(owners, new Set(["specialist", "manager"]))).toBe(owners);
   });
 
   test("keeps agent ownership when an active agent is assigned", () => {
