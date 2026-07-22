@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { OdooClient } from "./client";
 import { fetchOdooUsersWithAvatars, odooAvatarDataUrl } from "./avatars";
 import { syncStageHistory } from "./syncs/stage-history";
+import { matchTemplatesForOrg } from "@/lib/tasks/match-templates";
 import {
   OdooMany2one,
   OdooPartner,
@@ -2348,6 +2349,15 @@ export async function runImport(
     } catch (e) {
       summary.errors.push(`tasks: ${(e as Error).message}`);
     }
+    // Link freshly-synced tasks to their template item and derive
+    // stage_owner_positions from that link (never a service-mode guess). This
+    // is what keeps accountability attribution correct for NEW tasks at sync
+    // time — the old refresh cron was never scheduled, so tasks drifted.
+    try {
+      await matchTemplatesForOrg(organizationId);
+    } catch (e) {
+      summary.errors.push(`template_match: ${(e as Error).message}`);
+    }
   }
 
   if (run.has("comments")) {
@@ -2629,6 +2639,15 @@ export async function syncOneTask(
     await supabaseAdmin.rpc("reconcile_stage_entered_at", { p_task_ids: [taskUuid] });
   } catch (e) {
     console.warn(`syncOneTask stage-history: ${(e as Error).message}`);
+  }
+
+  // Re-link THIS task to its template item and re-derive its owner map
+  // (scoped, so the button stays fast), so accountability ownership reflects
+  // the just-synced assignees immediately.
+  try {
+    await matchTemplatesForOrg(organizationId, { taskIds: [taskUuid] });
+  } catch (e) {
+    console.warn(`syncOneTask template-match: ${(e as Error).message}`);
   }
 
   console.log(`[odoo-pull] task ${odooTaskId} → ${taskUuid} (${comments} comments)`);
