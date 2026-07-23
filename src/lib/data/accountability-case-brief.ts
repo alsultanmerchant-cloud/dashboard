@@ -14,11 +14,10 @@ import type { ProblemHistorySummary } from "@/lib/data/accountability-problems-s
 // how many streams corroborated), not the BUSINESS. A CEO has no decision
 // hanging on "26 signals".
 //
-// So this module reduces 45 cases to the four things a CEO actually acts on:
+// So this module reduces the case feed to the three things a CEO actually acts on:
 //   1. scope    — how much work is stalled, and how much of it is untouched
 //   2. asks     — the 3 people to deal with this week, each with ONE ask
-//   3. patterns — where N cases are really ONE broken stage, not N bad people
-//   4. history  — what moved since last week (from the case store)
+//   3. history  — what moved inside the selected period (from the case store)
 //
 // Everything here is derived from facts the engine already computed. No AI, no
 // new queries — a pure fold over the cases the page loads anyway.
@@ -50,18 +49,6 @@ export interface CaseAsk {
   recurrenceNote: string | null;
 }
 
-export interface CasePattern {
-  kind: "stage" | "department";
-  key: string;
-  label: string;
-  tasks: number;
-  people: number;
-  sharePct: number; // share of all stalled tasks sitting here
-  worstDays: number;
-  href: string | null;
-  text: string;
-}
-
 // Scope of the open case set — context for the asks, deliberately NOT a
 // headline. An org-level contract-value rollup used to live here; it was
 // dropped because "client has a task past its deadline" catches ~41% of the
@@ -78,25 +65,8 @@ export interface CaseExposure {
 export interface CaseBrief {
   exposure: CaseExposure;
   asks: CaseAsk[];
-  patterns: CasePattern[];
   history: ProblemHistorySummary | null;
 }
-
-const STAGE_AR: Record<string, string> = {
-  new: "جديدة",
-  in_progress: "قيد التنفيذ",
-  manager_review: "مراجعة المدير",
-  specialist_review: "مراجعة الأخصائي",
-  client_changes: "تعديلات العميل",
-  ready_to_send: "جاهزة للإرسال",
-  sent_to_client: "أُرسلت للعميل",
-  done: "منجزة",
-};
-
-// A stage/department only earns "this is systemic, not personal" if the problem
-// is spread across enough PEOPLE that blaming individuals stops making sense.
-const PATTERN_MIN_PEOPLE = 3;
-const PATTERN_MIN_TASKS = 5;
 
 // Neglect needs a window long enough to be neglect. `windowDays` counts days in
 // the CURRENT stage, so a task that changed stage today reads 0 — claiming
@@ -271,58 +241,5 @@ export function buildCaseBrief(
     };
   });
 
-  // ---- 3. patterns: N cases that are really ONE broken stage ----
-  const byStage = new Map<string, { tasks: number; people: Set<string>; worst: number }>();
-  const byDept = new Map<string, { tasks: number; people: Set<string>; worst: number }>();
-  for (const c of cases) {
-    for (const p of c.proof) {
-      if (p.kind !== "overdue_task") continue;
-      const who = c.employeeId ?? c.employeeName;
-      if (p.stage) {
-        const e = byStage.get(p.stage) ?? { tasks: 0, people: new Set<string>(), worst: 0 };
-        e.tasks += 1;
-        e.people.add(who);
-        e.worst = Math.max(e.worst, p.windowDays ?? 0);
-        byStage.set(p.stage, e);
-      }
-      if (c.department) {
-        const e = byDept.get(c.department) ?? { tasks: 0, people: new Set<string>(), worst: 0 };
-        e.tasks += 1;
-        e.people.add(who);
-        e.worst = Math.max(e.worst, p.windowDays ?? 0);
-        byDept.set(c.department, e);
-      }
-    }
-  }
-
-  const patterns: CasePattern[] = [];
-  const pushPatterns = (
-    m: Map<string, { tasks: number; people: Set<string>; worst: number }>,
-    kind: CasePattern["kind"],
-  ) => {
-    for (const [key, e] of m) {
-      if (e.people.size < PATTERN_MIN_PEOPLE || e.tasks < PATTERN_MIN_TASKS) continue;
-      const label = kind === "stage" ? STAGE_AR[key] ?? key : key;
-      const sharePct = stalledTasks > 0 ? Math.round((e.tasks / stalledTasks) * 100) : 0;
-      patterns.push({
-        kind,
-        key,
-        label,
-        tasks: e.tasks,
-        people: e.people.size,
-        sharePct,
-        worstDays: e.worst,
-        href: kind === "stage" ? `/tasks?stage=${key}` : null,
-        text:
-          kind === "stage"
-            ? `${e.tasks} مهمة متعثّرة (${sharePct}% من الإجمالي) عالقة في «${label}» عند ${e.people.size} أشخاص — هذه مرحلة مختنقة، لا تقصير فردي.`
-            : `${e.tasks} مهمة متعثّرة عند ${e.people.size} أشخاص في «${label}» — العبء مركَّز في قسم واحد.`,
-      });
-    }
-  };
-  pushPatterns(byStage, "stage");
-  pushPatterns(byDept, "department");
-  patterns.sort((a, b) => b.tasks - a.tasks);
-
-  return { exposure, asks, patterns: patterns.slice(0, 3), history };
+  return { exposure, asks, history };
 }

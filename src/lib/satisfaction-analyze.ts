@@ -29,6 +29,7 @@ import {
   summarizeContractPayments,
 } from "@/lib/data/satisfaction-rules";
 import { buildKnowledgeBlock } from "@/lib/data/ai-knowledge";
+import { buildAnsweredQuestionsBlock } from "@/lib/satisfaction-questions";
 import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { aiModel, MODELS } from "@/lib/ai-model";
 import { deduplicateRecommendations } from "@/lib/satisfaction-recommendation-status";
@@ -355,6 +356,9 @@ export async function buildSatisfactionInput(
   const teamBlock = renderTeamActivityBlock(team);
 
   const knowledgeBlock = await buildKnowledgeBlock(orgId);
+  // Human-answered satisfaction questions — documented ground truth. Rides
+  // outside the transcript budget like the other context blocks.
+  const answeredQuestionsBlock = await buildAnsweredQuestionsBlock(orgId, clientId);
   const storedMedia = await getClientStoredMediaAttachments(orgId, clientId, {
     sinceDays: effectiveDays,
   });
@@ -458,7 +462,7 @@ ${briefInstruction}
 ${trim(clientBlock, budget)}
 
 === مجموعة الفريق التقني 📍 ===
-${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${teamBlock}${storedMediaBlock}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
+${trim(technicalBlock, budget)}${briefBlock}${executionBlock}${contractBlock}${teamBlock}${storedMediaBlock}${answeredQuestionsBlock ? `\n\n${answeredQuestionsBlock}` : ""}${knowledgeBlock ? `\n\n${knowledgeBlock}` : ""}`;
 
   const makeMessages = (budget: number): ModelMessage[] => {
     const content: UserContent = [{ type: "text", text: makePrompt(budget) }];

@@ -8,6 +8,7 @@ import {
   type AccountabilityLiveTotals,
 } from "@/lib/data/accountability";
 import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-finance";
+import { foldResolutionOverlayEvents } from "@/lib/satisfaction-recommendation-status";
 
 // =========================================================================
 // Accountability Cases (/accountability — القضايا) — a Problems & Proof
@@ -266,6 +267,7 @@ interface ContractRow {
   live: number;
 }
 interface ClientAnalysisRow {
+  analysis_id: string;
   client_id: string;
   client_name: string | null;
   accountability: unknown;
@@ -526,6 +528,47 @@ async function _getAccountabilityCases(
         });
   }
 
+  // The satisfaction resolution overlay: append-only ai_events that close a
+  // finding (manual "تأكيد أنها حُلّت" or the AI refresh pass) without mutating
+  // the frozen analysis. A complaint whose issue key — its exact `complaint`
+  // text — is currently resolved must not keep feeding a live case here.
+  // Keyed per (analysis, issue) since issue text could collide across clients.
+  // Degrades to empty (= nothing filtered) on failure.
+  const resolvedIssuesByAnalysis = new Map<string, Set<string>>();
+  if (analyses.length > 0) {
+    const { data: overlayEvents, error: overlayError } = await supabaseAdmin
+      .from("ai_events")
+      .select("entity_id, payload, created_at")
+      .eq("organization_id", org)
+      .eq("event_type", "SATISFACTION_RECOMMENDATION_STATUS_CHANGED")
+      .eq("entity_type", "satisfaction_analysis")
+      .in(
+        "entity_id",
+        analyses.map((a) => a.analysis_id),
+      )
+      .order("created_at", { ascending: true });
+    if (overlayError) {
+      console.error("[cases] resolution overlay failed:", overlayError.message);
+    } else {
+      const eventsByAnalysis = new Map<
+        string,
+        Array<{ payload: unknown; created_at: string }>
+      >();
+      for (const event of overlayEvents ?? []) {
+        if (!event.entity_id) continue;
+        const list = eventsByAnalysis.get(event.entity_id) ?? [];
+        list.push(event);
+        eventsByAnalysis.set(event.entity_id, list);
+      }
+      for (const [analysisId, events] of eventsByAnalysis) {
+        const resolved = new Set<string>();
+        for (const [issue, entry] of foldResolutionOverlayEvents(events))
+          if (entry.state === "resolved") resolved.add(issue);
+        if (resolved.size > 0) resolvedIssuesByAnalysis.set(analysisId, resolved);
+      }
+    }
+  }
+
   const buckets = new Map<string, Bucket>();
   const streamsAvailable = new Set<CaseStream>();
   const unmatched = new Set<string>();
@@ -751,8 +794,15 @@ async function _getAccountabilityCases(
     const inds = Array.isArray(a.indicators) ? (a.indicators as IndicatorJson[]) : [];
     const churn = inds.filter((i) => i.code && CHURN_CODES.has(i.code) && i.severity === "red");
     const clientName = a.client_name ?? "عميل";
+    const resolvedIssues = resolvedIssuesByAnalysis.get(a.analysis_id);
 
     for (const row of rows) {
+      // Overlay-resolved complaint — no longer an open problem. Skipping it
+      // before any bucket side effects also lets the daily materializer
+      // auto-resolve the persisted case/problem rows; a later `cleared` event
+      // re-surfaces it (→ 'reopened'). Churn indicators below are not
+      // issue-keyed, so they intentionally still see every row.
+      if (row.complaint && resolvedIssues?.has(row.complaint)) continue;
       const responsible = Array.isArray(row.responsible) ? row.responsible : [];
       for (const resp of responsible) {
         if (!resp.name) continue;
@@ -1150,7 +1200,7 @@ select account_manager_name, count(*)::int as live
 
 function analysesSql(org: string): string {
   return `
-select csa.client_id, c.name as client_name, csa.accountability, csa.indicators
+select csa.id::text as analysis_id, csa.client_id, c.name as client_name, csa.accountability, csa.indicators
   from client_satisfaction_analyses csa
   left join clients c on c.id = csa.client_id
  where csa.organization_id = '${org}'

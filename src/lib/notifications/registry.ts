@@ -19,6 +19,7 @@ import {
   FileClock,
   CircleDollarSign,
   Frown,
+  MessageCircleQuestion,
   Siren,
   type LucideIcon,
 } from "lucide-react";
@@ -55,6 +56,7 @@ const TYPE_META: Record<string, TypeMeta> = {
 
   // ---- Clients ------------------------------------------------------------
   CLIENT_SATISFACTION_RISK: { category: "clients", emoji: "😟", icon: Frown },
+  SATISFACTION_QUESTIONS_PENDING: { category: "clients", emoji: "❓", icon: MessageCircleQuestion },
   WA_PROJECT_COVERAGE: { category: "clients", emoji: "⚠️", icon: AlertTriangle },
   WA_LINK_SUGGESTIONS: { category: "clients", emoji: "🔗", icon: Link2 },
 
@@ -124,6 +126,8 @@ export function notificationHref(n: {
   switch (n.type) {
     case "CLIENT_SATISFACTION_RISK":
       return id ? `/satisfaction?client=${id}` : "/satisfaction";
+    case "SATISFACTION_QUESTIONS_PENDING":
+      return "/satisfaction/questions";
     case "CONTRACT_RENEWAL_DUE":
     case "INSTALLMENT_OVERDUE":
       return id ? `/contracts/${id}` : "/contracts";

@@ -619,6 +619,7 @@
     "settings": "Settings",
     "featureFlags": "Feature flags",
     "satisfaction": "Client satisfaction",
+    "satisfactionQuestions": "Questions to answer",
     "attendance": "Attendance",
     "warnings": "Warnings",
     "targets": "Targets",
@@ -2816,6 +2817,8 @@
     "financeSubtitle": "Launches in a later phase",
     "satisfactionTitle": "Client Satisfaction",
     "satisfactionSubtitle": "Analyze WhatsApp chats to measure client satisfaction & execution quality",
+    "satisfactionQuestionsTitle": "Questions Needing Answers",
+    "satisfactionQuestionsSubtitle": "Satisfaction follow-up questions waiting for a team answer",
     "attendanceTitle": "Attendance",
     "attendanceSubtitle": "Record and track employee attendance",
     "warningsTitle": "Warnings",
@@ -2986,13 +2989,13 @@
       "editRateDetail": "{k} completed edits ÷ {n} deliveries",
       "slaBreachDetail": "of {n} edits",
       "oldestPending": "Oldest: {v}",
+      "pendingOverSla": "{n} past SLA",
       "tooltip": {
         "edits": "Total = tasks that exited client_changes and reached Done/Cancelled within the same range + tasks live in the stage now. A late Done does not pull an earlier edit into the range.",
         "medianTime": "Median edit time for tasks that both exited client_changes and reached Done/Cancelled within the selected range.",
         "slaBreach": "Of tasks that exited client_changes and reached Done/Cancelled within the same range, how many exceeded the stage SLA.",
         "editRate": "Tasks that exited client_changes and reached Done/Cancelled in the range ÷ all tasks that reached Done/Cancelled in the range. Live edits are excluded from the rate.",
-        "pending": "Tasks sitting in client_changes right now under his ownership. This is a live count and is not limited by the selected range's start date.",
-        "pendingDuration": "Matches Odoo notation: each d is 24 accumulated working hours. The same duration is {v} when one workday is treated as 8 hours."
+        "pending": "Tasks sitting in client_changes right now under his ownership. This is a live count and is not limited by the selected range's start date."
       },
       "deptChipTitle": "{people} people · {edits} completed + live edits"
     }
@@ -4012,6 +4015,33 @@
       "satisfaction": "AI-read score (0–100). Gemini reads the client's WhatsApp group conversations and rates how satisfied they sound. Below 55 = at risk, 55–69 = watch, 70+ = healthy.",
       "brief": "AI-read score (0–100) of how closely the work matches the client's agreed brief, judged by Gemini from the chats. Blank when no brief document is attached to compare against.",
       "sentiment": "Overall tone of the client's recent messages as read by AI (positive / neutral / negative) — a fast read of the relationship, separate from the numeric score."
+    },
+    "questions": {
+      "title": "Questions needing answers",
+      "subtitle": "Findings the satisfaction follow-up couldn't verify — a team answer closes them or keeps them open",
+      "back": "Back to Client Satisfaction",
+      "empty": "No open questions",
+      "emptyHint": "When the satisfaction follow-up can't find enough evidence to judge a finding, a question for the team appears here.",
+      "openCount": "{count, plural, one {1 question} other {# questions}}",
+      "kind": {
+        "recommendation": "Recommendation",
+        "risk": "Risk",
+        "accountability": "Accountability"
+      },
+      "viewAnalysis": "View analysis",
+      "markResolved": "Resolved",
+      "markStillOpen": "Still open",
+      "notePlaceholder": "Write exactly what happened — the answer is stored as documented ground truth for future AI passes…",
+      "submit": "Save answer",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "answeredRecently": "Recently answered",
+      "answerSaved": "Answer saved",
+      "answerFailed": "Couldn't save the answer",
+      "outcome": {
+        "resolved": "Resolved",
+        "still_open": "Still open"
+      }
     },
     "groups": {
       "title": "Link WhatsApp groups",

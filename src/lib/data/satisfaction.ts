@@ -24,6 +24,7 @@ import { riyadhTodayIso } from "@/lib/tz";
 import {
   classifyRecommendationLiveStatus,
   extractRecommendationTaskCodes,
+  foldResolutionOverlayEvents,
   isOverdueTaskRecommendation,
   type RecommendationLiveStatus,
   type RecommendationTaskState,
@@ -629,28 +630,11 @@ async function getRecommendationLiveStatuses(
 
   // A conversation-only finding has no safe machine signal. Team confirmation
   // is stored as an append-only ai_event overlay so the original AI snapshot
-  // remains immutable and the action is auditable/reversible. Keyed by the exact
-  // issue TEXT, not array index: the UI shows derived cards (overdue / first-risk)
-  // whose index sits past the end of the stored recommendations array, so
-  // index-based matching could never resolve them. Events arrive oldest-first,
-  // so the last write per issue is the latest state.
-  const latestManualByIssue = new Map<
-    string,
-    { state: "resolved" | "cleared"; createdAt: string }
-  >();
-  for (const event of manualEventsRes.data ?? []) {
-    const payload = event.payload;
-    if (!payload || Array.isArray(payload) || typeof payload !== "object")
-      continue;
-    const state = payload.state;
-    const issue = payload.issue;
-    if (
-      (state !== "resolved" && state !== "cleared") ||
-      typeof issue !== "string"
-    )
-      continue;
-    latestManualByIssue.set(issue, { state, createdAt: event.created_at });
-  }
+  // remains immutable and the action is auditable/reversible. Events arrive
+  // oldest-first, so the last write per issue is the latest state.
+  const latestManualByIssue = foldResolutionOverlayEvents(
+    manualEventsRes.data ?? [],
+  );
 
   const overlaid = statuses.map((status) => {
     const recommendation = analysis.recommendations[status.recommendationIndex];

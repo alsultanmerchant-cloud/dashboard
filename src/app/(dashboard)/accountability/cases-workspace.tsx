@@ -378,13 +378,7 @@ function CaseCard({
                 <SevIcon className="size-3.5" />
                 {sev.label}
               </span>
-              {c.employeeId ? (
-                <Link href={`/accountability?emp=${c.employeeId}&view=scorecard`} className="text-base font-bold hover:text-cyan">
-                  {c.employeeName}
-                </Link>
-              ) : (
-                <span className="text-base font-bold">{c.employeeName}</span>
-              )}
+              <span className="text-base font-bold">{c.employeeName}</span>
               <span className="text-[11px] text-muted-foreground">
                 {c.role ?? "—"}
                 {c.department ? ` · ${c.department}` : ""}

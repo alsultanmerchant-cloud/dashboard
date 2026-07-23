@@ -49,7 +49,6 @@ function editsDrillView(drill: EditsDrill, all: DrillTask[]): Omit<DrillView, "l
         title: `قيد التعديل الآن — ${drill.employeeName}`,
         subtitle: "جالسة في مرحلة تعديلات العميل حتى الآن",
         valueKind: "minutes",
-        durationStyle: "odoo",
         tasks: all.filter((t) => t.kind === "pending"),
       };
   }
@@ -70,27 +69,6 @@ function formatMinutes(min: number | null, t: ReturnType<typeof useTranslations>
   const h = m / 60;
   if (h < 8) return t("fmt.hours", { n: Math.round(h * 10) / 10 });
   return t("fmt.workdays", { n: Math.round((h / 8) * 10) / 10 });
-}
-
-// Rwasem/Odoo renders accumulated working hours in 24-hour `d` chunks. Thus
-// 83h 29m appears there as 3d 11h 29m, while the SLA view calls the same amount
-// 10.4 eight-hour workdays. Use the Odoo notation for the live pending clock so
-// the two screens can be compared without looking like contradictory data.
-// Wrap an LTR token (e.g. "3d 17h 9m") in Unicode isolate marks so it renders
-// intact inside an RTL label — LRI (U+2066) … PDI (U+2069). Without it, the
-// bidi algorithm splits the leading digit off the Arabic «الأقدم:» prefix.
-function ltrIsolate(s: string): string {
-  return `⁦${s}⁩`;
-}
-
-function formatOdooDuration(min: number): string {
-  const total = Math.max(0, Math.round(min));
-  const days = Math.floor(total / (24 * 60));
-  const hours = Math.floor((total % (24 * 60)) / 60);
-  const minutes = total % 60;
-  return [days > 0 ? `${days}d` : null, hours > 0 || days > 0 ? `${hours}h` : null, `${minutes}m`]
-    .filter(Boolean)
-    .join(" ");
 }
 
 export function ClientEditsSection({
@@ -399,20 +377,21 @@ export function ClientEditsSection({
                               onClick={() => openDrill(row.employeeId, row.fullName, "pending")}
                               className="tabular-nums"
                             />
+                            {row.pendingEdits > 0 && row.pendingSlaBreachCount > 0 && (
+                              <div className="text-[10px] font-medium tabular-nums text-amber">
+                                {/* Of the live pending edits, how many already sit past
+                                    the client_changes SLA — the actionable slice. */}
+                                {t("clientEdits.pendingOverSla", { n: row.pendingSlaBreachCount })}
+                              </div>
+                            )}
                             {row.oldestPendingBusinessMinutes !== null && row.pendingEdits > 0 && (
-                              <div
-                                className="text-[10px] tabular-nums text-muted-foreground"
-                                title={t("clientEdits.tooltip.pendingDuration", {
-                                  v: formatMinutes(row.oldestPendingBusinessMinutes, t),
-                                })}
-                              >
-                                {/* «الأقدم:» is RTL, the duration is an LTR token
-                                    (3d 17h 9m). Wrapping the value in LRI…PDI
-                                    isolate marks keeps it intact under RTL without
-                                    forcing the whole line dir="ltr" (which split
-                                    the leading digit off — see the bug). */}
+                              <div className="text-[10px] tabular-nums text-muted-foreground">
+                                {/* Working-day clock (8h/workday), same as the median
+                                    beside it and the صرامة المراجعة sibling — not the
+                                    24h Odoo notation, which understated business-hour
+                                    time and produced garbled multi-token RTL output. */}
                                 {t("clientEdits.oldestPending", {
-                                  v: ltrIsolate(formatOdooDuration(row.oldestPendingBusinessMinutes)),
+                                  v: formatMinutes(row.oldestPendingBusinessMinutes, t),
                                 })}
                               </div>
                             )}

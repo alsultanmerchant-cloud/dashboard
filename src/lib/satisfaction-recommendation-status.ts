@@ -32,6 +32,38 @@ export interface RecommendationLiveStatus {
 export type SatisfactionRecommendation =
   SatisfactionResult["recommendations"][number];
 
+export interface ResolutionOverlayEntry {
+  state: "resolved" | "cleared";
+  createdAt: string;
+}
+
+// The resolution overlay is the append-only ai_events stream
+// (SATISFACTION_RECOMMENDATION_STATUS_CHANGED on a satisfaction_analysis)
+// written by the manual "تأكيد أنها حُلّت" button and the AI refresh pass.
+// It is keyed by the exact issue TEXT, never by array index: the UI shows
+// derived cards (overdue / first-risk) whose index sits past the end of the
+// stored recommendations array, so index-based matching could never resolve
+// them. Events must be passed oldest-first; the last write per issue wins,
+// so a later `cleared` re-opens an earlier `resolved` purely by being newer.
+export function foldResolutionOverlayEvents(
+  events: ReadonlyArray<{ payload: unknown; created_at: string }>,
+): Map<string, ResolutionOverlayEntry> {
+  const latestByIssue = new Map<string, ResolutionOverlayEntry>();
+  for (const event of events) {
+    const payload = event.payload;
+    if (!payload || Array.isArray(payload) || typeof payload !== "object")
+      continue;
+    const { state, issue } = payload as { state?: unknown; issue?: unknown };
+    if (
+      (state !== "resolved" && state !== "cleared") ||
+      typeof issue !== "string"
+    )
+      continue;
+    latestByIssue.set(issue, { state, createdAt: event.created_at });
+  }
+  return latestByIssue;
+}
+
 // Human-readable task codes are intentionally the bridge for legacy AI output:
 // old recommendations predate structured entity references, but already mention
 // codes such as PRJ-01826-022 in their issue/action text.

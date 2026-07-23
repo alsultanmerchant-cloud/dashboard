@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { riyadhTodayIso } from "@/lib/tz";
+import { riyadhDateOf, riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
+import type { DashboardRange } from "@/lib/dashboard-range";
 import {
   getAccountabilityCases,
   type AccountabilityCase,
@@ -363,9 +364,9 @@ export interface ProblemHistorySummary {
 
 export async function getProblemHistorySummary(
   orgId: string,
-  windowDays = 7,
+  range: Pick<DashboardRange, "from" | "to" | "days">,
 ): Promise<ProblemHistorySummary | null> {
-  const since = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
+  const { start, endExclusive } = riyadhDateRangeUtcBounds(range.from, range.to);
 
   const [problemsRes, eventsRes] = await Promise.all([
     supabaseAdmin
@@ -376,7 +377,8 @@ export async function getProblemHistorySummary(
       .from("accountability_problem_events")
       .select("kind, created_at")
       .eq("organization_id", orgId)
-      .gte("created_at", since),
+      .gte("created_at", start)
+      .lt("created_at", endExclusive),
   ]);
   if (problemsRes.error) {
     console.error("[problems-store] history summary failed:", problemsRes.error.message);
@@ -390,18 +392,19 @@ export async function getProblemHistorySummary(
   }>;
   if (rows.length === 0) return null;
 
+  const firstSeenDate = (r: { first_seen_at: string }) => riyadhDateOf(r.first_seen_at);
   const dayZero = rows
-    .map((r) => r.first_seen_at.slice(0, 10))
+    .map(firstSeenDate)
     .reduce((min, d) => (d < min ? d : min));
   const events = (eventsRes.data ?? []) as Array<{ kind: string }>;
 
   return {
-    windowDays,
+    windowDays: range.days,
     trackingSince: dayZero,
-    partial: dayZero >= since,
+    partial: dayZero >= range.from,
     newProblems: rows.filter((r) => {
-      const d = r.first_seen_at.slice(0, 10);
-      return d > dayZero && d >= since;
+      const d = firstSeenDate(r);
+      return d > dayZero && d >= range.from && d <= range.to;
     }).length,
     reopened: events.filter((e) => e.kind === "reopened").length,
     resolvedInWindow: events.filter((e) => e.kind === "resolved").length,

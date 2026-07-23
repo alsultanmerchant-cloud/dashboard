@@ -1232,6 +1232,7 @@ export interface ClientEditsRow {
   deliveredCount: number; // owned tasks with Actual Done in-period, Done/Cancelled
   editRate: number | null; // editsCompleted / deliveredCount, capped at 100%
   pendingEdits: number; // sitting in client_changes right now
+  pendingSlaBreachCount: number; // …of which have already passed the client_changes SLA
   oldestPendingBusinessMinutes: number | null;
   sampleSize: number;
   confidence: "high" | "low";
@@ -1247,6 +1248,7 @@ interface ClientEditsSqlRow {
   sla_target: number;
   delivered: number;
   pending: number;
+  pending_over_sla: number;
   oldest_min: number | null;
 }
 
@@ -1330,10 +1332,13 @@ delivered as (
     join owner_by_task o on o.task_id = pc.task_id
    group by 1
 ),
-pend as (
-  select o.employee_id, count(distinct h.task_id)::int as pending,
-         max(coalesce(d.dwell_business_minutes::numeric,
-                      public.business_minutes_between(h.entered_at, now()))) as oldest_min
+pend_tasks as (
+  -- Per-task pending duration, computed once (business_minutes_between is slow),
+  -- so both the oldest clock and the "how many already blew the SLA" count read
+  -- from the same value.
+  select o.employee_id, h.task_id,
+         coalesce(d.dwell_business_minutes::numeric,
+                  public.business_minutes_between(h.entered_at, now())) as mins
     from hist h
     join owner_by_task o on o.task_id = h.task_id
     left join task_stage_dwell d on d.history_id = h.id
@@ -1341,6 +1346,12 @@ pend as (
      and h.archived_at is null
      and h.current_stage = 'client_changes'
      and h.exited_at is null
+),
+pend as (
+  select employee_id, count(distinct task_id)::int as pending,
+         count(distinct task_id) filter (where mins > (select m from sla))::int as pending_over_sla,
+         max(mins) as oldest_min
+    from pend_tasks
    group by 1
 ),
 keys as (
@@ -1351,7 +1362,8 @@ select e.id as employee_id, e.full_name, dep.name as department,
        coalesce(a.edits, 0) as edits, a.median_min, coalesce(a.sla_breach, 0) as sla_breach,
        (select m from sla) as sla_target,
        coalesce(dl.delivered, 0) as delivered,
-       coalesce(p.pending, 0) as pending, p.oldest_min
+       coalesce(p.pending, 0) as pending,
+       coalesce(p.pending_over_sla, 0) as pending_over_sla, p.oldest_min
   from keys k
   join employee_profiles e on e.id = k.employee_id and e.organization_id = '${org}'
   left join departments dep on dep.id = e.department_id
@@ -1382,6 +1394,7 @@ async function _getClientEditsRigor(
     deliveredCount: r.delivered,
     editRate: r.delivered > 0 ? Math.min(100, Math.round((r.edits / r.delivered) * 100)) : null,
     pendingEdits: r.pending,
+    pendingSlaBreachCount: r.pending_over_sla,
     oldestPendingBusinessMinutes: r.oldest_min === null ? null : round1(r.oldest_min),
     sampleSize: r.edits,
     confidence: r.edits >= LOW_SAMPLE ? "high" : "low",
@@ -1657,7 +1670,8 @@ select t.id, t.task_code, t.title, pj.name, cl.name,
   left join clients cl on cl.id = pj.client_id
 union all
 select t.id, t.task_code, t.title, pj.name, cl.name,
-       p.pending_min as minutes, p.entered_at as occurred_at, false as flag, 'pending' as kind
+       p.pending_min as minutes, p.entered_at as occurred_at,
+       (p.pending_min > (select m from sla)) as flag, 'pending' as kind
   from pending p
   join tasks t on t.id = p.task_id
   left join projects pj on pj.id = t.project_id

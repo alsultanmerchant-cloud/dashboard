@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { AlertOctagon, ArrowLeft, History, Layers, Repeat } from "lucide-react";
+import { AlertOctagon, History, Repeat } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { CaseAsk, CaseBrief } from "@/lib/data/accountability-case-brief";
@@ -22,7 +21,7 @@ function money(n: number): string {
 }
 
 export function CaseOverview({ brief }: { brief: CaseBrief }) {
-  const { exposure, asks, patterns, history } = brief;
+  const { exposure, asks, history } = brief;
 
   return (
     <div className="space-y-3">
@@ -43,7 +42,6 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
       </p>
 
       <div className="grid gap-3 lg:grid-cols-3">
-        {/* ---- 2. The three asks ---- */}
         <Card className="lg:col-span-2">
           <CardContent className="p-4">
             <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -65,57 +63,22 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
           </CardContent>
         </Card>
 
-        <div className="space-y-3">
-          {/* ---- 3. Systemic patterns ---- */}
-          <Card>
-            <CardContent className="p-4">
-              <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <Layers className="size-3.5 text-cyan" />
-                نمط متكرّر — لا تقصير فردي
-              </p>
-              {patterns.length === 0 ? (
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                  لا يوجد تركّز واضح في مرحلة أو قسم — التعثّر موزّع على حالات فردية.
-                </p>
-              ) : (
-                <ul className="mt-2 space-y-2">
-                  {patterns.map((p) => (
-                    <li key={`${p.kind}-${p.key}`} className="rounded-lg border border-border bg-soft-1/40 p-2.5">
-                      <p className="text-[11px] leading-relaxed text-muted-foreground">{p.text}</p>
-                      <div className="mt-1.5 flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-semibold tabular-nums text-foreground/70" dir="ltr">
-                          {p.tasks} tasks · {p.people} people · {p.worstDays}d
-                        </span>
-                        {p.href && (
-                          <Link
-                            href={p.href}
-                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-cyan hover:underline"
-                          >
-                            افتح المهام
-                            <ArrowLeft className="size-3" />
-                          </Link>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* ---- 4. What moved ---- */}
+        <div>
           {history && (
             <Card>
               <CardContent className="p-4">
                 <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   <History className="size-3.5 text-cyan" />
-                  ما تغيّر هذا الأسبوع
+                  ما تغيّر خلال الفترة
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  المشاكل الجديدة، التي عادت بعد الإغلاق، والتي انتهت داخل الفترة المحددة.
                 </p>
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <Stat value={history.newProblems} label="مشكلة جديدة" tone="text-amber" />
                   <Stat value={history.reopened} label="عادت بعد إغلاقها" tone="text-cc-red" icon={Repeat} />
                   <Stat value={history.resolvedInWindow} label="انتهت" tone="text-cc-green" />
-                  <Stat value={history.longRunning} label="مزمنة (٥ رصدات+)" tone="text-foreground" />
+                  <Stat value={history.longRunning} label="مزمنة حاليًا (٥ رصدات+)" tone="text-foreground" />
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/70">
                   {history.decided} من {history.openProblems + history.decided} مشكلة حالية اتُّخذ فيها قرار.
@@ -170,16 +133,7 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
           {rank}
         </span>
         <span className={cn("size-1.5 rounded-full", SEV_DOT[a.severity])} aria-hidden />
-        {a.employeeId ? (
-          <Link
-            href={`/accountability?emp=${a.employeeId}&view=scorecard`}
-            className="text-sm font-bold hover:text-cyan"
-          >
-            {a.employeeName}
-          </Link>
-        ) : (
-          <span className="text-sm font-bold">{a.employeeName}</span>
-        )}
+        <span className="text-sm font-bold">{a.employeeName}</span>
         <span className="text-[10px] text-muted-foreground">
           {a.role ?? "—"}
           {a.department ? ` · ${a.department}` : ""}

@@ -30,7 +30,6 @@ import { DrillNumber, TaskDrillSheet, type DrillView } from "./task-drill-modal"
 import { EmployeeEvidence } from "./employee-evidence";
 import { ReviewerRigorSection } from "./reviewer-rigor-section";
 import { ClientEditsSection } from "./client-edits-section";
-import { AccountabilityRangePicker } from "./accountability-range-picker";
 import { AccountabilityPeriodTrend } from "./accountability-period-trend";
 import type {
   AccountabilityEvidence,
@@ -195,8 +194,6 @@ export function TeamWorkspace({
 
   return (
     <div className="space-y-4">
-      <AccountabilityRangePicker range={reviewerRange} />
-
       {/* Summary */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <SummaryCard icon={Building2} tone="text-foreground" value={totals.depts} label="أقسام" />

@@ -1,64 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
-import { Gauge, Scale, Users } from "lucide-react";
+import { Scale, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TeamWorkspace } from "./team-workspace";
 import { CasesWorkspace } from "./cases-workspace";
-import type { ClientFinanceMap } from "@/lib/data/client-finance";
 import type { AccountabilityCasesResult } from "@/lib/data/accountability-cases";
 import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type { AccountabilityRoster } from "@/lib/data/accountability-roster";
 import type { PersistedProblemMeta } from "@/lib/data/accountability-problems-store";
-import type {
-  AccountabilityEvidence,
-  AccountabilityOverview,
-  ClientEditsRow,
-} from "@/lib/data/accountability";
+import type { AccountabilityOverview, ClientEditsRow } from "@/lib/data/accountability";
 import type { DashboardRange } from "@/lib/dashboard-range";
+import { AccountabilityRangePicker } from "./accountability-range-picker";
 
-// The scorecard is not rendered in the default team lens. Loading it only on
-// demand keeps its sizeable client workspace off the initial interaction.
-const AccountabilityWorkspace = dynamic(
-  () => import("./accountability-workspace").then((mod) => mod.AccountabilityWorkspace),
-  {
-    loading: () => <div className="h-96 animate-pulse rounded-xl border border-border bg-card/60" />,
-  },
-);
-
-type View = "team" | "cases" | "scorecard";
+type View = "team" | "cases";
 
 interface Props {
   roster: AccountabilityRoster;
   cases: AccountabilityCasesResult;
   problemMeta: Record<string, PersistedProblemMeta>;
   brief: CaseBrief;
-  overview: AccountabilityOverview | null;
-  evidence: AccountabilityEvidence | null;
-  selectedId: string | null;
-  financeMap: ClientFinanceMap | null;
   initialView: View;
   reviewers: AccountabilityOverview["reviewers"];
   clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
 }
 
-// Three lenses on the same accountability data:
+// Two lenses on the same accountability data:
 //   • الفريق (default) — department grid + searchable employee table; each row
 //     opens a modal with the person's full accountability file.
 //   • القضايا — the Problems & Proof case feed (cross-stream, severity-ranked).
-//   • الدرجات — the per-person scorecard + stage-level evidence (master–detail).
-// The scorecard tab opens automatically on ?emp=…&view=scorecard deep links.
 export function AccountabilityShell({
   roster,
   cases,
   problemMeta,
   brief,
-  overview,
-  evidence,
-  selectedId,
-  financeMap,
   initialView,
   reviewers,
   clientEdits,
@@ -69,19 +45,9 @@ export function AccountabilityShell({
   const tabs: { key: View; label: string; icon: typeof Scale }[] = [
     { key: "team", label: "الفريق", icon: Users },
     { key: "cases", label: "القضايا", icon: Scale },
-    { key: "scorecard", label: "الدرجات", icon: Gauge },
   ];
 
   const switchTo = (next: View) => {
-    if (next === "scorecard" && !overview) {
-      if (typeof window !== "undefined") {
-        const params = new URLSearchParams(window.location.search);
-        params.set("view", "scorecard");
-        const qs = params.toString();
-        window.location.assign(qs ? `?${qs}` : "?view=scorecard");
-      }
-      return;
-    }
     setView(next);
     // Mirror to the URL without a server round-trip so refresh/links restore it.
     if (typeof window !== "undefined") {
@@ -95,6 +61,8 @@ export function AccountabilityShell({
 
   return (
     <div className="space-y-4">
+      <AccountabilityRangePicker range={reviewerRange} />
+
       {/* Lens switcher */}
       <div className="inline-flex rounded-xl border border-border bg-card/60 p-0.5">
         {tabs.map((t) => (
@@ -132,17 +100,6 @@ export function AccountabilityShell({
         />
       )}
       {view === "cases" && <CasesWorkspace data={cases} problemMeta={problemMeta} brief={brief} />}
-      {view === "scorecard" && overview && financeMap && (
-        <AccountabilityWorkspace
-          key={selectedId ?? "none"}
-          overview={overview}
-          evidence={evidence}
-          selectedId={selectedId}
-          financeMap={financeMap}
-          clientEdits={clientEdits}
-          reviewerRange={reviewerRange}
-        />
-      )}
     </div>
   );
 }

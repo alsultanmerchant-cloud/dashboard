@@ -27,6 +27,7 @@ import {
   Heart,
   KeyRound,
   MessageCircle,
+  MessageCircleQuestion,
   Activity,
   ClipboardCheck,
   Gauge,
@@ -108,6 +109,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // العقود. Restore this line once the targets figures are reconciled.
       // { labelKey: "targets", href: "/targets", icon: Target, perm: "target.view" },
       { labelKey: "satisfaction", href: "/satisfaction", icon: Heart, perm: "clients.view" },
+      // Questions the satisfaction status-refresh pass needs the team to answer.
+      { labelKey: "satisfactionQuestions", href: "/satisfaction/questions", icon: MessageCircleQuestion, perm: "clients.view" },
       { labelKey: "reports", href: "/reports", icon: BarChart3, perm: "reports.view" },
     ],
   },
@@ -166,6 +169,7 @@ export const PAGE_TITLE_KEYS: Record<string, { titleKey: string; subtitleKey?: s
   "/targets": { titleKey: "targetsTitle", subtitleKey: "targetsSubtitle" },
   "/governance": { titleKey: "governanceTitle", subtitleKey: "governanceSubtitle" },
   "/satisfaction": { titleKey: "satisfactionTitle", subtitleKey: "satisfactionSubtitle" },
+  "/satisfaction/questions": { titleKey: "satisfactionQuestionsTitle", subtitleKey: "satisfactionQuestionsSubtitle" },
   "/hr": { titleKey: "hrTitle", subtitleKey: "hrSubtitle" },
   "/finance": { titleKey: "financeTitle", subtitleKey: "financeSubtitle" },
 };

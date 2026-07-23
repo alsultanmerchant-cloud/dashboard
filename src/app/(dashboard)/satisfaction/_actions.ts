@@ -16,6 +16,7 @@ import {
 import { matchGroups, detectGroupKind } from "@/lib/wa/match-groups";
 import { ingestWaMessages, type NormalMessage } from "@/lib/wa/ingest";
 import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
+import { autoResolveOpenQuestions } from "@/lib/satisfaction-questions";
 
 const UploadSchema = z.object({
   clientId: z.string().uuid("اختر عميلًا"),
@@ -142,6 +143,11 @@ export async function setRecommendationStatusAction(input: {
     })),
   );
   if (error) return { error: error.message };
+
+  // Manually-confirmed issues make their pending AI questions moot.
+  if (state === "resolved") {
+    await autoResolveOpenQuestions(session.orgId, clientId, issues);
+  }
 
   await logAudit({
     organizationId: session.orgId,
