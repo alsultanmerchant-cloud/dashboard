@@ -25,7 +25,6 @@ export default async function AccountabilityPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    view?: string;
     preset?: string;
     from?: string;
     to?: string;
@@ -34,10 +33,7 @@ export default async function AccountabilityPage({
   const session = await requirePagePermission("people.analytics.view");
   const t = await getTranslations("AccountabilityPage");
   const params = await searchParams;
-  const { view } = params;
   const reviewerRange = resolveRange(params);
-  const initialView =
-    view === "cases" ? "cases" : "team";
 
   const [cases, roster, problemMeta, history, reopenByEmployee, reviewers, clientEdits] = await Promise.all([
     getAccountabilityCases(session.orgId),
@@ -63,7 +59,6 @@ export default async function AccountabilityPage({
         cases={cases}
         problemMeta={problemMeta}
         brief={brief}
-        initialView={initialView}
         reviewers={reviewers}
         clientEdits={clientEdits}
         reviewerRange={reviewerRange}

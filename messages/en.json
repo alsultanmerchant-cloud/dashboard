@@ -3887,7 +3887,8 @@
       "unknown": "Unknown"
     },
     "causes": {
-      "title": "Root causes"
+      "title": "Root causes",
+      "allResolved": "All root causes here have been marked resolved."
     },
     "accountability": {
       "title": "Accountability",
@@ -4214,7 +4215,23 @@
       "showMore": "Show more ({count})",
       "showLess": "Show less"
     },
-    "analyzing": "Analyzing…"
+    "analyzing": "Analyzing…",
+    "problemsLog": {
+      "title": "Problem log (reference)",
+      "note": "Every problem flagged for this client — resolved and open. Reference only; does not affect the satisfaction score.",
+      "openBadge": "{n} open",
+      "resolvedBadge": "{n} resolved",
+      "status": {
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "source": {
+        "cause": "Root cause",
+        "accountability": "Accountability",
+        "risk": "Risk",
+        "recommendation": "Recommendation"
+      }
+    }
   },
   "ClientFinance": {
     "onTarget": "On target",

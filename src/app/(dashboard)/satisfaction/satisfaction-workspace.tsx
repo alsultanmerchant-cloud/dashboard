@@ -1786,6 +1786,39 @@ function AnalysisView({
       ),
     [analysis, execution, recommendationStatuses, manualResolvedIssues],
   );
+  // Every problem text confirmed resolved anywhere: the overlay (manual +
+  // AI-refresh), resolved recommendations (incl. task/overdue auto-close), and
+  // resolved accountability rows. Used to settle the mirrored causes and to tag
+  // the reference problem log — never to change the score.
+  const resolvedProblemTexts = useMemo(() => {
+    const set = new Set<string>(manualResolvedIssues);
+    recommendations.forEach((r) => {
+      if (r.liveStatus.state === "resolved") {
+        set.add(r.issue);
+        r.relatedIssues.forEach((issue) => set.add(issue));
+      }
+    });
+    analysis.accountability.forEach((row, i) => {
+      if (
+        accountabilityStates.find((s) => s.index === i)?.state === "resolved"
+      )
+        set.add(row.complaint);
+    });
+    return [...set];
+  }, [manualResolvedIssues, recommendations, analysis.accountability, accountabilityStates]);
+  const problemsLog = useMemo(
+    () =>
+      buildProblemLog(
+        analysis.causes,
+        analysis.accountability,
+        analysis.risks,
+        recommendations,
+        accountabilityStates,
+        resolvedProblemTexts,
+        t,
+      ),
+    [analysis, recommendations, accountabilityStates, resolvedProblemTexts, t],
+  );
   // Deep-link scroll: cross-page links (e.g. the accountability cases feed) land
   // on `/satisfaction?client=X#accountability`. The target section only exists
   // once this analysis renders — after data fetch + hydration — so the browser's
@@ -2013,7 +2046,11 @@ function AnalysisView({
       <TeamRosterPanel teamContext={analysis.teamContext} t={t} />
 
       {/* أسباب المشاكل */}
-      <CausesPanel causes={analysis.causes} t={t} />
+      <CausesPanel
+        causes={analysis.causes}
+        resolvedIssues={resolvedProblemTexts}
+        t={t}
+      />
 
       <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
         {(["critical", "timeline"] as const).map((tab) => (
@@ -2064,6 +2101,9 @@ function AnalysisView({
 
       {/* الوسائط والملفات المتبادلة — evidence of what was shared in the chats */}
       <MediaExchangePanel clientId={clientId} t={t} />
+
+      {/* سجل المشاكل — reference-only consolidated log (does not affect score) */}
+      <ProblemsLogPanel entries={problemsLog} t={t} />
 
       <HistoryList
         history={history}
@@ -3285,14 +3325,81 @@ function BriefAdherencePanel({
   );
 }
 
+// A cause carries no stable id, so it can't participate in the issue-keyed
+// resolution overlay directly. Instead we match its `problem` text against the
+// set of already-resolved issue texts with the SAME fuzzy problem matcher the
+// recommendations dedup uses — so once a problem is confirmed resolved on any
+// other surface (recommendation / accountability / manual / AI-refresh), its
+// mirror in أسباب المشاكل settles into the "resolved" group instead of lingering
+// as an open cause. Nothing here touches the satisfaction score.
+function causeIsResolved(
+  problem: string,
+  resolvedIssues: readonly string[],
+): boolean {
+  if (!problem.trim() || resolvedIssues.length === 0) return false;
+  const asCause = { issue: problem } as SatisfactionRecommendation;
+  return resolvedIssues.some((issue) =>
+    recommendationsDescribeSameProblem(asCause, {
+      issue,
+    } as SatisfactionRecommendation),
+  );
+}
+
 function CausesPanel({
   causes,
+  resolvedIssues,
   t,
 }: {
   causes: Analysis["causes"];
+  resolvedIssues: string[];
   t: ReturnType<typeof useTranslations>;
 }) {
   if (causes.length === 0) return null;
+  const open = causes.filter((c) => !causeIsResolved(c.problem, resolvedIssues));
+  const resolved = causes.filter((c) =>
+    causeIsResolved(c.problem, resolvedIssues),
+  );
+
+  const renderCause = (
+    c: Analysis["causes"][number],
+    key: string,
+    isResolved: boolean,
+  ) => (
+    <li
+      key={key}
+      className={cn(
+        "rounded-lg border p-3",
+        isResolved ? "border-cc-green/25 bg-card/60" : "border-border bg-soft-1",
+      )}
+    >
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <span
+          className={cn(
+            "text-[13px] font-medium leading-snug",
+            isResolved && "text-foreground/70",
+          )}
+        >
+          {isResolved && (
+            <CheckCircle2 className="me-1 inline size-3.5 -translate-y-px text-cc-green" />
+          )}
+          {c.problem}
+        </span>
+        <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
+          {t(`owner.${c.owner}`)}
+        </span>
+      </div>
+      <p
+        className={cn(
+          "flex items-start gap-1.5 text-[12px]",
+          isResolved ? "text-muted-foreground/70" : "text-muted-foreground",
+        )}
+      >
+        <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
+        {c.rootCause}
+      </p>
+    </li>
+  );
+
   return (
     <Card className="border-border">
       <CardContent className="p-4">
@@ -3300,24 +3407,188 @@ function CausesPanel({
           <GitBranch className="size-4 text-muted-foreground" />{" "}
           {t("causes.title")}
         </p>
-        <ul className="space-y-2">
-          {causes.map((c, i) => (
+        {open.length > 0 ? (
+          <ul className="space-y-2">
+            {open.map((c, i) => renderCause(c, `open-${i}`, false))}
+          </ul>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">
+            {t("causes.allResolved")}
+          </p>
+        )}
+        {resolved.length > 0 && (
+          <div className="mt-4 border-t border-border pt-3">
+            <p className="mb-2 inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <CheckCircle2 className="size-3.5 text-cc-green" />
+              {t("executive.recommendationStatus.resolvedGroup", {
+                n: resolved.length,
+              })}
+            </p>
+            <ul className="space-y-2">
+              {resolved.map((c, i) => renderCause(c, `resolved-${i}`, true))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---- سجل المشاكل (reference-only) -------------------------------------------
+// One consolidated log of EVERY problem flagged for this client — causes,
+// accountability complaints, risks, recommendations — each fuzzy-deduped across
+// those sources and tagged open/resolved. This is a read-only reference view:
+// it derives entirely from data already rendered above and never feeds the
+// satisfaction score. A problem counts as resolved only when EVERY source that
+// raised it agrees it's resolved.
+interface ProblemLogEntry {
+  text: string;
+  sources: string[];
+  resolved: boolean;
+}
+
+function buildProblemLog(
+  causes: Analysis["causes"],
+  accountability: Analysis["accountability"],
+  risks: string[],
+  recommendations: DisplayRecommendation[],
+  accountabilityStates: AccountabilityLiveState[],
+  resolvedIssues: string[],
+  t: ReturnType<typeof useTranslations>,
+): ProblemLogEntry[] {
+  const resolvedSet = new Set(resolvedIssues);
+  const raw: { text: string; source: string; resolved: boolean }[] = [];
+  causes.forEach((c) =>
+    raw.push({
+      text: c.problem,
+      source: t("problemsLog.source.cause"),
+      resolved: causeIsResolved(c.problem, resolvedIssues),
+    }),
+  );
+  accountability.forEach((row, i) =>
+    raw.push({
+      text: row.complaint,
+      source: t("problemsLog.source.accountability"),
+      resolved:
+        accountabilityStates.find((s) => s.index === i)?.state === "resolved" ||
+        resolvedSet.has(row.complaint),
+    }),
+  );
+  risks.forEach((r) =>
+    raw.push({
+      text: r,
+      source: t("problemsLog.source.risk"),
+      resolved: resolvedSet.has(r),
+    }),
+  );
+  recommendations.forEach((r) =>
+    raw.push({
+      text: r.issue,
+      source: t("problemsLog.source.recommendation"),
+      resolved: r.liveStatus.state === "resolved",
+    }),
+  );
+
+  const out: ProblemLogEntry[] = [];
+  for (const e of raw) {
+    if (!e.text?.trim()) continue;
+    const dup = out.find((o) =>
+      recommendationsDescribeSameProblem(
+        { issue: o.text } as SatisfactionRecommendation,
+        { issue: e.text } as SatisfactionRecommendation,
+      ),
+    );
+    if (dup) {
+      if (!dup.sources.includes(e.source)) dup.sources.push(e.source);
+      // Open if ANY source that raised it still considers it open.
+      dup.resolved = dup.resolved && e.resolved;
+    } else {
+      out.push({ text: e.text, sources: [e.source], resolved: e.resolved });
+    }
+  }
+  // Open problems first, resolved sink to the bottom.
+  return out.sort((a, b) => Number(a.resolved) - Number(b.resolved));
+}
+
+function ProblemsLogPanel({
+  entries,
+  t,
+}: {
+  entries: ProblemLogEntry[];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (entries.length === 0) return null;
+  const openCount = entries.filter((e) => !e.resolved).length;
+  const resolvedCount = entries.length - openCount;
+  return (
+    <Card className="border-border">
+      <CardContent className="p-4">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold">
+            <ClipboardList className="size-4 text-muted-foreground" />{" "}
+            {t("problemsLog.title")}
+          </p>
+          <div className="flex gap-1.5 text-[10px]">
+            <span className="rounded-full border border-amber/30 bg-amber/10 px-1.5 py-0.5 font-medium tabular-nums text-amber">
+              {t("problemsLog.openBadge", { n: openCount })}
+            </span>
+            <span className="rounded-full border border-cc-green/25 bg-cc-green/[0.07] px-1.5 py-0.5 font-medium tabular-nums text-cc-green">
+              {t("problemsLog.resolvedBadge", { n: resolvedCount })}
+            </span>
+          </div>
+        </div>
+        <p className="mb-3 text-[11px] text-muted-foreground">
+          {t("problemsLog.note")}
+        </p>
+        <ul className="space-y-1.5">
+          {entries.map((e, i) => (
             <li
               key={i}
-              className="rounded-lg border border-border bg-soft-1 p-3"
+              className={cn(
+                "flex items-start gap-2 rounded-lg border p-2.5",
+                e.resolved
+                  ? "border-cc-green/20 bg-card/50"
+                  : "border-border bg-soft-1",
+              )}
             >
-              <div className="mb-1 flex items-start justify-between gap-2">
-                <span className="text-[13px] font-medium leading-snug">
-                  {c.problem}
+              {e.resolved ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-cc-green" />
+              ) : (
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber" />
+              )}
+              <div className="min-w-0 flex-1">
+                <span
+                  className={cn(
+                    "text-[12px] leading-snug",
+                    e.resolved &&
+                      "text-foreground/70 line-through decoration-cc-green/40",
+                  )}
+                >
+                  {e.text}
                 </span>
-                <span className="shrink-0 rounded border border-border bg-soft-2 px-1.5 py-0.5 text-[10px] font-medium">
-                  {t(`owner.${c.owner}`)}
-                </span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {e.sources.map((s) => (
+                    <span
+                      key={s}
+                      className="rounded border border-border bg-soft-2 px-1 py-0.5 text-[9px] text-muted-foreground"
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
-                <ArrowRightCircle className="mt-0.5 size-3.5 shrink-0" />
-                {c.rootCause}
-              </p>
+              <span
+                className={cn(
+                  "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium",
+                  e.resolved
+                    ? "border-cc-green/25 bg-cc-green/[0.07] text-cc-green"
+                    : "border-amber/30 bg-amber/10 text-amber",
+                )}
+              >
+                {e.resolved
+                  ? t("problemsLog.status.resolved")
+                  : t("problemsLog.status.open")}
+              </span>
             </li>
           ))}
         </ul>

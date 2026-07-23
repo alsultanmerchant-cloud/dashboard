@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { Scale, Users } from "lucide-react";
+import { useTransition } from "react";
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TeamWorkspace } from "./team-workspace";
-import { CasesWorkspace } from "./cases-workspace";
+import { CaseOverview } from "./case-overview";
+import { refreshAccountabilityScorecardAction } from "./_actions";
 import type { AccountabilityCasesResult } from "@/lib/data/accountability-cases";
 import type { CaseBrief } from "@/lib/data/accountability-case-brief";
 import type { AccountabilityRoster } from "@/lib/data/accountability-roster";
@@ -13,93 +15,69 @@ import type { AccountabilityOverview, ClientEditsRow } from "@/lib/data/accounta
 import type { DashboardRange } from "@/lib/dashboard-range";
 import { AccountabilityRangePicker } from "./accountability-range-picker";
 
-type View = "team" | "cases";
-
 interface Props {
   roster: AccountabilityRoster;
   cases: AccountabilityCasesResult;
   problemMeta: Record<string, PersistedProblemMeta>;
   brief: CaseBrief;
-  initialView: View;
   reviewers: AccountabilityOverview["reviewers"];
   clientEdits: ClientEditsRow[];
   reviewerRange: DashboardRange;
 }
 
-// Two lenses on the same accountability data:
-//   • الفريق (default) — department grid + searchable employee table; each row
-//     opens a modal with the person's full accountability file.
-//   • القضايا — the Problems & Proof case feed (cross-stream, severity-ranked).
+// One page — the separate «القضايا» case-feed tab was removed. Its only
+// surviving piece is the CEO band (تعامل مع هؤلاء أولاً + ما تغيّر خلال الفترة),
+// which now sits atop the team scorecard. The full per-person evidence still
+// lives in each team row's modal (تفاصيل الفريق), so the case cards added no
+// unique information beyond that band.
 export function AccountabilityShell({
   roster,
   cases,
   problemMeta,
   brief,
-  initialView,
   reviewers,
   clientEdits,
   reviewerRange,
 }: Props) {
-  const [view, setView] = useState<View>(initialView);
+  const [refreshing, startRefresh] = useTransition();
 
-  const tabs: { key: View; label: string; icon: typeof Scale }[] = [
-    { key: "team", label: "الفريق", icon: Users },
-    { key: "cases", label: "القضايا", icon: Scale },
-  ];
-
-  const switchTo = (next: View) => {
-    setView(next);
-    // Mirror to the URL without a server round-trip so refresh/links restore it.
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (next === "team") params.delete("view");
-      else params.set("view", next);
-      const qs = params.toString();
-      window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-    }
-  };
+  const handleRefresh = () =>
+    startRefresh(async () => {
+      const res = await refreshAccountabilityScorecardAction();
+      if (res.ok) {
+        toast.success("تم تحديث البيانات");
+        window.location.reload();
+      } else {
+        toast.error(res.error ?? "تعذّر التحديث");
+      }
+    });
 
   return (
     <div className="space-y-4">
-      <AccountabilityRangePicker range={reviewerRange} />
-
-      {/* Lens switcher */}
-      <div className="inline-flex rounded-xl border border-border bg-card/60 p-0.5">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => switchTo(t.key)}
-            aria-pressed={view === t.key}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors",
-              view === t.key
-                ? "bg-cyan-dim text-cyan"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <t.icon className="size-3.5" />
-            {t.label}
-            {t.key === "cases" && cases.meta.critical + cases.meta.proven > 0 && (
-              <span className="rounded-full bg-cc-red/15 px-1.5 text-[10px] font-bold text-cc-red">
-                {cases.meta.critical + cases.meta.proven}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <AccountabilityRangePicker range={reviewerRange} />
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-soft-1 disabled:opacity-60"
+        >
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+          {refreshing ? "جارٍ التحديث…" : "تحديث البيانات"}
+        </button>
       </div>
 
-      {view === "team" && (
-        <TeamWorkspace
-          roster={roster}
-          cases={cases.cases}
-          problemMeta={problemMeta}
-          reviewers={reviewers}
-          clientEdits={clientEdits}
-          reviewerRange={reviewerRange}
-        />
-      )}
-      {view === "cases" && <CasesWorkspace data={cases} problemMeta={problemMeta} brief={brief} />}
+      {/* CEO band — moved here from the removed القضايا tab. */}
+      <CaseOverview brief={brief} />
+
+      <TeamWorkspace
+        roster={roster}
+        cases={cases.cases}
+        problemMeta={problemMeta}
+        reviewers={reviewers}
+        clientEdits={clientEdits}
+        reviewerRange={reviewerRange}
+      />
     </div>
   );
 }

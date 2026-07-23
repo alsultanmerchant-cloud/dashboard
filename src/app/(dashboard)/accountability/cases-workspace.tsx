@@ -426,8 +426,9 @@ function CaseCard({
           </div>
         </div>
 
-        {/* Ledger + heatmap */}
-        {c.ledger && <LedgerStrip led={c.ledger} />}
+        {/* Ledger + heatmap intentionally omitted here — the same per-person
+            stats grid + 14-day heatmap live in the الفريق → تفاصيل الفريق modal
+            (period-aware there). Duplicating them on every case card was noise. */}
 
         {/* Advice panel (opt-in) */}
         {showAdvice && c.employeeId && <AdvicePanel employeeId={c.employeeId} />}

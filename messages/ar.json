@@ -3887,7 +3887,8 @@
       "unknown": "غير محدد"
     },
     "causes": {
-      "title": "أسباب المشاكل"
+      "title": "أسباب المشاكل",
+      "allResolved": "كل الأسباب هنا تم حلها."
     },
     "accountability": {
       "title": "المسؤولية",
@@ -4214,7 +4215,23 @@
       "showMore": "عرض المزيد ({count})",
       "showLess": "عرض أقل"
     },
-    "analyzing": "يحلل الآن…"
+    "analyzing": "يحلل الآن…",
+    "problemsLog": {
+      "title": "سجل المشاكل (للمرجع)",
+      "note": "كل مشكلة رُصدت لهذا العميل — المحلولة والمفتوحة. للمرجع فقط؛ لا يؤثر على درجة الرضا.",
+      "openBadge": "{n} مفتوحة",
+      "resolvedBadge": "{n} محلولة",
+      "status": {
+        "open": "مفتوحة",
+        "resolved": "تم حلها"
+      },
+      "source": {
+        "cause": "سبب",
+        "accountability": "مساءلة",
+        "risk": "خطر",
+        "recommendation": "توصية"
+      }
+    }
   },
   "ClientFinance": {
     "onTarget": "ضمن التارجت",
