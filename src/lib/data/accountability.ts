@@ -3,13 +3,9 @@ import { cache } from "react";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TASK_OWNER_ROLE_LABELS, type TaskOwnerRoleKey } from "@/lib/labels";
 import { nonLeadershipFilter } from "@/lib/data/leadership";
-import {
-  getEmployeeOwnedDeskTasks,
-  getEmployeePendingLateTasks,
-} from "@/lib/data/team-pulse";
 import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 import { resolveRange } from "@/lib/dashboard-range";
-import { riyadhDateRangeUtcBounds } from "@/lib/tz";
+import { riyadhDateRangeUtcBounds, riyadhTodayIso } from "@/lib/tz";
 
 // =========================================================================
 // Accountability Engine (/accountability) — CEO/department-head scorecard
@@ -1012,12 +1008,14 @@ async function _getAccountabilityPeriodTrends(
 
 export const getAccountabilityPeriodTrends = cache(_getAccountabilityPeriodTrends);
 
-// ---- Live desk totals (مفتوحة / معلّقة متأخرة) -------------------------------
-// This is intentionally the SAME cache and meaning as نبض الفريق:
-//   openLive    = tasks whose current stage this employee owns now;
-//   overdueLive = those tasks whose current-stage SLA has been breached.
-// Keeping the alias names avoids a wide API churn while making the displayed
-// values and their drill-downs reconcile exactly across both pages.
+// ---- Live desk totals (مفتوحة / متأخرة) -------------------------------------
+// Total OPEN and OVERDUE tasks the employee is directly assigned to, LIVE and
+// current-state — NOT gated to the stages their role owns (that gating lives in
+// the period stage-counts). "his open board", the way a person reads it.
+// Overdue uses the Rwasem definition (0257): open task, deadline passed — a
+// not-started (`new`) task past its deadline counts too — in Asia/Riyadh,
+// matching the CEO dashboard. This is deliberately NOT the نبض الفريق
+// current-stage-ownership counter: the team wants plain assigned-task totals.
 export interface AccountabilityLiveTotals {
   openLive: number;
   overdueLive: number;
@@ -1033,12 +1031,21 @@ async function _getAccountabilityLiveTotals(
   orgId: string,
 ): Promise<Record<string, AccountabilityLiveTotals>> {
   const org = assertUuid(orgId, "organization id");
+  const today = riyadhTodayIso();
   const sql = `
-select employee_id,
-       owned_open::int as open_live,
-       pending_late::int as overdue_live
-  from team_activity_cache
- where organization_id = '${org}'`;
+select ta.employee_id,
+       count(distinct t.id) filter (where t.stage <> 'done')::int as open_live,
+       count(distinct t.id) filter (
+         -- Canonical overdue (0257): open + deadline passed. A not-started
+         -- (new-stage) task past its deadline counts too — the team treats
+         -- un-started late work as a delay, not an exemption.
+         where t.stage <> 'done' and t.planned_date < '${today}'::date
+       )::int as overdue_live
+  from task_assignees ta
+  join tasks t on t.id = ta.task_id and t.organization_id = '${org}'
+ where ta.organization_id = '${org}'
+   and t.archived_at is null
+ group by 1`;
   const rows = await runSql<LiveTotalsSqlRow>(sql);
   const result: Record<string, AccountabilityLiveTotals> = {};
   for (const r of rows) {
@@ -1708,10 +1715,28 @@ export type EmployeeMetric = "open" | "overdue" | "totalStages" | "lateStages";
 function buildEmployeeMetricDrillSql(
   org: string,
   emp: string,
-  metric: "totalStages" | "lateStages",
+  metric: EmployeeMetric,
   from: string,
   to: string,
 ): string {
+  if (metric === "open" || metric === "overdue") {
+    // مفتوحة / متأخرة — assigned open board, deadline-based overdue (0257).
+    const today = riyadhTodayIso();
+    const pred =
+      metric === "overdue"
+        ? `t.stage <> 'done' and t.planned_date < '${today}'::date`
+        : `t.stage <> 'done'`;
+    return `
+select distinct t.id as task_id, t.task_code, t.title, pj.name as project_name, cl.name as client_name,
+       null::numeric as minutes, t.planned_date::text as occurred_at, t.stage::text as stage,
+       (t.stage <> 'done' and t.planned_date < '${today}'::date) as flag, 'task' as kind
+  from task_assignees ta
+  join tasks t on t.id = ta.task_id and t.organization_id = '${org}' and t.archived_at is null
+  left join projects pj on pj.id = t.project_id
+  left join clients cl on cl.id = pj.client_id
+ where ta.organization_id = '${org}' and ta.employee_id = '${emp}' and ${pred}
+ order by occurred_at asc nulls last`;
+  }
   const { start, endExclusive } = riyadhDateRangeUtcBounds(from, to);
   const lateFilter = metric === "lateStages" ? "where flag" : "";
   return `
@@ -1762,36 +1787,6 @@ async function _getEmployeeMetricDrill(
 ): Promise<DrillTask[]> {
   const org = assertUuid(orgId, "organization id");
   const emp = assertUuid(employeeId, "employee id");
-  if (metric === "open") {
-    const rows = await getEmployeeOwnedDeskTasks(org, emp);
-    return rows.map((row) => ({
-      taskId: row.taskId,
-      taskCode: row.taskCode,
-      title: row.title,
-      projectName: row.projectName,
-      clientName: null,
-      minutes: row.elapsedMinutes,
-      occurredAt: row.stageEnteredAt,
-      flag: row.isLate,
-      kind: "task",
-      stage: row.stage,
-    }));
-  }
-  if (metric === "overdue") {
-    const rows = await getEmployeePendingLateTasks(org, emp);
-    return rows.map((row) => ({
-      taskId: row.taskId,
-      taskCode: row.taskCode,
-      title: row.title,
-      projectName: row.projectName,
-      clientName: null,
-      minutes: row.overdueMinutes,
-      occurredAt: row.stageEnteredAt,
-      flag: true,
-      kind: "task",
-      stage: row.stage,
-    }));
-  }
   const range = reviewerRange(from, to);
   return mapDrill(
     await runSql<DrillSqlRow>(

@@ -684,16 +684,16 @@ export function LedgerStrip({
     <div className="mt-3 space-y-2">
       <div className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border bg-border text-center sm:grid-cols-6">
         <LedgerCell
-          label="على مكتبه"
+          label="مفتوحة"
           value={led.openTasks}
           sub={peerSub(openDelta)}
-          explain={`المهام المفتوحة التي يملك مرحلتها الحالية الآن — نفس «معلّقة» في نبض الفريق. وسيط الفريق ${led.peerMedianOpen} مهمة.`}
+          explain={`كل المهام المفتوحة المُسندة إليه الآن (لايف). وسيط الفريق ${led.peerMedianOpen} مهمة.`}
         />
         <LedgerCell
-          label="معلّقة متأخرة"
+          label="متأخرة"
           value={led.overdueOwned}
           tone={led.overdueOwned > 0 ? "text-cc-red" : undefined}
-          explain="من المهام الموجودة على مكتبه، التي تجاوزت مهلة المرحلة الحالية (SLA) — نفس رقم نبض الفريق، وليس موعد التسليم."
+          explain="من مهامه المفتوحة، التي فات موعد تسليمها اليوم — بما فيها «جديد» (لايف). تعريف المتأخر، وليس مهلة المرحلة (SLA)."
         />
         <LedgerCell
           label="الالتزام"

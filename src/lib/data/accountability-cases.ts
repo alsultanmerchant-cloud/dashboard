@@ -107,8 +107,8 @@ export interface CaseLedger {
   activeDays: number; // distinct days with an authored action in the window
   lastActionAt: string | null;
   daysSinceLastAction: number | null;
-  openTasks: number; // same current-stage desk count as Team Pulse
-  overdueOwned: number; // subset whose current-stage SLA is breached
+  openTasks: number; // total open tasks assigned to the person (live)
+  overdueOwned: number; // subset past their delivery deadline today (0257)
   onTimeRate: number | null;
   liveContracts: number; // live contracts owned as account manager (context)
   // P4 ledger polish — a 14-day activity heatmap, silent working-days, and how
