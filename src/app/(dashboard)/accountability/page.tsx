@@ -12,7 +12,7 @@ import {
   getReopenByEmployee,
   syncAndGetProblemMeta,
 } from "@/lib/data/accountability-problems-store";
-import { buildCaseBrief } from "@/lib/data/accountability-case-brief";
+import { attachAskProjects, buildCaseBrief } from "@/lib/data/accountability-case-brief";
 import { PageHeader } from "@/components/page-header";
 import { AccountabilityShell } from "./accountability-shell";
 
@@ -48,8 +48,14 @@ export default async function AccountabilityPage({
     }),
   ]);
 
-  // The CEO band over the case feed: a pure fold over data already loaded.
-  const brief = buildCaseBrief(cases, history, reopenByEmployee);
+  // The CEO band over the case feed: a pure fold over data already loaded,
+  // then the Rawasm project names the heads actually recognize are attached
+  // beside each ask's clients (a handful of cached lookups).
+  const brief = await attachAskProjects(
+    session.orgId,
+    buildCaseBrief(cases, history, reopenByEmployee),
+    cases,
+  );
 
   return (
     <div>

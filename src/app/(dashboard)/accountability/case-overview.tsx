@@ -160,7 +160,24 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
       <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{a.why}</p>
       {a.clientNames.length > 0 && (
         <p className="mt-1.5 text-[10px] text-muted-foreground/70">
-          العملاء: {a.clientNames.join("، ")}
+          العملاء:{" "}
+          {a.clientNames.map((name, i) => {
+            // The heads only know the Rawasm/group names — the contract name
+            // alone doesn't tell them which project this is about.
+            const projects = a.clientProjects[name] ?? [];
+            return (
+              <span key={name}>
+                {i > 0 && "، "}
+                {name}
+                {projects.length > 0 && (
+                  <span className="text-[9px] text-muted-foreground/50">
+                    {" "}
+                    (رواسم: {projects.join("، ")})
+                  </span>
+                )}
+              </span>
+            );
+          })}
           {a.moreClients > 0 && ` +${a.moreClients}`}
         </p>
       )}

@@ -1,4 +1,6 @@
 import "server-only";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
 import type {
   AccountabilityCase,
   AccountabilityCasesResult,
@@ -42,6 +44,12 @@ export interface CaseAsk {
   contractValue: number;
   clientNames: string[]; // the ask's own client first
   moreClients: number;
+  // client display name → its Rawasm (Odoo) project names. The heads only
+  // recognize the names that exist in Rawasm and the WA groups — the sheet's
+  // contract name (which titles the ask) means nothing to them, so the UI
+  // shows the project names in small text beside each client. Filled by
+  // attachAskProjects (the one deliberate query layer over this pure fold).
+  clientProjects: Record<string, string[]>;
   // Set ONLY when the case was resolved and came back. Deliberately not derived
   // from `times_seen` — that is a daily-poll counter, identical (6) on 42 of 52
   // live cases, and labelling it "تكرّرت N×" claimed a recurrence that never
@@ -237,9 +245,90 @@ export function buildCaseBrief(
       contractValue: c.impact.contractValue,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
+      clientProjects: {},
       recurrenceNote: c.employeeId ? fmtRecurrence(reopenByEmployee[c.employeeId] ?? 0) : null,
     };
   });
 
   return { exposure, asks, history };
+}
+
+// ---- Rawasm project names beside each ask client -------------------------
+// The asks title complaints with the CONTRACT-sheet client name, but the
+// department heads only know the project names that live in Rawasm (Odoo) and
+// the WA groups. Resolve each displayed client to its projects (owned +
+// WA-group-linked + merged twins, via the satisfaction identity resolver) and
+// attach the names so the band can show them in parentheses.
+//
+// Name→id pairs come from the cases' own proof rows (every stream stamps both
+// clientName and clientId together); the case-level name/id Sets lost the
+// pairing. Only the ≤3 asks × ≤4 names each are resolved — a handful of
+// cached lookups, not a table scan.
+const MAX_PROJECTS_PER_CLIENT = 2;
+
+function normName(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export async function attachAskProjects(
+  orgId: string,
+  brief: CaseBrief,
+  result: AccountabilityCasesResult,
+): Promise<CaseBrief> {
+  try {
+    const displayed = new Set<string>();
+    for (const a of brief.asks) for (const n of a.clientNames) displayed.add(n);
+    if (displayed.size === 0) return brief;
+
+    const idByName = new Map<string, string>();
+    for (const c of result.cases.slice(0, brief.asks.length)) {
+      for (const p of c.proof) {
+        if (p.clientName && p.clientId && displayed.has(p.clientName) && !idByName.has(p.clientName)) {
+          idByName.set(p.clientName, p.clientId);
+        }
+      }
+    }
+    if (idByName.size === 0) return brief;
+
+    const uniqueIds = [...new Set(idByName.values())];
+    const projectIdsByClient = new Map<string, string[]>();
+    await Promise.all(
+      uniqueIds.map(async (id) => {
+        projectIdsByClient.set(id, await resolveClientProjectIds(orgId, id).catch(() => []));
+      }),
+    );
+
+    const allProjectIds = [...new Set([...projectIdsByClient.values()].flat())];
+    if (allProjectIds.length === 0) return brief;
+    const { data: projects } = await supabaseAdmin
+      .from("projects")
+      .select("id, name")
+      .in("id", allProjectIds);
+    const projectName = new Map(
+      ((projects ?? []) as Array<{ id: string; name: string | null }>).map((p) => [
+        p.id,
+        (p.name ?? "").trim(),
+      ]),
+    );
+
+    for (const a of brief.asks) {
+      const map: Record<string, string[]> = {};
+      for (const clientName of a.clientNames) {
+        const clientId = idByName.get(clientName);
+        if (!clientId) continue;
+        const names = (projectIdsByClient.get(clientId) ?? [])
+          .map((pid) => projectName.get(pid) ?? "")
+          // A project literally named like the client adds nothing but noise
+          // ("تطبيق خدمتي (تطبيق خدمتي)") — the head already recognizes it.
+          .filter((n) => n.length > 0 && normName(n) !== normName(clientName));
+        if (names.length > 0) map[clientName] = names.slice(0, MAX_PROJECTS_PER_CLIENT);
+      }
+      a.clientProjects = map;
+    }
+    return brief;
+  } catch (e) {
+    // Enrichment is decoration — never let it take the band down.
+    console.error("[case-brief] attachAskProjects failed:", e);
+    return brief;
+  }
 }
