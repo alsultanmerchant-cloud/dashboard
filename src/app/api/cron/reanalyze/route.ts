@@ -154,3 +154,9 @@ async function handle(request: NextRequest) {
 export async function GET(request: NextRequest) {
   return handle(request);
 }
+
+// pg_cron invokes via net.http_post — without this export every nightly slot
+// dies with 405 (caught by the 2026-07-26 live-fire test of job 38).
+export async function POST(request: NextRequest) {
+  return handle(request);
+}

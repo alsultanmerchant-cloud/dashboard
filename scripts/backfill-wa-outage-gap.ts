@@ -6,9 +6,11 @@
 // per-(account,chat) completion marks so already-backfilled groups are re-read,
 // which is the whole point after an outage), then resumes until remaining is 0.
 //
-//   bun --preload ./scripts/_preload-stub-server-only.ts scripts/backfill-wa-outage-gap.ts --session=rawasm [--apply]
+//   bun --preload ./scripts/_preload-stub-server-only.ts scripts/backfill-wa-outage-gap.ts --session=rawasm [--apply] [--resume]
 //
 // Dry-run by default (reports the gap only); --apply performs the backfill.
+// --resume skips the initial refresh wipe so a SECOND invocation continues the
+// queue instead of clearing the completion marks and redoing finished groups.
 // Ingestion dedups on the bare message id, so re-pulling is additive and safe.
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -16,6 +18,7 @@ import { backfillAccountHistory } from "@/lib/wa/backfill";
 import { getDefaultOrgId } from "@/lib/wa/ingest";
 
 const APPLY = process.argv.includes("--apply");
+const RESUME = process.argv.includes("--resume");
 const SESSION =
   process.argv.find((a) => a.startsWith("--session="))?.slice("--session=".length) ?? "rawasm";
 const MAX_RUNS = Number(
@@ -47,8 +50,9 @@ let totalImported = 0;
 let totalGroups = 0;
 for (let run = 1; run <= MAX_RUNS; run++) {
   const t0 = Date.now();
-  // Only the FIRST run refreshes; later runs resume the queue it created.
-  const res = await backfillAccountHistory(orgId, SESSION, { refresh: run === 1 });
+  // Only the FIRST run of a fresh invocation refreshes; later runs (and
+  // --resume invocations) continue the queue it created.
+  const res = await backfillAccountHistory(orgId, SESSION, { refresh: run === 1 && !RESUME });
   if (res.error) {
     console.error(`run ${run}: ERROR ${res.error}`);
     break;
