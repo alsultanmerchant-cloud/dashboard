@@ -49,18 +49,18 @@ async function handle(request: NextRequest) {
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
 
   // Eligible list: distinct clients with mapped messages in the last 7 days
-  // (weekly window has content).
-  const { data: msgs } = await supabaseAdmin
-    .from("wa_messages")
-    .select("client_id")
-    .eq("organization_id", orgId)
-    .not("client_id", "is", null)
-    .not("group_kind", "is", null)
-    .gte("sent_at", since)
-    .limit(20000);
-  const ids = Array.from(
-    new Set(((msgs ?? []) as Array<{ client_id: string }>).map((m) => m.client_id)),
-  ).sort();
+  // (weekly window has content). DISTINCT happens in SQL (0268) — a raw row
+  // scan through PostgREST silently truncates at max-rows, which shrank the
+  // eligible set to whatever clients dominated the capped window (6 of 49
+  // after a bulk backfill).
+  const { data: recent, error: recentError } = await supabaseAdmin.rpc("get_recent_wa_clients", {
+    p_org: orgId,
+    p_since: since,
+  });
+  if (recentError) {
+    return NextResponse.json({ ok: false, error: recentError.message }, { status: 500 });
+  }
+  const ids = ((recent ?? []) as Array<{ client_id: string }>).map((m) => m.client_id).sort();
 
   // Current analysis per eligible client — drives both the freshness skip and
   // the stalest-first ordering (never-analyzed clients go first).

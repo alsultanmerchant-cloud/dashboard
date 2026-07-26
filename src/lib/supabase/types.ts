@@ -8681,6 +8681,12 @@ export type Database = {
           stage: string
         }[]
       }
+      get_recent_wa_clients: {
+        Args: { p_org: string; p_since: string }
+        Returns: {
+          client_id: string
+        }[]
+      }
       get_wa_group_coverage: {
         Args: { p_org: string }
         Returns: {
