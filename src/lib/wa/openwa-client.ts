@@ -479,7 +479,19 @@ export async function fetchSessionContacts(
   if (!waConfigured()) return [];
   const uuid = await findSessionUuid(sessionName);
   if (!uuid) return [];
-  const { ok, json } = await call(`/api/sessions/${uuid}/contacts`, { timeoutMs: 90_000 });
+  // /contacts is the flakiest endpoint on the gateway (it walks the whole
+  // browser contact store and routinely 504s or exceeds the timeout, which
+  // `call` surfaces as a THROWN AbortError, not ok:false). Sender-name
+  // enrichment is a nice-to-have, so degrade to [] like every other failure
+  // path here — a slow contact store must never abort a caller's backfill.
+  let ok = false;
+  let json: unknown = null;
+  try {
+    ({ ok, json } = await call(`/api/sessions/${uuid}/contacts`, { timeoutMs: 90_000 }));
+  } catch (e) {
+    console.warn("[wa_contacts_unavailable]", (e as Error).message);
+    return [];
+  }
   if (!ok || !json) return [];
   const list = Array.isArray(json)
     ? json
