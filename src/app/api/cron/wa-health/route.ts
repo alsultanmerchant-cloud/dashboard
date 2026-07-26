@@ -9,6 +9,7 @@ import {
   listSessionWebhooks,
   registerSessionWebhook,
   probeSessionStore,
+  restartStuckSession,
   waConfigured,
   isOwnSession,
 } from "@/lib/wa/openwa-client";
@@ -24,13 +25,28 @@ import {
 // session's lastActive and each account's newest ingested message against the
 // clock (detect #2/#3), and replay anything parked in the dead-letter queue.
 // Auth: shared secret in the X-Cron-Secret header (CRON_SECRET env var).
+//
+// 2026-07-26: detection alone proved useless — WhatsApp hot-updates a RUNNING
+// session past the gateway's pinned web build, so sessions break every
+// hours-to-days (wedged page or store-500) and the alerts sat unactioned for
+// 93 hours while 61 clients went dark. The watchdog now RESTARTS a broken
+// session itself (same recovery as إعادة الربط: force-kill + start, LocalAuth
+// survives, no QR), at most once per cooldown; the loud alert fires only when
+// a recent restart didn't stick — that's the signal a human is really needed.
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // A session that has done nothing for this long, while still claiming to be
 // connected, is wedged rather than quiet.
 const WEDGED_HOURS = 6;
+// Auto-restart a broken session at most once per this window. Within the
+// window, a still-broken session means the restart didn't stick → alert a
+// human instead of thrashing Chromium on the VPS.
+const RESTART_COOLDOWN_MINUTES = 45;
+// The healthy primary has answered /groups in ~15s under load — the probe's
+// 12s default would call that broken and bounce a working session.
+const STORE_PROBE_TIMEOUT_MS = 30_000;
 // No message ingested for this long across ALL numbers means the pipe is down,
 // regardless of what any individual session reports.
 const SILENT_HOURS = 12;
@@ -106,7 +122,7 @@ export async function POST(request: NextRequest) {
 
   const { data: accounts, error } = await supabaseAdmin
     .from("wa_accounts")
-    .select("id, session_id, phone, label")
+    .select("id, session_id, phone, label, last_auto_restart_at")
     .eq("organization_id", orgId)
     .eq("is_active", true);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -186,22 +202,60 @@ export async function POST(request: NextRequest) {
       faults.push(`webhook_check_failed:${(e as Error).message}`);
     }
 
+    // ---- Auto-recovery for a broken-but-"CONNECTED" session -----------------
+    // Restart first (the same force-kill + start the إعادة الربط button does;
+    // LocalAuth survives, no QR), alert only when a restart inside the cooldown
+    // window evidently didn't stick. WhatsApp hot-updates running sessions past
+    // the gateway's pinned build, so this fires routinely — it must be boring.
+    const lastAutoRestart = account.last_auto_restart_at
+      ? Date.parse(account.last_auto_restart_at as string)
+      : null;
+    const cooldownActive =
+      lastAutoRestart !== null &&
+      Date.now() - lastAutoRestart < RESTART_COOLDOWN_MINUTES * 60_000;
+    const recoverBroken = async (
+      kind: "session_wedged" | "store_unusable",
+      detail: string,
+      alert: { type: string; title: string; body: string },
+    ) => {
+      faults.push(kind);
+      if (!cooldownActive) {
+        const res = await restartStuckSession(name);
+        if (res.ok) {
+          await supabaseAdmin
+            .from("wa_accounts")
+            .update({ last_auto_restart_at: new Date().toISOString() })
+            .eq("id", account.id as string);
+          healed.push(`auto_restarted:${kind}`);
+          await notifyOwners({
+            orgId,
+            owners,
+            type: "WA_SESSION_AUTO_RESTARTED",
+            entityId: account.id as string,
+            title: `أُعيد تشغيل رقم واتساب تلقائيًا: ${label}`,
+            body:
+              `اكتشف الفاحص أن «${label}» متصل لكنه معطّل (${detail})، فأعاد تشغيل جلسته تلقائيًا ` +
+              `دون الحاجة لمسح QR. سيتحقق من التعافي خلال ١٥ دقيقة وينبّهك إن لم تثبت الإعادة.`,
+          });
+          return;
+        }
+        faults.push(`auto_restart_failed:${res.error ?? "?"}`);
+      }
+      await notifyOwners({ orgId, owners, entityId: account.id as string, ...alert });
+    };
+
     // ---- 2. Detect a wedged session (status lies; lastActive doesn't) ------
     const idleHours = hoursSince(session.lastActive);
     row.status = session.status;
     row.lastActive = session.lastActive;
     row.idleHours = idleHours === null ? null : Math.round(idleHours);
     if (session.status === "CONNECTED" && idleHours !== null && idleHours >= WEDGED_HOURS) {
-      faults.push("session_wedged");
-      await notifyOwners({
-        orgId,
-        owners,
+      await recoverBroken("session_wedged", `بلا أي نشاط منذ ${Math.round(idleHours)} ساعة`, {
         type: "WA_SESSION_WEDGED",
-        entityId: account.id as string,
         title: `رقم واتساب متوقف عن النشاط: ${label}`,
         body:
-          `«${label}» يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة. ` +
-          `الجلسة على الأرجح معلّقة — استخدم "إعادة الربط" على الرقم ثم "سحب السجل".`,
+          `«${label}» يظهر "متصل" لكنه لم ينفّذ أي نشاط منذ ${Math.round(idleHours)} ساعة، ` +
+          `وإعادة التشغيل التلقائية لم تُصلحه — استخدم "إعادة الربط"، وإن تكرر ذلك أعد تعيين الجلسة (مسح QR جديد) ثم "سحب السجل".`,
       });
     }
 
@@ -211,20 +265,17 @@ export async function POST(request: NextRequest) {
     // never delivers a message and still looks green. Only probe when the
     // lastActive check passed, so a wedged number raises one alert, not two.
     if (!faults.includes("session_wedged") && session.status === "CONNECTED") {
-      const store = await probeSessionStore(session.uuid);
+      const store = await probeSessionStore(session.uuid, STORE_PROBE_TIMEOUT_MS);
       row.store = store.detail;
       row.storeGroups = store.groups;
       if (!store.ok) {
-        faults.push("store_unusable");
-        await notifyOwners({
-          orgId,
-          owners,
+        await recoverBroken("store_unusable", store.detail, {
           type: "WA_SESSION_STORE_BROKEN",
-          entityId: account.id as string,
           title: `رقم واتساب متصل لكنه لا يستقبل: ${label}`,
           body:
-            `«${label}» يظهر "متصل" لكن مخزون المحادثات لديه غير صالح (${store.detail}) — ` +
-            `لن تصل أي رسالة منه. استخدم "إعادة الربط" وأعد مسح رمز QR ثم "سحب السجل".`,
+            `«${label}» يظهر "متصل" لكن مخزون المحادثات لديه غير صالح (${store.detail}) ` +
+            `وإعادة التشغيل التلقائية لم تُصلحه — لن تصل أي رسالة منه. ` +
+            `استخدم "إعادة الربط"، وإن تكرر ذلك أعد تعيين الجلسة (مسح QR جديد) ثم "سحب السجل".`,
         });
       }
     }

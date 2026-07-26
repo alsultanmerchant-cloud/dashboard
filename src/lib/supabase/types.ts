@@ -7434,6 +7434,7 @@ export type Database = {
           id: string
           is_active: boolean
           label: string | null
+          last_auto_restart_at: string | null
           last_seen_at: string | null
           organization_id: string
           phone: string | null
@@ -7446,6 +7447,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           label?: string | null
+          last_auto_restart_at?: string | null
           last_seen_at?: string | null
           organization_id: string
           phone?: string | null
@@ -7458,6 +7460,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           label?: string | null
+          last_auto_restart_at?: string | null
           last_seen_at?: string | null
           organization_id?: string
           phone?: string | null
