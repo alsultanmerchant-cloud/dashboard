@@ -120,16 +120,23 @@ export interface CaseLedger {
 }
 
 // What this case puts at stake, in the only unit a CEO budgets in: clients and
-// riyals. Deliberately NOT a loss forecast — a stuck task does not put a whole
-// contract at risk. `contractValue` is the live contract value of the clients
-// this person's stalled work touches: the exposure the case sits on top of.
+// riyals. The money here is UNCOLLECTED money tied to the affected clients —
+// not their total contract value (that read as the person's portfolio size and
+// said nothing about the problem):
+//   • dueValue     — unpaid installments already past their expected date
+//   • renewalValue — expected renewal money (sheet "Value of repeated services")
+//                    on the clients' live contracts
+// Still NOT a loss forecast — a stuck task does not forfeit a renewal — but it
+// is the money a stalled relationship actually threatens.
 // `unpricedClients` are affected clients with no contract row at all (the
 // Odoo-only client population — value UNKNOWN, not zero, and never "churned").
 export interface CaseImpact {
   clients: number; // distinct affected clients
   pricedClients: number; // …of which carry a live contract (value is known)
   unpricedClients: number; // …of which have no contract row → unknown value
-  contractValue: number; // SAR across pricedClients' live contracts
+  dueValue: number; // SAR: overdue unpaid installments across affected clients
+  renewalValue: number; // SAR: expected renewal on affected clients' live contracts
+  atStakeValue: number; // dueValue + renewalValue — badge + ranking input
   churnClients: string[]; // affected clients who threatened to leave
   financeFlagClients: string[]; // affected clients with overdue installments
 }
@@ -246,7 +253,7 @@ interface StuckRow {
 }
 interface ClientValueRow {
   client_id: string;
-  value: number;
+  renewal_value: number;
   live: number;
 }
 interface TaskRefRow {
@@ -961,17 +968,23 @@ async function _getAccountabilityCases(
       : null;
 
     // ---- impact: what this case puts at stake, in clients and riyals ----
+    // Money = what the affected clients haven't paid yet: overdue installments
+    // (client-finance map, installments past expected_date with no actual)
+    // plus expected renewal value on their live contracts. Both maps key by
+    // canonical client id, same as b.clientIds.
     const clientIds = [...b.clientIds];
-    let contractValue = 0;
+    let dueValue = 0;
+    let renewalValue = 0;
     let pricedClients = 0;
     const churnClients: string[] = [];
     const financeFlagClients: string[] = [];
     for (const cid of clientIds) {
       const v = valueByClient.get(cid);
       if (v && v.live > 0) {
-        contractValue += v.value;
+        renewalValue += v.renewal_value;
         pricedClients += 1;
       }
+      dueValue += financeMap[cid]?.overdueAmount ?? 0;
       const nameOf = () =>
         b.proof.find((p) => p.clientId === cid)?.clientName ?? "عميل";
       if (churnClientIds.has(cid)) churnClients.push(nameOf());
@@ -981,7 +994,9 @@ async function _getAccountabilityCases(
       clients: clientIds.length,
       pricedClients,
       unpricedClients: clientIds.length - pricedClients,
-      contractValue: Math.round(contractValue),
+      dueValue: Math.round(dueValue),
+      renewalValue: Math.round(renewalValue),
+      atStakeValue: Math.round(dueValue + renewalValue),
       churnClients,
       financeFlagClients,
     };
@@ -990,9 +1005,10 @@ async function _getAccountabilityCases(
     // about our detector, not about the business. A CEO ranks by what it costs,
     // so impact leads: money at stake first, then corroboration as the
     // tie-breaker (an expensive case we can prove outranks an expensive hunch).
-    // Value is log-scaled: a 100k client should outrank a 10k one, but not by
-    // 10× — a well-proven neglect case on a mid-size client still deserves air.
-    const valueScore = contractValue > 0 ? Math.log10(contractValue) * 60_000 : 0;
+    // "At stake" is the UNCOLLECTED money (dues + expected renewal), log-scaled:
+    // a 100k exposure should outrank a 10k one, but not by 10× — a well-proven
+    // neglect case on a mid-size client still deserves air.
+    const valueScore = impact.atStakeValue > 0 ? Math.log10(impact.atStakeValue) * 60_000 : 0;
     const sort =
       valueScore +
       churnClients.length * 250_000 + // an actual leaving threat dominates
@@ -1176,10 +1192,14 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
 // otherwise a merged client's work looks unpriced. Clients with no contract row
 // are absent here on purpose: unknown value, not zero.
 // See [[project_satisfaction_contract_bridge]].
+// Per client (canonical id): the expected-renewal money on their LIVE contracts
+// (the sheet's " Value of repeated services") plus how many live contracts they
+// hold. Full contract value is deliberately NOT read here anymore — the badge
+// this feeds shows money the client hasn't paid yet, not their portfolio size.
 function clientValueSql(org: string): string {
   return `
 select coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
-       sum(c.total_value)::float8 as value,
+       sum(coalesce(c.repeated_services_value, 0))::float8 as renewal_value,
        count(*)::int as live
   from contracts c
   join clients cl on cl.id = c.client_id

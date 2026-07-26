@@ -24,13 +24,15 @@ import type { ProblemHistorySummary } from "@/lib/data/accountability-problems-s
 // Everything here is derived from facts the engine already computed. No AI, no
 // new queries — a pure fold over the cases the page loads anyway.
 //
-// HONESTY: per-ask `contractValue` is the value of the clients whose work is
-// stalled under that person — EXPOSURE for ranking, not a loss forecast, and a
-// stuck task does not put a whole contract at risk. It is shown beside a name
-// and an ask (where it is actionable), never rolled up into an org headline:
-// the inclusion bar is low enough that an org rollup catches half the book.
-// Clients with no contract row are the Odoo-only population — value UNKNOWN,
-// never zero, never "churned". See [[project_clients_centralization]].
+// HONESTY: per-ask money is the UNCOLLECTED money of the clients whose work is
+// stalled under that person — overdue unpaid installments (`dueValue`) and the
+// expected renewal value of their live contracts (`renewalValue`). It replaced
+// total contract value, which read as the person's portfolio size and said
+// nothing about the problem. EXPOSURE for ranking, not a loss forecast. It is
+// shown beside a name and an ask (where it is actionable), never rolled up into
+// an org headline: the inclusion bar is low enough that an org rollup catches
+// half the book. Clients with no contract row are the Odoo-only population —
+// value UNKNOWN, never zero, never "churned". See [[project_clients_centralization]].
 // =========================================================================
 
 export interface CaseAsk {
@@ -41,7 +43,8 @@ export interface CaseAsk {
   severity: AccountabilityCase["severity"];
   why: string; // the single hardest FACT behind this ranking
   ask: string; // the one thing to do about it — code-derived, never AI
-  contractValue: number;
+  dueValue: number; // SAR: overdue unpaid installments on the affected clients
+  renewalValue: number; // SAR: expected renewal (repeated services) on their live contracts
   clientNames: string[]; // the ask's own client first
   moreClients: number;
   // client display name → its Rawasm (Odoo) project names. The heads only
@@ -242,7 +245,8 @@ export function buildCaseBrief(
       severity: c.severity,
       why,
       ask,
-      contractValue: c.impact.contractValue,
+      dueValue: c.impact.dueValue,
+      renewalValue: c.impact.renewalValue,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
       clientProjects: {},

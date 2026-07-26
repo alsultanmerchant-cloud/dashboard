@@ -49,7 +49,7 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
               تعامل مع هؤلاء أولًا
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground/70">
-              مرتّبون بقيمة ما يتعثّر تحت أيديهم، لا بعدد الأدلة.
+              مرتّبون بالمال غير المحصَّل المعرَّض للخطر تحت أيديهم (دفعات متأخرة + تجديد متوقّع)، لا بعدد الأدلة.
             </p>
             <div className="mt-3 space-y-2.5">
               {asks.length === 0 ? (
@@ -138,13 +138,24 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
           {a.role ?? "—"}
           {a.department ? ` · ${a.department}` : ""}
         </span>
-        {a.contractValue > 0 && (
+        {/* Money = what the affected clients haven't paid yet — not their
+            total contract value (that read as portfolio size, unrelated to
+            the problem). Two separate chips: dues already late, and the
+            renewal money a stalled relationship threatens. */}
+        {a.dueValue > 0 && (
+          <span
+            className="rounded-md border border-cc-red/25 bg-red-dim px-1.5 py-0.5 text-[10px] font-bold text-cc-red tabular-nums"
+            title="دفعات متأخرة على العملاء المتأثّرين لم تُسدَّد بعد"
+          >
+            <span dir="ltr">{money(a.dueValue)}</span> ر.س مستحقّة
+          </span>
+        )}
+        {a.renewalValue > 0 && (
           <span
             className="rounded-md border border-amber/25 bg-amber-dim px-1.5 py-0.5 text-[10px] font-bold text-amber tabular-nums"
-            dir="ltr"
-            title="قيمة عقود العملاء المتأثّرين بعمله المتعثّر"
+            title="قيمة التجديد المتوقعة (الخدمات المتكررة) لعقود العملاء المتأثّرين"
           >
-            {money(a.contractValue)} ر.س
+            <span dir="ltr">{money(a.renewalValue)}</span> ر.س تجديد متوقّع
           </span>
         )}
         {a.recurrenceNote && (
