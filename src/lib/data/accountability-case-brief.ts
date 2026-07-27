@@ -71,6 +71,9 @@ export interface CaseExposure {
   clients: number; // distinct clients touched by stalled work
   stalledTasks: number;
   zeroActionTasks: number; // …of which the responsible owner never touched
+  // Tasks left OUT of the above because they are parked by decision (HOLD/LOST
+  // tag, or a dashboard hold). Stated openly so the scope reads as a choice.
+  heldTasksExcluded: number;
 }
 
 export interface CaseBrief {
@@ -227,6 +230,7 @@ export function buildCaseBrief(
     clients: allClientIds.size,
     stalledTasks,
     zeroActionTasks,
+    heldTasksExcluded: result.meta.heldTasksExcluded,
   };
 
   // ---- 2. the three asks (feed is already impact-sorted) ----

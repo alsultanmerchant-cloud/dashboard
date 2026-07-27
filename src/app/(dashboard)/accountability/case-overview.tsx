@@ -39,6 +39,18 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
         <b className="text-foreground/80 tabular-nums">{exposure.cases}</b> من الفريق · منها{" "}
         <b className="text-cc-red tabular-nums">{exposure.zeroActionTasks}</b> بلا أي إجراء من المسؤول عنها ·{" "}
         <b className="text-foreground/80 tabular-nums">{exposure.clients}</b> عميل متأثّر
+        {/* Held work is excluded on purpose (HOLD/LOST tag or a dashboard hold):
+            a paused task's slipped deadline is the consequence of a decision,
+            not evidence against its owner. Stated so the scope reads as a
+            choice rather than a number that quietly shrank. */}
+        {exposure.heldTasksExcluded > 0 && (
+          <>
+            {" · "}
+            <span className="text-muted-foreground/70">
+              <b className="tabular-nums">{exposure.heldTasksExcluded}</b> مهمة مؤجَّلة (HOLD) مستثناة
+            </span>
+          </>
+        )}
       </p>
 
       <div className="grid gap-3 lg:grid-cols-3">

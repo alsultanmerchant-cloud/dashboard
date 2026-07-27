@@ -8,6 +8,7 @@ import {
   type AccountabilityLiveTotals,
 } from "@/lib/data/accountability";
 import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-finance";
+import { isLeadershipPosition } from "@/lib/data/leadership";
 import { foldResolutionOverlayEvents } from "@/lib/satisfaction-recommendation-status";
 
 // =========================================================================
@@ -167,6 +168,10 @@ export interface AccountabilityCasesResult {
     signal: number;
     streamsAvailable: CaseStream[]; // which streams produced any evidence
     unmatchedNames: string[];
+    // Distinct tasks that WOULD have been execution evidence but are parked by
+    // decision (HOLD/LOST tag, or a dashboard hold). Surfaced so the band can
+    // state what it set aside rather than silently reporting a smaller number.
+    heldTasksExcluded: number;
   };
 }
 
@@ -180,6 +185,39 @@ const CHURN_CODES = new Set([
 // Per-stream evidence caps so a card stays readable.
 const MAX_EXEC_TASKS = 6;
 const STUCK_MIN_DAYS = 5; // a non-overdue owned task idle this long is still "stuck"
+
+// ---- "Parked by decision" ------------------------------------------------
+// Deliberately paused work is not neglected work: if somebody decided to stop a
+// task, its missed deadline and its silence are consequences of THAT decision,
+// not evidence against whoever holds it. Three ways a task can be parked:
+//   • an Odoo HOLD/LOST tag on the task itself (project.task.tag_ids)
+//   • the same tag on its PROJECT — the whole engagement is frozen or the client
+//     is gone (the convention /satisfaction uses to bucket a client as lost)
+//   • the dashboard's own per-task hold (tasks.hold_since, migration 0023)
+// Shared by BOTH evidence paths, because filtering only the execution stream
+// left the same held task visible as an AI-cited complaint (client stream).
+//
+// "CURRENTLY parked" — the liveness gate matters. Most HOLD tags in prod sit on
+// tasks that are long finished (109 tagged org-wide, only ~6 open): the tag is
+// never cleaned up when work resumes or completes. Without the open/non-archived
+// test, a stale tag on a DELIVERED task would silence a real complaint about it.
+// stuckSql already restricts to open work, so this is belt-and-braces there and
+// load-bearing for the complaint stream, which resolves codes with no such gate.
+//
+// NOTE: agent_run_readonly_sql rejects write/DDL keywords word-boundary-wise
+// ANYWHERE in a query, prose included — keep wording here clear of them.
+const ON_HOLD_SQL = (t: string) => `(
+  ${t}.stage <> 'done' and ${t}.archived_at is null and (
+  ${t}.hold_since is not null
+  or exists (
+       select 1 from task_tag_assignments tta
+         join project_tags g on g.id = tta.tag_id
+        where tta.task_id = ${t}.id and upper(g.name) in ('HOLD','LOST'))
+  or exists (
+       select 1 from project_tag_assignments pta
+         join project_tags g2 on g2.id = pta.tag_id
+        where pta.project_id = ${t}.project_id and upper(g2.name) in ('HOLD','LOST'))
+))`;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function assertUuid(v: string, label: string): string {
@@ -222,6 +260,10 @@ interface EmpRow {
   full_name: string | null;
   position_label: string | null;
   department: string | null;
+  // From positions (via position_id) — feeds isLeadershipPosition, the same
+  // rule every performance table uses (src/lib/data/leadership.ts).
+  position_role: string | null;
+  position_name: string | null;
 }
 interface LedgerRow {
   actor_employee_id: string;
@@ -250,6 +292,9 @@ interface StuckRow {
   client_id: string | null;
   client_name: string | null;
   project_name: string | null;
+  // Deliberately parked: HOLD/LOST tag on the task or its project, or the
+  // dashboard's own per-task hold. Never counted as a problem — see stuckSql.
+  on_hold: boolean;
 }
 interface ClientValueRow {
   client_id: string;
@@ -261,6 +306,7 @@ interface TaskRefRow {
   task_code: string | null;
   title: string | null;
   project_name: string | null;
+  on_hold: boolean;
 }
 interface ReworkTaskRow {
   employee_id: string;
@@ -520,19 +566,25 @@ async function _getAccountabilityCases(
     for (const row of rows) for (const c of rowTaskCodes(row)) complaintCodes.add(c);
   }
   const taskRefByCode = new Map<string, TaskRef>();
+  // Cited codes that resolve to a task parked by decision. A code we could NOT
+  // resolve is deliberately absent: unknown is not held, so an unresolvable
+  // citation never silences a complaint.
+  const heldCodes = new Set<string>();
   if (complaintCodes.size > 0) {
     const refs = await runSql<TaskRefRow>(taskRefsSql(org, [...complaintCodes])).catch((e) => {
       console.error("[cases] taskRefsSql failed:", e);
       return [] as TaskRefRow[];
     });
     for (const r of refs)
-      if (r.task_code)
+      if (r.task_code) {
         taskRefByCode.set(r.task_code, {
           taskId: r.task_id,
           code: r.task_code,
           title: (r.title ?? "").trim() || "مهمة",
           projectName: r.project_name,
         });
+        if (r.on_hold) heldCodes.add(r.task_code);
+      }
   }
 
   // The satisfaction resolution overlay: append-only ai_events that close a
@@ -617,7 +669,17 @@ async function _getAccountabilityCases(
 
   // ---- EXECUTION: overdue / stuck owned tasks ----
   const stuckByEmp = new Map<string, StuckRow[]>();
+  // Parked work set aside (HOLD/LOST tag, or a dashboard hold). Reported in
+  // meta so the band can say what it excluded instead of silently shrinking.
+  const heldTaskIds = new Set<string>();
   for (const s of stuck) {
+    // A held task is paused BY DECISION — its deadline slipping and its silence
+    // are both consequences of that decision, not evidence against the person.
+    // Dropped before either arm is evaluated so neither can resurrect it.
+    if (s.on_hold) {
+      heldTaskIds.add(s.task_id);
+      continue;
+    }
     // Mirrors stuckSql's two arms. A stage with no SLA can only qualify by
     // missing its DEADLINE — never by sitting, however long it sits.
     const stuckEligible = s.stage_sla_minutes !== null;
@@ -810,14 +872,40 @@ async function _getAccountabilityCases(
       // re-surfaces it (→ 'reopened'). Churn indicators below are not
       // issue-keyed, so they intentionally still see every row.
       if (row.complaint && resolvedIssues?.has(row.complaint)) continue;
+      // Parked-by-decision, the client-stream half. Filtering only the execution
+      // stream left a held task still on the band as an AI-cited complaint —
+      // exactly the row the client pointed at. An accountability row whose ONLY
+      // cited tasks are held is blaming somebody for work that was stopped on
+      // purpose. A row citing no task at all is untouched: that is pure client
+      // voice with no paused work behind it. Mixed rows survive on the live task.
+      const citedCodes = rowTaskCodes(row);
+      if (citedCodes.length > 0 && citedCodes.every((c) => heldCodes.has(c))) {
+        for (const c of citedCodes) {
+          const ref = taskRefByCode.get(c);
+          if (ref) heldTaskIds.add(ref.taskId);
+        }
+        continue;
+      }
       const responsible = Array.isArray(row.responsible) ? row.responsible : [];
+      // Leadership dedup. The analyses name the direct owner AND the escalation
+      // chain (basis team_manager; team leads also match as plain assignees
+      // because they sit on every team task) — so one complaint fanned out to
+      // 2–3 people and the SAME problem ranked twice on the band (سلمى #1 and
+      // her head اية #3, word for word). Attribution rule: the case belongs to
+      // the non-leadership responsible; a leader carries it ONLY when nobody
+      // else was named, so a problem can never vanish. Same leadership
+      // definition as every performance table (src/lib/data/leadership.ts).
+      const resolvedResp: EmpRow[] = [];
       for (const resp of responsible) {
         if (!resp.name) continue;
-        const match = empByName.get(norm(resp.name));
-        if (!match) {
-          unmatched.add(resp.name);
-          continue;
-        }
+        const m = empByName.get(norm(resp.name));
+        if (!m) unmatched.add(resp.name);
+        else if (!resolvedResp.some((r) => r.id === m.id)) resolvedResp.push(m);
+      }
+      const directOwners = resolvedResp.filter(
+        (m) => !isLeadershipPosition({ role: m.position_role, name: m.position_name }),
+      );
+      for (const match of directOwners.length > 0 ? directOwners : resolvedResp) {
         streamsAvailable.add("client");
         const b = empBucket(match.id);
         b.material = true;
@@ -865,6 +953,10 @@ async function _getAccountabilityCases(
       for (const row of rows)
         for (const resp of row.responsible ?? [])
           if (resp.name) responsibleNames.add(norm(resp.name));
+      // Same leadership dedup as the complaint stream — and needed here even
+      // more, because the /حساب|account/ gate happily matches the AM dept HEAD
+      // («مدير قسم إدارة الحسابات»), handing her a copy of every churn threat.
+      const amMatches: EmpRow[] = [];
       for (const nm of responsibleNames) {
         const match = empByName.get(nm);
         if (!match) continue;
@@ -872,6 +964,12 @@ async function _getAccountabilityCases(
         const role = match.position_label ?? "";
         const isAm = /حساب|account/i.test(role) || contractsByName.has(nm);
         if (!isAm) continue;
+        amMatches.push(match);
+      }
+      const directAms = amMatches.filter(
+        (m) => !isLeadershipPosition({ role: m.position_role, name: m.position_name }),
+      );
+      for (const match of directAms.length > 0 ? directAms : amMatches) {
         streamsAvailable.add("commercial");
         const b = empBucket(match.id);
         b.material = true;
@@ -1049,6 +1147,7 @@ async function _getAccountabilityCases(
       signal: cases.filter((c) => c.severity === "signal").length,
       streamsAvailable: [...streamsAvailable].sort((x, y) => STREAM_ORDER[x] - STREAM_ORDER[y]),
       unmatchedNames: [...unmatched],
+      heldTasksExcluded: heldTaskIds.size,
     },
   };
 }
@@ -1091,9 +1190,11 @@ function arCount(n: number, one: string, two: string, few: string): string {
 // ---- SQL builders ----------------------------------------------------------
 function empSql(org: string): string {
   return `
-select e.id, e.full_name, e.job_title as position_label, d.name as department
+select e.id, e.full_name, e.job_title as position_label, d.name as department,
+       pos.role as position_role, pos.name as position_name
   from employee_profiles e
   left join departments d on d.id = e.department_id
+  left join positions pos on pos.id = e.position_id
  where e.organization_id = '${org}'`;
 }
 
@@ -1154,7 +1255,8 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
        max(tc.created_at)::date as last_action,
        count(tc.id) filter (where tc.created_at >= h.entered_at)::int as owner_actions_in_stage,
        coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
-       cl.name as client_name, pj.name as project_name
+       cl.name as client_name, pj.name as project_name,
+       coalesce(hold.on_hold, false) as on_hold
   from attrib a
   join tasks t on t.id = a.task_id and t.archived_at is null
   left join projects pj on pj.id = t.project_id
@@ -1164,6 +1266,11 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
      where h2.task_id = t.id and h2.exited_at is null
      order by h2.entered_at desc limit 1
   ) h on true
+  -- Parked-by-decision flag (see ON_HOLD_SQL). Flagged rather than filtered so
+  -- the caller can count the exclusions instead of quietly reporting less.
+  left join lateral (
+    select true as on_hold where ${ON_HOLD_SQL("t")}
+  ) hold on true
   left join task_comments tc
     on tc.task_id = t.id and tc.actor_employee_id = a.employee_id
   left join sla_rules sla
@@ -1184,7 +1291,7 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
          and (current_date - h.entered_at::date) >= ${STUCK_MIN_DAYS})
    )
  group by a.employee_id, t.id, t.task_code, t.title, t.stage, t.planned_date, h.entered_at,
-          sla.max_minutes, cl.id, cl.merged_into_client_id, cl.name, pj.name`;
+          sla.max_minutes, cl.id, cl.merged_into_client_id, cl.name, pj.name, hold.on_hold`;
 }
 
 // Live contract value per CANONICAL client. Contracts sit on the sheet twin of
@@ -1234,7 +1341,8 @@ select csa.id::text as analysis_id, csa.client_id, c.name as client_name, csa.ac
 function taskRefsSql(org: string, codes: string[]): string {
   const safe = codes.filter((c) => /^[A-Za-z0-9_-]+$/.test(c)).map((c) => `'${c}'`);
   return `
-select t.id::text as task_id, t.task_code, t.title, pj.name as project_name
+select t.id::text as task_id, t.task_code, t.title, pj.name as project_name,
+       ${ON_HOLD_SQL("t")} as on_hold
   from tasks t
   left join projects pj on pj.id = t.project_id
  where t.organization_id = '${org}'

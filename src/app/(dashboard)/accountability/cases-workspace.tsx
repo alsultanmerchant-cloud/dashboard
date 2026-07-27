@@ -287,6 +287,12 @@ function MethodologyNote({ streams, unmatched }: { streams: CaseStream[]; unmatc
             فعلًا في مرحلته، <span className="text-amber">مثبتة</span> = مصدران متفقان،{" "}
             <span className="text-cyan">إشارة</span> = مصدر واحد.
           </p>
+          <p>
+            المهام المؤجَّلة لا تُحسب مشكلة: أي مهمة تحمل وسم{" "}
+            <b className="text-foreground/80">HOLD</b> أو <b className="text-foreground/80">LOST</b>{" "}
+            (على المهمة نفسها أو على مشروعها)، أو أُوقفت من داخل اللوحة، تُستثنى من أدلة التنفيذ —
+            تأخّرها وسكونها نتيجة قرار إيقاف، لا تقصير من المسؤول عنها.
+          </p>
           {unmatched.length > 0 && (
             <p className="text-[11px] text-muted-foreground/80">
               أسماء وردت في الشكاوى ولم تُطابَق بموظف (تظهر كنص فقط): {unmatched.join("، ")}.
