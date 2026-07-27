@@ -62,7 +62,7 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground/70">
               مرتّبون بالمال غير المحصَّل المعرَّض للخطر تحت أيديهم، لا بعدد الأدلة. المبالغ المعروضة
-              تخصّ عميل الشكوى نفسه (دفعات متأخرة + تجديد متوقّع).
+              تخصّ عميل الشكوى نفسه (متأخرة · تحصيل هذا الشهر · تجديد متوقّع) مع عقدها من الشيت.
             </p>
             <div className="mt-3 space-y-2.5">
               {asks.length === 0 ? (
@@ -153,23 +153,58 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
         </span>
         {/* Money = what the ASK'S OWN client hasn't paid yet — not the sum
             across everyone the person touches (that read as portfolio size,
-            unrelated to the problem — client feedback, twice). Two chips:
-            dues already late, and the renewal money the stalled complaint
-            threatens. Both hidden when the ask names no client. */}
-        {a.dueValue > 0 && (
+            unrelated to the problem — client feedback, twice). Three chips:
+            payments already LATE, payments to collect inside this month, and
+            the renewal money the stalled complaint threatens. Every chip
+            names the contract behind it — the sheet records contracts under
+            the client's commercial name (محمد أبو بكر's renewal sits on
+            «كري اروما» C40-1), so a bare number can't be checked against the
+            sheet. All hidden when the ask names no client. */}
+        {a.money && a.money.due > 0 && (
           <span
             className="rounded-md border border-cc-red/25 bg-red-dim px-1.5 py-0.5 text-[10px] font-bold text-cc-red tabular-nums"
-            title={`دفعات متأخرة على ${a.clientNames[0] ?? "عميل الشكوى"} لم تُسدَّد بعد`}
+            title={`دفعات متأخرة على ${a.clientNames[0] ?? "عميل الشكوى"} لم تُسدَّد بعد${a.money.dueCodes.length ? ` — عقد ${a.money.dueCodes.join("، ")}` : ""}`}
           >
-            <span dir="ltr">{money(a.dueValue)}</span> ر.س مستحقّة
+            <span dir="ltr">{money(a.money.due)}</span> ر.س متأخرة
+            {a.money.dueCodes.length > 0 && (
+              <span className="font-medium text-cc-red/80" dir="ltr">
+                {" "}· {a.money.dueCodes.slice(0, 2).join("، ")}
+              </span>
+            )}
           </span>
         )}
-        {a.renewalValue > 0 && (
+        {a.money && a.money.monthDue > 0 && (
           <span
-            className="rounded-md border border-amber/25 bg-amber-dim px-1.5 py-0.5 text-[10px] font-bold text-amber tabular-nums"
-            title={`قيمة التجديد المتوقعة (الخدمات المتكررة) لعقود ${a.clientNames[0] ?? "عميل الشكوى"}`}
+            className="rounded-md border border-cyan/25 bg-cyan-dim px-1.5 py-0.5 text-[10px] font-bold text-cyan tabular-nums"
+            title={`دفعات مستحقة على ${a.clientNames[0] ?? "عميل الشكوى"} خلال الشهر الحالي (لم يحن موعدها بعد)${a.money.monthDueCodes.length ? ` — عقد ${a.money.monthDueCodes.join("، ")}` : ""}`}
           >
-            <span dir="ltr">{money(a.renewalValue)}</span> ر.س تجديد متوقّع
+            <span dir="ltr">{money(a.money.monthDue)}</span> ر.س تحصيل هذا الشهر
+            {a.money.monthDueCodes.length > 0 && (
+              <span className="font-medium text-cyan/80" dir="ltr">
+                {" "}· {a.money.monthDueCodes.slice(0, 2).join("، ")}
+              </span>
+            )}
+          </span>
+        )}
+        {a.money && a.money.renewal > 0 && (
+          <span
+            className="rounded-md border border-[#e0a800]/60 bg-[#fff3cd] px-1.5 py-0.5 text-[10px] font-bold text-[#7a5200] tabular-nums dark:border-amber/40 dark:bg-amber/20 dark:text-amber"
+            title={`قيمة التجديد المتوقعة (الخدمات المتكررة) — ${
+              a.money.renewalContracts
+                .map((r) => `${r.name ?? "عقد"}${r.code ? ` (${r.code})` : ""}`)
+                .join("، ") || (a.clientNames[0] ?? "عميل الشكوى")
+            }`}
+          >
+            <span dir="ltr">{money(a.money.renewal)}</span> ر.س تجديد متوقّع
+            {a.money.renewalContracts[0] && (
+                <span className="font-medium text-[#8a6100] dark:text-amber/80">
+                {" "}· {a.money.renewalContracts[0].name ?? "عقد"}
+                {a.money.renewalContracts[0].code && (
+                  <span dir="ltr"> ({a.money.renewalContracts[0].code})</span>
+                )}
+                {a.money.renewalContracts.length > 1 && ` +${a.money.renewalContracts.length - 1}`}
+              </span>
+            )}
           </span>
         )}
         {a.recurrenceNote && (

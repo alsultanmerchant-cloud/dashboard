@@ -131,6 +131,16 @@ export interface CaseLedger {
 // is the money a stalled relationship actually threatens.
 // `unpricedClients` are affected clients with no contract row at all (the
 // Odoo-only client population — value UNKNOWN, not zero, and never "churned").
+// One client's uncollected money, with the contracts behind each amount.
+export interface ClientMoney {
+  due: number; // overdue unpaid installments (already late)
+  dueCodes: string[]; // contract codes those installments belong to
+  monthDue: number; // unpaid installments still ahead inside this month
+  monthDueCodes: string[];
+  renewal: number; // expected renewal (repeated services) on live contracts
+  renewalContracts: { code: string | null; name: string | null }[];
+}
+
 export interface CaseImpact {
   clients: number; // distinct affected clients
   pricedClients: number; // …of which carry a live contract (value is known)
@@ -141,8 +151,11 @@ export interface CaseImpact {
   // Per-client breakdown (canonical client id → SAR). The band's ask badges
   // read THIS, scoped to the one client the ask is about — a case-wide sum
   // beside a single-client ask read as the person's portfolio, not the
-  // problem's money (client feedback, twice).
-  moneyByClient: Record<string, { due: number; renewal: number }>;
+  // problem's money (client feedback, twice). Each amount carries its
+  // PROVENANCE (contract codes / sheet-twin names): contracts live on the
+  // twin under its commercial name, so a bare number can't be checked
+  // against the sheet without it.
+  moneyByClient: Record<string, ClientMoney>;
   churnClients: string[]; // affected clients who threatened to leave
   financeFlagClients: string[]; // affected clients with overdue installments
 }
@@ -305,6 +318,9 @@ interface ClientValueRow {
   client_id: string;
   renewal_value: number;
   live: number;
+  // Provenance of the renewal money: sheet-twin client name + contract code
+  // per live contract carrying a repeated-services value (renewal desc).
+  renewal_contracts: { code: string | null; name: string | null; renewal: number }[];
 }
 interface TaskRefRow {
   task_id: string;
@@ -1079,22 +1095,34 @@ async function _getAccountabilityCases(
     let dueValue = 0;
     let renewalValue = 0;
     let pricedClients = 0;
-    const moneyByClient: Record<string, { due: number; renewal: number }> = {};
+    const moneyByClient: Record<string, ClientMoney> = {};
     const churnClients: string[] = [];
     const financeFlagClients: string[] = [];
     for (const cid of clientIds) {
       const v = valueByClient.get(cid);
       const renewal = v && v.live > 0 ? v.renewal_value : 0;
       if (v && v.live > 0) pricedClients += 1;
-      const due = financeMap[cid]?.overdueAmount ?? 0;
+      const fin = financeMap[cid];
+      const due = fin?.overdueAmount ?? 0;
+      const monthDue = fin?.monthDueAmount ?? 0;
       renewalValue += renewal;
       dueValue += due;
-      if (due > 0 || renewal > 0)
-        moneyByClient[cid] = { due: Math.round(due), renewal: Math.round(renewal) };
+      if (due > 0 || monthDue > 0 || renewal > 0)
+        moneyByClient[cid] = {
+          due: Math.round(due),
+          dueCodes: fin?.overdueContractCodes ?? [],
+          monthDue: Math.round(monthDue),
+          monthDueCodes: fin?.monthDueContractCodes ?? [],
+          renewal: Math.round(renewal),
+          renewalContracts: (v?.renewal_contracts ?? []).map((r) => ({
+            code: r.code,
+            name: r.name,
+          })),
+        };
       const nameOf = () =>
         b.proof.find((p) => p.clientId === cid)?.clientName ?? "عميل";
       if (churnClientIds.has(cid)) churnClients.push(nameOf());
-      if ((financeMap[cid]?.overdueInstallments ?? 0) > 0) financeFlagClients.push(nameOf());
+      if ((fin?.overdueInstallments ?? 0) > 0) financeFlagClients.push(nameOf());
     }
     const impact: CaseImpact = {
       clients: clientIds.length,
@@ -1312,11 +1340,26 @@ select a.employee_id, t.id as task_id, t.task_code, t.title, t.stage::text as st
 // (the sheet's " Value of repeated services") plus how many live contracts they
 // hold. Full contract value is deliberately NOT read here anymore — the badge
 // this feeds shows money the client hasn't paid yet, not their portfolio size.
+// `renewal_contracts` carries PROVENANCE — the sheet-twin client name + the
+// contract code behind each renewal amount. Contracts live on the sheet twin
+// under its commercial name (محمد أبو بكر's renewal sits on «كري اروما» C40-1),
+// so a bare number beside the Odoo name reads as someone else's money.
 function clientValueSql(org: string): string {
   return `
 select coalesce(cl.merged_into_client_id, cl.id)::text as client_id,
        sum(coalesce(c.repeated_services_value, 0))::float8 as renewal_value,
-       count(*)::int as live
+       count(*)::int as live,
+       coalesce(
+         jsonb_agg(
+           jsonb_build_object(
+             'code', c.contract_code,
+             'name', cl.name,
+             'renewal', c.repeated_services_value
+           )
+           order by c.repeated_services_value desc
+         ) filter (where coalesce(c.repeated_services_value, 0) > 0),
+         '[]'::jsonb
+       ) as renewal_contracts
   from contracts c
   join clients cl on cl.id = c.client_id
  where c.organization_id = '${org}'

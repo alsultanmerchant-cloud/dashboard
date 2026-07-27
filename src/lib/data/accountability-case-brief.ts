@@ -4,6 +4,7 @@ import { resolveClientProjectIds } from "@/lib/data/satisfaction-identity";
 import type {
   AccountabilityCase,
   AccountabilityCasesResult,
+  ClientMoney,
 } from "@/lib/data/accountability-cases";
 import type { ProblemHistorySummary } from "@/lib/data/accountability-problems-store";
 
@@ -47,9 +48,9 @@ export interface CaseAsk {
   // person's whole affected-client set: a case-wide sum beside a single-client
   // ask read as portfolio money, unrelated to the problem (client feedback).
   // Zero (chips hidden) when the ask names no client or that client has
-  // neither dues nor an expected renewal.
-  dueValue: number; // overdue unpaid installments on the ask's client
-  renewalValue: number; // expected renewal (repeated services) on their live contracts
+  // neither dues nor an expected renewal. Each amount carries the contract(s)
+  // behind it — money without provenance can't be checked against the sheet.
+  money: ClientMoney | null;
   clientNames: string[]; // the ask's own client first
   moreClients: number;
   // client display name → its Rawasm (Odoo) project names. The heads only
@@ -251,7 +252,7 @@ export function buildCaseBrief(
     const primaryClientId = primaryClient
       ? c.proof.find((p) => p.clientName === primaryClient && p.clientId)?.clientId ?? null
       : null;
-    const money = primaryClientId ? c.impact.moneyByClient[primaryClientId] : undefined;
+    const money = primaryClientId ? c.impact.moneyByClient[primaryClientId] ?? null : null;
     return {
       employeeId: c.employeeId,
       employeeName: c.employeeName,
@@ -260,8 +261,7 @@ export function buildCaseBrief(
       severity: c.severity,
       why,
       ask,
-      dueValue: money?.due ?? 0,
-      renewalValue: money?.renewal ?? 0,
+      money,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
       clientProjects: {},
