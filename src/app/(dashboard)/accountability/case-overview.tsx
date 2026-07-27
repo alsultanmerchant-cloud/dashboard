@@ -61,7 +61,8 @@ export function CaseOverview({ brief }: { brief: CaseBrief }) {
               تعامل مع هؤلاء أولًا
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground/70">
-              مرتّبون بالمال غير المحصَّل المعرَّض للخطر تحت أيديهم (دفعات متأخرة + تجديد متوقّع)، لا بعدد الأدلة.
+              مرتّبون بالمال غير المحصَّل المعرَّض للخطر تحت أيديهم، لا بعدد الأدلة. المبالغ المعروضة
+              تخصّ عميل الشكوى نفسه (دفعات متأخرة + تجديد متوقّع).
             </p>
             <div className="mt-3 space-y-2.5">
               {asks.length === 0 ? (
@@ -150,14 +151,15 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
           {a.role ?? "—"}
           {a.department ? ` · ${a.department}` : ""}
         </span>
-        {/* Money = what the affected clients haven't paid yet — not their
-            total contract value (that read as portfolio size, unrelated to
-            the problem). Two separate chips: dues already late, and the
-            renewal money a stalled relationship threatens. */}
+        {/* Money = what the ASK'S OWN client hasn't paid yet — not the sum
+            across everyone the person touches (that read as portfolio size,
+            unrelated to the problem — client feedback, twice). Two chips:
+            dues already late, and the renewal money the stalled complaint
+            threatens. Both hidden when the ask names no client. */}
         {a.dueValue > 0 && (
           <span
             className="rounded-md border border-cc-red/25 bg-red-dim px-1.5 py-0.5 text-[10px] font-bold text-cc-red tabular-nums"
-            title="دفعات متأخرة على العملاء المتأثّرين لم تُسدَّد بعد"
+            title={`دفعات متأخرة على ${a.clientNames[0] ?? "عميل الشكوى"} لم تُسدَّد بعد`}
           >
             <span dir="ltr">{money(a.dueValue)}</span> ر.س مستحقّة
           </span>
@@ -165,7 +167,7 @@ function AskRow({ a, rank }: { a: CaseAsk; rank: number }) {
         {a.renewalValue > 0 && (
           <span
             className="rounded-md border border-amber/25 bg-amber-dim px-1.5 py-0.5 text-[10px] font-bold text-amber tabular-nums"
-            title="قيمة التجديد المتوقعة (الخدمات المتكررة) لعقود العملاء المتأثّرين"
+            title={`قيمة التجديد المتوقعة (الخدمات المتكررة) لعقود ${a.clientNames[0] ?? "عميل الشكوى"}`}
           >
             <span dir="ltr">{money(a.renewalValue)}</span> ر.س تجديد متوقّع
           </span>

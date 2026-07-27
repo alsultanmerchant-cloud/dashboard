@@ -43,8 +43,13 @@ export interface CaseAsk {
   severity: AccountabilityCase["severity"];
   why: string; // the single hardest FACT behind this ranking
   ask: string; // the one thing to do about it — code-derived, never AI
-  dueValue: number; // SAR: overdue unpaid installments on the affected clients
-  renewalValue: number; // SAR: expected renewal (repeated services) on their live contracts
+  // SAR — scoped to the ONE client the ask is about (primaryClient), not the
+  // person's whole affected-client set: a case-wide sum beside a single-client
+  // ask read as portfolio money, unrelated to the problem (client feedback).
+  // Zero (chips hidden) when the ask names no client or that client has
+  // neither dues nor an expected renewal.
+  dueValue: number; // overdue unpaid installments on the ask's client
+  renewalValue: number; // expected renewal (repeated services) on their live contracts
   clientNames: string[]; // the ask's own client first
   moreClients: number;
   // client display name → its Rawasm (Odoo) project names. The heads only
@@ -241,6 +246,12 @@ export function buildCaseBrief(
     const ordered = primaryClient
       ? [primaryClient, ...c.clientNames.filter((n) => n !== primaryClient)]
       : c.clientNames;
+    // Money chips carry ONLY the ask's own client's uncollected money. The
+    // proof rows pair clientName↔clientId, which the case-level Sets lost.
+    const primaryClientId = primaryClient
+      ? c.proof.find((p) => p.clientName === primaryClient && p.clientId)?.clientId ?? null
+      : null;
+    const money = primaryClientId ? c.impact.moneyByClient[primaryClientId] : undefined;
     return {
       employeeId: c.employeeId,
       employeeName: c.employeeName,
@@ -249,8 +260,8 @@ export function buildCaseBrief(
       severity: c.severity,
       why,
       ask,
-      dueValue: c.impact.dueValue,
-      renewalValue: c.impact.renewalValue,
+      dueValue: money?.due ?? 0,
+      renewalValue: money?.renewal ?? 0,
       clientNames: ordered.slice(0, 3),
       moreClients: Math.max(0, ordered.length - 3),
       clientProjects: {},

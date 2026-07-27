@@ -137,7 +137,12 @@ export interface CaseImpact {
   unpricedClients: number; // …of which have no contract row → unknown value
   dueValue: number; // SAR: overdue unpaid installments across affected clients
   renewalValue: number; // SAR: expected renewal on affected clients' live contracts
-  atStakeValue: number; // dueValue + renewalValue — badge + ranking input
+  atStakeValue: number; // dueValue + renewalValue — ranking input
+  // Per-client breakdown (canonical client id → SAR). The band's ask badges
+  // read THIS, scoped to the one client the ask is about — a case-wide sum
+  // beside a single-client ask read as the person's portfolio, not the
+  // problem's money (client feedback, twice).
+  moneyByClient: Record<string, { due: number; renewal: number }>;
   churnClients: string[]; // affected clients who threatened to leave
   financeFlagClients: string[]; // affected clients with overdue installments
 }
@@ -1074,15 +1079,18 @@ async function _getAccountabilityCases(
     let dueValue = 0;
     let renewalValue = 0;
     let pricedClients = 0;
+    const moneyByClient: Record<string, { due: number; renewal: number }> = {};
     const churnClients: string[] = [];
     const financeFlagClients: string[] = [];
     for (const cid of clientIds) {
       const v = valueByClient.get(cid);
-      if (v && v.live > 0) {
-        renewalValue += v.renewal_value;
-        pricedClients += 1;
-      }
-      dueValue += financeMap[cid]?.overdueAmount ?? 0;
+      const renewal = v && v.live > 0 ? v.renewal_value : 0;
+      if (v && v.live > 0) pricedClients += 1;
+      const due = financeMap[cid]?.overdueAmount ?? 0;
+      renewalValue += renewal;
+      dueValue += due;
+      if (due > 0 || renewal > 0)
+        moneyByClient[cid] = { due: Math.round(due), renewal: Math.round(renewal) };
       const nameOf = () =>
         b.proof.find((p) => p.clientId === cid)?.clientName ?? "عميل";
       if (churnClientIds.has(cid)) churnClients.push(nameOf());
@@ -1095,6 +1103,7 @@ async function _getAccountabilityCases(
       dueValue: Math.round(dueValue),
       renewalValue: Math.round(renewalValue),
       atStakeValue: Math.round(dueValue + renewalValue),
+      moneyByClient,
       churnClients,
       financeFlagClients,
     };
