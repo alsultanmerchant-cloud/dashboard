@@ -8,6 +8,7 @@ import {
   type AccountabilityLiveTotals,
 } from "@/lib/data/accountability";
 import { getClientFinanceMap, type ClientFinanceMap } from "@/lib/data/client-finance";
+import { getClientDisplayNameMap } from "@/lib/data/clients";
 import { isLeadershipPosition } from "@/lib/data/leadership";
 import { foldResolutionOverlayEvents } from "@/lib/satisfaction-recommendation-status";
 
@@ -470,6 +471,7 @@ async function _getAccountabilityCases(
     clientValues,
     financeMap,
     reworkTasks,
+    displayNameById,
   ] = await Promise.all([
     overview ? Promise.resolve(overview) : getAccountabilityCaseOverview(orgId),
     getAccountabilityLiveTotals(orgId).catch((e) => {
@@ -508,7 +510,20 @@ async function _getAccountabilityCases(
       console.error("[cases] reworkTasksSql failed:", e);
       return [] as ReworkTaskRow[];
     }),
+    // Contract-sourced display names (canonical id → sheet_client_name). The
+    // band must speak the CONTRACT's name — «كري اروما», not the Odoo client
+    // «محمد أبو بكر» — or the CEO can't find the client in the sheet. Same
+    // resolver as /clients and /satisfaction.
+    getClientDisplayNameMap(orgId).catch((e) => {
+      console.error("[cases] displayNameMap failed:", e);
+      return new Map<string, string>();
+    }),
   ]);
+
+  // Resolve a client's display name through the contract map; fall back to
+  // the name the stream carried when the client is unlinked/unknown.
+  const clientDisplay = (name: string | null, id: string | null): string | null =>
+    (id ? displayNameById.get(id) : undefined) ?? name;
 
   // Per-employee list of the tasks behind their rework count (capped for UI).
   const reworkTasksByEmp = new Map<string, TaskRef[]>();
@@ -722,7 +737,9 @@ async function _getAccountabilityCases(
         b.material = true;
       if (s.task_code) b.execTaskCodes.add(s.task_code);
       if (s.client_id) b.clientIds.add(s.client_id);
-      if (s.client_name) b.clients.add(s.client_name);
+      // Contract-sourced display name, same as the analysis streams.
+      const cName = clientDisplay(s.client_name, s.client_id);
+      if (cName) b.clients.add(cName);
       const d = s.days_in_stage ?? 0;
       const owner = s.owner_actions_in_stage ?? 0;
       // The proof: what did the OWNER actually do on this task while it sat stuck?
@@ -733,8 +750,8 @@ async function _getAccountabilityCases(
       // Lead with the PROJECT name (the id is meaningless to a reader — the
       // task title carries the identity). Keep the client only when the project
       // name doesn't already carry it, to avoid "…- Chic Boutique (Chic Boutique)".
-      const projectName = (s.project_name ?? "").trim() || s.client_name || "مشروع";
-      const clientTag = s.client_name && !projectName.includes(s.client_name) ? ` (${s.client_name})` : "";
+      const projectName = (s.project_name ?? "").trim() || cName || "مشروع";
+      const clientTag = cName && !projectName.includes(cName) ? ` (${cName})` : "";
       b.proof.push({
         stream: "execution",
         kind: "overdue_task",
@@ -748,7 +765,7 @@ async function _getAccountabilityCases(
         quote: null,
         href: `/tasks/${s.task_id}`,
         taskCode: s.task_code,
-        clientName: s.client_name,
+        clientName: cName,
         clientId: s.client_id,
         stage: s.stage,
         date: s.last_action,
@@ -883,7 +900,8 @@ async function _getAccountabilityCases(
     const rows = Array.isArray(a.accountability) ? (a.accountability as AccountabilityJson[]) : [];
     const inds = Array.isArray(a.indicators) ? (a.indicators as IndicatorJson[]) : [];
     const churn = inds.filter((i) => i.code && CHURN_CODES.has(i.code) && i.severity === "red");
-    const clientName = a.client_name ?? "عميل";
+    // Speak the contract's name (sheet identity), not the Odoo client name.
+    const clientName = clientDisplay(a.client_name, a.client_id) ?? "عميل";
     const resolvedIssues = resolvedIssuesByAnalysis.get(a.analysis_id);
 
     for (const row of rows) {
