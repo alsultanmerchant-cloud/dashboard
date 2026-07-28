@@ -3,6 +3,7 @@ import {
   classifyRecommendationLiveStatus,
   deduplicateRecommendations,
   extractRecommendationTaskCodes,
+  indicatorIssueKey,
   recommendationsDescribeSameProblem,
   type RecommendationTaskState,
 } from "./satisfaction-recommendation-status";
@@ -194,5 +195,37 @@ describe("recommendation problem identity", () => {
       "PRJ-01815-305",
     ]);
     expect(result[0].resolutionKind).toBe("manual_confirmation");
+  });
+});
+
+describe("indicatorIssueKey", () => {
+  test("keys on the evidence line the operator reads on the chip", () => {
+    expect(
+      indicatorIssueKey({
+        code: "team_reported_blocker",
+        date: "2026-07-26",
+        evidence: "حملات تيك توك واقفه مديونيه",
+      }),
+    ).toBe("team_reported_blocker: حملات تيك توك واقفه مديونيه");
+  });
+
+  test("same code on different dates stays distinct without evidence", () => {
+    const july21 = indicatorIssueKey({
+      code: "team_reported_blocker",
+      date: "2026-07-21",
+      evidence: null,
+    });
+    const july26 = indicatorIssueKey({
+      code: "team_reported_blocker",
+      date: "2026-07-26",
+      evidence: "",
+    });
+    expect(july21).not.toBe(july26);
+  });
+
+  test("is stable across whitespace so a resolved chip keeps matching", () => {
+    expect(
+      indicatorIssueKey({ code: "missing_access", date: null, evidence: "  صلاحية ميتا ناقصة  " }),
+    ).toBe(indicatorIssueKey({ code: "missing_access", date: null, evidence: "صلاحية ميتا ناقصة" }));
   });
 });

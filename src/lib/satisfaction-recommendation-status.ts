@@ -64,6 +64,22 @@ export function foldResolutionOverlayEvents(
   return latestByIssue;
 }
 
+// Indicator chips (المؤشرات) are frozen {code, date, evidence} triples rather
+// than free-text findings, so they need a deterministic text key to take part
+// in the issue-keyed resolution overlay above. The evidence line is what the
+// operator actually reads on the chip; fall back to code+date when the model
+// emitted none, so the key is never empty and never collides across dates.
+export function indicatorIssueKey(indicator: {
+  code: string;
+  date?: string | null;
+  evidence?: string | null;
+}): string {
+  const evidence = indicator.evidence?.trim();
+  return evidence
+    ? `${indicator.code}: ${evidence}`
+    : `${indicator.code}@${indicator.date ?? "—"}`;
+}
+
 // Human-readable task codes are intentionally the bridge for legacy AI output:
 // old recommendations predate structured entity references, but already mention
 // codes such as PRJ-01826-022 in their issue/action text.

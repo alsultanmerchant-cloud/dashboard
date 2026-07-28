@@ -79,6 +79,7 @@ import type {
 } from "@/lib/data/satisfaction";
 import type { RefreshSummary } from "@/lib/satisfaction-refresh";
 import {
+  indicatorIssueKey,
   isOverdueTaskRecommendation,
   recommendationsDescribeSameProblem,
   type SatisfactionRecommendation,
@@ -440,6 +441,31 @@ export function SatisfactionWorkspace({
               </div>
             )
           )}
+
+          {/* Recovery state — the counterpart the warnings above never had:
+              the shown analysis ran while the pipe was silent (hadNewMessages
+              false), but messages HAVE arrived since. Without this the warning
+              just vanishes and nobody learns the outage ended; say it plainly
+              and point at the re-analyze that refreshes the result. */}
+          {detail.analysis &&
+            detail.analysis.hadNewMessages === false &&
+            detail.hasNewMessagesSinceAnalysis === true && (
+              <div className="flex items-start gap-2 rounded-xl border border-cc-green/35 bg-green-dim px-4 py-3 text-sm text-cc-green">
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                <div>
+                  <p className="font-semibold">
+                    {t("freshness.recoveredTitle")}
+                  </p>
+                  <p className="mt-0.5 text-xs leading-6 text-foreground/70">
+                    {t("freshness.recoveredBody", {
+                      date: detail.latestMessageAt
+                        ? detail.latestMessageAt.slice(0, 16).replace("T", " ")
+                        : t("freshness.unknownDate"),
+                    })}
+                  </p>
+                </div>
+              </div>
+            )}
 
           {/* Analyze — two windows. Current week feeds the board; all time is
               an on-demand full-history snapshot. */}
@@ -2026,7 +2052,11 @@ function AnalysisView({
       />
 
       {/* المؤشرات — the risk/operational taxonomy */}
-      <IndicatorsPanel indicators={analysis.indicators} t={t} />
+      <IndicatorsPanel
+        indicators={analysis.indicators}
+        resolvedIssues={resolvedProblemTexts}
+        t={t}
+      />
 
       {/* per-source signal extraction */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -2864,45 +2894,72 @@ function BigPicturePanel({
 function IndicatorGroup({
   items,
   severity,
+  resolved,
   t,
 }: {
   items: Analysis["indicators"];
   severity: "red" | "yellow";
+  resolved: Set<string>;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
     <ul className="space-y-2">
-      {items.map((ind, i) => (
-        <li
-          key={`${ind.code}-${i}`}
-          className={cn(
-            "rounded-lg border bg-soft-1 p-2.5",
-            severity === "red" ? "border-cc-red/25" : "border-amber/25",
-          )}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 text-[12px] font-semibold",
-                severity === "red" ? "text-cc-red" : "text-amber",
-              )}
-            >
-              <span aria-hidden>{severity === "red" ? "🔴" : "🟡"}</span>
-              {t(`indicator.${ind.code}`)}
-            </span>
-            {ind.date && (
-              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                {ind.date}
-              </span>
+      {items.map((ind, i) => {
+        // Settled by the overlay (تحديث pass or a human confirmation): keep the
+        // chip as history — it really was raised on that date — but stop it
+        // reading as a live problem.
+        const isResolved = resolved.has(indicatorIssueKey(ind));
+        return (
+          <li
+            key={`${ind.code}-${i}`}
+            className={cn(
+              "rounded-lg border bg-soft-1 p-2.5",
+              isResolved
+                ? "border-cc-green/30 opacity-75"
+                : severity === "red"
+                  ? "border-cc-red/25"
+                  : "border-amber/25",
             )}
-          </div>
-          {ind.evidence && (
-            <p className="mt-1 text-[12px] leading-snug text-muted-foreground" data-private="chat">
-              {ind.evidence}
-            </p>
-          )}
-        </li>
-      ))}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 text-[12px] font-semibold",
+                  isResolved
+                    ? "text-cc-green"
+                    : severity === "red"
+                      ? "text-cc-red"
+                      : "text-amber",
+                )}
+              >
+                <span aria-hidden>
+                  {isResolved ? "✅" : severity === "red" ? "🔴" : "🟡"}
+                </span>
+                <span className={cn(isResolved && "line-through")}>
+                  {t(`indicator.${ind.code}`)}
+                </span>
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {isResolved && (
+                  <span className="rounded-full border border-cc-green/30 bg-green-dim px-1.5 py-px text-[10px] font-semibold text-cc-green">
+                    {t("indicators.resolvedBadge")}
+                  </span>
+                )}
+                {ind.date && (
+                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                    {ind.date}
+                  </span>
+                )}
+              </div>
+            </div>
+            {ind.evidence && (
+              <p className="mt-1 text-[12px] leading-snug text-muted-foreground" data-private="chat">
+                {ind.evidence}
+              </p>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -2910,13 +2967,23 @@ function IndicatorGroup({
 // The detected indicators, split into 🔴 risk and 🟡 operational groups.
 function IndicatorsPanel({
   indicators,
+  resolvedIssues,
   t,
 }: {
   indicators: Analysis["indicators"];
+  resolvedIssues: string[];
   t: ReturnType<typeof useTranslations>;
 }) {
   const red = indicators.filter((i) => i.severity === "red");
   const yellow = indicators.filter((i) => i.severity === "yellow");
+  const resolved = useMemo(() => new Set(resolvedIssues), [resolvedIssues]);
+  // The header counts what is still LIVE. A settled signal stays visible in the
+  // list as history, but counting it would keep reporting a problem the team
+  // has already closed.
+  const openCount = (list: Analysis["indicators"]) =>
+    list.filter((i) => !resolved.has(indicatorIssueKey(i))).length;
+  const redOpen = openCount(red);
+  const yellowOpen = openCount(yellow);
   return (
     <Card className="border-cc-red/20">
       <CardContent className="p-4">
@@ -2935,10 +3002,10 @@ function IndicatorsPanel({
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-cc-red">
-                {t("indicators.risk")} {red.length > 0 && `(${red.length})`}
+                {t("indicators.risk")} {redOpen > 0 && `(${redOpen})`}
               </p>
               {red.length > 0 ? (
-                <IndicatorGroup items={red} severity="red" t={t} />
+                <IndicatorGroup items={red} severity="red" resolved={resolved} t={t} />
               ) : (
                 <p className="text-[12px] text-muted-foreground">
                   {t("indicators.noneRisk")}
@@ -2948,10 +3015,10 @@ function IndicatorsPanel({
             <div>
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber">
                 {t("indicators.operational")}{" "}
-                {yellow.length > 0 && `(${yellow.length})`}
+                {yellowOpen > 0 && `(${yellowOpen})`}
               </p>
               {yellow.length > 0 ? (
-                <IndicatorGroup items={yellow} severity="yellow" t={t} />
+                <IndicatorGroup items={yellow} severity="yellow" resolved={resolved} t={t} />
               ) : (
                 <p className="text-[12px] text-muted-foreground">
                   {t("indicators.noneOperational")}

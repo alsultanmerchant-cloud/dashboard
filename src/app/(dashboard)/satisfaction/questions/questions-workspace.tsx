@@ -23,6 +23,7 @@ const KIND_BADGE: Record<SatisfactionQuestionKind, string> = {
   recommendation: "border-cyan/20 bg-cyan-dim text-cyan",
   risk: "border-cc-red/30 bg-red-dim text-cc-red",
   accountability: "border-amber/30 bg-amber-dim text-amber",
+  indicator: "border-cc-purple/30 bg-purple-dim text-cc-purple",
 };
 
 type AnswerOutcome = "resolved" | "still_open";

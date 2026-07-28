@@ -11,6 +11,7 @@ import {
   classifyRecommendationLiveStatus,
   extractRecommendationTaskCodes,
   foldResolutionOverlayEvents,
+  indicatorIssueKey,
   type RecommendationTaskState,
 } from "@/lib/satisfaction-recommendation-status";
 import {
@@ -34,7 +35,7 @@ import type { SatisfactionResult } from "@/lib/satisfaction-schema";
 
 interface RefreshItem {
   id: number;
-  kind: "recommendation" | "risk" | "accountability";
+  kind: "recommendation" | "risk" | "accountability" | "indicator";
   index: number; // index within its source array
   issue: string; // the exact stored text — this is the overlay key
   context: string; // action / finding text that helps the model judge
@@ -117,7 +118,7 @@ export async function refreshSatisfactionStatuses(
   // 1) The analysis under review (the one the operator is looking at).
   let analysisQuery = supabaseAdmin
     .from("client_satisfaction_analyses")
-    .select("id, recommendations, risks, accountability, created_at")
+    .select("id, recommendations, risks, accountability, indicators, created_at")
     .eq("organization_id", orgId)
     .eq("client_id", clientId);
   analysisQuery = analysisId
@@ -137,6 +138,9 @@ export async function refreshSatisfactionStatuses(
   const accountability = (
     Array.isArray(analysis.accountability) ? analysis.accountability : []
   ) as SatisfactionResult["accountability"];
+  const indicators = (
+    Array.isArray(analysis.indicators) ? analysis.indicators : []
+  ) as SatisfactionResult["indicators"];
 
   // 2) Overlay + live task data (same sources the read side reconciles with),
   //    plus the human-answered questions — ground-truth memory for the model.
@@ -300,6 +304,30 @@ export async function refreshSatisfactionStatuses(
       responsibleName: row.responsible?.[0]?.name ?? null,
     });
   });
+  // Indicator chips (المؤشرات) are the most visible problem surface on the page
+  // and were previously frozen forever: nothing but a full re-analysis could
+  // retire one, so a blocker the team had already cleared in chat kept showing
+  // as live. They reconcile through the same overlay as everything else.
+  indicators.forEach((indicator, index) => {
+    if (!indicator || typeof indicator.code !== "string") return;
+    const issue = indicatorIssueKey(indicator);
+    if (alreadyResolved(issue)) return;
+    if (forceIfHumanResolved(issue, "indicator", index)) return;
+    items.push({
+      id: nextId++,
+      kind: "indicator",
+      index,
+      issue,
+      context: [
+        indicator.evidence ?? "",
+        indicator.date ? `رُصدت بتاريخ ${indicator.date}` : "",
+      ]
+        .filter(Boolean)
+        .join(" — "),
+      taskCodes: [],
+      responsibleName: null,
+    });
+  });
 
   // 4) Messages that arrived AFTER the analysis ran — the new evidence.
   const transcripts = await buildClientTranscripts(orgId, clientId, {
@@ -354,6 +382,7 @@ export async function refreshSatisfactionStatuses(
 - كل حكم "resolved" يجب أن يحمل استشهادًا قابلاً للتحقق آليًا: إما taskCode لمهمة مكتملة (المرحلة done) من جدول المهام أدناه، أو quote منسوخ حرفيًا — دون أي تعديل أو تلخيص — من الرسائل الجديدة أدناه (8 أحرف على الأقل). سنتحقق منه آليًا، وأي "resolved" بلا استشهاد صحيح سيُحوَّل إلى "unclear".
 - اكتمال مهمة دورية/تقرير/"شهر العميل" لا يعني حل المشكلة — إنجاز مهمة روتينية أو انتهاء فترة ليس دليل حل.
 - المشاكل المالية أو الخاصة بطرف العميل (مديونية، سداد، شحن رصيد، صلاحيات من العميل) لا تُغلق بإنجاز مهام داخلية؛ تحتاج quote صريحًا من الرسائل على أنها عُولجت — taskCode وحده لا يكفي هنا.
+- بنود [indicator] هي إشارات رُصدت في تاريخ محدّد (مثل «التيم أبلغ عن مشكلة تمنع التنفيذ: حملات واقفة مديونية»). احكم عليها "resolved" متى وُجدت رسالة أحدث تؤكد معالجة نفس النقطة صراحةً (سُدّدت المديونية واستأنفت الحملات، وصلت الصلاحية، اكتمل البريف…) مع اقتباس حرفي منها. تجاهل كون الإشارة قديمة بحد ذاته — القِدَم ليس حلاً.
 - غياب الشكوى ليس دليلاً على الحل — عند الشك اختر "unclear".
 - إجابات فريق العمل الموثّقة (إن وُجدت أدناه) حقائق مؤكدة: بند أجاب عنه الفريق بأنه «ما زالت قائمة» لا يُحكم عليه بـ"resolved" إلا بدليل جديد تاريخه بعد تاريخ الإجابة، ولا تناقض أبدًا إجابة بشرية بأنه «تم الحل».
 - عند "unclear" اكتب في question سطرًا واحدًا بالعربية يسأل فريق العمل تحديدًا عمّا تحتاج معرفته للحكم على هذا البند.
@@ -485,7 +514,9 @@ ${messagesBlock}`;
           ? item.index
           : item.kind === "risk"
             ? recommendations.length + item.index
-            : 200 + item.index;
+            : item.kind === "accountability"
+              ? 200 + item.index
+              : 400 + item.index;
       return {
         organization_id: orgId,
         actor_user_id: actorUserId,

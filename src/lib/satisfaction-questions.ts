@@ -17,7 +17,11 @@ export const FALLBACK_QUESTION =
 // An answered issue stays quiet this long before the AI may re-ask about it.
 const REASK_COOLDOWN_DAYS = 14;
 
-export type SatisfactionQuestionKind = "recommendation" | "risk" | "accountability";
+export type SatisfactionQuestionKind =
+  | "recommendation"
+  | "risk"
+  | "accountability"
+  | "indicator";
 
 export interface SatisfactionQuestionDraft {
   kind: SatisfactionQuestionKind;

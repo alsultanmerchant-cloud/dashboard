@@ -3826,7 +3826,8 @@
       "operational": "Operational",
       "none": "No indicators detected in this analysis.",
       "noneRisk": "No risk indicators.",
-      "noneOperational": "No operational indicators."
+      "noneOperational": "No operational indicators.",
+      "resolvedBadge": "Resolved"
     },
     "indicator": {
       "client_complained": "Client complained",
@@ -4027,7 +4028,8 @@
       "kind": {
         "recommendation": "Recommendation",
         "risk": "Risk",
-        "accountability": "Accountability"
+        "accountability": "Accountability",
+        "indicator": "Indicator"
       },
       "viewAnalysis": "View analysis",
       "markResolved": "Resolved",
@@ -4195,7 +4197,9 @@
       "unknownDate": "Unknown",
       "stalledTitle": "WhatsApp ingestion looks stalled",
       "stalledBody": "The latest message received is from {date} ({days} days ago). That is not a quiet client — ingestion has most likely stopped, so any analysis now would be based on stale data.",
-      "stalledCta": "Check WhatsApp numbers"
+      "stalledCta": "Check WhatsApp numbers",
+      "recoveredTitle": "WhatsApp ingestion is back — new messages arrived after this analysis",
+      "recoveredBody": "Latest message now: {date}. The shown analysis ran while ingestion was down, so it does not reflect the new conversation — hit Refresh or re-analyze to read it."
     },
     "archive": "Archive",
     "restore": "Restore",

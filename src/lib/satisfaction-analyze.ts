@@ -413,6 +413,7 @@ ${briefInstruction}
 🔴 مخاطر (severity=red): client_complained (اشتكى)، client_dissatisfied (عدم رضا)، client_threatened_cancellation (هدد بالإلغاء/التوقف)، client_compared_competitor (قارن بمنافس)، client_complained_about_person (اشتكى من شخص)، client_repeated_complaint (كرّر نفس الشكوى)، client_question_unanswered (سؤال مهم بلا رد لفترة)، major_task_delay (تأخير كبير في مهمة مؤثرة)، client_corrected_am_repeatedly (صحّح فهم الأكاونت عدة مرات)، client_vs_team_mismatch (تضارب بين طلب العميل وما نُقل للتيم)، team_reported_unclear_requirements (التيم أبلغ عن غموض المتطلبات من الأكاونت).
 🟡 تشغيلية (severity=yellow): team_reported_blocker (مشكلة تمنع التنفيذ)، missing_access (صلاحيات ناقصة)، missing_brief (بريف ناقص)، client_uncooperative (غير متعاون)، client_late_approvals (متأخر في الاعتمادات بشكل مؤثر)، conflicting_client_requests (تضارب بين طلبات العميل)، am_not_understanding (الأكاونت غير فاهم/كرّر طلب التوضيح).
 لا تخترع أكواداً خارج القائمة. أصدر المؤشر فقط عند وجود دليل صريح. source = client أو technical أو tasks بحسب أين ظهر.
+لا تُصدر مؤشراً تشغيلياً (أصفر) عولج صراحةً لاحقاً داخل نفس الفترة: إن أبلغ التيم عن عائق ثم أكدت رسالة أحدث زواله (سُدّدت المديونية واستأنفت الحملات، وصلت الصلاحية، اكتمل البريف…) فهو حدث منتهٍ وليس مؤشراً قائماً — اذكره في الملخص/الأحداث لا في المؤشرات. أما مؤشرات المخاطر الحمراء (شكوى/عدم رضا) فتبقى مسجّلة حتى لو هدأت لاحقاً.
 
 — clientGroupSignals (من مجموعة العميل فقط) —
 - requests: عدّ {new, edit, complaint, inquiry, approval}.
