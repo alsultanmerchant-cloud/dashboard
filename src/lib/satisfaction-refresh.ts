@@ -332,6 +332,9 @@ export async function refreshSatisfactionStatuses(
   // 4) Messages that arrived AFTER the analysis ran — the new evidence.
   const transcripts = await buildClientTranscripts(orgId, clientId, {
     sinceIso: analysis.created_at as string,
+    // Backfilled messages are older than the analysis but arrived after it, so
+    // the analysis never read them — they are new evidence for this pass.
+    ingestedSinceIso: analysis.created_at as string,
   });
   const newMessageCount = transcripts.clientMessages + transcripts.technicalMessages;
   const hadNewMessages = newMessageCount > 0;

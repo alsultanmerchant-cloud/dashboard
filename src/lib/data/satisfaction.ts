@@ -1227,7 +1227,7 @@ export const getClientLatestLiveMessageAt = cache(
 async function _buildClientTranscripts(
   orgId: string,
   clientId: string,
-  opts?: { sinceDays?: number; sinceIso?: string },
+  opts?: { sinceDays?: number; sinceIso?: string; ingestedSinceIso?: string },
 ): Promise<MergedTranscripts> {
   // Windowed (current-status) analysis: only the last `sinceDays` of LIVE
   // messages. The one-time .txt import is a historical seed (one undated blob)
@@ -1258,7 +1258,18 @@ async function _buildClientTranscripts(
         .order("sent_at", { ascending: true })
         .limit(8000)
     : null;
-  if (waQuery && since) waQuery = waQuery.gte("sent_at", since);
+  // `ingestedSinceIso` widens the window to messages the caller could not have
+  // seen even though they were SENT earlier: after an ingestion outage the
+  // backfill lands days-old messages, and a pure sent_at cutoff hides every one
+  // of them from the status-refresh pass — the analysis timestamp is newer than
+  // the message that resolves the problem.
+  if (waQuery && since) {
+    waQuery = opts?.ingestedSinceIso
+      ? waQuery.or(
+          `sent_at.gte.${since},created_at.gt.${opts.ingestedSinceIso}`,
+        )
+      : waQuery.gte("sent_at", since);
+  }
 
   const [importsRes, waRes, employeeDirectory] = await Promise.all([
     since
