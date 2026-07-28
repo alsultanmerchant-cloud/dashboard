@@ -46,10 +46,6 @@ export async function GET(request: NextRequest) {
   const dry = request.nextUrl.searchParams.get("dry") === "1";
   const overrideTo = request.nextUrl.searchParams.get("to");
   const to = recipients(overrideTo);
-  if (!dry && to.length === 0)
-    return NextResponse.json({ error: "no recipients (CEO_BRIEF_RECIPIENTS empty)" }, { status: 400 });
-  if (!dry && !waConfigured())
-    return NextResponse.json({ error: "WA gateway not configured" }, { status: 500 });
 
   const { data: org, error: orgError } = await supabaseAdmin
     .from("organizations")
@@ -58,16 +54,28 @@ export async function GET(request: NextRequest) {
     .single();
   if (orgError || !org) return NextResponse.json({ error: "org not found" }, { status: 500 });
 
-  // Refresh the on-dashboard CEO brief (3-question synthesis, Gemini-narrated)
-  // as part of the same daily run. Best-effort: a Gemini failure here must not
-  // block the WhatsApp card brief below. Skipped on dry test runs to save credits.
+  // Refresh the on-dashboard CEO brief FIRST — it must never depend on the
+  // WhatsApp leg. The old order returned 400/500 on missing recipients or an
+  // unconfigured gateway before ever generating, which (combined with no
+  // scheduler) left the dashboard serving a frozen brief for weeks.
+  // Skipped on dry test runs to save credits.
+  let dashboardBrief: "generated" | "failed" | "skipped(dry)" = "skipped(dry)";
   if (!dry) {
     try {
       await generateAndStoreCeoBrief(org.id, null);
+      dashboardBrief = "generated";
     } catch (e) {
+      dashboardBrief = "failed";
       console.error("[cron.ceo-brief] dashboard brief generation failed:", e);
     }
   }
+
+  // WhatsApp leg is optional: report why it was skipped instead of erroring the
+  // whole cron run.
+  if (!dry && to.length === 0)
+    return NextResponse.json({ ok: true, dashboardBrief, wa: "skipped (CEO_BRIEF_RECIPIENTS empty)" });
+  if (!dry && !waConfigured())
+    return NextResponse.json({ ok: true, dashboardBrief, wa: "skipped (WA gateway not configured)" });
 
   const brief = await buildCeoBriefData(org.id);
   const cards = await renderAllCards(brief);
@@ -141,5 +149,5 @@ export async function GET(request: NextRequest) {
     importance: failed.length > 0 ? "high" : "normal",
   });
 
-  return NextResponse.json({ ok: failed.length === 0, results });
+  return NextResponse.json({ ok: failed.length === 0, dashboardBrief, results });
 }

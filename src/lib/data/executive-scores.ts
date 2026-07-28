@@ -154,15 +154,13 @@ async function loadSnapshots(orgId: string): Promise<{
 }
 
 // ---- Agent load (paginated) ----------------------------------------------
-// task_assignees for open work exceeds the 1000-row PostgREST cap org-wide
-// (~1.4k agent rows), so a single select silently truncates and undercounts
-// contributors / overload / balance. Page through the full set instead.
+// Start from the small live-task set, then join its agent assignments. Starting
+// from task_assignees made PostgREST join every historical assignment before
+// the application discarded completed/archived tasks, turning this one input
+// into the slowest dashboard query by a wide margin.
 type AgentLoadRow = {
   employee_id: string;
-  task:
-    | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }
-    | { id: string; stage: string; allocated_time_minutes: number | null; archived_at: string | null }[]
-    | null;
+  allocated_time_minutes: number | null;
 };
 
 // ---- SLA compliance (business-minutes, all SLA-configured stages) --------
@@ -221,13 +219,34 @@ async function loadAgentRows(orgId: string): Promise<AgentLoadRow[]> {
   const rows: AgentLoadRow[] = [];
   for (let offset = 0; ; offset += page) {
     const { data, error } = await supabaseAdmin
-      .from("task_assignees")
-      .select("employee_id, task:tasks!inner(id, stage, allocated_time_minutes, archived_at)")
+      .from("tasks")
+      .select("id, allocated_time_minutes, assignees:task_assignees!inner(employee_id)")
       .eq("organization_id", orgId)
-      .eq("role_type", "agent")
+      .is("archived_at", null)
+      .neq("stage", "done")
+      .eq("assignees.organization_id", orgId)
+      .eq("assignees.role_type", "agent")
+      .order("id", { ascending: true })
       .range(offset, offset + page - 1);
     if (error || !data || data.length === 0) break;
-    rows.push(...(data as unknown as AgentLoadRow[]));
+
+    for (const task of data as unknown as Array<{
+      allocated_time_minutes: number | null;
+      assignees: { employee_id: string } | { employee_id: string }[] | null;
+    }>) {
+      const assignees = Array.isArray(task.assignees)
+        ? task.assignees
+        : task.assignees
+          ? [task.assignees]
+          : [];
+      for (const assignee of assignees) {
+        rows.push({
+          employee_id: assignee.employee_id,
+          allocated_time_minutes: task.allocated_time_minutes,
+        });
+      }
+    }
+
     if (data.length < page) break;
   }
   return rows;
@@ -449,10 +468,8 @@ async function _getExecutiveScores(
   const countByEmp = new Map<string, number>();
   let allocatedMinutesTotal = 0;
   for (const raw of agentLoadRows) {
-    const t = Array.isArray(raw.task) ? raw.task[0] : raw.task;
-    if (!t || t.archived_at || t.stage === "done") continue;
     countByEmp.set(raw.employee_id, (countByEmp.get(raw.employee_id) ?? 0) + 1);
-    allocatedMinutesTotal += t.allocated_time_minutes ?? 0;
+    allocatedMinutesTotal += raw.allocated_time_minutes ?? 0;
   }
   const contributors = countByEmp.size;
   const counts = Array.from(countByEmp.values());

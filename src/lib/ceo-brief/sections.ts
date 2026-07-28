@@ -40,12 +40,14 @@ function sharedHeader(signals: CeoBriefSignals): string {
         .map((c) => `- ${c}`)
         .join("\n")}\n- إن لم يكن الرقم مُعطى صراحةً في الحقائق أدناه، فلا تذكره. الأفضل عدم ذكر مؤشر على أن لا تذكره خاطئًا.`
     : "";
-  return `أنت رئيس أركان (Chief of Staff) للرئيس التنفيذي لوكالة تسويق سعودية (رواسم).
+  return `أنت سكرتير تنفيذي (رئيس أركان) للرئيس التنفيذي لوكالة تسويق سعودية (رواسم) — تُطلعه صباحًا على ما استجد وكيف تسير الشركة.
 
 قواعد صارمة:
 - **لا تخترع أي رقم**. الأرقام كلها محسوبة مسبقًا في البيانات أدناه؛ مهمتك الصياغة وربط الأسباب فقط.
 - عربية فصحى، حاسمة وموجزة، موجّهة للقرار. لا تشجيع ولا حشو.
-- لا تعتبر مرحلة "new/جديدة" أو تراكم المهام فيها اختناقًا أو خطرًا أو إجراءً مطلوبًا. في رواسم هذا وضع طبيعي/أثر استيراد من Odoo، وليس مؤشرًا تشغيليًا مهمًا. ممنوع اقتراح "تحريك مهام جديدة" أو تقليل انتظار مرحلة جديدة.${dataQualityBlock}`;
+- «متأخرة» في هذا الموجز تعني حصريًا: مهمة تجاوزت **مهلة مرحلتها الحالية (SLA)** المحددة وفق القوالب — وليس تجاوز موعد تسليم المهمة. لا تخلط بين المعنيين ولا تذكر تواريخ التسليم.
+- لا تعتبر مرحلة "new/جديدة" أو تراكم المهام فيها اختناقًا أو خطرًا أو إجراءً مطلوبًا. في رواسم هذا وضع طبيعي/أثر استيراد من Odoo، وليس مؤشرًا تشغيليًا مهمًا. ممنوع اقتراح "تحريك مهام جديدة" أو تقليل انتظار مرحلة جديدة.
+- لا تدّعِ علاقة سببية بين مؤشرين إلا إذا كانت معطاة صراحةً في البيانات — الربط الجائز هو ذكر الحقيقتين جنبًا إلى جنب دون افتراض أن إحداهما سبب الأخرى.${dataQualityBlock}`;
 }
 
 const fence = (facts: unknown) => "```json\n" + JSON.stringify(facts) + "\n```";
@@ -67,6 +69,7 @@ export const trajectorySection: SectionDef<typeof TrajectoryAiSchema> = {
     statusPct: s.statusPct,
     grade: s.grade,
     changes: s.changes,
+    today: s.today,
     context: s.context,
     dataQuality: s.dataQuality,
   }),
@@ -75,15 +78,15 @@ export const trajectorySection: SectionDef<typeof TrajectoryAiSchema> = {
     return withKnowledge(
       `${sharedHeader(s)}
 
-السؤال: هل الشركة تتحسّن أم تتراجع؟
+السؤال: كيف تسير الشركة اليوم — تتحسّن أم تتراجع؟
 
 البيانات (الحقائق المحسوبة):
 ${fence(f)}
 
-استخدم **context** لتحديد جذور التغيّر (worstServices/bestService = أين يتركّز التراجع وأين القوة؛ wip = مزمن أم طارئ؛ discipline = صحة العملية).
+استخدم **today** (مستجدات اليوم) و **context** لتحديد جذور التغيّر (worstServices/bestService = أين يتركّز التراجع وأين القوة؛ slaLate = حجم المهام المتجاوزة مهلة مراحلها وأين تتركّز؛ discipline = صحة العملية).
 
 التعليمات:
-- **headline**: جملة واحدة تجيب السؤال وتُحدّد **أين** يتركّز التغيّر (الخدمة/المرحلة)، مستندةً إلى verdictArabic و statusPct و changes و context. مثال: "الوضع التشغيلي ${VERDICT_AR[s.verdict]} عند ${s.statusPct}% — مدفوعًا بـ… وتتركّز المشكلة في…".`,
+- **headline**: جملة واحدة بأسلوب سكرتير يُطلع مديره صباحًا: تجيب هل نتحسّن أم نتراجع و**أين** يتركّز التغيّر (الخدمة/المرحلة/العميل)، مستندةً إلى verdictArabic و changes و today و context. مثال: "الوضع ${VERDICT_AR[s.verdict]} — أبرز ما يجب انتباهك اليوم…".`,
       knowledge,
     );
   },
@@ -169,6 +172,7 @@ export const synthesisSection: SectionDef<typeof SynthesisAiSchema> = {
     verdictArabic: VERDICT_AR[s.verdict],
     statusPct: s.statusPct,
     changes: s.changes,
+    today: s.today,
     risks: s.risks.map((r) => ({
       id: r.id,
       title: r.title,

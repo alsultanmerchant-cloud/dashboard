@@ -135,9 +135,7 @@ interface TaskFact {
   createdMs: number | null;
 }
 
-type ProjEmbed = { client_id: string | null; status: string } | { client_id: string | null; status: string }[] | null;
-
-function toFact(r: {
+interface TaskFactSource {
   project_id: string;
   due_date: string | null;
   planned_date: string | null;
@@ -147,14 +145,24 @@ function toFact(r: {
   created_at: string;
   source_created_at: string | null;
   service_id: string | null;
-  project: ProjEmbed;
-}): TaskFact {
-  const proj = Array.isArray(r.project) ? r.project[0] : r.project;
+}
+
+interface ProjectFactSource {
+  id: string;
+  client_id: string | null;
+  status: string;
+}
+
+function toFact(
+  r: TaskFactSource,
+  projectsById: Map<string, ProjectFactSource>,
+): TaskFact {
+  const project = projectsById.get(r.project_id);
   const done = r.completed_at ?? (r.actual_done_date ? `${r.actual_done_date}T00:00:00+03:00` : null);
   return {
     projectId: r.project_id,
-    clientId: proj?.client_id ?? null,
-    projectActive: proj?.status === "active",
+    clientId: project?.client_id ?? null,
+    projectActive: project?.status === "active",
     serviceId: r.service_id,
     deadline: r.due_date ?? r.planned_date,
     doneMs: ms(done),
@@ -170,44 +178,77 @@ function toFact(r: {
 // before `since` is irrelevant to the snapshot/interval math, so this keeps the
 // set to ~1-2k rows instead of the full ~13k.
 async function loadOpenOrRecent(orgId: string, sinceIso: string): Promise<TaskFact[]> {
-  const out: TaskFact[] = [];
   const PAGE = 1000;
 
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseAdmin
-      .from("tasks")
-      .select(
-        "project_id, due_date, planned_date, completed_at, actual_done_date, archived_at, created_at, source_created_at, service_id, project:projects!inner(client_id, status)",
-      )
-      .eq("organization_id", orgId)
-      .is("completed_at", null)
-      .order("id", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as Parameters<typeof toFact>[0][];
-    out.push(...rows.map(toFact));
-    if (rows.length < PAGE) break;
-  }
+  const loadOpen = async (): Promise<TaskFactSource[]> => {
+    const rows: TaskFactSource[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select(
+          "project_id, due_date, planned_date, completed_at, actual_done_date, archived_at, created_at, source_created_at, service_id",
+        )
+        .eq("organization_id", orgId)
+        .is("completed_at", null)
+        // An archived task that never completed is excluded by every historical
+        // predicate below, so do not transfer it only to discard it in JS.
+        .is("archived_at", null)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const page = (data ?? []) as TaskFactSource[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return rows;
+  };
 
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseAdmin
-      .from("tasks")
-      .select(
-        "project_id, due_date, planned_date, completed_at, actual_done_date, archived_at, created_at, source_created_at, service_id, project:projects!inner(client_id, status)",
-      )
-      .eq("organization_id", orgId)
-      .not("completed_at", "is", null)
-      .gte("completed_at", sinceIso)
-      .order("completed_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as Parameters<typeof toFact>[0][];
-    out.push(...rows.map(toFact));
-    if (rows.length < PAGE) break;
-  }
+  const loadRecent = async (): Promise<TaskFactSource[]> => {
+    const rows: TaskFactSource[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("tasks")
+        .select(
+          "project_id, due_date, planned_date, completed_at, actual_done_date, archived_at, created_at, source_created_at, service_id",
+        )
+        .eq("organization_id", orgId)
+        .not("completed_at", "is", null)
+        .gte("completed_at", sinceIso)
+        .order("completed_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const page = (data ?? []) as TaskFactSource[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return rows;
+  };
 
-  return out;
+  const loadProjects = async (): Promise<ProjectFactSource[]> => {
+    const rows: ProjectFactSource[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from("projects")
+        .select("id, client_id, status")
+        .eq("organization_id", orgId)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const page = (data ?? []) as ProjectFactSource[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return rows;
+  };
+
+  const [openRows, recentRows, projectRows] = await Promise.all([
+    loadOpen(),
+    loadRecent(),
+    loadProjects(),
+  ]);
+  const projectsById = new Map(projectRows.map((project) => [project.id, project]));
+  return [...openRows, ...recentRows].map((row) => toFact(row, projectsById));
 }
 
 // ── Contract state (HOLD/LOST exclusion) ───────────────────────────────────
@@ -352,7 +393,6 @@ async function _getExecutiveIndicatorsForWindow(
   // High-risk threshold (configurable, default 5). "Projects At Risk" itself
   // is now the ≥1-overdue-task set per Sky Light feedback; the configured
   // threshold governs the separate High-Risk card.
-  const threshold = await getRiskThreshold(orgId);
   const AT_RISK_MIN = 1;
   const today = riyadhTodayIso();
   const previous = previousEquivalent(range);
@@ -362,23 +402,62 @@ async function _getExecutiveIndicatorsForWindow(
   // Load once, reuse for the snapshot/interval KPIs. `since` = the earliest
   // period start we evaluate, so we keep every task that could be open in-window.
   const since = startOfDayMs(previous.from);
-  const [facts, excluded, excludedProjectIds, completedRows, ccEntries, liveClientChanges] = await Promise.all([
-    loadOpenOrRecent(orgId, new Date(since).toISOString()),
-    excludedClientIds(orgId),
-    excludedProjectIdsByTag(orgId),
-    loadCompleted(orgId, previous.from, range.to),
-    loadClientChanges(orgId, previous.from, range.to),
-    countLiveClientChanges(orgId),
-  ]);
+  const thresholdPromise = getRiskThreshold(orgId);
+  const factsPromise = loadOpenOrRecent(orgId, new Date(since).toISOString());
+  const excludedPromise = excludedClientIds(orgId);
+  const excludedProjectIdsPromise = excludedProjectIdsByTag(orgId);
+  const completedRowsPromise = loadCompleted(orgId, previous.from, range.to);
+  const ccEntriesPromise = loadClientChanges(orgId, previous.from, range.to);
+  const liveClientChangesPromise = countLiveClientChanges(orgId);
 
   // KPI 1 — Projects At Risk (≥1 overdue open task) and the High-Risk tier
   // (≥ configured threshold). Trends come from the exact SQL RPC, with the TS
   // snapshot as fallback. Both tiers share the same overdue-open-task basis.
-  const [riskCur, riskPrev, highCur, highPrev] = await Promise.all([
-    atRiskAsOfRpc(orgId, range.to, AT_RISK_MIN),
-    atRiskAsOfRpc(orgId, previous.to, AT_RISK_MIN),
+  const riskCurPromise = atRiskAsOfRpc(orgId, range.to, AT_RISK_MIN);
+  const riskPrevPromise = atRiskAsOfRpc(orgId, previous.to, AT_RISK_MIN);
+  const highCurPromise = thresholdPromise.then((threshold) =>
     atRiskAsOfRpc(orgId, range.to, threshold),
+  );
+  const highPrevPromise = thresholdPromise.then((threshold) =>
     atRiskAsOfRpc(orgId, previous.to, threshold),
+  );
+  const odCurPromise = overdueDuringPeriodRpc(orgId, range.from, range.to);
+  const odPrevPromise = overdueDuringPeriodRpc(orgId, previous.from, previous.to);
+  const serviceDeliveryPromise = Promise.all([completedRowsPromise, ccEntriesPromise]).then(
+    ([completedRows, ccEntries]) =>
+      buildServiceDelivery(orgId, completedRows, ccEntries, range, previous),
+  );
+
+  const [
+    threshold,
+    facts,
+    excluded,
+    excludedProjectIds,
+    completedRows,
+    ccEntries,
+    liveClientChanges,
+    riskCur,
+    riskPrev,
+    highCur,
+    highPrev,
+    odCur,
+    odPrev,
+    serviceDelivery,
+  ] = await Promise.all([
+    thresholdPromise,
+    factsPromise,
+    excludedPromise,
+    excludedProjectIdsPromise,
+    completedRowsPromise,
+    ccEntriesPromise,
+    liveClientChangesPromise,
+    riskCurPromise,
+    riskPrevPromise,
+    highCurPromise,
+    highPrevPromise,
+    odCurPromise,
+    odPrevPromise,
+    serviceDeliveryPromise,
   ]);
   const projectsAtRisk: ProjectsAtRiskKpi = {
     mainValue: atRiskCount(facts, today, AT_RISK_MIN, { activeOnly: true, excludedProjectIds }),
@@ -409,10 +488,6 @@ async function _getExecutiveIndicatorsForWindow(
     facts.filter(
       (f) => overdueDuringPeriod(f, s, e, nowMs) && !(f.clientId && excluded.has(f.clientId)),
     ).length;
-  const [odCur, odPrev] = await Promise.all([
-    overdueDuringPeriodRpc(orgId, range.from, range.to),
-    overdueDuringPeriodRpc(orgId, previous.from, previous.to),
-  ]);
   const overdue: OverdueKpi = {
     mainValue: liveOverdue,
     trend: trendOf(
@@ -457,15 +532,6 @@ async function _getExecutiveIndicatorsForWindow(
     periods,
     validation: { ok: true, missing: [] },
   };
-
-  // KPI 4 — Service Delivery Performance (per base service, renewal merged)
-  const serviceDelivery = await buildServiceDelivery(
-    orgId,
-    completedRows,
-    ccEntries,
-    range,
-    previous,
-  );
 
   return { projectsAtRisk, highRisk, onTime, overdue, clientChanges, serviceDelivery, periods };
 }

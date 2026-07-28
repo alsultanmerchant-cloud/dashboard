@@ -1,5 +1,11 @@
 import { z } from "zod";
-import type { BriefChange, BriefRisk, Verdict, BriefEmphasis } from "@/lib/data/ceo-brief-signals";
+import type {
+  BriefChange,
+  BriefRisk,
+  BriefTodayItem,
+  Verdict,
+  BriefEmphasis,
+} from "@/lib/data/ceo-brief-signals";
 
 // =========================================================================
 // CEO Brief — AI output schema.
@@ -148,6 +154,9 @@ export interface CeoBriefResult {
   emphasis?: BriefEmphasis;
   changes: BriefChange[];
   risks: CeoBriefRiskRendered[];
+  // «الجديد اليوم» — code-computed secretary digest (never AI-worded). Optional
+  // for back-compat: briefs stored before this field render without the block.
+  today?: BriefTodayItem[];
   criticalEvents?: CeoBriefEvent[];
   timelineEvents?: CeoBriefEvent[];
   recommendations: CeoBriefRecommendation[];
@@ -187,13 +196,29 @@ function evidenceHrefForRisk(
   currentHref: string | null,
   entityId?: string,
 ): string | null {
+  // Only REPAIR missing/known-bad legacy links — never override a stored href.
+  // Current briefs link delivery_slip/stuck_project to their SLA evidence
+  // (/accountability, project task list); forcing the old deadline-overdue
+  // list here would silently re-point them at the other متأخرة definition.
+  // Known-bad legacy: overdue_money once linked the renewal-overdue list
+  // (`target=Overdue`, an unrelated population) and later a `pay=overdue`
+  // param the contracts table never consumed (it filters on `payment`, the
+  // sheet's payment_status values). Repair both to لوحة الإيرادات, whose
+  // overdue-installment cards use the same contracts-engine formula.
+  if (
+    id === "overdue_money" &&
+    (currentHref === "/contracts?view=table&target=Overdue" ||
+      currentHref === "/contracts?view=table&pay=overdue")
+  )
+    return "/contracts?view=dashboard";
+  if (currentHref) return currentHref;
   switch (id) {
     case "delivery_slip":
-      return "/tasks?view=list&filter=overdue";
+      return "/accountability";
     case "stuck_project":
-      return entityId ? `/tasks?view=list&projectId=${entityId}&filter=overdue` : currentHref;
+      return entityId ? `/tasks?view=list&projectId=${entityId}` : currentHref;
     case "overdue_money":
-      return "/contracts?view=table&target=Overdue";
+      return "/contracts?view=table&pay=overdue";
     default:
       return currentHref;
   }

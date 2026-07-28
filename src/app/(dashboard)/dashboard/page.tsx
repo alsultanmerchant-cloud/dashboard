@@ -58,39 +58,56 @@ import { cn } from "@/lib/utils";
 
 // ---- Sections (each streams behind its own Suspense) ---------------------
 
-async function BriefSection({ orgId }: { orgId: string }) {
+async function BriefSection({
+  data,
+}: {
+  data: ReturnType<typeof getCurrentCeoBrief>;
+}) {
   // Read the cached brief (daily cron + on-demand refresh keep it fresh). The
   // card is interactive client-side; we only seed it with the current run.
-  const current = await getCurrentCeoBrief(orgId);
+  const current = await data;
   return <CeoBriefCard initialBrief={current} />;
 }
 
-async function ExecIndicators({ orgId, range }: { orgId: string; range: DashboardRange }) {
+async function ExecIndicators({
+  data,
+  workflow,
+}: {
+  data: ReturnType<typeof getExecutiveIndicators>;
+  workflow: ReturnType<typeof getWorkflowIndicators>;
+}) {
   // Executive Indicators (client spec) — each card is a Main live value + a
   // Trend vs the Previous Equivalent Period. docs/EXECUTIVE_INDICATORS_SPEC.md
-  const [data, workflow] = await Promise.all([
-    getExecutiveIndicators(orgId, range),
-    getWorkflowIndicators(orgId),
-  ]);
+  const [indicators, workflowIndicators] = await Promise.all([data, workflow]);
   return (
     <ExecutiveIndicatorsRow
-      data={data}
+      data={indicators}
       review={{
-        count: workflow.review.count,
-        oldestDays: workflow.review.oldestDays,
-        avgDwellDays: workflow.review.avgDwellDays,
+        count: workflowIndicators.review.count,
+        oldestDays: workflowIndicators.review.oldestDays,
+        avgDwellDays: workflowIndicators.review.avgDwellDays,
       }}
     />
   );
 }
 
-async function ScoresBand({ orgId, range }: { orgId: string; range: DashboardRange }) {
-  const data = await getExecutiveScores(orgId, range);
+async function ScoresBand({
+  data: dataPromise,
+  range,
+}: {
+  data: ReturnType<typeof getExecutiveScores>;
+  range: DashboardRange;
+}) {
+  const data = await dataPromise;
   return <ExecutiveScoresBand data={data} windowLabel={rangeLabel(range)} />;
 }
 
-async function PulseBand({ orgId }: { orgId: string }) {
-  const data = await getTeamPulseOverview(orgId);
+async function PulseBand({
+  data: dataPromise,
+}: {
+  data: ReturnType<typeof getTeamPulseOverview>;
+}) {
+  const data = await dataPromise;
   return <TeamPulseBand data={data} />;
 }
 
@@ -250,11 +267,28 @@ export default async function DashboardPage({
 
 async function ExecutiveDashboard({ session, range }: { session: ServerSession; range: DashboardRange }) {
   const orgId = session.orgId;
-  const t = await getTranslations("Dashboard");
   // Financial / CEO-only blocks (the brief, P&L summary, and contract revenue
   // analysis) are gated on finance.view. Roles like dept_lead get the org-wide
   // executive view for performance, but not these money sections.
   const canFinance = hasPermission(session, "finance.view");
+  // Start the above-the-fold reads immediately and in parallel. Detail queries
+  // are deliberately gated below so these four sections do not compete with
+  // the heavier tables and analysis for database connections.
+  const briefPromise = canFinance
+    ? getCurrentCeoBrief(orgId)
+    : Promise.resolve(null);
+  const indicatorsPromise = getExecutiveIndicators(orgId, range);
+  const workflowPromise = getWorkflowIndicators(orgId);
+  const scoresPromise = getExecutiveScores(orgId, range);
+  const pulsePromise = getTeamPulseOverview(orgId);
+  const priorityReady = Promise.allSettled([
+    briefPromise,
+    indicatorsPromise,
+    workflowPromise,
+    scoresPromise,
+    pulsePromise,
+  ]);
+  const t = await getTranslations("Dashboard");
 
   return (
     <div>
@@ -268,7 +302,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
           so it sits above the date-range picker. */}
       {canFinance && (
         <DashSection fallback={<Skeleton className="mb-8 h-[360px] rounded-2xl" />}>
-          <BriefSection orgId={orgId} />
+          <BriefSection data={briefPromise} />
         </DashSection>
       )}
 
@@ -277,21 +311,49 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       {/* ── EXECUTIVE INDICATORS (client spec): Main live value + Trend vs the
           Previous Equivalent Period. docs/EXECUTIVE_INDICATORS_SPEC.md ────── */}
       <DashSection fallback={<SectionSkeleton h={200} />}>
-        <ExecIndicators orgId={orgId} range={range} />
+        <ExecIndicators data={indicatorsPromise} workflow={workflowPromise} />
       </DashSection>
 
       {/* ── INDICATORS (top): the fast, at-a-glance KPI cards, grouped so they
           render first and stay reliable even if a heavier detail section below
           is slow or errors (each is its own DashSection boundary). ───────── */}
       <DashSection fallback={<ScoresSkeleton />}>
-        <ScoresBand orgId={orgId} range={range} />
+        <ScoresBand data={scoresPromise} range={range} />
       </DashSection>
 
       <DashSection fallback={<StripSkeleton />}>
-        <PulseBand orgId={orgId} />
+        <PulseBand data={pulsePromise} />
       </DashSection>
 
-      {/* ── DETAILS (below): heavier tables / flows / lists. ─────────────── */}
+      {/* ── DETAILS (below): begin only after the four priority sections have
+          settled, then keep streaming independently behind their own bounds. */}
+      <Suspense fallback={<SectionSkeleton h={300} />}>
+        <DeferredDashboardDetails
+          ready={priorityReady}
+          orgId={orgId}
+          range={range}
+          canFinance={canFinance}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+async function DeferredDashboardDetails({
+  ready,
+  orgId,
+  range,
+  canFinance,
+}: {
+  ready: Promise<unknown>;
+  orgId: string;
+  range: DashboardRange;
+  canFinance: boolean;
+}) {
+  await ready;
+
+  return (
+    <>
       <DashSection fallback={<SectionSkeleton h={300} />}>
         <CeoAnalysisSection orgId={orgId} canFinance={canFinance} />
       </DashSection>
@@ -327,8 +389,7 @@ async function ExecutiveDashboard({ session, range }: { session: ServerSession; 
       <DashSection fallback={<SectionSkeleton h={180} />}>
         <UpcomingDeadlines orgId={orgId} />
       </DashSection>
-
-    </div>
+    </>
   );
 }
 

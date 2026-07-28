@@ -56,10 +56,10 @@ export function applyTrajectory(base: CeoBriefResult, ai: TrajectoryAi): CeoBrie
 
 // Like applyTrajectory but also refreshes the Q1 code-computed fields from fresh
 // signals — used when re-analyzing pulls live data (so statusPct/grade/verdict/
-// changes update, not just the AI headline).
+// changes and the «الجديد اليوم» digest update, not just the AI headline).
 export function applyTrajectoryFromSignals(
   base: CeoBriefResult,
-  signals: Pick<CeoBriefSignals, "statusPct" | "grade" | "verdict" | "changes">,
+  signals: Pick<CeoBriefSignals, "statusPct" | "grade" | "verdict" | "changes" | "today">,
   ai: TrajectoryAi,
 ): CeoBriefResult {
   return {
@@ -68,6 +68,7 @@ export function applyTrajectoryFromSignals(
     grade: signals.grade,
     verdict: signals.verdict,
     changes: signals.changes,
+    today: signals.today,
     headline: oneLine(ai.headline),
   };
 }

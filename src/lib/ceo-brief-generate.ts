@@ -160,6 +160,7 @@ export async function generateAndStoreCeoBrief(
       headline: priorResult?.headline ?? "",
       synthesis: priorResult?.synthesis ?? "",
       changes: signals.changes,
+      today: signals.today,
       risks: mergeRisks(signals.risks, []),
       criticalEvents: signals.criticalEvents,
       timelineEvents: signals.timelineEvents,

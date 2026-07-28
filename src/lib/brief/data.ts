@@ -179,6 +179,66 @@ async function loadMoney(orgId: string): Promise<BriefMoney> {
   };
 }
 
+// Row-level breakdown of the SAME overdue-installments population loadMoney
+// aggregates (identical filter chain — keep the two in lockstep). Powers the
+// CEO brief's "show details" evidence modal, so the 22,543-style headline and
+// its breakdown can never disagree.
+export interface OverdueInstallmentRow {
+  contractId: string;
+  contractCode: string | null;
+  clientName: string;
+  amount: number;
+  expectedDate: string | null;
+  collectedDate: string | null; // non-null → collected this month, not outstanding
+}
+
+export async function listOverdueInstallmentRows(
+  orgId: string,
+): Promise<OverdueInstallmentRow[]> {
+  const now = new Date();
+  const monthStart = `${now.toISOString().slice(0, 7)}-01`;
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
+    .toISOString()
+    .slice(0, 10);
+  const { data, error } = await supabaseAdmin
+    .from("installments")
+    .select(
+      "expected_amount, expected_date, actual_date, contract:contracts!inner(id, contract_code, status, client:clients(name))",
+    )
+    .eq("organization_id", orgId)
+    .in("contract.status", ["active", "hold"])
+    .gte("sequence", 2)
+    .in("source_type_key", ["Renew", "WinBack", "UPSELL", "New"])
+    .lt("expected_date", monthStart)
+    .or(`actual_date.is.null,and(actual_date.gte.${monthStart},actual_date.lte.${monthEnd})`)
+    .or(`lost_date.is.null,lost_date.gte.${monthStart}`);
+  if (error) throw new Error(`listOverdueInstallmentRows: ${error.message}`);
+
+  type Row = {
+    expected_amount: number | string | null;
+    expected_date: string | null;
+    actual_date: string | null;
+    contract:
+      | { id: string; contract_code: string | null; client: { name: string } | { name: string }[] | null }
+      | { id: string; contract_code: string | null; client: { name: string } | { name: string }[] | null }[]
+      | null;
+  };
+  return ((data ?? []) as Row[])
+    .map((r) => {
+      const c = Array.isArray(r.contract) ? r.contract[0] : r.contract;
+      const client = Array.isArray(c?.client) ? c?.client[0] : c?.client;
+      return {
+        contractId: c?.id ?? "",
+        contractCode: c?.contract_code ?? null,
+        clientName: client?.name ?? "—",
+        amount: Number(r.expected_amount) || 0,
+        expectedDate: r.expected_date,
+        collectedDate: r.actual_date,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+}
+
 // "ريال" instead of "ر.س": satori splits the Arabic run on the dots and
 // reorders the fragments, so the abbreviation renders backwards on cards.
 export const formatSar = (n: number) =>

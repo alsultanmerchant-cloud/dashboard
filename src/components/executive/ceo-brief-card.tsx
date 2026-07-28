@@ -13,17 +13,23 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  ArrowUpRight,
-  ArrowDownRight,
+  Newspaper,
   ChevronDown,
   ChevronLeft,
   MessageCircleQuestion,
+  ListTree,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { Explained, MetricInfo } from "@/components/metric-info";
-import type { BriefChange } from "@/lib/data/ceo-brief-signals";
+import type { BriefTodayItem } from "@/lib/data/ceo-brief-signals";
 import {
   applyBriefPatch,
   SECTION_SCHEMA,
@@ -43,10 +49,171 @@ import {
 } from "@/components/executive/dashboard-selection-assistant";
 
 const VERDICT = {
-  improving: { icon: TrendingUp, accent: "text-cc-green", ring: "ring-cc-green/35", chip: "bg-green-dim text-cc-green" },
-  stable: { icon: Minus, accent: "text-amber", ring: "ring-amber/35", chip: "bg-amber-dim text-amber" },
-  declining: { icon: TrendingDown, accent: "text-cc-red", ring: "ring-cc-red/35", chip: "bg-red-dim text-cc-red" },
+  improving: { icon: TrendingUp, chip: "bg-green-dim text-cc-green" },
+  stable: { icon: Minus, chip: "bg-amber-dim text-amber" },
+  declining: { icon: TrendingDown, chip: "bg-red-dim text-cc-red" },
 } as const;
+
+const TODAY_TONE = {
+  good: "bg-cc-green",
+  bad: "bg-cc-red",
+  info: "bg-cc-blue",
+} as const;
+
+// Which evidence breakdown (the /api/ceo-brief/evidence kind + params) proves
+// each calculated row. null → the row has no row-level breakdown to show.
+function evidenceQueryForRisk(id: string, entityId?: string): string | null {
+  switch (id) {
+    case "delivery_slip":
+      return "kind=sla_late";
+    case "stuck_project":
+      return entityId ? `kind=sla_late&projectId=${entityId}` : "kind=sla_late";
+    case "at_risk_client":
+      return entityId ? `kind=sla_late&clientId=${entityId}` : null;
+    case "overdue_money":
+      return "kind=overdue_money";
+    case "client_churn":
+      return "kind=client_churn";
+    default:
+      return null;
+  }
+}
+
+function evidenceQueryForTodayItem(id: string): string | null {
+  switch (id) {
+    case "sla-new":
+      return "kind=sla_late_new";
+    case "done":
+      return "kind=done";
+    case "collected":
+      return "kind=collected";
+    case "complaints":
+      return "kind=complaints";
+    default:
+      return null;
+  }
+}
+
+interface EvidenceTable {
+  columns: string[];
+  rows: Array<{ id: string; href: string | null; cells: string[] }>;
+  note?: string;
+}
+
+// Lazy evidence modal: nothing is fetched until the FIRST open, then the
+// result is kept for re-opens. The API recomputes the breakdown live from the
+// same formula that produced the headline number, so what the modal lists is
+// exactly what was counted.
+function EvidenceDialog({ query, title, t }: { query: string; title: string; t: T }) {
+  const [open, setOpen] = useState(false);
+  const [table, setTable] = useState<EvidenceTable | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const res = await fetch(`/api/ceo-brief/evidence?${query}`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      setTable((await res.json()) as EvidenceTable);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next && !table && !loading) void load();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger
+        className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-soft-1/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ListTree className="size-3" />
+        {t("details")}
+      </DialogTrigger>
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-sm" data-private="client person">
+            {title}
+          </DialogTitle>
+        </DialogHeader>
+        {loading && (
+          <div className="space-y-2 py-2">
+            <div className="h-8 animate-pulse rounded-lg bg-soft-1/60" />
+            <div className="h-8 animate-pulse rounded-lg bg-soft-1/60" />
+            <div className="h-8 animate-pulse rounded-lg bg-soft-1/60" />
+          </div>
+        )}
+        {error && !loading && (
+          <div className="flex items-center gap-3 rounded-xl border border-cc-red/30 bg-cc-red/[0.04] p-3">
+            <AlertTriangle className="size-4 shrink-0 text-cc-red" />
+            <p className="flex-1 text-xs text-muted-foreground">{t("evidenceError")}</p>
+            <Button variant="ghost" size="sm" onClick={() => void load()} className="h-7 text-xs">
+              {t("retry")}
+            </Button>
+          </div>
+        )}
+        {table && !loading && !error && (
+          table.rows.length === 0 ? (
+            <p className="rounded-xl bg-soft-1/40 px-4 py-5 text-center text-xs text-muted-foreground">
+              {t("evidenceEmpty")}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-soft text-start text-[10px] text-muted-foreground">
+                    {table.columns.map((c) => (
+                      <th key={c} className="px-2 py-2 text-start font-medium">
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.map((r) => (
+                    <tr
+                      key={r.id}
+                      className={cn(
+                        "border-b border-soft/50",
+                        r.href && "cursor-pointer transition-colors hover:bg-soft-1/40",
+                      )}
+                    >
+                      {r.cells.map((cell, i) => (
+                        <td key={i} className="px-2 py-2 align-top" data-private="client person">
+                          {r.href && i === 0 ? (
+                            <Link href={r.href} className="hover:text-cyan hover:underline">
+                              {cell}
+                            </Link>
+                          ) : (
+                            cell
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {table.note && (
+                <p className="mt-2 text-[10px] text-muted-foreground">{table.note}</p>
+              )}
+              <p className="mt-2 text-[10px] text-muted-foreground/80">
+                {t("evidenceLiveNote")}
+              </p>
+            </div>
+          )
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const SEVERITY = {
   critical: { bar: "bg-cc-red", text: "text-cc-red" },
@@ -72,89 +239,53 @@ interface Reanalyze<TObj> {
   run: () => void;
 }
 
-function changeLabel(c: BriefChange, t: T): string {
-  return c.labelKey === "service"
-    ? t("changes.service", { name: c.serviceName ?? "" })
-    : t(`changes.${c.labelKey}`);
-}
-
-function changeDelta(c: BriefChange, t: T): string {
-  const sign = c.value > 0 ? "+" : "";
-  if (c.unit === "percent") return `${sign}${c.value}%`;
-  return `${sign}${c.value} ${t(`units.${c.unit}`)}`;
-}
-
-// A single before/after value rendered with its unit (e.g. "82%", "11 مهمة").
-// onTime & delaysCleared carry percentages in their from/to, so render as "%".
-function changeValueText(c: BriefChange, n: number, t: T): string {
-  if (c.unit === "percent" || c.labelKey === "onTime" || c.labelKey === "delaysCleared")
-    return `${n}%`;
-  return `${n} ${t(`units.${c.unit}`)}`;
-}
-
-// One trajectory pill. When the change carries `detail` (the before→after facts
-// behind the delta), the pill becomes a click target that opens a popover
-// explaining what the metric measures, how it moved, and a link to the records.
-function ChangePill({ c, t }: { c: BriefChange; t: T }) {
-  const Arrow = c.dir === "up" ? ArrowUpRight : c.dir === "down" ? ArrowDownRight : Minus;
-  const tone = c.good ? "bg-cc-green/[0.08] text-cc-green" : "bg-cc-red/[0.08] text-cc-red";
-  const body = (
-    <>
-      <Arrow className="size-3.5" />
-      <span className="text-foreground/75">{changeLabel(c, t)}</span>
-      <span className="font-semibold tabular-nums">{changeDelta(c, t)}</span>
-    </>
-  );
-
-  if (!c.detail) {
-    return (
-      <span className={cn("inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs", tone)}>
-        {body}
-      </span>
-    );
-  }
-
+// «الجديد اليوم» — the secretary digest. Items are code-computed facts (never
+// AI prose); each row deep-links into the surface holding the evidence.
+function TodayDigest({ items, t }: { items: BriefTodayItem[]; t: T }) {
   return (
-    <Popover>
-      <PopoverTrigger
-        className={cn(
-          "inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-shadow hover:ring-1 hover:ring-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-          tone,
-        )}
-      >
-        {body}
-      </PopoverTrigger>
-      <PopoverContent align="start" className="gap-2 text-xs">
-        <p className="font-semibold text-foreground">{t("changeDetail.title")}</p>
-        <p className="leading-relaxed text-foreground/80">{t(`changeDetail.why.${c.labelKey}`)}</p>
-        <p className="flex items-center gap-1.5 font-semibold tabular-nums text-foreground">
-          {t("changeDetail.fromTo", {
-            from: changeValueText(c, c.detail.from, t),
-            to: changeValueText(c, c.detail.to, t),
-          })}
-        </p>
-        {c.detail.sample && (
-          <p className="leading-relaxed tabular-nums text-foreground/80">
-            {t("changeDetail.sample", {
-              num: c.detail.sample.current.num,
-              den: c.detail.sample.current.den,
-              prevNum: c.detail.sample.previous.num,
-              prevDen: c.detail.sample.previous.den,
-            })}
-          </p>
-        )}
-        <p className="leading-relaxed text-muted-foreground">{t("changeDetail.period")}</p>
-        {c.detail.href && (
-          <Link
-            href={c.detail.href}
-            className="inline-flex w-fit items-center gap-0.5 font-medium text-cc-blue hover:underline"
-          >
-            {t("changeDetail.link")}
-            <ChevronLeft className="size-3.5" />
-          </Link>
-        )}
-      </PopoverContent>
-    </Popover>
+    <section>
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="flex size-6 items-center justify-center rounded-full bg-cyan-dim text-cyan">
+          <Newspaper className="size-3.5" />
+        </span>
+        <h3 className="text-sm font-bold">{t("todayTitle")}</h3>
+      </div>
+      <ul className="space-y-1">
+        {items.map((item) => {
+          const evidence = evidenceQueryForTodayItem(item.id);
+          return (
+            <li key={item.id} className="group -mx-2 flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-soft-1/40">
+              <span
+                className={cn("mt-1.5 size-2 shrink-0 rounded-full", TODAY_TONE[item.tone])}
+                aria-hidden
+              />
+              {item.href ? (
+                <Link
+                  href={item.href}
+                  className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/90 hover:text-foreground"
+                  data-private="client person"
+                >
+                  {item.text}
+                </Link>
+              ) : (
+                <span
+                  className="min-w-0 flex-1 text-xs leading-relaxed text-foreground/90"
+                  data-private="client person"
+                >
+                  {item.text}
+                </span>
+              )}
+              {evidence && <EvidenceDialog query={evidence} title={item.text} t={t} />}
+              {item.href && (
+                <Link href={item.href} aria-label={item.text}>
+                  <ChevronLeft className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground ltr:rotate-180" />
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -281,7 +412,7 @@ function BriefBody({
   const v = VERDICT[data.verdict];
   const VIcon = v.icon;
   // Tolerate older/partial cached briefs that predate a field.
-  const changes = data.changes ?? [];
+  const today = data.today ?? [];
   const risks = data.risks ?? [];
   // Cross-section analyst narrative. Streamed partial wins only while loading.
   const synthesis = synth.isLoading ? synth.object?.synthesis ?? data.synthesis : data.synthesis;
@@ -317,33 +448,58 @@ function BriefBody({
     }));
   }
 
+  // One button refreshes the whole narrative: the headline (trajectory — which
+  // also refreshes the code-computed «الجديد اليوم» digest) and the synthesis.
+  const narrative = {
+    isLoading: traj.isLoading || synth.isLoading,
+    run: () => {
+      traj.run();
+      synth.run();
+    },
+  };
+
   return (
     <div className="space-y-7">
-      {(synthesis || synth.isLoading || synth.error) && (
-        <div className="rounded-xl border border-cyan/20 bg-cyan-dim/40 p-4">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-cyan">
-                <Sparkles className="size-3.5" />
-                {t("synthesisTitle")}
-              </div>
-              {focus && focus !== "stable" && (
-                <span className="rounded-full bg-soft-2 px-2 py-0.5 text-[10px] font-medium text-foreground/70">
-                  {t("focusLabel")}: {t(`focus.${focus}`)}
-                </span>
-              )}
-            </div>
-            <ReanalyzeButton ctl={synth} t={t} disabled={busy} />
+      {today.length > 0 && <TodayDigest items={today} t={t} />}
+
+      {today.length > 0 && <div className="border-t border-soft/60" />}
+
+      <QSection
+        n={1}
+        title={t("q1")}
+        error={traj.error || synth.error ? t("sectionError") : null}
+        action={<ReanalyzeButton ctl={narrative} t={t} disabled={busy} />}
+      >
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Explained text={t("q1VerdictHelp")}>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold",
+                  v.chip,
+                )}
+              >
+                <VIcon className="size-3.5" />
+                {t(`verdict.${data.verdict}`)}
+              </span>
+            </Explained>
+            {focus && focus !== "stable" && (
+              <span className="rounded-full bg-soft-2 px-2 py-0.5 text-[10px] font-medium text-foreground/70">
+                {t("focusLabel")}: {t(`focus.${focus}`)}
+              </span>
+            )}
           </div>
-          {synth.error ? (
-            <p className="flex items-center gap-1.5 text-[11px] text-cc-red">
-              <AlertTriangle className="size-3" />
-              {t("sectionError")}
-            </p>
-          ) : (
+          <p
+            className={cn("text-sm leading-7 text-foreground/90", traj.isLoading && "animate-pulse")}
+            data-brief-field="headline"
+            data-private="client person"
+          >
+            {headline}
+          </p>
+          {(synthesis || synth.isLoading) && (
             <p
               className={cn(
-                "text-sm leading-7 text-foreground/90",
+                "text-sm leading-7 text-foreground/80",
                 synth.isLoading && "animate-pulse",
               )}
               data-brief-field="synthesis"
@@ -356,58 +512,6 @@ function BriefBody({
             </p>
           )}
         </div>
-      )}
-
-      <QSection
-        n={1}
-        title={t("q1")}
-        error={traj.error ? t("sectionError") : null}
-        action={<ReanalyzeButton ctl={traj} t={t} disabled={busy} />}
-      >
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          <Explained text={t("q1ScoreHelp")}>
-            <div
-              className={cn(
-                "flex size-[60px] shrink-0 flex-col items-center justify-center rounded-full bg-card ring-2 ring-inset",
-                v.ring,
-              )}
-            >
-              <span className={cn("text-lg font-extrabold leading-none tabular-nums", v.accent)}>
-                {data.statusPct}%
-              </span>
-              <span className="mt-0.5 text-[9px] text-muted-foreground">{data.grade}</span>
-            </div>
-          </Explained>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <Explained text={t("q1VerdictHelp")}>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold",
-                  v.chip,
-                )}
-              >
-                <VIcon className="size-3.5" />
-                {t(`verdict.${data.verdict}`)}
-              </span>
-            </Explained>
-            <p
-              className={cn("text-sm leading-7 text-foreground/90", traj.isLoading && "animate-pulse")}
-              data-brief-field="headline"
-              data-private="client person"
-            >
-              {headline}
-            </p>
-          </div>
-        </div>
-
-        {changes.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <MetricInfo text={t("q1ChangesHelp")} label={t("q1")} />
-            {changes.map((c, i) => (
-              <ChangePill key={i} c={c} t={t} />
-            ))}
-          </div>
-        )}
       </QSection>
 
       <div className="border-t border-soft/60" />
@@ -464,6 +568,12 @@ function BriefBody({
                         </span>
                       )}
                       <MetricInfo text={t("riskHelp")} label={t(`severity.${r.severity}`)} />
+                      {(() => {
+                        const evidence = evidenceQueryForRisk(r.id, r.entityId);
+                        return evidence ? (
+                          <EvidenceDialog query={evidence} title={r.title} t={t} />
+                        ) : null;
+                      })()}
                     </div>
                     {r.href ? (
                       <Link

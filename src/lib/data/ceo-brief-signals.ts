@@ -5,7 +5,6 @@ import { buildCeoBriefData } from "@/lib/brief/data";
 import { getTeamActivityOverview } from "@/lib/data/activity-scores";
 import {
   getPulseStats,
-  getTopStuckProjects,
   getApprovalBottlenecks,
   getClientHealth,
   getPerformerLeaderboard,
@@ -21,6 +20,8 @@ import {
   refreshMonthlyDashboard,
   getMonthlyDashboard,
 } from "@/lib/data/contracts";
+import { SLA_STAGES } from "@/lib/data/sla";
+import { riyadhDaysAgoIso } from "@/lib/tz";
 
 // =========================================================================
 // CEO Brief — deterministic signal builder.
@@ -138,6 +139,13 @@ export interface CeoBriefContext {
   bestClients: Array<{ name: string; onTimePct: number | null }>;
   discipline: { staleTasks: number; slaCompliancePct: number | null };
   reworkRate: number; // 0..1 — for "is the process looping?"
+  // The brief's ONE definition of متأخرة: tasks currently over their stage SLA.
+  slaLate: {
+    taskCount: number;
+    projectCount: number;
+    newToday: number;
+    topProjects: Array<{ project: string; client: string | null; lateCount: number }>;
+  };
   // Per-DEPARTMENT load imbalance so the action plan only ever proposes
   // SAME-department task rebalancing (a Social-Media task can't go to SEO).
   departmentCapacity: DepartmentCapacityRow[];
@@ -199,6 +207,7 @@ export interface CeoBriefSignals {
   emphasis: BriefEmphasis; // code-computed focus/hero hint (no model input)
   changes: BriefChange[];
   risks: BriefRisk[];
+  today: BriefTodayItem[]; // «الجديد اليوم» — code-computed secretary digest
   criticalEvents: BriefEvent[];
   timelineEvents: BriefEvent[];
   opportunities: CeoBriefOpportunities;
@@ -207,6 +216,250 @@ export interface CeoBriefSignals {
   // The AI generation prompt injects `dataQuality.caveats` so the model never
   // states an unbacked metric (e.g. on-time % with no due dates) as fact.
   dataQuality: AiDataQuality;
+}
+
+// ---- "متأخرة" = stage-SLA breach ----------------------------------------
+// The dashboard carries TWO meanings of "overdue": the task passed its delivery
+// deadline (planned_date), and the task has been sitting in its current stage
+// longer than that stage's SLA (sla_rules, per the templates). The team decided
+// the BRIEF speaks the SLA meaning — it's the actionable "who is sitting on
+// what right now" signal — so every risk/event below that says متأخرة reads
+// from this loader, never from planned_date. See [[late-metric-scoping]].
+
+export const SLA_STAGE_LABEL: Record<string, string> = Object.fromEntries(
+  SLA_STAGES.map((s) => [s.key, s.label]),
+);
+
+// One working day in business minutes — used to approximate "breached since
+// yesterday" (excess over the limit still under a day's worth of work time).
+const BUSINESS_MINUTES_PER_DAY = 480;
+
+export interface BriefSlaLate {
+  taskCount: number;
+  projectCount: number;
+  newToday: number; // breaches younger than ~1 working day
+  topProjects: Array<{
+    projectId: string;
+    projectName: string;
+    clientId: string | null;
+    clientName: string | null;
+    lateCount: number;
+    openCount: number;
+  }>;
+  topClients: Array<{ clientId: string; clientName: string; lateCount: number }>;
+  worstTasks: Array<{
+    taskId: string;
+    title: string;
+    taskCode: string | null;
+    stage: string;
+    clientName: string | null;
+    excessMinutes: number;
+  }>;
+}
+
+const EMPTY_SLA_LATE: BriefSlaLate = {
+  taskCount: 0,
+  projectCount: 0,
+  newToday: 0,
+  topProjects: [],
+  topClients: [],
+  worstTasks: [],
+};
+
+// agent_run_readonly_sql (0126): single SELECT/WITH, no semicolons, and a
+// word-boundary blocklist of write/DDL keywords that matches even inside
+// comments and aliases — keep those words out of the SQL text entirely.
+async function runSql<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+  const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
+    p_sql: sql.trim(),
+  });
+  if (error) throw new Error(`brief sla-late query failed: ${error.message}`);
+  return (data ?? []) as T[];
+}
+
+export interface SlaLateSqlRow {
+  task_id: string;
+  title: string | null;
+  task_code: string | null;
+  stage: string;
+  excess_min: number;
+  project_id: string;
+  project_name: string;
+  client_id: string | null;
+  client_name: string | null;
+  open_count: number;
+}
+
+// The one query behind every SLA-late number in the brief. Exported so the
+// evidence API (the "show details" modal) lists the EXACT rows this loader
+// aggregated — the headline count and its breakdown can never disagree.
+//
+// Sourced from task_stage_history's OPEN intervals (the task's current stage),
+// preferring the precomputed dwell cache but FALLING BACK to computing the
+// business minutes live when the cache row is missing: the hourly Odoo sync
+// rewrites history delete-then-insert, which cascade-drops dwell rows until
+// the next */10 refresh — reading the cache alone made every SLA-late number
+// transiently collapse to 0 right after a sync (observed live 11:30). The
+// fallback fires only for the few uncached open SLA-stage rows, so the slow
+// plpgsql helper runs at most a few dozen times.
+export async function querySlaLateRows(
+  orgId: string,
+  opts: { projectId?: string; clientId?: string } = {},
+): Promise<SlaLateSqlRow[]> {
+  const uuidRe = /^[0-9a-f-]{36}$/i;
+  const scope = [
+    opts.projectId && uuidRe.test(opts.projectId) ? `and t.project_id = '${opts.projectId}'` : "",
+    opts.clientId && uuidRe.test(opts.clientId) ? `and p.client_id = '${opts.clientId}'` : "",
+  ]
+    .filter(Boolean)
+    .join("\n     ");
+  const sql = `
+with open_sla as (
+  select h.task_id, h.to_stage::text as stage,
+         coalesce(
+           d.dwell_business_minutes,
+           public.business_minutes_between(h.entered_at, now())::int
+         ) as dwell_min,
+         r.max_minutes
+    from task_stage_history h
+    join sla_rules r on r.organization_id = h.organization_id and r.stage_key = h.to_stage::text
+    left join task_stage_dwell d on d.history_id = h.id
+   where h.organization_id = '${orgId}'
+     and h.exited_at is null
+), late as (
+  select o.task_id, o.stage,
+         (o.dwell_min - o.max_minutes)::int as excess_min,
+         t.title, t.task_code, t.project_id,
+         p.name as project_name, p.client_id, c.name as client_name
+    from open_sla o
+    join tasks t on t.id = o.task_id
+    join projects p on p.id = t.project_id
+    left join clients c on c.id = p.client_id
+   where o.dwell_min > o.max_minutes
+     and t.archived_at is null
+     and t.stage <> 'done'
+     and p.status <> 'archived'
+     ${scope}
+), open_counts as (
+  select t.project_id, count(*)::int as open_count
+    from tasks t
+   where t.organization_id = '${orgId}'
+     and t.archived_at is null
+     and t.stage <> 'done'
+     and t.project_id in (select distinct project_id from late)
+   group by t.project_id
+)
+select l.task_id, l.title, l.task_code, l.stage, l.excess_min,
+       l.project_id, l.project_name, l.client_id, l.client_name,
+       oc.open_count
+  from late l
+  join open_counts oc on oc.project_id = l.project_id
+ order by l.excess_min desc
+ limit 500`;
+  return runSql<SlaLateSqlRow>(sql);
+}
+
+async function loadSlaLate(orgId: string): Promise<BriefSlaLate> {
+
+  // Even though buildCeoBriefSignals runs this loader before its parallel
+  // burst, other surfaces (Team Pulse refresh, accountability cache crons) can
+  // still contend it past the RPC's 12s statement timeout — it runs in ~2s
+  // alone. One delayed retry lands after the burst has drained.
+  let rows: SlaLateSqlRow[];
+  try {
+    rows = await querySlaLateRows(orgId);
+  } catch {
+    try {
+      await new Promise((r) => setTimeout(r, 5000));
+      rows = await querySlaLateRows(orgId);
+    } catch (e) {
+      console.error("[ceo-brief-signals] loadSlaLate failed (after retry):", e);
+      return EMPTY_SLA_LATE;
+    }
+  }
+  if (rows.length === 0) return EMPTY_SLA_LATE;
+
+  const byProject = new Map<string, BriefSlaLate["topProjects"][number]>();
+  const byClient = new Map<string, { clientId: string; clientName: string; lateCount: number }>();
+  for (const r of rows) {
+    const p = byProject.get(r.project_id) ?? {
+      projectId: r.project_id,
+      projectName: r.project_name,
+      clientId: r.client_id,
+      clientName: r.client_name,
+      lateCount: 0,
+      openCount: r.open_count,
+    };
+    p.lateCount += 1;
+    byProject.set(r.project_id, p);
+    if (r.client_id) {
+      const c = byClient.get(r.client_id) ?? {
+        clientId: r.client_id,
+        clientName: r.client_name ?? "—",
+        lateCount: 0,
+      };
+      c.lateCount += 1;
+      byClient.set(r.client_id, c);
+    }
+  }
+
+  return {
+    taskCount: rows.length,
+    projectCount: byProject.size,
+    newToday: rows.filter((r) => r.excess_min <= BUSINESS_MINUTES_PER_DAY).length,
+    topProjects: [...byProject.values()].sort((a, b) => b.lateCount - a.lateCount).slice(0, 3),
+    topClients: [...byClient.values()].sort((a, b) => b.lateCount - a.lateCount).slice(0, 3),
+    worstTasks: rows.slice(0, 25).map((r) => ({
+      taskId: r.task_id,
+      title: r.title ?? "مهمة",
+      taskCode: r.task_code,
+      stage: r.stage,
+      clientName: r.client_name,
+      excessMinutes: r.excess_min,
+    })),
+  };
+}
+
+// ---- «الجديد اليوم» — the secretary digest -------------------------------
+// Code-computed, newsy facts since yesterday: what got done, what newly broke
+// its stage SLA, what arrived from clients, what money moved. Rendered
+// verbatim by the card (no AI wording) with a deep link per item.
+
+export interface BriefTodayItem {
+  id: string;
+  text: string; // Arabic, code-built — same convention as risk titles/metrics
+  href: string | null;
+  tone: "good" | "bad" | "info";
+}
+
+async function loadTodayCounts(orgId: string): Promise<{
+  doneSinceYesterday: number;
+  collectedSinceYesterday: { count: number; value: number };
+}> {
+  const yesterday = riyadhDaysAgoIso(1);
+  const [doneRes, paidRes] = await Promise.all([
+    supabaseAdmin
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", orgId)
+      .eq("stage", "done")
+      .is("archived_at", null)
+      .gte("actual_done_date", yesterday),
+    supabaseAdmin
+      .from("installments")
+      .select("actual_amount")
+      .eq("organization_id", orgId)
+      .gte("actual_date", yesterday)
+      .gt("actual_amount", 0),
+  ]);
+  const paid = (paidRes.data ?? []) as Array<{ actual_amount: number | string | null }>;
+  return {
+    doneSinceYesterday: doneRes.count ?? 0,
+    collectedSinceYesterday: {
+      count: paid.length,
+      value: paid.reduce((acc, r) => acc + (Number(r.actual_amount) || 0), 0),
+    },
+  };
 }
 
 // ---- helpers -------------------------------------------------------------
@@ -407,30 +660,24 @@ async function loadBriefTimelineEvents(
   orgId: string,
   risks: BriefRisk[],
   runDate: string,
-): Promise<{ criticalEvents: BriefEvent[]; timelineEvents: BriefEvent[] }> {
-  const [analysisRes, tasksRes] = await Promise.all([
-    supabaseAdmin
-      .from("client_satisfaction_analyses")
-      .select("id, client_id, created_at, highlights, risks, satisfaction_score, sentiment, client:clients!inner(name)")
-      .eq("organization_id", orgId)
-      .eq("is_current", true)
-      .order("created_at", { ascending: false })
-      .limit(40),
-    supabaseAdmin
-      .from("tasks")
-      .select(
-        "id, task_code, title, delay_days, due_date, stage_entered_at, project:projects!inner(id, name, project_code, status, client:clients!inner(name))",
-      )
-      .eq("organization_id", orgId)
-      // Overdue = open task past deadline (team's Rwasem method), not the buggy
-      // is_overdue field. runDate is the brief's "today".
-      .neq("stage", "done")
-      .lt("planned_date", runDate.slice(0, 10))
-      .is("archived_at", null)
-      .neq("project.status", "archived")
-      .order("delay_days", { ascending: false, nullsFirst: false })
-      .limit(25),
-  ]);
+  slaLate: BriefSlaLate,
+): Promise<{
+  criticalEvents: BriefEvent[];
+  timelineEvents: BriefEvent[];
+  // «الجديد اليوم» complaints item — counted PRE-cap from actual client-group
+  // complaint/escalation highlights only. Counting from the capped timeline
+  // mixed in AI risk-summary events (dated by analysis time, not message time)
+  // and truncated at 80, so the digest number matched neither its label nor
+  // the evidence modal (claimed 7 when real in-window complaints were 3).
+  freshComplaints: { count: number; latestTitle: string | null };
+}> {
+  const analysisRes = await supabaseAdmin
+    .from("client_satisfaction_analyses")
+    .select("id, client_id, created_at, highlights, risks, satisfaction_score, sentiment, client:clients!inner(name)")
+    .eq("organization_id", orgId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(40);
 
   const events: BriefEvent[] = [];
 
@@ -450,6 +697,8 @@ async function loadBriefTimelineEvents(
     sentiment: string | null;
     client: { name: string } | { name: string }[] | null;
   };
+  const complaintCutoff = riyadhDaysAgoIso(2);
+  const complaintPool: Array<{ date: string; title: string }> = [];
   for (const row of (analysisRes.data ?? []) as unknown as AnalysisRow[]) {
     const client = Array.isArray(row.client) ? row.client[0] : row.client;
     const clientName = client?.name ?? "—";
@@ -467,10 +716,21 @@ async function loadBriefTimelineEvents(
             : category === "internal" || category === "delay"
               ? "medium"
               : "low";
+      const date = highlight.date ?? row.created_at;
+      // ACTUAL client-group complaints in-window (highlight-dated, not the
+      // AI risk-summary rows below, which carry the analysis date) — this is
+      // the population the digest item claims and the evidence modal lists.
+      if (
+        audience !== "team" &&
+        (type === "complaint" || type === "escalation") &&
+        date >= complaintCutoff
+      ) {
+        complaintPool.push({ date, title: `${clientName}: ${text}` });
+      }
       events.push({
         id: `sat-${row.id}-${i}`,
         title: `${clientName}: ${text}`,
-        date: highlight.date ?? row.created_at,
+        date,
         source: audience === "team" ? "technical_group" : "client_group",
         category,
         severity,
@@ -495,41 +755,25 @@ async function loadBriefTimelineEvents(
     }
   }
 
-  type TaskRow = {
-    id: string;
-    task_code: string | null;
-    title: string | null;
-    delay_days: number | null;
-    due_date: string | null;
-    stage_entered_at: string | null;
-    project:
-      | {
-          id: string;
-          name: string;
-          project_code: string | null;
-          client: { name: string } | { name: string }[] | null;
-        }
-      | {
-          id: string;
-          name: string;
-          project_code: string | null;
-          client: { name: string } | { name: string }[] | null;
-        }[]
-      | null;
-  };
-  for (const row of (tasksRes.data ?? []) as unknown as TaskRow[]) {
-    const project = Array.isArray(row.project) ? row.project[0] : row.project;
-    const client = Array.isArray(project?.client) ? project?.client[0] : project?.client;
-    const delay = row.delay_days ?? 0;
-    const taskLabel = [row.task_code, row.title].filter(Boolean).join(" · ");
+  // Late = the SLA meaning (stage dwell over the template limit), NOT the
+  // delivery deadline — the brief carries one definition of متأخرة only.
+  for (const t of slaLate.worstTasks) {
+    const taskLabel = [t.taskCode, t.title].filter(Boolean).join(" · ");
+    const stageLabel = SLA_STAGE_LABEL[t.stage] ?? t.stage;
+    const excessHours = Math.round(t.excessMinutes / 60);
     events.push({
-      id: `task-${row.id}`,
-      title: `${client?.name ?? "—"}: ${taskLabel || "مهمة متأخرة"}${delay > 0 ? ` (${delay} يوم)` : ""}`,
-      date: row.due_date ?? row.stage_entered_at ?? runDate,
+      id: `task-${t.taskId}`,
+      title: `${t.clientName ?? "—"}: ${taskLabel || "مهمة"} — متجاوزة مهلة «${stageLabel}» بـ ${excessHours} ساعة عمل`,
+      date: runDate,
       source: "system",
       category: "delay",
-      severity: delay >= 7 ? "critical" : delay >= 3 ? "high" : "medium",
-      href: `/tasks/${row.id}`,
+      severity:
+        t.excessMinutes >= BUSINESS_MINUTES_PER_DAY * 2
+          ? "critical"
+          : t.excessMinutes >= BUSINESS_MINUTES_PER_DAY
+            ? "high"
+            : "medium",
+      href: `/tasks/${t.taskId}`,
     });
   }
 
@@ -544,7 +788,15 @@ async function loadBriefTimelineEvents(
     .filter((event) => event.severity === "critical" || event.severity === "high")
     .slice(0, 10);
 
-  return { criticalEvents, timelineEvents };
+  complaintPool.sort((a, b) => b.date.localeCompare(a.date));
+  return {
+    criticalEvents,
+    timelineEvents,
+    freshComplaints: {
+      count: complaintPool.length,
+      latestTitle: complaintPool[0]?.title ?? null,
+    },
+  };
 }
 
 // ---- main ----------------------------------------------------------------
@@ -582,11 +834,16 @@ async function loadRenewalPipeline(
 }
 
 export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSignals> {
+  // Run ALONE, before the parallel burst below: the ~18 concurrent loaders
+  // (several heavy accountability aggregations) create enough DB contention to
+  // blow this query past the RPC's 12s statement timeout, even though it runs
+  // in ~2s uncontended. Serializing it costs ~2s and removes the flake.
+  const slaLate = await loadSlaLate(orgId);
+
   const [
     scores,
     briefData,
     pulse,
-    stuck,
     bottlenecks,
     clientHealth,
     activity,
@@ -601,11 +858,11 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     deliveryWindow,
     deptCapacity,
     renewalPipeline,
+    todayCounts,
   ] = await Promise.all([
     getExecutiveScores(orgId),
     buildCeoBriefData(orgId),
     getPulseStats(orgId),
-    getTopStuckProjects(orgId),
     getApprovalBottlenecks(orgId),
     getClientHealth(orgId),
     getTeamActivityOverview(orgId),
@@ -620,6 +877,10 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     loadDeliveryWindow(orgId),
     getDepartmentCapacity(orgId).catch(() => []),
     loadRenewalPipeline(orgId),
+    loadTodayCounts(orgId).catch(() => ({
+      doneSinceYesterday: 0,
+      collectedSinceYesterday: { count: 0, value: 0 },
+    })),
   ]);
 
   const statusPct = Math.round(scores.stability.score);
@@ -765,34 +1026,24 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   // ── Risks (where is the danger), ranked by weight ──────────────────────
   const risks: BriefRisk[] = [];
 
-  // Agency-wide delivery slip — the systemic signal. Uses the real overdue load
-  // (from tasks, via executive-scores) + the snapshot on-time trend. This is the
-  // risk that was previously invisible because the hero overdue metric read 0.
-  const overdueCount = scores.delivery.overdueCount;
-  const lateProjects = scores.delivery.lateProjects;
-  const onTimePct = scores.delivery.onTimePct;
-  const onTimeDrop =
-    snap && snap.onTimeNow != null && snap.onTimePrev != null
-      ? Math.round(snap.onTimePrev - snap.onTimeNow) // positive = declined
-      : null;
-  if (overdueCount >= 20 || (onTimeDrop != null && onTimeDrop >= 5)) {
+  // Agency-wide delivery slip — the systemic signal, in the brief's ONE meaning
+  // of متأخرة: tasks currently held past their stage's SLA (sla_rules, per the
+  // templates) — NOT the delivery deadline (that count lives on the dashboard
+  // KPIs already, with its own definition).
+  if (slaLate.taskCount >= 10) {
     const esc = scores.stability.unackEscalations;
-    const parts = [`${overdueCount} مهمة متأخرة في ${lateProjects} مشروع`];
-    // On-time % and the weekly trend are snapshot/due-date derived — only quote
-    // them when the data actually backs them, else they read as confident noise.
-    if (onTimePct != null && dataQuality.onTimePct.level !== "missing")
-      parts.push(`الالتزام ${Math.round(onTimePct)}%`);
-    if (onTimeDrop != null && onTimeDrop > 0 && dataQuality.weekOverWeek.level === "reliable")
-      parts.push(`متراجع ${onTimeDrop} نقطة هذا الأسبوع`);
+    const parts = [
+      `${slaLate.taskCount} مهمة متجاوزة مهلة مرحلتها (SLA) في ${slaLate.projectCount} مشروع`,
+    ];
+    if (slaLate.newToday > 0) parts.push(`${slaLate.newToday} منها تجاوزت المهلة اليوم`);
     if (esc > 0) parts.push(`${esc} تصعيد غير معالَج`);
     risks.push({
       id: "delivery_slip",
-      title: "تراجع الالتزام بالتسليم على مستوى الوكالة",
-      severity:
-        (onTimePct != null && onTimePct < 50) || overdueCount >= 150 ? "critical" : "high",
+      title: "مهام معلّقة تجاوزت مهلة مراحلها",
+      severity: slaLate.taskCount >= 60 ? "critical" : "high",
       metric: parts.join(" · "),
-      href: "/tasks?view=list&filter=overdue",
-      weight: overdueCount * 0.5 + lateProjects * 2 + (onTimeDrop ?? 0),
+      href: "/accountability",
+      weight: slaLate.taskCount * 0.5 + slaLate.projectCount * 2,
     });
   }
 
@@ -828,31 +1079,25 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   }
 
   // Track the client behind the stuck-project card so the client-level
-  // "at-risk client" card below doesn't restate the SAME overdue load as a
+  // "at-risk client" card below doesn't restate the SAME late load as a
   // second risk (e.g. a single-project client surfaces identically as both
   // "مشروع … متعثّر" and "العميل … في منطقة الخطر").
+  // "Stuck" speaks the same SLA meaning: the project holding the most tasks
+  // past their stage limit right now.
   let stuckProjectClientId: string | null = null;
-  const topStuck = stuck[0];
-  if (topStuck && (topStuck.overdueTasks > 0 || topStuck.worstSlipPercent >= 20)) {
+  const topStuck = slaLate.topProjects[0];
+  if (topStuck && topStuck.lateCount >= 3) {
     stuckProjectClientId = topStuck.clientId;
-    const slip = Math.round(topStuck.worstSlipPercent);
-    const severity =
-      slip >= 50 || topStuck.overdueTasks >= 5
-        ? "critical"
-        : slip >= 20 || topStuck.overdueTasks >= 2
-          ? "high"
-          : "medium";
-    const idleDays = topStuck.daysSinceActivity ?? 0;
-    const idle = idleDays > 0 ? ` · ${idleDays} يوم بلا نشاط` : "";
+    const severity = topStuck.lateCount >= 8 ? "critical" : topStuck.lateCount >= 4 ? "high" : "medium";
     const client = topStuck.clientName ? ` · ${topStuck.clientName}` : "";
     risks.push({
       id: "stuck_project",
       title: `مشروع ${topStuck.projectName} متعثّر`,
       severity,
-      metric: `${topStuck.overdueTasks} متأخرة من ${topStuck.openTasks} مفتوحة · انزلاق ${slip}%${idle}${client}`,
-      href: `/tasks?view=list&projectId=${topStuck.projectId}&filter=overdue`,
+      metric: `${topStuck.lateCount} مهمة متجاوزة مهلة مرحلتها من ${topStuck.openCount} مفتوحة${client}`,
+      href: `/tasks?view=list&projectId=${topStuck.projectId}`,
       entityId: topStuck.projectId,
-      weight: topStuck.overdueTasks * 3 + slip,
+      weight: topStuck.lateCount * 3,
     });
   }
 
@@ -897,34 +1142,29 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: "دفعات متأخرة التحصيل",
       severity: val >= 50000 ? "critical" : val >= 10000 ? "high" : "medium",
       metric: `${clients} عميل · ${briefData.money.overdueInstallments} دفعة متأخرة بقيمة ${val.toLocaleString("en-US")} ريال`,
-      // Opens the EXACT contracts behind these installments (not the renewal-
-      // overdue list `target=Overdue`, which is an unrelated population).
-      href: "/contracts?view=table&pay=overdue",
+      // Evidence lives on لوحة الإيرادات: its overdue-installment cards use the
+      // SAME contracts-engine formula (0168/0172) as this number, listing the
+      // exact clients. (The table view has no installment-overdue filter — a
+      // `pay=overdue` param there is silently ignored.)
+      href: "/contracts?view=dashboard",
       weight: 50 + Math.min(60, val / 3000),
     });
   }
 
-  // Driven by overdue load (reliable). On-time % only shown when backed by a
-  // real sample (≥3 deliveries) — a "0%" from a single delivery is noise.
-  // Suppressed when this client is already represented by the stuck-project card
-  // above (same client → same overdue tasks → duplicate card); the project card
-  // is kept because it's more specific (names the project, slip %, idle days).
-  const worstClient = clientHealth.worst[0];
-  if (
-    worstClient &&
-    worstClient.overdueTaskCount >= 3 &&
-    worstClient.clientId !== stuckProjectClientId
-  ) {
-    const ot = worstClient.onTimePct30d;
-    const showOt = ot != null && worstClient.deliveredCount30d >= 3;
+  // Worst client by the same SLA meaning. Suppressed when this client is
+  // already represented by the stuck-project card above (same client → same
+  // late tasks → duplicate card); the project card is kept because it's more
+  // specific (names the project).
+  const worstClient = slaLate.topClients.find((c) => c.clientId !== stuckProjectClientId);
+  if (worstClient && worstClient.lateCount >= 3) {
     risks.push({
       id: "at_risk_client",
       title: `العميل ${worstClient.clientName} في منطقة الخطر`,
-      severity: worstClient.overdueTaskCount >= 10 ? "high" : "medium",
-      metric: `${showOt ? `التزام ${ot}% · ` : ""}${worstClient.overdueTaskCount} مهمة متأخرة`,
+      severity: worstClient.lateCount >= 8 ? "high" : "medium",
+      metric: `${worstClient.lateCount} مهمة متجاوزة مهلة مرحلتها`,
       href: `/satisfaction?client=${worstClient.clientId}`,
       entityId: worstClient.clientId,
-      weight: 9 + worstClient.overdueTaskCount * 2 + (showOt ? (100 - ot) / 5 : 0),
+      weight: 9 + worstClient.lateCount * 2,
     });
   }
 
@@ -1033,9 +1273,78 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     },
     reworkRate: scores.quality.reworkRate,
     departmentCapacity: deptCapacity,
+    slaLate: {
+      taskCount: slaLate.taskCount,
+      projectCount: slaLate.projectCount,
+      newToday: slaLate.newToday,
+      topProjects: slaLate.topProjects.map((p) => ({
+        project: p.projectName,
+        client: p.clientName,
+        lateCount: p.lateCount,
+      })),
+    },
   };
 
-  const eventPack = await loadBriefTimelineEvents(orgId, activeRisks.slice(0, 5), new Date().toISOString());
+  const eventPack = await loadBriefTimelineEvents(
+    orgId,
+    activeRisks.slice(0, 5),
+    new Date().toISOString(),
+    slaLate,
+  );
+
+  // ── «الجديد اليوم» — the secretary digest ──────────────────────────────
+  // Newsy, code-computed facts since yesterday: rendered verbatim by the card
+  // with a deep link each. The AI never words these — a wrong "news" line is
+  // worse than a plain one.
+  const today: BriefTodayItem[] = [];
+  if (slaLate.newToday > 0) {
+    today.push({
+      id: "sla-new",
+      text: `${slaLate.newToday} مهمة تجاوزت مهلة مرحلتها منذ الأمس (الإجمالي المعلّق: ${slaLate.taskCount})`,
+      href: "/accountability",
+      tone: "bad",
+    });
+  }
+  if (todayCounts.doneSinceYesterday > 0) {
+    today.push({
+      id: "done",
+      text: `أُنجزت ${todayCounts.doneSinceYesterday} مهمة منذ الأمس`,
+      href: "/tasks?view=list&f=completed_week",
+      tone: "good",
+    });
+  }
+  if (eventPack.freshComplaints.count > 0) {
+    const latest = eventPack.freshComplaints.latestTitle;
+    today.push({
+      id: "complaints",
+      text: `${eventPack.freshComplaints.count} شكوى/تصعيد من مجموعات العملاء خلال آخر يومين${latest ? ` — أحدثها: ${latest}` : ""}`,
+      href: "/satisfaction",
+      tone: "bad",
+    });
+  }
+  if (todayCounts.collectedSinceYesterday.count > 0) {
+    today.push({
+      id: "collected",
+      text: `حُصِّلت ${todayCounts.collectedSinceYesterday.count} دفعة بقيمة ${Math.round(
+        todayCounts.collectedSinceYesterday.value,
+      ).toLocaleString("en-US")} ريال منذ الأمس`,
+      href: "/contracts?view=table",
+      tone: "good",
+    });
+  }
+  if (renewalPipeline.count > 0) {
+    today.push({
+      id: "renewals",
+      text: `${renewalPipeline.count} عقدًا في مسار التجديد هذا الشهر بقيمة متوقعة ${Math.round(
+        renewalPipeline.value,
+      ).toLocaleString("en-US")} ريال`,
+      href: "/contracts",
+      tone: "info",
+    });
+  }
+  if (today.length === 0) {
+    today.push({ id: "quiet", text: "لا مستجدات تُذكر منذ الأمس", href: null, tone: "info" });
+  }
 
   const finalRisks = activeRisks.slice(0, 5);
   return {
@@ -1045,6 +1354,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     emphasis: computeEmphasis(finalRisks, verdict),
     changes: changes.slice(0, 5),
     risks: finalRisks,
+    today: today.slice(0, 6),
     criticalEvents: eventPack.criticalEvents,
     timelineEvents: eventPack.timelineEvents,
     opportunities,
