@@ -32,6 +32,11 @@ type Status =
   | "CONNECTED"
   | "DISCONNECTED"
   | "FAILED"
+  // getSessionInfo returns these when the gateway call itself fails. They were
+  // missing from the pill map below, so the card fell through to "LOADING" and
+  // span forever — a dead gateway read as "still loading" instead of a fault.
+  | "UNREACHABLE"
+  | "NOT_CONFIGURED"
   | "LOADING";
 
 interface Account {
@@ -97,11 +102,22 @@ export function ConnectWorkspace({ primarySession }: { primarySession: string })
     }
   }, []);
 
+  // The gateway throttles: each poll costs one status call PER connected
+  // number, so a fixed 4s beat from a single open tab was enough to earn a 429
+  // — which the page then rendered as a permanently "loading" card. Poll fast
+  // only while something is actually changing (a QR waiting to be scanned, a
+  // session mid-handshake); otherwise fall back to a calm beat.
+  const needsFastPoll = (accounts ?? []).some(
+    (a) =>
+      a.status === "SCAN_QR" ||
+      a.status === "CONNECTING" ||
+      a.status === "INITIALIZING",
+  );
   useEffect(() => {
     poll();
-    const id = setInterval(poll, 4000);
+    const id = setInterval(poll, needsFastPoll ? 4000 : 20000);
     return () => clearInterval(id);
-  }, [poll]);
+  }, [poll, needsFastPoll]);
 
   const addNumber = async () => {
     setError(null);
@@ -547,6 +563,8 @@ function StatusPill({ status, t }: { status: Status; t: ReturnType<typeof useTra
     DISCONNECTED: { tone: "text-muted-foreground bg-soft-1", label: t("state.disconnected") },
     NOT_CREATED: { tone: "text-muted-foreground bg-soft-1", label: t("state.disconnected") },
     FAILED: { tone: "text-cc-red bg-red-dim", label: t("state.failed") },
+    UNREACHABLE: { tone: "text-cc-red bg-red-dim", label: t("state.unreachable") },
+    NOT_CONFIGURED: { tone: "text-cc-red bg-red-dim", label: t("state.notConfigured") },
     LOADING: { tone: "text-muted-foreground bg-soft-1", label: t("state.loading") },
   };
   const m = map[status] ?? map.LOADING;
