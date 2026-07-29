@@ -19,8 +19,10 @@ type RiskNote = RisksAi["riskNotes"][number];
 
 // Rebuild the rendered risk array from the CURRENT code-computed signals, then
 // overlay each AI interpretation by id (robust to ordering). A risk with no
-// matching note falls back to its metric string. Used server-side where the
-// fresh signal risks are authoritative (e.g. dismissed risks already removed).
+// matching note gets an EMPTY interpretation — never the metric string: the
+// brief is text-only guidance (team rule 2026-07-28) and the metric is numeric,
+// so falling back to it would put numbers back on the card. Used server-side
+// where the fresh signal risks are authoritative (dismissed risks removed).
 export function mergeRisks(
   signalRisks: BriefRisk[],
   notes: RiskNote[],
@@ -29,7 +31,7 @@ export function mergeRisks(
   return signalRisks.map((r) => {
     const { weight, ...rest } = r;
     void weight;
-    return { ...rest, interpretation: noteById.get(r.id)?.interpretation ?? r.metric };
+    return { ...rest, interpretation: noteById.get(r.id)?.interpretation ?? "" };
   });
 }
 

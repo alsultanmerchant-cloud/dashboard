@@ -385,3 +385,29 @@
     transition: none;
   }
 }
+
+/* ── Brief deep-link arrival highlight ──────────────────────────────────────
+   The CEO brief routes each guidance row to the exact card holding its
+   numbers via #fragment links. When that section is the URL :target, pulse a
+   soft ring so the eye lands on the right card immediately. */
+.target-highlight:target {
+  animation: target-pulse 2.4s ease-out 1;
+  border-radius: 1rem;
+}
+
+@keyframes target-pulse {
+  0% {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-cyan, #22d3ee) 65%, transparent);
+    background-color: color-mix(in oklab, var(--color-cyan, #22d3ee) 10%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .target-highlight:target {
+    animation: none;
+  }
+}

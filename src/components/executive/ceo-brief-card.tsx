@@ -543,10 +543,13 @@ function BriefBody({
                 >
                   <span className={cn("w-1 shrink-0", sev.bar)} aria-hidden />
                   <div className="min-w-0 flex-1 py-3.5">
-                    {/* Title + metric are the click target (navigate to the
-                        scoped evidence). The interpretation below stays a plain
-                        <p> so its AI-written text remains selectable for inline
-                        editing, and the info icon keeps its own popover. */}
+                    {/* Title is the click target (navigate to the scoped
+                        evidence). The numeric metric line is intentionally NOT
+                        rendered — the brief is text-only guidance (team rule
+                        2026-07-28); its numbers live in the التفاصيل modal and
+                        behind the drill-down links. The interpretation below
+                        stays a plain <p> so its AI-written text remains
+                        selectable for inline editing. */}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       {r.href ? (
                         <Link
@@ -575,27 +578,18 @@ function BriefBody({
                         ) : null;
                       })()}
                     </div>
-                    {r.href ? (
-                      <Link
-                        href={r.href}
-                        className="mt-1 block w-fit text-[11px] tabular-nums text-muted-foreground transition-colors hover:text-foreground"
+                    {interpretation && (
+                      <p
+                        className={cn(
+                          "mt-1.5 text-xs leading-relaxed text-foreground/85",
+                          risksCtl.isLoading && "animate-pulse",
+                        )}
+                        data-brief-field={`risk:${r.id}`}
                         data-private="client person"
                       >
-                        {r.metric}
-                      </Link>
-                    ) : (
-                      <p className="mt-1 text-[11px] tabular-nums text-muted-foreground" data-private="client person">{r.metric}</p>
+                        {interpretation}
+                      </p>
                     )}
-                    <p
-                      className={cn(
-                        "mt-1.5 text-xs leading-relaxed text-foreground/85",
-                        risksCtl.isLoading && "animate-pulse",
-                      )}
-                      data-brief-field={`risk:${r.id}`}
-                      data-private="client person"
-                    >
-                      {interpretation}
-                    </p>
                   </div>
                   {r.href && (
                     <Link

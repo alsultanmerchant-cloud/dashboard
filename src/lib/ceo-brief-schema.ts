@@ -30,26 +30,33 @@ export const RISK_IDS = [
 export const REC_CATEGORIES = ["delivery", "people", "clients", "money", "growth"] as const;
 export type RecCategory = (typeof REC_CATEGORIES)[number];
 
+// The brief is GUIDANCE, not a report: no numerals anywhere in its prose (the
+// numbers live one click away — drill-downs and the التفاصيل modal). Enforced
+// at the schema level so a slipped digit fails validation and generateObject
+// retries; the prompt additionally tells the model to describe magnitude
+// qualitatively and to drop digits embedded in project/package names.
+const DIGITS_RE = /[0-9٠-٩]/;
+const noDigits = (s: string) => !DIGITS_RE.test(s);
+const NO_DIGITS_MSG = "ممنوع ذكر أي أرقام في النص — صف الحجم نوعيًا";
+const guidanceText = (describe: string) =>
+  z.string().refine(noDigits, NO_DIGITS_MSG).describe(describe);
+
 export const CeoBriefAiSchema = z.object({
-  headline: z
-    .string()
-    .describe(
-      "جملة واحدة حاسمة بالعربية تجيب: هل الشركة تتحسّن أم تتراجع ولماذا. تستند للحكم والتغيّرات المعطاة فقط، بدون اختراع أرقام.",
-    ),
-  synthesis: z
-    .string()
-    .describe(
-      "تحليل رابط من ٢-٤ جمل بالعربية يربط الأسئلة الثلاثة في قصة واحدة: كيف يتصل اتجاه الشركة بأخطر المخاطر وبالإجراء المطلوب (مثلاً أنّ نفس العملاء خلف خطر الفقد هم المتأخرون في الدفعات). لا يخترع أي رقم؛ يربط الحقائق المعطاة فقط.",
-    ),
+  headline: guidanceText(
+    "جملة واحدة حاسمة بالعربية تجيب: هل الشركة تتحسّن أم تتراجع ولماذا — بلا أي أرقام؛ صف الحجم نوعيًا ووجّه أين ينظر القارئ.",
+  ),
+  synthesis: guidanceText(
+    "تحليل رابط من ٢-٤ جمل بالعربية يربط الأسئلة الثلاثة في قصة واحدة: كيف يتصل اتجاه الشركة بأخطر المخاطر وبالإجراء المطلوب. بلا أي أرقام أو نسب أو مبالغ — الأرقام في صفحات التفاصيل؛ مهمتك التوجيه.",
+  ),
   riskNotes: z
     .array(
       z.object({
         id: z
           .enum(RISK_IDS)
           .describe("معرّف الخطر — يجب أن يطابق أحد المخاطر المعطاة"),
-        interpretation: z
-          .string()
-          .describe("جملة قصيرة: لماذا هذا خطر وما أثره على الأعمال"),
+        interpretation: guidanceText(
+          "جملة قصيرة: لماذا هذا خطر وما أثره على الأعمال — بلا أي أرقام",
+        ),
       }),
     )
     .describe("ملاحظة لكل خطر معطى، مرتبطة بمعرّفه"),
@@ -59,8 +66,8 @@ export const CeoBriefAiSchema = z.object({
         category: z
           .enum(REC_CATEGORIES)
           .describe("مجال القرار: التسليم/الأفراد/العملاء/المال/النمو"),
-        action: z.string().describe("إجراء عملي واحد محدّد وقابل للتنفيذ"),
-        owner: z.string().describe("من يتحرك — الدور أو الجهة المسؤولة"),
+        action: guidanceText("إجراء عملي واحد محدّد وقابل للتنفيذ — بلا أي أرقام"),
+        owner: guidanceText("من يتحرك — الدور أو الجهة المسؤولة"),
       }),
     )
     .min(3)
@@ -68,9 +75,9 @@ export const CeoBriefAiSchema = z.object({
     .describe(
       "خطة عمل متنوّعة (٣-٦ بنود) تغطي المخاطر والفرص معًا عبر مجالات مختلفة، لا تتمحور حول عميل واحد",
     ),
-  bottomLine: z
-    .string()
-    .describe("جملة واحدة: أهم إجراء يجب أن يتخذه الرئيس التنفيذي اليوم"),
+  bottomLine: guidanceText(
+    "جملة واحدة: أهم إجراء يجب أن يتخذه الرئيس التنفيذي اليوم — بلا أي أرقام",
+  ),
 });
 
 export type CeoBriefAi = z.infer<typeof CeoBriefAiSchema>;
@@ -203,14 +210,19 @@ function evidenceHrefForRisk(
   // Known-bad legacy: overdue_money once linked the renewal-overdue list
   // (`target=Overdue`, an unrelated population) and later a `pay=overdue`
   // param the contracts table never consumed (it filters on `payment`, the
-  // sheet's payment_status values). Repair both to لوحة الإيرادات, whose
-  // overdue-installment cards use the same contracts-engine formula.
+  // sheet's payment_status values). Repair those — and anchor-less links from
+  // briefs stored before the section anchors existed — to the EXACT cards
+  // (#overdue-installments / #sla-late) so old briefs scroll to the same
+  // evidence new ones do.
   if (
     id === "overdue_money" &&
     (currentHref === "/contracts?view=table&target=Overdue" ||
-      currentHref === "/contracts?view=table&pay=overdue")
+      currentHref === "/contracts?view=table&pay=overdue" ||
+      currentHref === "/contracts?view=dashboard")
   )
-    return "/contracts?view=dashboard";
+    return "/contracts?view=dashboard#overdue-installments";
+  if (id === "delivery_slip" && currentHref === "/accountability")
+    return "/accountability#sla-late";
   if (currentHref) return currentHref;
   switch (id) {
     case "delivery_slip":
@@ -247,6 +259,13 @@ export function sanitizeCeoBriefResult(result: CeoBriefResult | null): CeoBriefR
   const bottomLine = isIntakeStageNoise(result.bottomLine)
     ? (recommendations[0]?.action ?? "")
     : result.bottomLine;
+  // «الجديد اليوم» rows from briefs stored before the section anchors existed
+  // get their hrefs upgraded to the exact target card (scroll-to deep links).
+  const TODAY_HREF_REPAIR: Record<string, string> = {
+    "sla-new": "/accountability#sla-late",
+    collected: "/contracts?view=dashboard#installments-month",
+    renewals: "/contracts?view=dashboard#renewal-pipeline",
+  };
   return {
     ...result,
     risks: (result.risks ?? []).filter(
@@ -255,6 +274,11 @@ export function sanitizeCeoBriefResult(result: CeoBriefResult | null): CeoBriefR
       ...risk,
       href: evidenceHrefForRisk(String(risk.id), risk.href, risk.entityId),
     })),
+    today: (result.today ?? []).map((item) =>
+      item.href && !item.href.includes("#") && TODAY_HREF_REPAIR[item.id]
+        ? { ...item, href: TODAY_HREF_REPAIR[item.id] }
+        : item,
+    ),
     recommendations,
     bottomLine,
     criticalEvents: (result.criticalEvents ?? [])

@@ -205,7 +205,8 @@ export function CeoDashboard({
           both lists are empty rather than showing two empty cards. */}
       {!driftedLists &&
         buckets.acc_inst_expected.length + buckets.sales_inst_expected.length > 0 && (
-        <div className="space-y-2">
+        // id: deep-link target of the brief's «حُصِّلت دفعات جديدة» digest row.
+        <div id="installments-month" className="scroll-mt-24 space-y-2 target-highlight">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-1 text-sm font-semibold">
               {copy("الدفعات المتوقعة هذا الشهر", "Installments due this month")}
@@ -248,7 +249,9 @@ export function CeoDashboard({
           empty cards. */}
       {!driftedLists &&
         buckets.acc_inst_overdue.length + buckets.sales_inst_overdue.length > 0 && (
-        <div className="space-y-2">
+        // id: deep-link target of the CEO brief's «دفعات متأخرة التحصيل» row —
+        // the brief shows no numbers, this card is where the CEO reads them.
+        <div id="overdue-installments" className="scroll-mt-24 space-y-2 target-highlight">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-rose-700 dark:text-rose-200">
               {copy("الدفعات المتأخرة", "Overdue installments")}
@@ -429,16 +432,19 @@ function ModernSheetBoard({
         </div>
       </div>
 
-      <RenewalFunnelStrip
-        salesDeposit={dashboard.cnt_sales_deposit}
-        onTarget={dashboard.cnt_on_target}
-        overdue={dashboard.cnt_overdue}
-        expected={expectedTargetClients}
-        renewed={renewedFromTarget}
-        targetExclRenewals={expectedAfterRenewed}
-        targetExclLost={expectedAfterLost}
-        copy={copy}
-      />
+      {/* id: deep-link target of the brief's «عقود على مسار التجديد» digest row. */}
+      <div id="renewal-pipeline" className="scroll-mt-24 target-highlight">
+        <RenewalFunnelStrip
+          salesDeposit={dashboard.cnt_sales_deposit}
+          onTarget={dashboard.cnt_on_target}
+          overdue={dashboard.cnt_overdue}
+          expected={expectedTargetClients}
+          renewed={renewedFromTarget}
+          targetExclRenewals={expectedAfterRenewed}
+          targetExclLost={expectedAfterLost}
+          copy={copy}
+        />
+      </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <DepartmentIncomeCard

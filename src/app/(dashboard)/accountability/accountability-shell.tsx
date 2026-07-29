@@ -70,14 +70,19 @@ export function AccountabilityShell({
       {/* CEO band — moved here from the removed القضايا tab. */}
       <CaseOverview brief={brief} />
 
-      <TeamWorkspace
-        roster={roster}
-        cases={cases.cases}
-        problemMeta={problemMeta}
-        reviewers={reviewers}
-        clientEdits={clientEdits}
-        reviewerRange={reviewerRange}
-      />
+      {/* id: deep-link target of the CEO brief's SLA-late rows («مهام معلّقة
+          تجاوزت مهلة مراحلها» + the «الجديد اليوم» digest) — lands on the team
+          table whose «مراحل متأخرة» column carries the numbers. */}
+      <div id="sla-late" className="scroll-mt-24 target-highlight">
+        <TeamWorkspace
+          roster={roster}
+          cases={cases.cases}
+          problemMeta={problemMeta}
+          reviewers={reviewers}
+          clientEdits={clientEdits}
+          reviewerRange={reviewerRange}
+        />
+      </div>
     </div>
   );
 }

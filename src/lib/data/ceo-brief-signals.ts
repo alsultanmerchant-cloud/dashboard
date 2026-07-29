@@ -1042,7 +1042,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       title: "مهام معلّقة تجاوزت مهلة مراحلها",
       severity: slaLate.taskCount >= 60 ? "critical" : "high",
       metric: parts.join(" · "),
-      href: "/accountability",
+      href: "/accountability#sla-late",
       weight: slaLate.taskCount * 0.5 + slaLate.projectCount * 2,
     });
   }
@@ -1090,9 +1090,24 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
     stuckProjectClientId = topStuck.clientId;
     const severity = topStuck.lateCount >= 8 ? "critical" : topStuck.lateCount >= 4 ? "high" : "medium";
     const client = topStuck.clientName ? ` · ${topStuck.clientName}` : "";
+    // The brief is numbers-free (team rule 2026-07-28) — Odoo project names
+    // often embed package durations («نوفا 3 شهور»). Title by the name's
+    // prefix before the first digit («سموالفخامة للنقل-3شهورنوفا» → «سموالفخامة
+    // للنقل»), falling back to the client name; the drill-down link still
+    // opens the exact project either way.
+    const namePrefix = topStuck.projectName
+      .split(/[0-9٠-٩]/)[0]
+      .replace(/\s*(لمدة|خلال)\s*$/, "")
+      .replace(/[\s\-–·،+]+$/, "")
+      .trim();
+    const digitFreeName = !/[0-9٠-٩]/.test(topStuck.projectName)
+      ? topStuck.projectName
+      : namePrefix.length >= 4
+        ? namePrefix
+        : (topStuck.clientName ?? namePrefix);
     risks.push({
       id: "stuck_project",
-      title: `مشروع ${topStuck.projectName} متعثّر`,
+      title: `مشروع ${digitFreeName} متعثّر`,
       severity,
       metric: `${topStuck.lateCount} مهمة متجاوزة مهلة مرحلتها من ${topStuck.openCount} مفتوحة${client}`,
       href: `/tasks?view=list&projectId=${topStuck.projectId}`,
@@ -1146,7 +1161,7 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
       // SAME contracts-engine formula (0168/0172) as this number, listing the
       // exact clients. (The table view has no installment-overdue filter — a
       // `pay=overdue` param there is silently ignored.)
-      href: "/contracts?view=dashboard",
+      href: "/contracts?view=dashboard#overdue-installments",
       weight: 50 + Math.min(60, val / 3000),
     });
   }
@@ -1293,31 +1308,42 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   );
 
   // ── «الجديد اليوم» — the secretary digest ──────────────────────────────
-  // Newsy, code-computed facts since yesterday: rendered verbatim by the card
-  // with a deep link each. The AI never words these — a wrong "news" line is
-  // worse than a plain one.
+  // Code-computed GUIDANCE since yesterday — text only, NO numerals (the
+  // team's rule 2026-07-28: the brief guides, the numbers live behind the
+  // التفاصيل modal and the deep links). Magnitude is worded qualitatively
+  // from the counts; the AI never words these lines.
   const today: BriefTodayItem[] = [];
+  const magnitude = (n: number) => (n >= 30 ? "كبيرة" : n >= 10 ? "ملحوظة" : "محدودة");
   if (slaLate.newToday > 0) {
+    const surge =
+      slaLate.newToday >= 15
+        ? "دفعة كبيرة من المهام تجاوزت"
+        : slaLate.newToday >= 5
+          ? "عدد ملحوظ من المهام تجاوز"
+          : "مهام قليلة تجاوزت";
     today.push({
       id: "sla-new",
-      text: `${slaLate.newToday} مهمة تجاوزت مهلة مرحلتها منذ الأمس (الإجمالي المعلّق: ${slaLate.taskCount})`,
-      href: "/accountability",
+      text: `${surge} مهلة مراحلها منذ الأمس — راجع المتراكم قبل أن يتوسّع`,
+      href: "/accountability#sla-late",
       tone: "bad",
     });
   }
   if (todayCounts.doneSinceYesterday > 0) {
     today.push({
       id: "done",
-      text: `أُنجزت ${todayCounts.doneSinceYesterday} مهمة منذ الأمس`,
+      text: `أنجز الفريق دفعة ${magnitude(todayCounts.doneSinceYesterday)} من المهام منذ الأمس`,
       href: "/tasks?view=list&f=completed_week",
       tone: "good",
     });
   }
   if (eventPack.freshComplaints.count > 0) {
-    const latest = eventPack.freshComplaints.latestTitle;
+    // Surface only WHO complained (titles are "Client: quote" — the quote may
+    // itself carry numbers, so it stays on /satisfaction and in the modal).
+    const latestClient = eventPack.freshComplaints.latestTitle?.split(":")[0]?.trim();
+    const plural = eventPack.freshComplaints.count > 1 ? "شكاوى وتصعيدات" : "شكوى";
     today.push({
       id: "complaints",
-      text: `${eventPack.freshComplaints.count} شكوى/تصعيد من مجموعات العملاء خلال آخر يومين${latest ? ` — أحدثها: ${latest}` : ""}`,
+      text: `وردت ${plural} من مجموعات العملاء خلال اليومين الماضيين${latestClient ? ` — أحدثها من ${latestClient}` : ""}`,
       href: "/satisfaction",
       tone: "bad",
     });
@@ -1325,20 +1351,16 @@ export async function buildCeoBriefSignals(orgId: string): Promise<CeoBriefSigna
   if (todayCounts.collectedSinceYesterday.count > 0) {
     today.push({
       id: "collected",
-      text: `حُصِّلت ${todayCounts.collectedSinceYesterday.count} دفعة بقيمة ${Math.round(
-        todayCounts.collectedSinceYesterday.value,
-      ).toLocaleString("en-US")} ريال منذ الأمس`,
-      href: "/contracts?view=table",
+      text: "حُصِّلت دفعات جديدة من العملاء منذ الأمس",
+      href: "/contracts?view=dashboard#installments-month",
       tone: "good",
     });
   }
   if (renewalPipeline.count > 0) {
     today.push({
       id: "renewals",
-      text: `${renewalPipeline.count} عقدًا في مسار التجديد هذا الشهر بقيمة متوقعة ${Math.round(
-        renewalPipeline.value,
-      ).toLocaleString("en-US")} ريال`,
-      href: "/contracts",
+      text: "عقود عدة على مسار التجديد هذا الشهر — تستحق متابعة مبكرة قبل نهايته",
+      href: "/contracts?view=dashboard#renewal-pipeline",
       tone: "info",
     });
   }
