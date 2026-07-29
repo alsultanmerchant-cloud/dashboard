@@ -134,7 +134,7 @@ async function SupportingDeptHealth({ orgId, range }: { orgId: string; range: Da
       rows={rows}
       windowLabel={rangeLabel(range)}
       title="صحة الأقسام المساندة"
-      description="الجرافيك والموشن ومحتوى السيو — تُقاس بمهام أعضاء القسم (لا تظهر كخدمة مستقلة). محتوى السيو مقصور على تصنيف SEO / Renewal SEO"
+      description="الجرافيك والموشن ومحتوى السيو — تُقاس بمهام أعضاء القسم (لا تظهر كخدمة مستقلة). محتوى السيو يشمل كل خدمات أعضائه عدا Media Buying وCompany Profile"
       hrefBase="/team-activity?dept="
     />
   );

@@ -1188,14 +1188,18 @@ export const SUPPORTING_DEPARTMENT_SLUGS = [
   "seo-content",
 ] as const;
 
-// Category exception (Sky Light, 2026-07-13): محتوى السيو (seo-content) supports
-// the SEO line specifically. Its head occasionally picks up simple one-off tasks
-// for OTHER services individually — those must NOT count as supporting-dept load.
-// So for seo-content only, tasks are filtered to the SEO service group
-// (🟠SEO + 🟠Renewal SEO, matched via serviceGroupKey). الجرافيك / الموشن are
-// unscoped (they support every service line).
+// Category exception — REVISED per the team meeting (2026-07-29, WhatsApp
+// follow-up): the old rule scoped محتوى السيو (seo-content) to the SEO service
+// group only (🟠SEO + 🟠Renewal SEO), which under-counted the dept — SEO-content
+// members do assigned work across most service lines and all of it counts.
+// The agreed rule is an EXCLUSION list instead: count every task a member is
+// assigned to EXCEPT the services named in the meeting — 🟢Media Buying,
+// 🟢Renewal Media Buying, ⚫Company Profile (matched via serviceGroupKey so the
+// Renewal variants fold in automatically). Tasks with no service classification
+// still count («أي خدمة تانية طالما التيم أساينى فيها تمام معانا»).
+// الجرافيك / الموشن remain unscoped (they support every service line).
 const CATEGORY_SCOPED_DEPT_SLUG = "seo-content";
-const CATEGORY_SCOPED_SERVICE_GROUP = "seo";
+const CATEGORY_EXCLUDED_SERVICE_GROUPS = ["media buying", "company profile"] as const;
 
 async function execRunSql<R = Record<string, unknown>>(sql: string): Promise<R[]> {
   const { data, error } = await supabaseAdmin.rpc("agent_run_readonly_sql", {
@@ -1221,29 +1225,33 @@ async function _getSupportingDepartmentHealth(
 
   const slugList = SUPPORTING_DEPARTMENT_SLUGS.map((s) => `'${s}'`).join(", ");
 
-  // Resolve the SEO service group → concrete service ids, for the seo-content
-  // category exception. Matched via serviceGroupKey so both 🟠SEO and its
-  // 🟠Renewal SEO variant are included and future renamings still resolve.
+  // Resolve the EXCLUDED service groups → concrete service ids, for the
+  // seo-content category exception. Matched via serviceGroupKey so the Renewal
+  // variants (🟢Renewal Media Buying) fold onto their base service and future
+  // renamings still resolve.
   const { data: svcRows, error: svcErr } = await supabaseAdmin
     .from("services")
     .select("id, name")
     .eq("organization_id", orgId);
   if (svcErr) throw svcErr;
-  const seoServiceIds = (svcRows ?? [])
-    .filter((s) => serviceGroupKey(s.name ?? "") === CATEGORY_SCOPED_SERVICE_GROUP)
+  const excludedGroups = new Set<string>(CATEGORY_EXCLUDED_SERVICE_GROUPS);
+  const excludedServiceIds = (svcRows ?? [])
+    .filter((s) => excludedGroups.has(serviceGroupKey(s.name ?? "")))
     .map((s) => s.id)
     .filter((id) => UUID_RE_EXEC.test(id));
-  // Predicate applied ONLY to the category-scoped dept. If no SEO service
-  // resolves (shouldn't happen), fall back to `false` so we never silently
-  // widen the scope to every service.
-  const seoInList = seoServiceIds.length
-    ? `t.service_id in (${seoServiceIds.map((id) => `'${id}'`).join(", ")})`
-    : "false";
+  // Predicate applied ONLY to the category-scoped dept: everything the members
+  // are assigned to counts EXCEPT the excluded services; unclassified tasks
+  // (null service_id) count. If no excluded service resolves (renamed beyond
+  // recognition), fall back to `true` — the agreed default is inclusion.
+  const seoContentScope = excludedServiceIds.length
+    ? `(t.service_id is null or t.service_id not in (${excludedServiceIds.map((id) => `'${id}'`).join(", ")}))`
+    : "true";
 
   // Shared scope CTEs: active members of the supporting departments, then the
   // DISTINCT (department, task) pairs reachable through their task_assignees.
-  // seo-content is category-scoped to the SEO line (see CATEGORY_SCOPED_*);
-  // the other supporting depts see all of their members' tasks.
+  // seo-content counts all member tasks except the excluded service groups
+  // (see CATEGORY_EXCLUDED_SERVICE_GROUPS); other supporting depts see all of
+  // their members' tasks.
   const scopeCte = `
     dept_emp as (
       select e.id emp, d.id dep, d.slug slug
@@ -1259,7 +1267,7 @@ async function _getSupportingDepartmentHealth(
         join dept_emp de on de.emp = ta.employee_id
         join tasks t on t.id = ta.task_id
        where ta.organization_id = '${orgId}'
-         and (de.slug <> '${CATEGORY_SCOPED_DEPT_SLUG}' or ${seoInList})
+         and (de.slug <> '${CATEGORY_SCOPED_DEPT_SLUG}' or ${seoContentScope})
     )`;
 
   // Q1 — per-department scalars (open / overdue / delivered / on-time for the
